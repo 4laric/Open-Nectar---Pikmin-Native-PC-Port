@@ -1,6 +1,8 @@
 #if defined(PIKI_PC_PORT)
 #include "pc_midday_creature.h"
 #include "Creature.h"
+#include "FormationMgr.h"
+#include "pc_midday_strong_storage.h"
 #include <string>
 using namespace pc_midday;
 namespace {
@@ -9,6 +11,14 @@ bool matrix(ActorArchive& a,const char* key,Matrix4f& m){PrefixArchive p(a,key);
 bool context(ActorArchive& a,const char* key,UpdateContext& c){PrefixArchive p(a,key);return p.ref("manager",RefKind::UpdateMgr,c.mMgr)&&p.field("slot",c.mMgrSlotIndex)&&p.field("piki",c.mIsPiki);}
 }
 struct PcMiddayCreatureAccess {
+ static bool strongSearch(Creature& c,const ActorFields& fields,ActorArchive& a){
+  auto& s=c.mSearchBuffer;PrefixArchive p(a,"search");
+  auto saved=fields.find("creature.search.capacity");
+  if(saved==fields.end()||saved->second.category!=FieldCategory::Scalar||saved->second.scalar!=ScalarKind::S16||saved->second.bits>4096||saved->second.bits!=u64(s.mMaxEntries))return a.fail("saved search storage capacity mismatch");
+  if(s.mMaxEntries<0||s.mMaxEntries>4096||(s.mMaxEntries&&!s.mDataList))return a.fail("search storage allocation invalid");
+  for(int i=0;i<s.mMaxEntries;++i){auto& d=s.mDataList[i];PrefixArchive entry(p,std::to_string(i).c_str());if(!entry.strongRef("target",d.mTargetCreature,&d,"SearchData","mTargetCreature",i))return false;}
+  return true;
+ }
  static bool search(Creature& c,ActorArchive& a){
   auto& s=c.mSearchBuffer;PrefixArchive p(a,"search");
   s16 capacity=a.mode()==Mode::Capture?s.mMaxEntries:0,count=a.mode()==Mode::Capture?s.mCurrentEntries:0;
@@ -17,12 +27,19 @@ struct PcMiddayCreatureAccess {
   if(!p.field("last",s.mLastEntry)||!p.field("maxDistance",s.mMaxDistance))return false;
   // All slots were initialized by SearchBuffer::init; inactive SmartPtrs also
   // participate in scene-wide reference reconciliation.
-  for(int i=0;i<capacity;++i){PrefixArchive e(p,std::to_string(i).c_str());auto& d=s.mDataList[i];if(!e.ref("target",RefKind::Creature,d.mTargetCreature.mPtr)||!e.field("distance",d.mDistance)||!e.field("iteration",d.mSearchIteration))return false;}
+  for(int i=0;i<capacity;++i){PrefixArchive e(p,std::to_string(i).c_str());auto& d=s.mDataList[i];if(!e.strongRef("target",d.mTargetCreature,&d,"SearchData","mTargetCreature",i)||!e.field("distance",d.mDistance)||!e.field("iteration",d.mSearchIteration))return false;}
   if(a.mode()==Mode::Apply)s.mCurrentEntries=count;
   return true;
  }
 };
 namespace pc_midday {
+bool visit_creature_strong_storage(Creature& c,const ActorFields& fields,StrongStorageVisitor& visitor,std::string& error){
+ StrongStorageArchive observer(visitor,error);PrefixArchive a(observer,"creature");
+ return a.strongRef("mHoldingCreature.mPtr",c.mHoldingCreature,&c,"Creature","mHoldingCreature")&&a.strongRef("mGrabbedCreature.mPtr",c.mGrabbedCreature,&c,"Creature","mGrabbedCreature")&&PcMiddayCreatureAccess::strongSearch(c,fields,a);
+}
+bool visit_formpoint_strong_storage(FormPoint& point,StrongStorageVisitor& visitor,std::string& error){
+ StrongStorageArchive a(visitor,error);return a.strongRef("formpoint.mOwner",point.mOwner,&point,"FormPoint","mOwner");
+}
 bool creature_fields(Creature& c,ActorArchive& outer){
  PrefixArchive a(outer,"creature");
  int type=a.mode()==Mode::Capture?int(c.mObjType):0;
@@ -86,8 +103,8 @@ bool creature_fields(Creature& c,ActorArchive& outer){
  if(!a.ref("mPikiPlatformTriangle",RefKind::CollTriInfo,c.mPikiPlatformTriangle))return false;
  if(!a.ref("mGroundTriangle",RefKind::CollTriInfo,c.mGroundTriangle))return false;
  if(!a.ref("mPreviousTriangle",RefKind::CollTriInfo,c.mPreviousTriangle))return false;
- if(!a.ref("mHoldingCreature.mPtr",RefKind::Creature,c.mHoldingCreature.mPtr))return false;
- if(!a.ref("mGrabbedCreature.mPtr",RefKind::Creature,c.mGrabbedCreature.mPtr))return false;
+ if(!a.strongRef("mHoldingCreature.mPtr",c.mHoldingCreature,&c,"Creature","mHoldingCreature"))return false;
+ if(!a.strongRef("mGrabbedCreature.mPtr",c.mGrabbedCreature,&c,"Creature","mGrabbedCreature"))return false;
  if(!quat(a,"rotation",c.mRotationQuat)||!matrix(a,"constraint",c.mConstrainedMoveMtx)||!matrix(a,"world",c.mWorldMtx)||!context(a,"searchUpdate",c.mSearchContext)||!context(a,"optUpdate",c.mOptUpdateContext))return false;
  // Conditional payloads are not initialized before their first native use.
  float drag=a.mode()==Mode::Capture&&(c.mCreatureFlags&CF_EnableAirDrag)?c.mAirResistance:0;

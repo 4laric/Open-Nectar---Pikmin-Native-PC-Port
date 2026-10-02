@@ -114,8 +114,8 @@ bool piki_runtime_fields(Piki& s,ActorArchive& outer) {
  if(!ar.ref("mRippleEffect",RefKind::Effect,s.mRippleEffect))return false;
  if(!ar.ref("mFreeLightEffect",RefKind::Effect,s.mFreeLightEffect))return false;
  if(!ar.ref("mSlimeEffect",RefKind::Effect,s.mSlimeEffect))return false;
- if(!ar.ref("mLookAtCreature",RefKind::Creature,s.mLookAtCreature.mPtr))return false;
- if(!ar.ref("_500",RefKind::Creature,s._500.mPtr))return false;
+ if(!ar.strongRef("mLookAtCreature",s.mLookAtCreature,&s,"Piki","mLookAtCreature"))return false;
+ if(!ar.strongRef("_500",s._500,&s,"Piki","_500"))return false;
  u32 route=ar.mode()==Mode::Capture?s.mRouteHandle:0;
  if(!ar.handle("routeHandle",RefKind::Path,route))return false;
  if(ar.mode()==Mode::Apply)s.mRouteHandle=route;

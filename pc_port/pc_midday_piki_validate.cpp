@@ -1,7 +1,9 @@
 #include "pc_midday_creature.h"
+#include "pc_midday_piki_storage.h"
 #include "ObjType.h"
 #include "pc_midday_actor_archive.h"
 #include <cstring>
+#include <functional>
 namespace pc_midday {
 namespace {
 bool bad(std::string& e,const char* s){if(e.empty())e=s;return false;}
@@ -52,11 +54,12 @@ bool action(const ActorFields& f,std::vector<FieldSchema>& out,const std::string
 }
 bool range(const ActorFields& f,const char* name,ScalarKind kind,int low,int high,std::string& e){int n=0;return number(f,std::string("piki.runtime.")+name,kind,n,e)&&(n>=low&&n<=high||bad(e,"Piki runtime enum out of range"));}
 using Path=std::vector<int>;
-void activePaths(const ActorFields& f,const std::string& p,int type,Path path,std::set<Path>& seen){
- seen.insert(path);std::string ignored;int child=-1;number(f,p+"child",ScalarKind::S16,child,ignored);auto graph=children(type);
- if(child>=0&&child<int(graph.size())){auto next=path;next.push_back(child);activePaths(f,p+"childPayload.",graph[child],next,seen);}
+bool activePaths(const ActorFields& f,const std::string& p,int type,Path path,std::set<Path>& seen){
+ if(!seen.insert(path).second)return false;std::string ignored;int child=-1;number(f,p+"child",ScalarKind::S16,child,ignored);auto graph=children(type);
+ if(child>=0&&child<int(graph.size())){auto next=path;next.push_back(child);if(!activePaths(f,p+"childPayload.",graph[child],next,seen))return false;}
  int waiting=0;if(type==14)number(f,p+"mIsWaiting",ScalarKind::Bool,waiting,ignored);
- if(type==23||(type==14&&waiting)){path.push_back(31);activePaths(f,p+"selector.",type==23?22:8,path,seen);}
+ if(type==23||(type==14&&waiting)){path.push_back(31);if(!activePaths(f,p+"selector.",type==23?22:8,path,seen))return false;}
+ return true;
 }
 bool inactiveStrongSchema(int type,Path path,const std::set<Path>& seen,std::vector<FieldSchema>& schema,unsigned depth,std::string& e){
  if(depth>16)return bad(e,"inactive strong topology depth");
@@ -65,7 +68,7 @@ bool inactiveStrongSchema(int type,Path path,const std::set<Path>& seen,std::vec
  if(type==14||type==23){path.push_back(31);if(!inactiveStrongSchema(type==14?8:22,path,seen,schema,depth+1,e))return false;}return true;
 }
 bool extras(const ActorFields& f,std::vector<FieldSchema>& schema,std::set<Path>& seen,std::string& e){
- activePaths(f,"piki.action.",1,{},seen);
+ if(!activePaths(f,"piki.action.",1,{},seen))return bad(e,"overlapping active action payload");
  for(const char* layer:{"upper","lower"}){
   std::string p=std::string("piki.listenerExtras.")+layer+".";int present=0;
   if(!number(f,p+"present",ScalarKind::Bool,present,e))return false;scalar(schema,p+"present",ScalarKind::Bool);
@@ -86,7 +89,7 @@ bool extras(const ActorFields& f,std::vector<FieldSchema>& schema,std::set<Path>
   if(x.owner!=y.owner||x.resource!=y.resource||x.slot!=y.slot)return bad(e,"listener supplemental reference mismatch");
   schema.push_back(FieldSchema::ref((p+"listener").c_str(),RefKind::AnimListener,false,"PaniAnimKeyListener",ReferenceOwnership::ActorSubobject));
   if(!action(f,schema,p+"payload.",type,0,e))return false;
-  activePaths(f,p+"payload.",type,path,seen);
+  if(!activePaths(f,p+"payload.",type,path,seen))return bad(e,"overlapping listener action subtree");
  }
  return true;
 }
@@ -124,6 +127,16 @@ bool piki_schema(const ActorFields& f,std::vector<FieldSchema>& out,std::string&
   if(!number(f,std::string("piki.runtime.")+layer+"mMotionIdx",ScalarKind::S32,motion,e)||motion< -1||motion>=90||!number(f,std::string("piki.runtime.")+layer+"mPlayState",ScalarKind::S32,play,e)||play<0||play>2)return bad(e,"invalid Piki animation state");
  }
  out.swap(schema);return true;
+}
+bool piki_strong_paths(const ActorFields& f,std::vector<PikiStrongPath>& result,std::string& e){
+ std::vector<FieldSchema> schema;if(!piki_schema(f,schema,e))return false;
+ std::map<Path,std::string> represented;
+ std::function<void(int,Path,std::string)> active=[&](int type,Path path,std::string prefix){represented[path]=prefix;int child=-1;number(f,prefix+"child",ScalarKind::S16,child,e);auto graph=children(type);if(child>=0&&child<int(graph.size())){auto next=path;next.push_back(child);active(graph[child],next,prefix+"childPayload.");}int waiting=0;if(type==14)number(f,prefix+"mIsWaiting",ScalarKind::Bool,waiting,e);if(type==23||(type==14&&waiting)){path.push_back(31);active(type==14?8:22,path,prefix+"selector.");}};
+ active(1,{},"piki.action.");
+ for(auto layer:{"upper","lower"}){std::string prefix=std::string("piki.listenerExtras.")+layer+".";int present=0;number(f,prefix+"present",ScalarKind::Bool,present,e);if(!present)continue;int length=0,type=1;number(f,prefix+"length",ScalarKind::U8,length,e);Path path;for(int i=0;i<length;++i){int edge=0;number(f,prefix+"path."+std::to_string(i),ScalarKind::U8,edge,e);auto graph=children(type);type=edge==31?(type==14?8:22):graph[edge];path.push_back(edge);}active(type,path,prefix+"payload.");}
+ std::vector<PikiStrongPath> paths;
+ std::function<void(int,Path)> allocated=[&](int type,Path path){std::string prefix;auto found=represented.find(path);if(found!=represented.end())prefix=found->second;else{prefix="piki.inactiveStrong";for(int edge:path)prefix+="."+std::to_string(edge);prefix+=".";}std::vector<FieldSchema> payload;piki_action_schema(type,payload);for(auto&d:payload)if(d.strength==ReferenceStrength::StrongCreature)paths.push_back({prefix+d.key,path,type,d.key});auto graph=children(type);for(size_t i=0;i<graph.size();++i){auto next=path;next.push_back(int(i));allocated(graph[i],next);}if(type==14||type==23){path.push_back(31);allocated(type==14?8:22,path);}};
+ allocated(1,{});if(paths.size()!=26)return bad(e,"compiled strong action slot count");result.swap(paths);return true;
 }
 bool validate_piki(const ActorBytes& bytes,const LogicalResolver& resolver,std::string& e){ActorFields fields;std::vector<FieldSchema> schema;return decode_actor_fields(bytes,fields,e)&&piki_schema(fields,schema,e)&&validate_actor_fields(fields,schema,resolver,e);}
 }

@@ -3,6 +3,7 @@
 #include "Vector.h"
 #include <string>
 #include <cstdint>
+#include <type_traits>
 class Navi;
 class Piki;
 class PaniAnimKeyListener;
@@ -20,6 +21,15 @@ enum class RefKind { Creature, CollPart, WayPoint, Path, Animation, Action,
     ObjCollInfo, CollPartUpdater, ParticleNode, ParticleManager,
     ParticleCallback, ParticleData, Texture, ShapeDynMaterials, Material,
     TexAttr, PVWTevInfo, CollGroup, PVWTextureData, Count };
+// Ephemeral storage metadata for native census only; never serialized.
+struct StrongStorageSlot {
+    const void* storage;
+    const void* owner;
+    const char* ownerType;
+    const char* member;
+    int index;
+    const void* target;
+};
 class ActorArchive {
 public:
     virtual ~ActorArchive() = default;
@@ -29,6 +39,9 @@ public:
     // leave the transaction rejected. Validate never changes live engine fields.
     virtual bool scalar(const char* key, ScalarKind kind, void* staging) = 0;
     virtual bool reference(const char* key, RefKind kind, void*& staging) = 0;
+    virtual bool strongReference(const char* key, RefKind kind, void*& staging, const StrongStorageSlot&) {
+        return reference(key,kind,staging);
+    }
     virtual bool fail(const char* reason) = 0;
     // Runtime pool handles require the same stable-identity remapping as pointers.
     virtual bool handle(const char* key, RefKind kind, u32& staging) = 0;
@@ -50,6 +63,15 @@ public:
     PC_MIDDAY_FIELD(float,F32) PC_MIDDAY_FIELD(double,F64) PC_MIDDAY_FIELD(bool,Bool)
 #undef PC_MIDDAY_FIELD
     bool field(const char* key, Vector3f& v);
+    template<class Storage> bool strongRef(const char* key, Storage& storage, const void* owner,
+                                           const char* ownerType, const char* member, int index=-1) {
+        using Pointer=typename std::remove_reference<decltype(storage.mPtr)>::type;
+        void* staging=mode()==Mode::Capture?const_cast<void*>(static_cast<const void*>(storage.mPtr)):nullptr;
+        StrongStorageSlot slot{&storage,owner,ownerType,member,index,staging};
+        if(!strongReference(key,RefKind::Creature,staging,slot))return false;
+        if(mode()==Mode::Apply)storage.mPtr=static_cast<Pointer>(staging);
+        return true;
+    }
     template<class T> bool ref(const char* key, RefKind kind, T*& live) {
         void* staging = mode() == Mode::Capture ? const_cast<void*>(static_cast<const void*>(live)) : nullptr;
         if (!reference(key, kind, staging)) return false;
@@ -66,6 +88,7 @@ public:
     double clock_now() const override { return parent.clock_now(); }
     bool scalar(const char* key, ScalarKind kind, void* p) override { return parent.scalar((prefix+key).c_str(),kind,p); }
     bool reference(const char* key, RefKind kind, void*& p) override { return parent.reference((prefix+key).c_str(),kind,p); }
+    bool strongReference(const char* key,RefKind kind,void*& p,const StrongStorageSlot& slot) override { return parent.strongReference((prefix+key).c_str(),kind,p,slot); }
     bool handle(const char* key, RefKind kind, u32& v) override { return parent.handle((prefix+key).c_str(),kind,v); }
     bool token64(const char* key, RefKind kind, u64& v) override { return parent.token64((prefix+key).c_str(),kind,v); }
     bool fail(const char* reason) override { return parent.fail(reason); }

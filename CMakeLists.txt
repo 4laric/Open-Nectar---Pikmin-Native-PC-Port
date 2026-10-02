@@ -3064,6 +3064,10 @@ add_executable(p2_midday_creature_test
 target_include_directories(p2_midday_creature_test PRIVATE pc_port)
 target_compile_options(p2_midday_creature_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
 add_test(NAME p2_midday_creature_test COMMAND p2_midday_creature_test)
+add_executable(p2_midday_strong_storage_test tools/p2_midday_strong_storage_test.cpp)
+target_include_directories(p2_midday_strong_storage_test PRIVATE pc_port)
+target_compile_options(p2_midday_strong_storage_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+add_test(NAME p2_midday_strong_storage_test COMMAND p2_midday_strong_storage_test)
 add_executable(p2_midday_projectile_test
     tools/p2_midday_projectile_test.cpp
     pc_port/pc_midday_projectile.cpp

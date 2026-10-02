@@ -42,7 +42,7 @@ bool enemy_base_fields(Teki& s,ActorArchive& outer) {
  // This is a four-character graph ID, not the Piki asynchronous route token.
  if(!ar.field("routeGraph",s.mPathHandle))return false;
  for(int i=0;i<5;++i)if(!ar.field(("timer."+std::to_string(i)).c_str(),s.mTimers[i]))return false;
- for(int i=0;i<4;++i)if(!ar.ref(("target."+std::to_string(i)).c_str(),RefKind::Creature,s.mTargetCreatures[i].mPtr)||!ar.ref(("particle."+std::to_string(i)).c_str(),RefKind::ParticleGenerator,s.mParticleGenerators[i]))return false;
+ for(int i=0;i<4;++i)if(!ar.strongRef(("target."+std::to_string(i)).c_str(),s.mTargetCreatures[i],static_cast<BTeki*>(&s),"BTeki","mTargetCreatures",i)||!ar.ref(("particle."+std::to_string(i)).c_str(),RefKind::ParticleGenerator,s.mParticleGenerators[i]))return false;
  for(int i=0;i<8;++i)if(!ar.field(("corpseJoint."+std::to_string(i)).c_str(),s.mCorpsePartJoints[i]))return false;
  if(!ar.ref("pellet",RefKind::Creature,s.mPellet))return false;
  if(!s.mTekiAnimator||!s.mPersonality||!s.mVibrationController)return ar.fail("missing enemy owned subobject");

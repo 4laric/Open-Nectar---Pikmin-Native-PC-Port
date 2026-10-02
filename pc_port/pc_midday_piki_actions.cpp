@@ -2,6 +2,7 @@
 #if defined(PIKI_PC_PORT)
 #include "pc_midday_actor_states.h"
 #include "pc_midday_actor_archive.h"
+#include "pc_midday_piki_storage.h"
 #include "PikiAI.h"
 #include <string>
 #include <type_traits>
@@ -84,24 +85,24 @@ struct PcMiddayPikiActionAccess {
   if(depth>16||action.mPiki!=owner||!all.insert(&action).second||typeOf(action)!=expected)return outer.fail("inactive strong action allocation mismatch");
   auto graph=allocatedChildren(expected);if(action.mChildCount!=int(graph.size())||(!graph.empty()&&!action.mChildActions))return outer.fail("inactive strong child topology mismatch");
   if(!visited.count(&action)){PrefixArchive ar(outer,path.c_str());switch(expected){
- case 3:{auto& s=static_cast<ActAttack&>(action);if(!ar.ref("mOther",RefKind::Creature,s.mOther.mPtr))return false;break;}
- case 13:{auto& s=static_cast<ActChase&>(action);if(!ar.ref("mTarget",RefKind::Creature,s.mTarget.mPtr))return false;break;}
- case 16:{auto& s=static_cast<ActDeliver&>(action);if(!ar.ref("mObject",RefKind::Creature,s.mObject.mPtr))return false;break;}
- case 18:{auto& s=static_cast<ActEscape&>(action);if(!ar.ref("mTarget",RefKind::Creature,s.mTarget.mPtr))return false;break;}
- case 24:{auto& s=static_cast<ActGoto&>(action);if(!ar.ref("mTarget",RefKind::Creature,s.mTarget.mPtr))return false;break;}
- case 25:{auto& s=static_cast<ActGuard&>(action);if(!ar.ref("mTarget",RefKind::Creature,s.mTarget.mPtr))return false;if(!ar.ref("mLeftGuard",RefKind::Creature,s.mLeftGuard.mPtr))return false;if(!ar.ref("mRightGuard",RefKind::Creature,s.mRightGuard.mPtr))return false;break;}
- case 26:{auto& s=static_cast<ActJumpAttack&>(action);if(!ar.ref("mTarget",RefKind::Creature,s.mTarget.mPtr))return false;break;}
- case 27:{auto& s=static_cast<ActKinoko&>(action);if(!ar.ref("mTarget",RefKind::Creature,s.mTarget.mPtr))return false;break;}
- case 29:{auto& s=static_cast<ActPick&>(action);if(!ar.ref("mObject",RefKind::Creature,s.mObject.mPtr))return false;break;}
- case 30:{auto& s=static_cast<ActPickCreature&>(action);if(!ar.ref("_18",RefKind::Creature,s._18.mPtr))return false;break;}
- case 31:{auto& s=static_cast<ActPickItem&>(action);if(!ar.ref("mTargetItem",RefKind::Creature,s.mTargetItem.mPtr))return false;break;}
- case 32:{auto& s=static_cast<ActPullout&>(action);if(!ar.ref("mTarget",RefKind::Creature,s.mTarget.mPtr))return false;break;}
- case 33:{auto& s=static_cast<ActPulloutCreature&>(action);if(!ar.ref("mTarget",RefKind::Creature,s.mTarget.mPtr))return false;break;}
- case 37:{auto& s=static_cast<ActPutItem&>(action);if(!ar.ref("mItem",RefKind::Creature,s.mItem.mPtr))return false;break;}
- case 41:{auto& s=static_cast<ActShoot&>(action);if(!ar.ref("mTarget",RefKind::Creature,s.mTarget.mPtr))return false;break;}
- case 42:{auto& s=static_cast<ActShootCreature&>(action);if(!ar.ref("mTarget",RefKind::Creature,s.mTarget.mPtr))return false;break;}
- case 44:{auto& s=static_cast<ActTransport&>(action);if(!ar.ref("mPellet",RefKind::Creature,s.mPellet.mPtr))return false;break;}
- case 45:{auto& s=static_cast<ActWatch&>(action);if(!ar.ref("mTarget",RefKind::Creature,s.mTarget.mPtr))return false;break;}
+ case 3:{auto& s=static_cast<ActAttack&>(action);if(!ar.strongRef("mOther",s.mOther,&s,"ActAttack","mOther"))return false;break;}
+ case 13:{auto& s=static_cast<ActChase&>(action);if(!ar.strongRef("mTarget",s.mTarget,&s,"ActChase","mTarget"))return false;break;}
+ case 16:{auto& s=static_cast<ActDeliver&>(action);if(!ar.strongRef("mObject",s.mObject,&s,"ActDeliver","mObject"))return false;break;}
+ case 18:{auto& s=static_cast<ActEscape&>(action);if(!ar.strongRef("mTarget",s.mTarget,&s,"ActEscape","mTarget"))return false;break;}
+ case 24:{auto& s=static_cast<ActGoto&>(action);if(!ar.strongRef("mTarget",s.mTarget,&s,"ActGoto","mTarget"))return false;break;}
+ case 25:{auto& s=static_cast<ActGuard&>(action);if(!ar.strongRef("mTarget",s.mTarget,&s,"ActGuard","mTarget"))return false;if(!ar.strongRef("mLeftGuard",s.mLeftGuard,&s,"ActGuard","mLeftGuard"))return false;if(!ar.strongRef("mRightGuard",s.mRightGuard,&s,"ActGuard","mRightGuard"))return false;break;}
+ case 26:{auto& s=static_cast<ActJumpAttack&>(action);if(!ar.strongRef("mTarget",s.mTarget,&s,"ActJumpAttack","mTarget"))return false;break;}
+ case 27:{auto& s=static_cast<ActKinoko&>(action);if(!ar.strongRef("mTarget",s.mTarget,&s,"ActKinoko","mTarget"))return false;break;}
+ case 29:{auto& s=static_cast<ActPick&>(action);if(!ar.strongRef("mObject",s.mObject,&s,"ActPick","mObject"))return false;break;}
+ case 30:{auto& s=static_cast<ActPickCreature&>(action);if(!ar.strongRef("_18",s._18,&s,"ActPickCreature","_18"))return false;break;}
+ case 31:{auto& s=static_cast<ActPickItem&>(action);if(!ar.strongRef("mTargetItem",s.mTargetItem,&s,"ActPickItem","mTargetItem"))return false;break;}
+ case 32:{auto& s=static_cast<ActPullout&>(action);if(!ar.strongRef("mTarget",s.mTarget,&s,"ActPullout","mTarget"))return false;break;}
+ case 33:{auto& s=static_cast<ActPulloutCreature&>(action);if(!ar.strongRef("mTarget",s.mTarget,&s,"ActPulloutCreature","mTarget"))return false;break;}
+ case 37:{auto& s=static_cast<ActPutItem&>(action);if(!ar.strongRef("mItem",s.mItem,&s,"ActPutItem","mItem"))return false;break;}
+ case 41:{auto& s=static_cast<ActShoot&>(action);if(!ar.strongRef("mTarget",s.mTarget,&s,"ActShoot","mTarget"))return false;break;}
+ case 42:{auto& s=static_cast<ActShootCreature&>(action);if(!ar.strongRef("mTarget",s.mTarget,&s,"ActShootCreature","mTarget"))return false;break;}
+ case 44:{auto& s=static_cast<ActTransport&>(action);if(!ar.strongRef("mPellet",s.mPellet,&s,"ActTransport","mPellet"))return false;break;}
+ case 45:{auto& s=static_cast<ActWatch&>(action);if(!ar.strongRef("mTarget",s.mTarget,&s,"ActWatch","mTarget"))return false;break;}
  default:break;}}
   for(size_t i=0;i<graph.size();++i){auto* child=action.mChildActions[i].mAction;if(!child||!inactiveStrong(*child,outer,path+"."+std::to_string(i),graph[i],owner,all,depth+1))return false;}
   Action* selector=nullptr;if(expected==14)selector=static_cast<ActCrowd&>(action).mSelectAction;if(expected==23)selector=static_cast<ActFree&>(action).mSelectAction;
@@ -109,6 +110,35 @@ struct PcMiddayPikiActionAccess {
   return true;
  }
  static bool inactiveStrong(Piki& piki,ActorArchive& ar){std::set<Action*> all;return inactiveStrong(*piki.mActiveAction,ar,"piki.inactiveStrong",1,&piki,all,0);}
+ static bool storage(Piki& piki,const ActorFields& fields,StrongStorageVisitor& visitor,std::string& error){
+ std::vector<PikiStrongPath> paths;if(!piki_strong_paths(fields,paths,error)||!piki.mActiveAction)return false;
+ // Check the whole fresh allocation topology without consulting current child or listeners.
+ struct Ignore:StrongStorageVisitor{bool visit(const char*,const StrongStorageSlot&,std::string&)override{return true;}} ignore;
+ StrongStorageArchive check(ignore,error);std::set<Action*> all;auto savedVisited=visited;visited.clear();bool topology=inactiveStrong(*piki.mActiveAction,check,"allocation",1,&piki,all,0);visited=std::move(savedVisited);if(!topology)return false;
+ StrongStorageArchive ar(visitor,error);
+ for(auto& entry:paths){std::vector<u8> path(entry.path.begin(),entry.path.end());Action* action=follow(*piki.mActiveAction,path);if(!action||typeOf(*action)!=entry.type)return ar.fail("strong storage canonical action path");bool emitted=false;switch(entry.type){
+ case 3:{auto& s=static_cast<ActAttack&>(*action);if(entry.member=="mOther"){if(!ar.strongRef(entry.key.c_str(),s.mOther,&s,"ActAttack","mOther"))return false;emitted=true;}break;}
+ case 13:{auto& s=static_cast<ActChase&>(*action);if(entry.member=="mTarget"){if(!ar.strongRef(entry.key.c_str(),s.mTarget,&s,"ActChase","mTarget"))return false;emitted=true;}break;}
+ case 16:{auto& s=static_cast<ActDeliver&>(*action);if(entry.member=="mObject"){if(!ar.strongRef(entry.key.c_str(),s.mObject,&s,"ActDeliver","mObject"))return false;emitted=true;}break;}
+ case 18:{auto& s=static_cast<ActEscape&>(*action);if(entry.member=="mTarget"){if(!ar.strongRef(entry.key.c_str(),s.mTarget,&s,"ActEscape","mTarget"))return false;emitted=true;}break;}
+ case 24:{auto& s=static_cast<ActGoto&>(*action);if(entry.member=="mTarget"){if(!ar.strongRef(entry.key.c_str(),s.mTarget,&s,"ActGoto","mTarget"))return false;emitted=true;}break;}
+ case 25:{auto& s=static_cast<ActGuard&>(*action);if(entry.member=="mTarget"){if(!ar.strongRef(entry.key.c_str(),s.mTarget,&s,"ActGuard","mTarget"))return false;emitted=true;}if(entry.member=="mLeftGuard"){if(!ar.strongRef(entry.key.c_str(),s.mLeftGuard,&s,"ActGuard","mLeftGuard"))return false;emitted=true;}if(entry.member=="mRightGuard"){if(!ar.strongRef(entry.key.c_str(),s.mRightGuard,&s,"ActGuard","mRightGuard"))return false;emitted=true;}break;}
+ case 26:{auto& s=static_cast<ActJumpAttack&>(*action);if(entry.member=="mTarget"){if(!ar.strongRef(entry.key.c_str(),s.mTarget,&s,"ActJumpAttack","mTarget"))return false;emitted=true;}break;}
+ case 27:{auto& s=static_cast<ActKinoko&>(*action);if(entry.member=="mTarget"){if(!ar.strongRef(entry.key.c_str(),s.mTarget,&s,"ActKinoko","mTarget"))return false;emitted=true;}break;}
+ case 29:{auto& s=static_cast<ActPick&>(*action);if(entry.member=="mObject"){if(!ar.strongRef(entry.key.c_str(),s.mObject,&s,"ActPick","mObject"))return false;emitted=true;}break;}
+ case 30:{auto& s=static_cast<ActPickCreature&>(*action);if(entry.member=="_18"){if(!ar.strongRef(entry.key.c_str(),s._18,&s,"ActPickCreature","_18"))return false;emitted=true;}break;}
+ case 31:{auto& s=static_cast<ActPickItem&>(*action);if(entry.member=="mTargetItem"){if(!ar.strongRef(entry.key.c_str(),s.mTargetItem,&s,"ActPickItem","mTargetItem"))return false;emitted=true;}break;}
+ case 32:{auto& s=static_cast<ActPullout&>(*action);if(entry.member=="mTarget"){if(!ar.strongRef(entry.key.c_str(),s.mTarget,&s,"ActPullout","mTarget"))return false;emitted=true;}break;}
+ case 33:{auto& s=static_cast<ActPulloutCreature&>(*action);if(entry.member=="mTarget"){if(!ar.strongRef(entry.key.c_str(),s.mTarget,&s,"ActPulloutCreature","mTarget"))return false;emitted=true;}break;}
+ case 37:{auto& s=static_cast<ActPutItem&>(*action);if(entry.member=="mItem"){if(!ar.strongRef(entry.key.c_str(),s.mItem,&s,"ActPutItem","mItem"))return false;emitted=true;}break;}
+ case 41:{auto& s=static_cast<ActShoot&>(*action);if(entry.member=="mTarget"){if(!ar.strongRef(entry.key.c_str(),s.mTarget,&s,"ActShoot","mTarget"))return false;emitted=true;}break;}
+ case 42:{auto& s=static_cast<ActShootCreature&>(*action);if(entry.member=="mTarget"){if(!ar.strongRef(entry.key.c_str(),s.mTarget,&s,"ActShootCreature","mTarget"))return false;emitted=true;}break;}
+ case 44:{auto& s=static_cast<ActTransport&>(*action);if(entry.member=="mPellet"){if(!ar.strongRef(entry.key.c_str(),s.mPellet,&s,"ActTransport","mPellet"))return false;emitted=true;}break;}
+ case 45:{auto& s=static_cast<ActWatch&>(*action);if(entry.member=="mTarget"){if(!ar.strongRef(entry.key.c_str(),s.mTarget,&s,"ActWatch","mTarget"))return false;emitted=true;}break;}
+ default:break;}if(!emitted)return ar.fail("strong storage member not compiled for action");}
+ if(!ar.strongRef("piki.runtime.mLookAtCreature",piki.mLookAtCreature,&piki,"Piki","mLookAtCreature")||!ar.strongRef("piki.runtime._500",piki._500,&piki,"Piki","_500"))return false;
+ return visit_creature_strong_storage(piki,fields,visitor,error);
+ }
  static bool extras(Piki&,ActorArchive&);
  static bool payload(TopAction& s,ActorArchive& ar,unsigned depth) {
   if(!ar.ref("mListener",RefKind::AnimListener,s.mListener))return false;
@@ -139,7 +169,7 @@ struct PcMiddayPikiActionAccess {
   if(!ar.field("mIsCriticalHit",s.mIsCriticalHit))return false;
   if(!ar.field("mTargetIsPlayer",s.mTargetIsPlayer))return false;
   if(!ar.ref("mTargetObjectPool",RefKind::Traversable,s.mTargetObjectPool))return false;
-  if(!ar.ref("mOther",RefKind::Creature,s.mOther.mPtr))return false;
+  if(!ar.strongRef("mOther",s.mOther,&s,"ActAttack","mOther"))return false;
   if(!ar.ref("mPlayerObject",RefKind::Creature,s.mPlayerObject))return false;
   return true;
  }
@@ -214,7 +244,7 @@ struct PcMiddayPikiActionAccess {
   return true;
  }
  static bool payload(ActChase& s,ActorArchive& ar,unsigned depth) {
-  if(!ar.ref("mTarget",RefKind::Creature,s.mTarget.mPtr))return false;
+  if(!ar.strongRef("mTarget",s.mTarget,&s,"ActChase","mTarget"))return false;
   if(!ar.field("mChaseTimer",s.mChaseTimer))return false;
   return true;
  }
@@ -255,7 +285,7 @@ struct PcMiddayPikiActionAccess {
   return true;
  }
  static bool payload(ActDeliver& s,ActorArchive& ar,unsigned depth) {
-  if(!ar.ref("mObject",RefKind::Creature,s.mObject.mPtr))return false;
+  if(!ar.strongRef("mObject",s.mObject,&s,"ActDeliver","mObject"))return false;
   return true;
  }
  static bool payload(ActEnter& s,ActorArchive& ar,unsigned depth) {
@@ -267,7 +297,7 @@ struct PcMiddayPikiActionAccess {
   return true;
  }
  static bool payload(ActEscape& s,ActorArchive& ar,unsigned depth) {
-  if(!ar.ref("mTarget",RefKind::Creature,s.mTarget.mPtr))return false;
+  if(!ar.strongRef("mTarget",s.mTarget,&s,"ActEscape","mTarget"))return false;
   if(!ar.field("mEscapeTimer",s.mEscapeTimer))return false;
   if(!ar.field("mState",s.mState))return false;
   if(!ar.field("mAvoidDirection",s.mAvoidDirection))return false;
@@ -323,14 +353,14 @@ struct PcMiddayPikiActionAccess {
  static bool payload(ActGoto& s,ActorArchive& ar,unsigned depth) {
   if(!ar.field("mMaxDistance",s.mMaxDistance))return false;
   if(!ar.field("mMinDistance",s.mMinDistance))return false;
-  if(!ar.ref("mTarget",RefKind::Creature,s.mTarget.mPtr))return false;
+  if(!ar.strongRef("mTarget",s.mTarget,&s,"ActGoto","mTarget"))return false;
   if(!ar.field("mTimeoutDuration",s.mTimeoutDuration))return false;
   return true;
  }
  static bool payload(ActGuard& s,ActorArchive& ar,unsigned depth) {
-  if(!ar.ref("mTarget",RefKind::Creature,s.mTarget.mPtr))return false;
-  if(!ar.ref("mLeftGuard",RefKind::Creature,s.mLeftGuard.mPtr))return false;
-  if(!ar.ref("mRightGuard",RefKind::Creature,s.mRightGuard.mPtr))return false;
+  if(!ar.strongRef("mTarget",s.mTarget,&s,"ActGuard","mTarget"))return false;
+  if(!ar.strongRef("mLeftGuard",s.mLeftGuard,&s,"ActGuard","mLeftGuard"))return false;
+  if(!ar.strongRef("mRightGuard",s.mRightGuard,&s,"ActGuard","mRightGuard"))return false;
   if(!ar.field("mGoalPosition",s.mGoalPosition))return false;
   if(!ar.field("mFormationAngle",s.mFormationAngle))return false;
   if(!ar.field("mLandPosition",s.mLandPosition))return false;
@@ -344,14 +374,14 @@ struct PcMiddayPikiActionAccess {
  static bool payload(ActJumpAttack& s,ActorArchive& ar,unsigned depth) {
   if(!ar.field("mState",s.mState))return false;
   if(!ar.field("mAttackState",s.mAttackState))return false;
-  if(!ar.ref("mTarget",RefKind::Creature,s.mTarget.mPtr))return false;
+  if(!ar.strongRef("mTarget",s.mTarget,&s,"ActJumpAttack","mTarget"))return false;
   if(!ar.ref("mTargetCollider",RefKind::CollPart,s.mTargetCollider))return false;
   if(!ar.field("_2C",s._2C))return false;
   if(!ar.field("mIsCriticalHit",s.mIsCriticalHit))return false;
   return true;
  }
  static bool payload(ActKinoko& s,ActorArchive& ar,unsigned depth) {
-  if(!ar.ref("mTarget",RefKind::Creature,s.mTarget.mPtr))return false;
+  if(!ar.strongRef("mTarget",s.mTarget,&s,"ActKinoko","mTarget"))return false;
   if(!ar.field("mState",s.mState))return false;
   if(!ar.field("mStateTimer",s.mStateTimer))return false;
   if(!ar.field("mTargetDirection",s.mTargetDirection))return false;
@@ -364,26 +394,26 @@ struct PcMiddayPikiActionAccess {
   return true;
  }
  static bool payload(ActPick& s,ActorArchive& ar,unsigned depth) {
-  if(!ar.ref("mObject",RefKind::Creature,s.mObject.mPtr))return false;
+  if(!ar.strongRef("mObject",s.mObject,&s,"ActPick","mObject"))return false;
   if(!ar.field("mIsAnimationFinished",s.mIsAnimationFinished))return false;
   return true;
  }
  static bool payload(ActPickCreature& s,ActorArchive& ar,unsigned depth) {
-  if(!ar.ref("_18",RefKind::Creature,s._18.mPtr))return false;
+  if(!ar.strongRef("_18",s._18,&s,"ActPickCreature","_18"))return false;
   return true;
  }
  static bool payload(ActPickItem& s,ActorArchive& ar,unsigned depth) {
-  if(!ar.ref("mTargetItem",RefKind::Creature,s.mTargetItem.mPtr))return false;
+  if(!ar.strongRef("mTargetItem",s.mTargetItem,&s,"ActPickItem","mTargetItem"))return false;
   return true;
  }
  static bool payload(ActPullout& s,ActorArchive& ar,unsigned depth) {
-  if(!ar.ref("mTarget",RefKind::Creature,s.mTarget.mPtr))return false;
+  if(!ar.strongRef("mTarget",s.mTarget,&s,"ActPullout","mTarget"))return false;
   return true;
  }
  static bool payload(ActPulloutCreature& s,ActorArchive& ar,unsigned depth) {
   if(!ar.field("mState",s.mState))return false;
   if(!ar.field("mPulloutTimer",s.mPulloutTimer))return false;
-  if(!ar.ref("mTarget",RefKind::Creature,s.mTarget.mPtr))return false;
+  if(!ar.strongRef("mTarget",s.mTarget,&s,"ActPulloutCreature","mTarget"))return false;
   if(!ar.field("mPulloutSuccess",s.mPulloutSuccess))return false;
   return true;
  }
@@ -415,7 +445,7 @@ struct PcMiddayPikiActionAccess {
  }
  static bool payload(ActPutItem& s,ActorArchive& ar,unsigned depth) {
   if(!ar.field("mItemPosition",s.mItemPosition))return false;
-  if(!ar.ref("mItem",RefKind::Creature,s.mItem.mPtr))return false;
+  if(!ar.strongRef("mItem",s.mItem,&s,"ActPutItem","mItem"))return false;
   return true;
  }
  static bool payload(ActRandomBoid& s,ActorArchive& ar,unsigned depth) {
@@ -443,14 +473,14 @@ struct PcMiddayPikiActionAccess {
  static bool payload(ActShoot& s,ActorArchive& ar,unsigned depth) {
   if(!ar.field("mTargetIsPlayer",s.mTargetIsPlayer))return false;
   if(!ar.ref("mTargetObjectPool",RefKind::Traversable,s.mTargetObjectPool))return false;
-  if(!ar.ref("mTarget",RefKind::Creature,s.mTarget.mPtr))return false;
+  if(!ar.strongRef("mTarget",s.mTarget,&s,"ActShoot","mTarget"))return false;
   if(!ar.ref("mNavi",RefKind::Creature,s.mNavi))return false;
   return true;
  }
  static bool payload(ActShootCreature& s,ActorArchive& ar,unsigned depth) {
   if(!ar.field("mState",s.mState))return false;
   if(!ar.field("mChaseTimer",s.mChaseTimer))return false;
-  if(!ar.ref("mTarget",RefKind::Creature,s.mTarget.mPtr))return false;
+  if(!ar.strongRef("mTarget",s.mTarget,&s,"ActShootCreature","mTarget"))return false;
   return true;
  }
  static bool payload(ActStone& s,ActorArchive& ar,unsigned depth) {
@@ -461,7 +491,7 @@ struct PcMiddayPikiActionAccess {
   return true;
  }
  static bool payload(ActTransport& s,ActorArchive& ar,unsigned depth) {
-  if(!ar.ref("mPellet",RefKind::Creature,s.mPellet.mPtr))return false;
+  if(!ar.strongRef("mPellet",s.mPellet,&s,"ActTransport","mPellet"))return false;
   if(!ar.field("mState",s.mState))return false;
   if(!odometer(ar,"mOdometer",s.mOdometer))return false;
   if(!ar.field("mMoveDir",s.mMoveDir))return false;
@@ -489,7 +519,7 @@ struct PcMiddayPikiActionAccess {
   return true;
  }
  static bool payload(ActWatch& s,ActorArchive& ar,unsigned depth) {
-  if(!ar.ref("mTarget",RefKind::Creature,s.mTarget.mPtr))return false;
+  if(!ar.strongRef("mTarget",s.mTarget,&s,"ActWatch","mTarget"))return false;
   if(!ar.field("mWatchRetryTimer",s.mWatchRetryTimer))return false;
   if(!ar.ref("mListener",RefKind::AnimListener,s.mListener))return false;
   if(!ar.field("mTargetPosition",s.mTargetPosition))return false;
@@ -599,7 +629,7 @@ bool PcMiddayPikiActionAccess::extras(Piki& piki,ActorArchive& outer){
 }
 bool PcMiddayPikiActionAccess::visit(Action& action,ActorArchive& ar,unsigned depth) {
  if(depth>16)return ar.fail("action graph exceeds depth bound");
- visited.insert(&action);
+ if(!visited.insert(&action).second)return ar.fail("overlapping action payload subtree");
  if(action.mChildCount<0||action.mChildCount>PikiAction::COUNT)return ar.fail("invalid allocated child count");
  s16 child=ar.mode()==Mode::Capture?action.mCurrActionIdx:0;
  s16 count=action.mChildCount;
@@ -675,6 +705,7 @@ bool piki_actions(Piki& piki,ActorArchive& ar){
  PcMiddayPikiActionAccess::visited.clear();
  PrefixArchive top(ar,"piki.action");return PcMiddayPikiActionAccess::visit(*piki.mActiveAction,top,0) && PcMiddayPikiActionAccess::extras(piki,ar) && PcMiddayPikiActionAccess::inactiveStrong(piki,ar) && piki_runtime_fields(piki,ar);
 }
+bool visit_piki_strong_storage(Piki& piki,const ActorFields& fields,StrongStorageVisitor& visitor,std::string& error){return PcMiddayPikiActionAccess::storage(piki,fields,visitor,error);}
 bool capture_piki(Piki& piki,LogicalResolver& resolver,double now,ActorBytes& output,std::string& error){
  ActorFields fields;FieldArchive capture(Mode::Capture,fields,resolver,error,now);
  if(!creature_fields(piki,capture)||!piki_states(piki,capture)||!piki_actions(piki,capture)||!capture.finish())return false;
