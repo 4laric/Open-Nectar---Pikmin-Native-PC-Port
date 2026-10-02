@@ -2373,6 +2373,10 @@ add_executable(p2_purple_impact_policy_test tools/p2_purple_impact_policy_test.c
 target_include_directories(p2_purple_impact_policy_test PRIVATE pc_port)
 target_compile_options(p2_purple_impact_policy_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
 add_test(NAME p2_purple_impact_policy_test COMMAND p2_purple_impact_policy_test)
+add_executable(p2_kochappy_stun_receiver_test tools/p2_kochappy_stun_receiver_test.cpp pc_port/pc_p2_kochappy_stun.cpp)
+target_include_directories(p2_kochappy_stun_receiver_test BEFORE PRIVATE tools/kochappy_stun_stubs pc_port)
+target_compile_options(p2_kochappy_stun_receiver_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_kochappy_stun_receiver_test COMMAND p2_kochappy_stun_receiver_test)
 add_executable(p2_white_poison_policy_test tools/test_p2_white_poison_policy.cpp)
 target_include_directories(p2_white_poison_policy_test PRIVATE pc_port)
 target_compile_options(p2_white_poison_policy_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
@@ -2429,7 +2433,11 @@ function(pikmin_add_ci_fixture name source)
         message(FATAL_ERROR "Invalid explicit CI fixture: ${name} ${source}")
     endif()
     set(target "pikmin_ci_fixture_${name}")
-    set(sources ${PC_PORT_SOURCES})
+    # Clone the final production source set, including late-added NETPLAY
+    # ICE/launcher/session/HUD TUs, platform resources and libm object binding.
+    # PC_PORT_SOURCES predates those additions. Cloning it omitted real symbols;
+    # attaching libm separately here would duplicate its existing object source.
+    get_target_property(sources ${NECTAR_GAME} SOURCES)
     list(REMOVE_ITEM sources pc_port/pc_main.cpp)
     list(APPEND sources "${source}")
     add_executable(${target} EXCLUDE_FROM_ALL ${sources})
@@ -2497,4 +2505,8 @@ pikmin_add_ci_fixture(captain_campaign_resume tools/p2_captain_campaign_resume_r
 pikmin_add_ci_fixture(tutorial_encounter tools/p2_tutorial_encounter_runtime.cpp)
 if(TARGET pikmin_ci_fixture_tutorial_encounter)
     target_include_directories(pikmin_ci_fixture_tutorial_encounter PRIVATE ${P2_CHALLENGE_GUARD_INCLUDE_DIR})
+endif()
+pikmin_add_ci_fixture(purple_kochappy tools/p2_purple_kochappy_runtime.cpp)
+if(TARGET pikmin_ci_fixture_purple_kochappy)
+    target_include_directories(pikmin_ci_fixture_purple_kochappy PRIVATE ${P2_CHALLENGE_GUARD_INCLUDE_DIR})
 endif()
