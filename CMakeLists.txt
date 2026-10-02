@@ -360,6 +360,8 @@ set(PC_PORT_SOURCES
     pc_port/pc_midday_save_quit_engine.cpp
     pc_port/pc_midday_economy.cpp
     pc_port/pc_midday_economy_engine.cpp
+    pc_port/pc_midday_reference_catalog.cpp
+    pc_port/pc_midday_reference_catalog_engine.cpp
     pc_port/pc_p2_cave.cpp
     pc_port/pc_p2_cave_dialog_window.cpp
     pc_port/pc_p2_cave_generate.cpp
@@ -3186,3 +3188,7 @@ target_include_directories(pc_midday_save_quit_engine_test PRIVATE pc_port ${SDL
 target_compile_options(pc_midday_save_quit_engine_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
 target_link_libraries(pc_midday_save_quit_engine_test PRIVATE ${SDL2_LIBRARIES})
 add_test(NAME pc_midday_save_quit_engine COMMAND pc_midday_save_quit_engine_test "${CMAKE_CURRENT_BINARY_DIR}/midday-save-quit-engine-controls")
+add_executable(pc_midday_reference_catalog_test tools/pc_midday_reference_catalog_test.cpp pc_port/pc_midday_reference_catalog.cpp)
+target_include_directories(pc_midday_reference_catalog_test PRIVATE pc_port)
+target_compile_options(pc_midday_reference_catalog_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+add_test(NAME pc_midday_reference_catalog COMMAND pc_midday_reference_catalog_test)
