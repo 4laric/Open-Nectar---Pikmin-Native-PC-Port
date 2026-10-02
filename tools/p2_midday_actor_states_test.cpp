@@ -77,6 +77,20 @@ void run() {
         linked["plate"].target.owner=8;linked["captain"].target={};linkSchema[0].nullable=true;e.clear();
         check(!validate_actor_fields(linked,linkSchema,resolver,e),"present subobject cannot refer through absent owner");
     }
+    {
+        struct ResourceResolver final:Resolver {
+            bool validateTyped(const FieldSchema& d,const LogicalRef& r,std::string&) const override {
+                return d.targetType=="zen::particleMdl" && d.ownership==ReferenceOwnership::ResourceSubobject && r.resource==91 && r.slot==4;
+            }
+        } resourceResolver;
+        ActorField node;node.category=FieldCategory::Reference;node.reference=RefKind::ParticleNode;node.target={0,91,4};
+        ActorFields nodes={{"model",node}};
+        std::vector<FieldSchema> nodeSchema={FieldSchema::ref("model",RefKind::ParticleNode,false,"zen::particleMdl",ReferenceOwnership::ResourceSubobject)};
+        e.clear();check(validate_actor_fields(nodes,nodeSchema,resourceResolver,e),"resource subject child validates");
+        nodes["model"].target.owner=7;e.clear();check(!validate_actor_fields(nodes,nodeSchema,resourceResolver,e),"resource child cannot carry actor owner");
+        nodes["model"].target={0,92,4};e.clear();check(!validate_actor_fields(nodes,nodeSchema,resourceResolver,e),"different resource subject child refused");
+        nodes["model"].target={0,91,5};e.clear();check(!validate_actor_fields(nodes,nodeSchema,resourceResolver,e),"unregistered resource child slot refused");
+    }
     invalid=fields;invalid["target"].target={};e.clear();check(!validate_actor_fields(invalid,schema,resolver,e),"required null refusal");
     invalid=fields;invalid["target"].target.owner=8;e.clear();check(!validate_actor_fields(invalid,schema,resolver,e),"existing incompatible actor role refusal");
     invalid=fields;invalid["target"].reference=RefKind::Animation;e.clear();check(!validate_actor_fields(invalid,schema,resolver,e),"reference role refusal");

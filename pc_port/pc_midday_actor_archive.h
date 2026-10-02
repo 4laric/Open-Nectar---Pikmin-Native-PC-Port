@@ -6,7 +6,8 @@
 namespace pc_midday {
 using ActorBytes = std::vector<u8>;
 enum class FieldCategory : u8 { Scalar, Reference, Handle, Token64 };
-enum class ReferenceOwnership { AnyLive, Self, ActorSubobject, Content };
+enum class ReferenceOwnership { AnyLive, Self, ActorSubobject, Content,
+    ResourceSubobject, ResourceSelf };
 struct FieldSchema {
     std::string key;
     FieldCategory category;
@@ -28,6 +29,9 @@ struct FieldSchema {
 // owner is a checkpoint actor incarnation, resource is a content-bound resource
 // identity, slot identifies a named/indexed subobject of that owner/resource.
 // All-zero is absent; no process address or recycled runtime handle is permitted.
+// ResourceSelf/ResourceSubobject use owner=0, resource=current canonical resource
+// ID, slot=registered adjusted interface/owned subobject. The resolver carries
+// explicit actor or resource subject context and verifies exact membership.
 struct LogicalRef { u64 owner=0, resource=0; u32 slot=0; };
 struct ActorField {
     FieldCategory category=FieldCategory::Scalar;
