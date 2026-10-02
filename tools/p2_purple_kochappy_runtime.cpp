@@ -151,6 +151,18 @@ public:
      age,n->getCurrState()->getID(),int(SDL_JoystickGetButton(pad,SDL_CONTROLLER_BUTTON_B)),n->mKontroller->getMainStickX(),n->mKontroller->getMainStickY(),radius,C_NAVI_PARM(n,mNeutralStickThreshold),C_NAVI_PARM(n,mCursorMoveStickThreshold),distance(n->mSRT.t,violet->mSRT.t),approach,n->mSRT.t.x,n->mSRT.t.y,n->mSRT.t.z,n->mVelocity.x,n->mVelocity.y,n->mVelocity.z,violet->mSRT.t.x,violet->mSRT.t.y,violet->mSRT.t.z,mapMgr->getMinY((n->mSRT.t.x+violet->mSRT.t.x)*.5f,(n->mSRT.t.z+violet->mSRT.t.z)*.5f,true),mapMgr->getMinY(violet->mSRT.t.x,violet->mSRT.t.z,true),n->getPlatePikis());
     std::fflush(nullptr);
    }
+   // Aim the real whistle at an ungathered body; neutral whistle at a stale
+   // cursor can leave alive free Pikmin outside its circle indefinitely.
+   // Keep the exact20-follower approach gate and all mechanic oracles below.
+   if(n->getPlatePikis()<20){
+    Piki* gather=nullptr;Iterator idle(pikiMgr);CI_LOOP(idle){Piki* p=static_cast<Piki*>(*idle);
+     if(p&&p->isAlive()&&p->mColor==Red&&!pc_p2_is_purple(p)&&p->mMode==PikiMode::FreeMode){gather=p;break;}}
+    if(gather){
+     if(age%30==0)std::printf("P2_PURPLE_KOCHAPPY_GATHER_CURSOR age=%d followers=%d target_generator=%u target_callable=%d target_state=%d target_xyz=%.4f,%.4f,%.4f cursor_xyz=%.4f,%.4f,%.4f loaded_whistle_min=%.4f loaded_whistle_max=%.4f whistle_timer=%.4f SDL_aim=1 actor_writes=0\n",
+      age,n->getPlatePikis(),gather->mGenerator?unsigned(gather->mGenerator->_70):0,int(gather->mIsCallable),gather->getState(),gather->mSRT.t.x,gather->mSRT.t.y,gather->mSRT.t.z,n->mCursorWorldPos.x,n->mCursorWorldPos.y,n->mCursorWorldPos.z,C_NAVI_PARM(n,mWhistleMinRadius),C_NAVI_PARM(n,mWhistleMaxRadius),n->mWhistleTimer);
+     point(n,gather->mSRT.t,false,KeyConfig::_instance->mSetCursorKey.mBind);return result;
+    }
+   }
    if(n->getPlatePikis()==20&&age-start>30){
     if(distance(n->mSRT.t,violet->mSRT.t)>approach){point(n,violet->mSRT.t,true,KeyConfig::_instance->mSetCursorKey.mBind);return result;}
     std::printf("P2_PURPLE_KOCHAPPY_APPROACH loaded_cursor_radius=%.4f captain_bud_xz=%.4f target_distance=%.4f SDL_walk=1\n",radius,distance(n->mSRT.t,violet->mSRT.t),approach);
