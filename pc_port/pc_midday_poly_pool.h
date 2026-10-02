@@ -15,6 +15,8 @@ class PolyConcreteTypes {
 public:
  virtual ~PolyConcreteTypes()=default;
  // Must compare exact compiled sizeof/subtype and source prototype identity.
+ // Null/zero entries require exact source forwarding-factory proof; they never
+ // allocate in this pool. Their actual actor channels must be captured separately.
  virtual bool validateTemplate(const PolyTemplateView&,std::string& error)const {
   error="compiled poly template layout unavailable";return false;
  }

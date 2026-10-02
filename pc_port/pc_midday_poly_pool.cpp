@@ -21,9 +21,15 @@ bool planPolyPool(const PolyPoolView&v,const CheckpointInventory&inventory,const
  const auto*ledger=inventory.identities(scope,e);if(!ledger)return false;
  if(v.capacity>MaxActors||v.count>v.capacity||!v.stride||v.statuses.size()!=v.capacity||v.objects.size()!=v.capacity||v.templates.empty()||v.templates.size()>4096)return fail(e,"poly native view incomplete");
  PolyPoolPlan p;p.capacity=v.capacity;p.count=v.count;
- std::set<const void*>prototypes;
- for(const auto&t:v.templates)if(t.classId<0||!t.bytes||t.bytes>v.stride||!t.prototype||!p.classes.insert(t.classId).second||!prototypes.insert(t.prototype).second)return fail(e,"poly factory templates invalid/aliased");
- for(const auto&t:v.templates)if(!types.validateTemplate(t,e))return false;
+ std::set<const void*>prototypes;std::set<int>registered;
+ for(const auto&t:v.templates){
+  if(t.classId<0||t.bytes>v.stride||!registered.insert(t.classId).second||bool(t.bytes)!=bool(t.prototype))return fail(e,"poly factory templates invalid/aliased");
+  if(!types.validateTemplate(t,e))return false;
+  if(t.bytes){if(!prototypes.insert(t.prototype).second)return fail(e,"poly allocated prototypes aliased");p.classes.insert(t.classId);}
+  // Explicit source-validated forwarding entries own no Poly backing objects.
+  // Their separately managed actors still require full scene channel capture.
+ }
+ if(p.classes.empty())return fail(e,"poly backing has no compiled allocated classes");
  std::set<const void*>addresses;
  for(size_t i=0;i<v.capacity;++i){
   if(!v.objects[i]||prototypes.count(v.objects[i])||!addresses.insert(v.objects[i]).second)return fail(e,"poly backing slots missing/aliased");

@@ -27,6 +27,14 @@ bool unregisterConstructionAudioDevice(std::string& e){
  if(active.load()||(device&&!onOwner()))return fail(e,"audio device cannot close during foreign/active fence");
  device=0;owner={};e.clear();return true;
 }
+bool resumeConstructionAudioDevice(std::string& e){
+ std::lock_guard<std::mutex> lock(control);
+ if(active.load()||!device||!onOwner())return fail(e,"audio resume requires original owner and no constructor fence");
+ if(SDL_GetAudioDeviceStatus(device)!=SDL_AUDIO_PAUSED)return fail(e,"audio publication device is not actually paused");
+ SDL_PauseAudioDevice(device,0);
+ if(SDL_GetAudioDeviceStatus(device)!=SDL_AUDIO_PLAYING)return fail(e,"actual audio callback did not resume");
+ e.clear();return true;
+}
 bool AudioConstructionFence::begin(std::string& e){
  std::lock_guard<std::mutex> lock(control);
 #if defined(PIKI_USE_JAUDIO) && PIKI_USE_JAUDIO

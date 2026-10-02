@@ -1,3 +1,4 @@
+#include "pc_midday_constructor_rewards.h"
 #include "pc_p2_ship_store.h"
 #include "pc_p2_white_campaign_policy.h"
 #include "pc_p2_white_treasure_policy.h"
@@ -2084,6 +2085,7 @@ bool pc_randomizer_checked(const char* name) {
     return slot >= 0 && checks.count(unsigned(slot)) != 0;
 }
 void pc_randomizer_check(const char* name) {
+    if (pc_midday_construction_rewards_suppressed()) return;
     if (!enabled || !ready) return;
     const int slot = index(name);
     if (thelynk && slot >= 0 && !thelynkEnabled.count(unsigned(slot))) return;

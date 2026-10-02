@@ -6,6 +6,9 @@ namespace pc_midday {
 // state is claimed quiescent until the real SDL device reaches PAUSED.
 bool registerConstructionAudioDevice(uint32_t,std::string&);
 bool unregisterConstructionAudioDevice(std::string&);
+// Only after complete logical audio/world publication, by the original owner.
+// This physical transition does not itself prove world restoration complete.
+bool resumeConstructionAudioDevice(std::string&);
 class AudioConstructionFence {
  bool held_=false;
 public:

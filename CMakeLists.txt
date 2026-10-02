@@ -599,6 +599,7 @@ pc_port/pc_p2_projectile_host.cpp
     pc_port/timing/pc_tick_profiler.cpp
     pc_port/audio/pc_audio.cpp
     pc_port/pc_midday_audio_fence.cpp
+    pc_port/pc_midday_constructor.cpp
     pc_port/audio/pc_envelope.cpp
     pc_port/audio/pc_jam.cpp
     pc_port/audio/pc_instrument_bank.cpp
@@ -3344,3 +3345,13 @@ add_test(NAME pc_midday_audio_fence COMMAND pc_midday_audio_fence_test)
 add_executable(pc_midday_poly_pool_test tools/pc_midday_poly_pool_test.cpp pc_port/pc_midday_poly_pool.cpp pc_port/pc_midday_inventory.cpp pc_port/pc_midday_capture.cpp pc_port/pc_midday_codec.cpp)
 target_include_directories(pc_midday_poly_pool_test PRIVATE pc_port)
 add_test(NAME pc_midday_poly_pool COMMAND pc_midday_poly_pool_test)
+
+add_executable(pc_midday_constructor_test tools/pc_midday_constructor_test.cpp
+    pc_port/pc_midday_constructor.cpp pc_port/pc_midday_audio_fence.cpp
+    pc_port/netplay/pc_sim_rng.cpp pc_port/netplay/pc_netplay_det.cpp
+    pc_port/pc_randomizer.cpp pc_port/netplay/pc_netplay_randstate.cpp
+    pc_port/pc_randomizer_outbox.cpp pc_port/pc_p2_delivery_host.cpp pc_port/pc_p2_proxy.cpp)
+target_include_directories(pc_midday_constructor_test PRIVATE pc_port)
+target_compile_options(pc_midday_constructor_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+target_link_libraries(pc_midday_constructor_test PRIVATE ${SDL2_LIBRARIES})
+add_test(NAME pc_midday_constructor COMMAND pc_midday_constructor_test "${CMAKE_CURRENT_BINARY_DIR}/midday-fixtures")

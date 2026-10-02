@@ -15,14 +15,15 @@ int main(){
  for(uint32_t n=uint32_t(Family::Captain);n<=uint32_t(Family::Projectile);++n){auto key=std::to_string(n);f[key]={Family(n)};channels.push_back({scope,key,true,true,true,80,{}});}
  channels[4].roots={{&roots[0],Family::Cargo,SlotLife::Active},{&roots[1],Family::Cargo,SlotLife::Retained}};
  CheckpointInventory inventory;check(buildCheckpointInventory(scope,f,channels,inventory,e));
- PolyPoolView view;view.capacity=3;view.count=2;view.stride=128;view.statuses={7,-2,-1};view.objects={&roots[0],&roots[1],&roots[2]};view.templates={{7,64,&templates[0]},{11,96,&templates[1]}};
+ PolyPoolView view;view.capacity=3;view.count=2;view.stride=128;view.statuses={7,-2,-1};view.objects={&roots[0],&roots[1],&roots[2]};view.templates={{7,64,&templates[0]},{11,96,&templates[1]},{13,0,nullptr}};
  Types types;for(const auto&t:view.templates)types.layouts[t.classId]=t;types.actual={{&roots[0],7},{&roots[1],11}};PolyPoolPlan plan;
- check(planPolyPool(view,inventory,scope,types,plan,e));check(plan.slots[1].life==SlotLife::Retained&&plan.slots[1].classId==11&&plan.slots[1].actor==2&&types.calls==4);check(plan.slots[2].classId==-1&&!plan.slots[2].actor);
+ check(planPolyPool(view,inventory,scope,types,plan,e));check(plan.slots[1].life==SlotLife::Retained&&plan.slots[1].classId==11&&plan.slots[1].actor==2&&types.calls==4);check(plan.slots[2].classId==-1&&!plan.slots[2].actor&&plan.classes==std::set<int>{7,11});
  check(validatePolyPool(plan,{1,2},{7,11},e));check(!validatePolyPool(plan,{1},{7,11},e));check(!validatePolyPool(plan,{1,2},{7},e));
  Bytes encoded;check(encodePolyPool(plan,encoded,e));PolyPoolPlan decoded;check(decodePolyPool(encoded,decoded,e)&&decoded.slots[1].classId==11&&decoded.slots[1].life==SlotLife::Retained);Bytes again;check(encodePolyPool(decoded,again,e)&&again==encoded);
  auto reject=[&](PolyPoolView bad){check(!planPolyPool(bad,inventory,scope,types,plan,e));check(plan.count==2&&plan.slots[1].classId==11);};
  auto bad=view;bad.count=1;reject(bad);bad=view;bad.objects[2]=bad.objects[0];reject(bad);bad=view;bad.statuses[0]=11;reject(bad);bad=view;bad.statuses[0]=99;reject(bad);bad=view;bad.statuses[2]=-3;reject(bad);bad=view;bad.statuses[0]=-1;reject(bad);bad=view;bad.statuses[1]=7;reject(bad);bad=view;bad.templates[1].classId=7;reject(bad);bad=view;bad.templates[0].bytes=129;reject(bad);bad=view;bad.templates[1].prototype=&templates[0];reject(bad);bad=view;bad.objects.pop_back();reject(bad);
  bad=view;bad.templates[0].bytes=63;reject(bad);bad=view;bad.objects[2]=&templates[0];reject(bad);
+bad=view;bad.templates.back().classId=14;reject(bad);bad=view;bad.templates.back().bytes=1;reject(bad);bad=view;bad.templates.back().prototype=&templates[0];reject(bad);bad=view;bad.statuses[0]=13;reject(bad);bad=view;bad.templates[0].bytes=0;bad.templates[0].prototype=nullptr;reject(bad);
  types.ambiguous=true;reject(view);types.ambiguous=false;types.refuse=true;reject(view);types.refuse=false;PolyConcreteTypes unavailable;check(!planPolyPool(view,inventory,scope,unavailable,plan,e));auto wrong=scope;++wrong.generation;check(!planPolyPool(view,inventory,wrong,types,plan,e));
  for(size_t i=0;i<encoded.size();++i){Bytes truncated(encoded.begin(),encoded.begin()+i);check(!decodePolyPool(truncated,decoded,e));check(decoded.slots[1].classId==11);}
  auto corrupt=encoded;corrupt[8]=2;check(!decodePolyPool(corrupt,decoded,e));corrupt=encoded;corrupt[28]=7;check(!decodePolyPool(corrupt,decoded,e));corrupt=encoded;corrupt.push_back(0);check(!decodePolyPool(corrupt,decoded,e));
