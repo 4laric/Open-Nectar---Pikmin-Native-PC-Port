@@ -31,6 +31,7 @@ struct Resolver : LogicalResolver {
     std::map<std::pair<RefKind,u64>,void*> objects;
     u64 next=1;
     Navi* owner=nullptr;
+    Creature* typedOwner=nullptr;
     bool identify(const char* key,RefKind k,const void* p,LogicalRef& ref,std::string&) override {
         if(!p){ref={};return true;}auto identity=std::make_pair(k,p);
         if(!ids.count(identity)){ids[identity]=next;objects[{k,next}]=const_cast<void*>(p);++next;}
@@ -41,6 +42,16 @@ struct Resolver : LogicalResolver {
         if(role=="demon.captain"||role=="escape.captain"||role=="state.mNavi"||role.find(".captain")!=std::string::npos)return p==owner;
         if(role=="state.mTargetPiki"||role=="state.mHeldThrowPiki"||role=="state.mPendingThrowPiki")return dynamic_cast<Piki*>(static_cast<Creature*>(p))!=nullptr;
         return true;}
+    // Structural fixture only: pointers were identified from real typed fields
+    // in this process. Production restore must validate the persisted catalog.
+    bool validateTyped(const FieldSchema& d,const LogicalRef& r,std::string& e) const override {
+        if(d.targetType.empty()||!validate(d.key.c_str(),d.reference,r,e))return false;
+        auto p=objects.at({d.reference,r.owner});
+        if(d.ownership==ReferenceOwnership::Self)return p==(typedOwner?typedOwner:owner);
+        if(d.reference==RefKind::Creature&&d.targetType=="Piki")return dynamic_cast<Piki*>(static_cast<Creature*>(p))!=nullptr;
+        if(d.reference==RefKind::Creature&&d.targetType=="Navi")return dynamic_cast<Navi*>(static_cast<Creature*>(p))!=nullptr;
+        return true;
+    }
     bool resolve(const char* key,RefKind k,const LogicalRef& r,void*& p,std::string& e) override {if(!validate(key,k,r,e))return false;p=objects[{k,r.owner}];return true;}
     bool identifyHandle(const char* key,RefKind,u32 value,LogicalRef& ref,std::string& e) override {if(value==0){ref={};return true;}e="fixture does not invent path handle identity";return false;}
     bool resolveHandle(const char* key,RefKind,const LogicalRef& ref,u32& value,std::string&) override{if(!ref.owner&&!ref.resource&&!ref.slot){value=0;return true;}return false;}
@@ -52,7 +63,9 @@ void run(Navi& n) {
     LogicalRef self;require(resolver.identify("self",RefKind::Creature,&n,self,error),"fixture logical self");
     Iterator pikis(pikiMgr);pikis.first();require(!pikis.isDone(),"real Piki required");
     auto* piki=static_cast<Piki*>(*pikis);
+    resolver.typedOwner=piki;
     require(pc_midday_test_piki(*piki,resolver,now,error),"actual Piki timer/frame/action component: "+error);
+    resolver.typedOwner=&n;
     ActorFields originalFields;require(decode_actor_fields(original,originalFields,error),"original fields");
     // First allocate two tokens in the existing empty constructor-owned pool.
     // No engine tick executes while these synthetic component payloads are bound.

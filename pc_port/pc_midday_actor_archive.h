@@ -6,16 +6,21 @@
 namespace pc_midday {
 using ActorBytes = std::vector<u8>;
 enum class FieldCategory : u8 { Scalar, Reference, Handle, Token64 };
+enum class ReferenceOwnership { AnyLive, Self, ActorSubobject, Content };
 struct FieldSchema {
     std::string key;
     FieldCategory category;
     ScalarKind scalar;
     RefKind reference;
     bool nullable;
-    static FieldSchema value(const char* k, ScalarKind s) { return {k,FieldCategory::Scalar,s,RefKind::Creature,false}; }
-    static FieldSchema ref(const char* k, RefKind r, bool n=false) { return {k,FieldCategory::Reference,ScalarKind::U8,r,n}; }
-    static FieldSchema handle(const char* k, RefKind r, bool n=false) { return {k,FieldCategory::Handle,ScalarKind::U32,r,n}; }
-    static FieldSchema token64(const char* k, RefKind r, bool n=false) { return {k,FieldCategory::Token64,ScalarKind::U64,r,n}; }
+    // Compiled declared target type, never a serialized RTTI name. An empty
+    // contract is invalid for every reference, including nullable references.
+    std::string targetType;
+    ReferenceOwnership ownership=ReferenceOwnership::AnyLive;
+    static FieldSchema value(const char* k, ScalarKind s) { return {k,FieldCategory::Scalar,s,RefKind::Creature,false,"",ReferenceOwnership::AnyLive}; }
+    static FieldSchema ref(const char* k, RefKind r, bool n=false, const char* t="", ReferenceOwnership o=ReferenceOwnership::AnyLive) { return {k,FieldCategory::Reference,ScalarKind::U8,r,n,t,o}; }
+    static FieldSchema handle(const char* k, RefKind r, bool n=false, const char* t="", ReferenceOwnership o=ReferenceOwnership::AnyLive) { return {k,FieldCategory::Handle,ScalarKind::U32,r,n,t,o}; }
+    static FieldSchema token64(const char* k, RefKind r, bool n=false, const char* t="", ReferenceOwnership o=ReferenceOwnership::AnyLive) { return {k,FieldCategory::Token64,ScalarKind::U64,r,n,t,o}; }
 };
 // owner is a checkpoint actor incarnation, resource is a content-bound resource
 // identity, slot identifies a named/indexed subobject of that owner/resource.
@@ -37,6 +42,12 @@ public:
     virtual ~LogicalResolver()=default;
     virtual bool identify(const char*,RefKind,const void*,LogicalRef&,std::string&)=0;
     virtual bool validate(const char*,RefKind,const LogicalRef&,std::string&) const=0;
+    // Validate the exact compiled type/owner contract before scene allocation.
+    // resolve(key,...) must use this same record's descriptors to produce the
+    // correctly adjusted destination pointer, including multiple inheritance.
+    virtual bool validateTyped(const FieldSchema&,const LogicalRef&,std::string& error) const {
+        error="typed logical reference validation unavailable"; return false;
+    }
     virtual bool resolve(const char*,RefKind,const LogicalRef&,void*&,std::string&)=0;
     virtual bool identifyHandle(const char*,RefKind,u32,LogicalRef&,std::string&)=0;
     virtual bool resolveHandle(const char*,RefKind,const LogicalRef&,u32&,std::string&)=0;

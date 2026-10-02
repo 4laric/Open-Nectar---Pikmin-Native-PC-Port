@@ -6,7 +6,7 @@
 namespace pc_midday {
 namespace {
 void scalar(std::vector<FieldSchema>& out,const std::string& key,ScalarKind kind) {out.push_back(FieldSchema::value(key.c_str(),kind));}
-void ref(std::vector<FieldSchema>& out,const std::string& key,RefKind kind,bool nullable=true) {out.push_back(FieldSchema::ref(key.c_str(),kind,nullable));}
+void ref(std::vector<FieldSchema>& out,const std::string& key,RefKind kind,bool nullable,const char* type,ReferenceOwnership owner=ReferenceOwnership::AnyLive) {out.push_back(FieldSchema::ref(key.c_str(),kind,nullable,type,owner));}
 void vector(std::vector<FieldSchema>& out,const std::string& key) {for(const char* v:{".x",".y",".z"})scalar(out,key+v,ScalarKind::F32);}
 }
 bool navi_schema(const ActorFields& fields,std::vector<FieldSchema>& out,std::string& error) {
@@ -27,7 +27,7 @@ bool navi_schema(const ActorFields& fields,std::vector<FieldSchema>& out,std::st
     scalar(out,"whistle.pressAge",ScalarKind::F64);scalar(out,"whistle.recallWorkers",ScalarKind::Bool);
     scalar(out,"demon.policy.phase",ScalarKind::S32);scalar(out,"demon.policy.generation",ScalarKind::U64);
     scalar(out,"demon.policy.pendingDamage",ScalarKind::F32);scalar(out,"demon.policy.recovery",ScalarKind::F32);
-    ref(out,"demon.captain",RefKind::Creature,current!=36);scalar(out,"demon.generation",ScalarKind::U64);scalar(out,"demon.serial",ScalarKind::U64);
+    ref(out,"demon.captain",RefKind::Creature,current!=36,"Navi",ReferenceOwnership::Self);scalar(out,"demon.generation",ScalarKind::U64);scalar(out,"demon.serial",ScalarKind::U64);
     scalar(out,"demon.retired",ScalarKind::Bool);scalar(out,"demon.frame",ScalarKind::U32);scalar(out,"demon.expected",ScalarKind::S32);
     scalar(out,"demon.listeners.count",ScalarKind::U32);
     u32 tokens=0;int phase=-1;
@@ -40,12 +40,12 @@ bool navi_schema(const ActorFields& fields,std::vector<FieldSchema>& out,std::st
     if(current==36 && phase==0){error="active DemonDrop has idle policy";return false;}
     for(u32 i=0;i<tokens;++i) {
         auto p=std::string("demon.listeners.")+std::to_string(i);
-        ref(out,p+".captain",RefKind::Creature,false);scalar(out,p+".generation",ScalarKind::U64);scalar(out,p+".serial",ScalarKind::U64);
+        ref(out,p+".captain",RefKind::Creature,false,"Navi",ReferenceOwnership::Self);scalar(out,p+".generation",ScalarKind::U64);scalar(out,p+".serial",ScalarKind::U64);
     }
-    ref(out,"escape.captain",RefKind::Creature,current!=37);
+    ref(out,"escape.captain",RefKind::Creature,current!=37,"Navi",ReferenceOwnership::Self);
     switch(current) {
     case 0: // Walk
-        ref(out,"state._10",RefKind::Creature);
+        ref(out,"state._10",RefKind::Creature,true,"Creature");
         scalar(out,"state._14",ScalarKind::F32);
         scalar(out,"state.mIsTouchingWall",ScalarKind::S32);
         scalar(out,"state._1C",ScalarKind::F32);
@@ -54,11 +54,11 @@ bool navi_schema(const ActorFields& fields,std::vector<FieldSchema>& out,std::st
         scalar(out,"state.mHasThrownPiki",ScalarKind::Bool);
         scalar(out,"state._11",ScalarKind::Bool);
         scalar(out,"state.mQueuedThrowPress",ScalarKind::Bool);
-        ref(out,"state.mTargetPiki",RefKind::Creature);
+        ref(out,"state.mTargetPiki",RefKind::Creature,true,"Piki");
         break;
     case 2: // ThrowWait
-        ref(out,"state.mHeldThrowPiki",RefKind::Creature);
-        ref(out,"state.mPendingThrowPiki",RefKind::Creature);
+        ref(out,"state.mHeldThrowPiki",RefKind::Creature,true,"Piki");
+        ref(out,"state.mPendingThrowPiki",RefKind::Creature,true,"Piki");
         scalar(out,"state.mThrowChargeLevel",ScalarKind::S32);
         scalar(out,"state.mIsHoldingThrowPiki",ScalarKind::Bool);
         scalar(out,"state._20",ScalarKind::U32);
@@ -190,7 +190,7 @@ bool navi_schema(const ActorFields& fields,std::vector<FieldSchema>& out,std::st
     case 35: // IroIro
         break;
     case 25: {
-        ref(out,"state.mNavi",RefKind::Creature,false);vector(out,"state.mStartPos");vector(out,"state.mGoalPos");
+        ref(out,"state.mNavi",RefKind::Creature,false,"Navi",ReferenceOwnership::Self);vector(out,"state.mStartPos");vector(out,"state.mGoalPos");
         scalar(out,"state.mGoalDistance",ScalarKind::F32);scalar(out,"state.mSunsetTimer",ScalarKind::F32);scalar(out,"state.mOpenedAccount",ScalarKind::Bool);
         scalar(out,"state.current",ScalarKind::S32);scalar(out,"state.last",ScalarKind::S32);
         int sub=-1,previous=-1;

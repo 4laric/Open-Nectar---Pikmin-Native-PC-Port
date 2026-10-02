@@ -103,9 +103,10 @@ bool validate_actor_fields(const ActorFields& fields,const std::vector<FieldSche
         if(f.category==FieldCategory::Scalar) {
             if(f.scalar!=s.scalar||!valid_scalar(f.scalar,f.bits))return reject(error,"actor scalar schema mismatch");
         } else {
+            if(s.targetType.empty())return reject(error,"missing concrete reference contract");
             if(f.reference!=s.reference)return reject(error,"actor reference role mismatch");
             if(absent(f.target)) {if(!s.nullable)return reject(error,"required actor reference absent");}
-            else if(!resolver.validate(s.key.c_str(),f.reference,f.target,error))return false;
+            else if(!resolver.validateTyped(s,f.target,error))return false;
         }
     }
     return true;

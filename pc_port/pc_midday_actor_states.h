@@ -16,7 +16,8 @@ enum class RefKind { Creature, CollPart, WayPoint, Path, Animation, Action,
     Camera, Controller, SlotListener, Locus, Generator, FormPoint, UpdateMgr,
     CollInfo, CreatureProp, CollTriInfo, Shape, SeContext, Effect,
     ProjectileToken, SAIStateMachine, ItemShape, PelletConfig, PelletView,
-    UfoShape, DynParticle, DynBuildShape, Joint, StaticText, Count };
+    UfoShape, DynParticle, DynBuildShape, Joint, StaticText,
+    ObjCollInfo, CollPartUpdater, Count };
 class ActorArchive {
 public:
     virtual ~ActorArchive() = default;
