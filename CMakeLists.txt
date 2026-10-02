@@ -403,6 +403,8 @@ set(PC_PORT_SOURCES
     pc_port/pc_midday_demo.cpp
     pc_port/pc_midday_demo_engine.cpp
     pc_port/pc_midday_mono_manager_engine.cpp
+    pc_port/pc_midday_manager_pool.cpp
+    pc_port/pc_midday_manager_pool_engine.cpp
     pc_port/pc_midday_resolved_fields.cpp
     pc_port/pc_midday_player_resource_bind_engine.cpp
     pc_port/pc_midday_player_resource_stage.cpp
