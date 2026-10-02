@@ -386,6 +386,8 @@ set(PC_PORT_SOURCES
     pc_port/pc_midday_economy_engine.cpp
     pc_port/pc_midday_reference_catalog.cpp
     pc_port/pc_midday_reference_catalog_engine.cpp
+    pc_port/pc_midday_animation_context.cpp
+    pc_port/pc_midday_animation_context_engine.cpp
     pc_port/pc_p2_cave.cpp
     pc_port/pc_p2_cave_dialog_window.cpp
     pc_port/pc_p2_cave_generate.cpp
@@ -3286,3 +3288,10 @@ add_executable(pc_midday_reference_catalog_test tools/pc_midday_reference_catalo
 target_include_directories(pc_midday_reference_catalog_test PRIVATE pc_port)
 target_compile_options(pc_midday_reference_catalog_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
 add_test(NAME pc_midday_reference_catalog COMMAND pc_midday_reference_catalog_test)
+
+add_executable(pc_midday_animation_context_test tools/pc_midday_animation_context_test.cpp
+    pc_port/pc_midday_animation_context.cpp pc_port/pc_midday_animation_context_engine.cpp
+    pc_port/pc_midday_actor_archive.cpp pc_port/pc_midday_reference_catalog.cpp)
+target_include_directories(pc_midday_animation_context_test PRIVATE pc_port)
+target_compile_options(pc_midday_animation_context_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+add_test(NAME pc_midday_animation_context COMMAND pc_midday_animation_context_test)
