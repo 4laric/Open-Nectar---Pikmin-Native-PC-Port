@@ -1,9 +1,18 @@
 #include "pc_midday_actor_archive.h"
 #include "Navi.h"
 #include "CPlate.h"
+#include "pc_midday_strong_storage.h"
+#include "pc_midday_creature.h"
 #include "SlotChangeListner.h"
 namespace pc_midday { bool animation_fields(PaniPikiAnimator&,ActorArchive&); }
 struct PcMiddayNaviRuntimeAccess {
+ static bool strongPlate(CPlate& s,const pc_midday::ActorFields& fields,pc_midday::ActorArchive& a,std::string& error) {
+    using namespace pc_midday;int capacity=0;
+    if(!actor_i32(fields,"navi.runtime.plate.capacity",capacity,error)||capacity<1||capacity>4096||capacity!=s.mSlotListSize||!s.mSlotList)return a.fail("CPlate strong storage allocation mismatch");
+    PrefixArchive plate(a,"navi.runtime.plate");
+    for(int i=0;i<capacity;++i){auto& v=s.mSlotList[i];PrefixArchive slot(plate,("slot."+std::to_string(i)).c_str());if(!slot.strongRef("occupant",v.mOccupant,&v,"CPlate::Slot","mOccupant",i))return false;}
+    return true;
+ }
  static bool plate(CPlate& s,pc_midday::ActorArchive& a) {
     using namespace pc_midday;
     int capacity=a.mode()==Mode::Capture?s.mSlotListSize:0;
@@ -27,7 +36,7 @@ struct PcMiddayNaviRuntimeAccess {
     for(int i=0;i<capacity;++i) {
         PrefixArchive slot(a,("slot."+std::to_string(i)).c_str());auto& v=s.mSlotList[i];
         if(!slot.field("position",v.mPosition)||!slot.field("offset",v.mOffsetFromCenter)||
-           !slot.ref("occupant",RefKind::Creature,v.mOccupant.mPtr))return false;
+           !slot.strongRef("occupant",v.mOccupant,&v,"CPlate::Slot","mOccupant",i))return false;
         // Releasing the last slot clears its occupant but leaves the listener
         // stale. getSlot overwrites it before reuse; do not root that dead link.
         auto* listener=a.mode()==Mode::Capture && !v.mOccupant.mPtr ? nullptr : v.mListener;
@@ -38,6 +47,12 @@ struct PcMiddayNaviRuntimeAccess {
  }
 };
 namespace pc_midday {
+bool visit_navi_strong_storage(Navi& s,const ActorFields& fields,StrongStorageVisitor& visitor,std::string& error) {
+    if(!s.mPlateMgr){error="Navi strong storage missing CPlate";return false;}
+    if(!visit_creature_strong_storage(s,fields,visitor,error))return false;
+    StrongStorageArchive archive(visitor,error);PrefixArchive runtime(archive,"navi.runtime");
+    return runtime.strongRef("attackTarget",s.mAttackTarget,&s,"Navi","mAttackTarget")&&PcMiddayNaviRuntimeAccess::strongPlate(*s.mPlateMgr,fields,archive,error);
+}
 bool navi_runtime_fields(Navi& s,ActorArchive& outer) {
     PrefixArchive a(outer,"navi.runtime");
     if(!a.field("mIsRidingUfo",s.mIsRidingUfo))return false;
@@ -120,7 +135,7 @@ bool navi_runtime_fields(Navi& s,ActorArchive& outer) {
     if(!a.ref("mWallPlane",RefKind::Plane,s.mWallPlane))return false;
     if(!a.ref("mWallCollObj",RefKind::DynCollObject,s.mWallCollObj))return false;
     if(!a.ref("mNaviShapeObject",RefKind::Shape,s.mNaviShapeObject))return false;
-    if(!a.ref("attackTarget",RefKind::Creature,s.mAttackTarget.mPtr))return false;
+    if(!a.strongRef("attackTarget",s.mAttackTarget,&s,"Navi","mAttackTarget"))return false;
     if(!a.field("odometer.distance",s.mOdoMeter.mTotalDistance)||!a.field("odometer.remaining",s.mOdoMeter.mRemainingTime)||!a.field("odometer.minimum",s.mOdoMeter.mMinAllowedDistance)||!a.field("odometer.reset",s.mOdoMeter.mResetTimeValue))return false;
     for(unsigned i=0;i<32;++i)if(!a.field(("whistleFx."+std::to_string(i)).c_str(),s.mWhistleFxPosArr[i]))return false;
     if(!a.field("animationSpeed",s.mNaviAnimMgr.mAnimSpeed))return false;

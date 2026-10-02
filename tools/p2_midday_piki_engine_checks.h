@@ -1,5 +1,7 @@
 #pragma once
 #include "Piki.h"
+#include "PikiAI.h"
+#include "pc_midday_piki_storage.h"
 #include "pc_midday_actor_archive.h"
 #include <cstring>
 #include <cmath>
@@ -10,6 +12,12 @@ inline bool pc_midday_test_piki(Piki& piki,pc_midday::LogicalResolver& resolver,
  ActorBytes original;
  if(!capture_piki(piki,resolver,now,original,error))return false;
  ActorFields fields;if(!decode_actor_fields(original,fields,error))return false;
+ struct Census:StrongStorageVisitor{std::map<std::string,const void*> keys;std::set<const void*> slots;bool visit(const char* key,const StrongStorageSlot& slot,std::string& e)override{if(!slot.storage||!slot.owner||!slot.ownerType||!slot.member||!keys.emplace(key,slot.storage).second||!slots.insert(slot.storage).second){e="duplicate/missing real strong storage";return false;}return true;}} census,changedSelection;
+ if(!visit_piki_strong_storage(piki,fields,census,error))return false;std::vector<FieldSchema> storageSchema;if(!piki_schema(fields,storageSchema,error))return false;size_t strongCount=0;for(auto& d:storageSchema)if(d.strength==ReferenceStrength::StrongCreature){++strongCount;if(!census.keys.count(d.key)){error="real strong schema/storage key missing";return false;}}if(strongCount!=census.keys.size()){error="extra real strong storage slot";return false;}
+ // Simulate a freshly allocated object's unrelated selection without callbacks.
+ auto savedChild=piki.mActiveAction->mCurrActionIdx;piki.mActiveAction->mCurrActionIdx=savedChild==-1?0:-1;
+ bool freshMapping=visit_piki_strong_storage(piki,fields,changedSelection,error);piki.mActiveAction->mCurrActionIdx=savedChild;
+ if(!freshMapping||census.keys!=changedSelection.keys){error="strong storage mapping used live action selection";return false;}
  auto* state=piki.mCurrentState;auto* top=piki.mActiveAction;
  auto change=[&](const char* key,float delta){
   auto it=fields.find(key);if(it==fields.end()||it->second.category!=FieldCategory::Scalar||it->second.scalar!=ScalarKind::F32){error="missing real Piki float field";return false;}

@@ -8,7 +8,9 @@ namespace p2sampled { struct Clip; }
 namespace pc_midday {
 // Sub-visitors compose into complete family records; these are not standalone
 // save adapters. The caller must also serialize the concrete family host graph.
+class StrongStorageVisitor;
 enum class EnemyHost : int { Frog=1, Kochappy=2, Catfish=3 };
+bool visit_enemy_strong_storage(Teki&,EnemyHost,const ActorFields&,StrongStorageVisitor&,std::string&);
 bool enemy_schema(const ActorFields&,EnemyHost,std::vector<FieldSchema>&,std::string&);
 bool capture_enemy(Teki&,EnemyHost,LogicalResolver&,double,ActorBytes&,std::string&);
 bool validate_enemy(const ActorBytes&,EnemyHost,const LogicalResolver&,std::string&);
