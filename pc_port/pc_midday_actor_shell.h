@@ -4,6 +4,11 @@
 class ViewPiki;
 namespace pc_midday {
 class ConstructorFence;
+class AllocationOwner;
+// Internal graph assembly: root is retained by the same concrete owner as its
+// nested objects. Returned pointers are borrows, never manager-ready actors.
+bool allocate_owned_navi_shell(const ActorBytes&,LogicalResolver&,ConstructorFence&,AllocationOwner&,Navi*&,std::string&);
+bool allocate_owned_view_piki_shell(const ActorBytes&,const ActorBytes&,LogicalResolver&,ConstructorFence&,AllocationOwner&,ViewPiki*&,std::string&);
 // Factory prerequisite ONLY: exact native root objects with no nested owned
 // allocations, no manager lookup/swap and no gameplay initialization. The
 // schema/catalog must describe the complete saved actor before construction.

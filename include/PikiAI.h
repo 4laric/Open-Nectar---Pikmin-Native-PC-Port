@@ -93,6 +93,14 @@ enum {
  */
 class Action : public Receiver<Piki> {
 #if defined(PIKI_PC_PORT)
+protected:
+ struct MiddayRestoreTag {};
+ Action(MiddayRestoreTag,Piki*);
+ friend struct PcMiddayPikiActionFactoryAccess;
+public:
+#endif
+
+#if defined(PIKI_PC_PORT)
 	friend struct PcMiddayPikiActionAccess;
 #endif
 public:
@@ -168,6 +176,14 @@ public:
  */
 struct AndAction : public Action {
 #if defined(PIKI_PC_PORT)
+protected:
+ struct MiddayRestoreTag {};
+ AndAction(MiddayRestoreTag,Piki*);
+ friend struct PcMiddayPikiActionFactoryAccess;
+public:
+#endif
+
+#if defined(PIKI_PC_PORT)
 	friend struct PcMiddayPikiActionAccess;
 #endif
 public:
@@ -212,6 +228,14 @@ protected:
  */
 class TopAction : public Action {
 #if defined(PIKI_PC_PORT)
+private:
+ struct MiddayRestoreTag {};
+ TopAction(MiddayRestoreTag,Piki*);
+ friend struct PcMiddayPikiActionFactoryAccess;
+public:
+#endif
+
+#if defined(PIKI_PC_PORT)
 	friend struct PcMiddayPikiActionAccess;
 #endif
 	// Another encapsulation fail...  Write a getter for `mIsSuspended`, Kando!
@@ -245,6 +269,15 @@ public:
 	 * @brief TODO
 	 */
 	struct ObjBore {
+#if defined(PIKI_PC_PORT)
+private:
+    struct MiddayRestoreTag {};
+    explicit ObjBore(MiddayRestoreTag);
+    friend class TopAction;
+    friend struct PcMiddayPikiActionFactoryAccess;
+public:
+#endif
+
 		ObjBore();
 
 		int getIndex(int);
@@ -262,6 +295,15 @@ public:
 	 * @brief TODO
 	 */
 	struct Boredom {
+#if defined(PIKI_PC_PORT)
+private:
+    struct MiddayRestoreTag {};
+    explicit Boredom(MiddayRestoreTag);
+    friend class TopAction;
+    friend struct PcMiddayPikiActionFactoryAccess;
+public:
+#endif
+
 		Boredom();
 
 		// unused/inlined:
@@ -329,6 +371,14 @@ protected:
  */
 struct ActAdjust : public Action {
 #if defined(PIKI_PC_PORT)
+private:
+ struct MiddayRestoreTag {};
+ ActAdjust(MiddayRestoreTag,Piki*);
+ friend struct PcMiddayPikiActionFactoryAccess;
+public:
+#endif
+
+#if defined(PIKI_PC_PORT)
 	friend struct PcMiddayPikiActionAccess;
 #endif
 public:
@@ -374,6 +424,14 @@ protected:
  * @note Size: 0x2C.
  */
 struct ActAttack : public AndAction, public PaniAnimKeyListener {
+#if defined(PIKI_PC_PORT)
+private:
+ struct MiddayRestoreTag {};
+ ActAttack(MiddayRestoreTag,Piki*);
+ friend struct PcMiddayPikiActionFactoryAccess;
+public:
+#endif
+
 #if defined(PIKI_PC_PORT)
 	friend struct PcMiddayPikiActionAccess;
 #endif
@@ -425,6 +483,14 @@ protected:
  */
 struct ActBoMake : public Action, private PaniAnimKeyListener {
 #if defined(PIKI_PC_PORT)
+private:
+ struct MiddayRestoreTag {};
+ ActBoMake(MiddayRestoreTag,Piki*);
+ friend struct PcMiddayPikiActionFactoryAccess;
+public:
+#endif
+
+#if defined(PIKI_PC_PORT)
 	friend struct PcMiddayPikiActionAccess;
 #endif
     friend void pc_randomizer_test_work_damage();
@@ -464,6 +530,14 @@ protected:
  */
 struct ActBoreListen : public Action {
 #if defined(PIKI_PC_PORT)
+private:
+ struct MiddayRestoreTag {};
+ ActBoreListen(MiddayRestoreTag,Piki*);
+ friend struct PcMiddayPikiActionFactoryAccess;
+public:
+#endif
+
+#if defined(PIKI_PC_PORT)
 	friend struct PcMiddayPikiActionAccess;
 #endif
 public:
@@ -486,6 +560,14 @@ protected:
  * @note Size: 0x24.
  */
 struct ActBoreOneshot : public Action, virtual PaniAnimKeyListener {
+#if defined(PIKI_PC_PORT)
+private:
+ struct MiddayRestoreTag {};
+ ActBoreOneshot(MiddayRestoreTag,Piki*);
+ friend struct PcMiddayPikiActionFactoryAccess;
+public:
+#endif
+
 #if defined(PIKI_PC_PORT)
 	friend struct PcMiddayPikiActionAccess;
 #endif
@@ -514,6 +596,14 @@ protected:
  * @note Size: 0x30.
  */
 struct ActBoreRest : public Action, virtual PaniAnimKeyListener {
+#if defined(PIKI_PC_PORT)
+private:
+ struct MiddayRestoreTag {};
+ ActBoreRest(MiddayRestoreTag,Piki*);
+ friend struct PcMiddayPikiActionFactoryAccess;
+public:
+#endif
+
 #if defined(PIKI_PC_PORT)
 	friend struct PcMiddayPikiActionAccess;
 #endif
@@ -549,6 +639,14 @@ protected:
  * @brief TODO
  */
 struct ActBoreSelect : public Action {
+#if defined(PIKI_PC_PORT)
+private:
+ struct MiddayRestoreTag {};
+ ActBoreSelect(MiddayRestoreTag,Piki*);
+ friend struct PcMiddayPikiActionFactoryAccess;
+public:
+#endif
+
 #if defined(PIKI_PC_PORT)
 	friend struct PcMiddayPikiActionAccess;
 #endif
@@ -595,6 +693,14 @@ protected:
  */
 struct ActBoreTalk : public Action, virtual PaniAnimKeyListener {
 #if defined(PIKI_PC_PORT)
+private:
+ struct MiddayRestoreTag {};
+ ActBoreTalk(MiddayRestoreTag,Piki*);
+ friend struct PcMiddayPikiActionFactoryAccess;
+public:
+#endif
+
+#if defined(PIKI_PC_PORT)
 	friend struct PcMiddayPikiActionAccess;
 #endif
 	// `mIsLookHandledElsewhere` and `mTarget` are altered by these two.
@@ -629,6 +735,14 @@ protected:
  * @note Size: 0x34.
  */
 struct ActBou : public Action {
+#if defined(PIKI_PC_PORT)
+private:
+ struct MiddayRestoreTag {};
+ ActBou(MiddayRestoreTag,Piki*);
+ friend struct PcMiddayPikiActionFactoryAccess;
+public:
+#endif
+
 #if defined(PIKI_PC_PORT)
 	friend struct PcMiddayPikiActionAccess;
 #endif
@@ -668,6 +782,14 @@ protected:
  * @note Size: 0x34.
  */
 struct ActBreakWall : public Action, public PaniAnimKeyListener {
+#if defined(PIKI_PC_PORT)
+private:
+ struct MiddayRestoreTag {};
+ ActBreakWall(MiddayRestoreTag,Piki*);
+ friend struct PcMiddayPikiActionFactoryAccess;
+public:
+#endif
+
 #if defined(PIKI_PC_PORT)
 	friend struct PcMiddayPikiActionAccess;
 #endif
@@ -716,6 +838,14 @@ protected:
  * @note Size: 0x58.
  */
 struct ActBridge : public Action, virtual PaniAnimKeyListener {
+#if defined(PIKI_PC_PORT)
+private:
+ struct MiddayRestoreTag {};
+ ActBridge(MiddayRestoreTag,Piki*);
+ friend struct PcMiddayPikiActionFactoryAccess;
+public:
+#endif
+
 #if defined(PIKI_PC_PORT)
 	friend struct PcMiddayPikiActionAccess;
 #endif
@@ -796,6 +926,14 @@ protected:
  */
 struct ActChase : public Action {
 #if defined(PIKI_PC_PORT)
+private:
+ struct MiddayRestoreTag {};
+ ActChase(MiddayRestoreTag,Piki*);
+ friend struct PcMiddayPikiActionFactoryAccess;
+public:
+#endif
+
+#if defined(PIKI_PC_PORT)
 	friend struct PcMiddayPikiActionAccess;
 #endif
 public:
@@ -830,6 +968,14 @@ protected:
  * @note Size: 0x88.
  */
 struct ActCrowd : public Action, virtual SlotChangeListner {
+#if defined(PIKI_PC_PORT)
+private:
+ struct MiddayRestoreTag {};
+ ActCrowd(MiddayRestoreTag,Piki*);
+ friend struct PcMiddayPikiActionFactoryAccess;
+public:
+#endif
+
 #if defined(PIKI_PC_PORT)
 	friend struct PcMiddayPikiActionAccess;
 #endif
@@ -929,6 +1075,14 @@ protected:
  */
 struct ActDecoy : public Action, public PaniAnimKeyListener {
 #if defined(PIKI_PC_PORT)
+private:
+ struct MiddayRestoreTag {};
+ ActDecoy(MiddayRestoreTag,Piki*);
+ friend struct PcMiddayPikiActionFactoryAccess;
+public:
+#endif
+
+#if defined(PIKI_PC_PORT)
 	friend struct PcMiddayPikiActionAccess;
 #endif
 public:
@@ -955,6 +1109,14 @@ protected:
  * @brief TODO
  */
 struct ActDeliver : public AndAction {
+#if defined(PIKI_PC_PORT)
+private:
+ struct MiddayRestoreTag {};
+ ActDeliver(MiddayRestoreTag,Piki*);
+ friend struct PcMiddayPikiActionFactoryAccess;
+public:
+#endif
+
 #if defined(PIKI_PC_PORT)
 	friend struct PcMiddayPikiActionAccess;
 #endif
@@ -1001,6 +1163,14 @@ protected:
  */
 struct ActEnter : public Action {
 #if defined(PIKI_PC_PORT)
+private:
+ struct MiddayRestoreTag {};
+ ActEnter(MiddayRestoreTag,Piki*);
+ friend struct PcMiddayPikiActionFactoryAccess;
+public:
+#endif
+
+#if defined(PIKI_PC_PORT)
 	friend struct PcMiddayPikiActionAccess;
 #endif
 public:
@@ -1044,6 +1214,14 @@ protected:
  * @note Size: 0x30.
  */
 struct ActEscape : public Action {
+#if defined(PIKI_PC_PORT)
+private:
+ struct MiddayRestoreTag {};
+ ActEscape(MiddayRestoreTag,Piki*);
+ friend struct PcMiddayPikiActionFactoryAccess;
+public:
+#endif
+
 #if defined(PIKI_PC_PORT)
 	friend struct PcMiddayPikiActionAccess;
 #endif
@@ -1092,6 +1270,14 @@ protected:
  */
 struct ActExit : public Action {
 #if defined(PIKI_PC_PORT)
+private:
+ struct MiddayRestoreTag {};
+ ActExit(MiddayRestoreTag,Piki*);
+ friend struct PcMiddayPikiActionFactoryAccess;
+public:
+#endif
+
+#if defined(PIKI_PC_PORT)
 	friend struct PcMiddayPikiActionAccess;
 #endif
 public:
@@ -1114,6 +1300,14 @@ protected:
  * @brief TODO
  */
 struct ActFlower : public Action, virtual PaniAnimKeyListener {
+#if defined(PIKI_PC_PORT)
+private:
+ struct MiddayRestoreTag {};
+ ActFlower(MiddayRestoreTag,Piki*);
+ friend struct PcMiddayPikiActionFactoryAccess;
+public:
+#endif
+
 #if defined(PIKI_PC_PORT)
 	friend struct PcMiddayPikiActionAccess;
 #endif
@@ -1142,6 +1336,14 @@ protected:
  * @note Size: 0x34.
  */
 struct ActFormation : public Action, public PaniAnimKeyListener {
+#if defined(PIKI_PC_PORT)
+private:
+ struct MiddayRestoreTag {};
+ ActFormation(MiddayRestoreTag,Piki*);
+ friend struct PcMiddayPikiActionFactoryAccess;
+public:
+#endif
+
 #if defined(PIKI_PC_PORT)
 	friend struct PcMiddayPikiActionAccess;
 #endif
@@ -1179,6 +1381,14 @@ protected:
  * @brief TODO
  */
 struct ActFreeSelect : public Action {
+#if defined(PIKI_PC_PORT)
+private:
+ struct MiddayRestoreTag {};
+ ActFreeSelect(MiddayRestoreTag,Piki*);
+ friend struct PcMiddayPikiActionFactoryAccess;
+public:
+#endif
+
 #if defined(PIKI_PC_PORT)
 	friend struct PcMiddayPikiActionAccess;
 #endif
@@ -1224,6 +1434,14 @@ protected:
  */
 struct ActFree : public Action, virtual PaniAnimKeyListener {
 #if defined(PIKI_PC_PORT)
+private:
+ struct MiddayRestoreTag {};
+ ActFree(MiddayRestoreTag,Piki*);
+ friend struct PcMiddayPikiActionFactoryAccess;
+public:
+#endif
+
+#if defined(PIKI_PC_PORT)
 	friend struct PcMiddayPikiActionAccess;
 #endif
 public:
@@ -1265,6 +1483,14 @@ protected:
  * @note Size: 0x24.
  */
 struct ActGoto : public Action {
+#if defined(PIKI_PC_PORT)
+private:
+ struct MiddayRestoreTag {};
+ ActGoto(MiddayRestoreTag,Piki*);
+ friend struct PcMiddayPikiActionFactoryAccess;
+public:
+#endif
+
 #if defined(PIKI_PC_PORT)
 	friend struct PcMiddayPikiActionAccess;
 #endif
@@ -1317,6 +1543,14 @@ protected:
  */
 struct ActGuard : public Action {
 #if defined(PIKI_PC_PORT)
+private:
+ struct MiddayRestoreTag {};
+ ActGuard(MiddayRestoreTag,Piki*);
+ friend struct PcMiddayPikiActionFactoryAccess;
+public:
+#endif
+
+#if defined(PIKI_PC_PORT)
 	friend struct PcMiddayPikiActionAccess;
 #endif
 public:
@@ -1365,6 +1599,14 @@ protected:
  */
 struct ActJumpAttack : public Action, public PaniAnimKeyListener {
 #if defined(PIKI_PC_PORT)
+private:
+ struct MiddayRestoreTag {};
+ ActJumpAttack(MiddayRestoreTag,Piki*);
+ friend struct PcMiddayPikiActionFactoryAccess;
+public:
+#endif
+
+#if defined(PIKI_PC_PORT)
 	friend struct PcMiddayPikiActionAccess;
 #endif
 public:
@@ -1405,6 +1647,14 @@ protected:
  * @note Size: 0x38.
  */
 struct ActKinoko : public Action, virtual PaniAnimKeyListener {
+#if defined(PIKI_PC_PORT)
+private:
+ struct MiddayRestoreTag {};
+ ActKinoko(MiddayRestoreTag,Piki*);
+ friend struct PcMiddayPikiActionFactoryAccess;
+public:
+#endif
+
 #if defined(PIKI_PC_PORT)
 	friend struct PcMiddayPikiActionAccess;
 #endif
@@ -1455,6 +1705,14 @@ protected:
  */
 struct ActMine : public Action, virtual PaniAnimKeyListener {
 #if defined(PIKI_PC_PORT)
+private:
+ struct MiddayRestoreTag {};
+ ActMine(MiddayRestoreTag,Piki*);
+ friend struct PcMiddayPikiActionFactoryAccess;
+public:
+#endif
+
+#if defined(PIKI_PC_PORT)
 	friend struct PcMiddayPikiActionAccess;
 #endif
 public:
@@ -1502,6 +1760,14 @@ protected:
  */
 struct ActPick : public Action, public PaniAnimKeyListener {
 #if defined(PIKI_PC_PORT)
+private:
+ struct MiddayRestoreTag {};
+ ActPick(MiddayRestoreTag,Piki*);
+ friend struct PcMiddayPikiActionFactoryAccess;
+public:
+#endif
+
+#if defined(PIKI_PC_PORT)
 	friend struct PcMiddayPikiActionAccess;
 #endif
 public:
@@ -1539,6 +1805,14 @@ protected:
  * @note Size: 0x1C.
  */
 struct ActPickCreature : public AndAction {
+#if defined(PIKI_PC_PORT)
+private:
+ struct MiddayRestoreTag {};
+ ActPickCreature(MiddayRestoreTag,Piki*);
+ friend struct PcMiddayPikiActionFactoryAccess;
+public:
+#endif
+
 #if defined(PIKI_PC_PORT)
 	friend struct PcMiddayPikiActionAccess;
 #endif
@@ -1580,6 +1854,14 @@ protected:
  */
 struct ActPickItem : public AndAction {
 #if defined(PIKI_PC_PORT)
+private:
+ struct MiddayRestoreTag {};
+ ActPickItem(MiddayRestoreTag,Piki*);
+ friend struct PcMiddayPikiActionFactoryAccess;
+public:
+#endif
+
+#if defined(PIKI_PC_PORT)
 	friend struct PcMiddayPikiActionAccess;
 #endif
 public:
@@ -1615,6 +1897,14 @@ protected:
  */
 struct ActPullout : public AndAction {
 #if defined(PIKI_PC_PORT)
+private:
+ struct MiddayRestoreTag {};
+ ActPullout(MiddayRestoreTag,Piki*);
+ friend struct PcMiddayPikiActionFactoryAccess;
+public:
+#endif
+
+#if defined(PIKI_PC_PORT)
 	friend struct PcMiddayPikiActionAccess;
 #endif
 public:
@@ -1648,6 +1938,14 @@ protected:
  * @note Size: 0x28.
  */
 struct ActPulloutCreature : public Action, private PaniAnimKeyListener {
+#if defined(PIKI_PC_PORT)
+private:
+ struct MiddayRestoreTag {};
+ ActPulloutCreature(MiddayRestoreTag,Piki*);
+ friend struct PcMiddayPikiActionFactoryAccess;
+public:
+#endif
+
 #if defined(PIKI_PC_PORT)
 	friend struct PcMiddayPikiActionAccess;
 #endif
@@ -1685,6 +1983,14 @@ protected:
  * @note Size: 0x50.
  */
 struct ActPush : public Action, virtual PaniAnimKeyListener {
+#if defined(PIKI_PC_PORT)
+private:
+ struct MiddayRestoreTag {};
+ ActPush(MiddayRestoreTag,Piki*);
+ friend struct PcMiddayPikiActionFactoryAccess;
+public:
+#endif
+
 #if defined(PIKI_PC_PORT)
 	friend struct PcMiddayPikiActionAccess;
 #endif
@@ -1738,6 +2044,14 @@ protected:
  */
 struct ActPut : public Action {
 #if defined(PIKI_PC_PORT)
+private:
+ struct MiddayRestoreTag {};
+ ActPut(MiddayRestoreTag,Piki*);
+ friend struct PcMiddayPikiActionFactoryAccess;
+public:
+#endif
+
+#if defined(PIKI_PC_PORT)
 	friend struct PcMiddayPikiActionAccess;
 #endif
 public:
@@ -1771,6 +2085,14 @@ protected:
  * @note Size: 0x30.
  */
 struct ActPutBomb : public Action, virtual PaniAnimKeyListener {
+#if defined(PIKI_PC_PORT)
+private:
+ struct MiddayRestoreTag {};
+ ActPutBomb(MiddayRestoreTag,Piki*);
+ friend struct PcMiddayPikiActionFactoryAccess;
+public:
+#endif
+
 #if defined(PIKI_PC_PORT)
 	friend struct PcMiddayPikiActionAccess;
 #endif
@@ -1831,6 +2153,14 @@ protected:
  */
 struct ActPutItem : public Action {
 #if defined(PIKI_PC_PORT)
+private:
+ struct MiddayRestoreTag {};
+ ActPutItem(MiddayRestoreTag,Piki*);
+ friend struct PcMiddayPikiActionFactoryAccess;
+public:
+#endif
+
+#if defined(PIKI_PC_PORT)
 	friend struct PcMiddayPikiActionAccess;
 #endif
 public:
@@ -1857,6 +2187,14 @@ protected:
  * @note Size: 0x28.
  */
 class ActRandomBoid : public Action {
+#if defined(PIKI_PC_PORT)
+private:
+ struct MiddayRestoreTag {};
+ ActRandomBoid(MiddayRestoreTag,Piki*);
+ friend struct PcMiddayPikiActionFactoryAccess;
+public:
+#endif
+
 #if defined(PIKI_PC_PORT)
 	friend struct PcMiddayPikiActionAccess;
 #endif
@@ -1926,6 +2264,14 @@ protected:
  */
 struct ActRescue : public Action, virtual PaniAnimKeyListener {
 #if defined(PIKI_PC_PORT)
+private:
+ struct MiddayRestoreTag {};
+ ActRescue(MiddayRestoreTag,Piki*);
+ friend struct PcMiddayPikiActionFactoryAccess;
+public:
+#endif
+
+#if defined(PIKI_PC_PORT)
 	friend struct PcMiddayPikiActionAccess;
 #endif
 public:
@@ -1978,6 +2324,14 @@ protected:
  */
 struct ActRope : public Action {
 #if defined(PIKI_PC_PORT)
+private:
+ struct MiddayRestoreTag {};
+ ActRope(MiddayRestoreTag,Piki*);
+ friend struct PcMiddayPikiActionFactoryAccess;
+public:
+#endif
+
+#if defined(PIKI_PC_PORT)
 	friend struct PcMiddayPikiActionAccess;
 #endif
 public:
@@ -2001,6 +2355,14 @@ protected:
  * @note Size: 0x28.
  */
 struct ActShoot : public AndAction {
+#if defined(PIKI_PC_PORT)
+private:
+ struct MiddayRestoreTag {};
+ ActShoot(MiddayRestoreTag,Piki*);
+ friend struct PcMiddayPikiActionFactoryAccess;
+public:
+#endif
+
 #if defined(PIKI_PC_PORT)
 	friend struct PcMiddayPikiActionAccess;
 #endif
@@ -2041,6 +2403,14 @@ protected:
  */
 struct ActShootCreature : public Action, public PaniAnimKeyListener {
 #if defined(PIKI_PC_PORT)
+private:
+ struct MiddayRestoreTag {};
+ ActShootCreature(MiddayRestoreTag,Piki*);
+ friend struct PcMiddayPikiActionFactoryAccess;
+public:
+#endif
+
+#if defined(PIKI_PC_PORT)
 	friend struct PcMiddayPikiActionAccess;
 #endif
 public:
@@ -2079,6 +2449,14 @@ protected:
  * @note Size: 0x2C.
  */
 struct ActStone : public Action, private PaniAnimKeyListener {
+#if defined(PIKI_PC_PORT)
+private:
+ struct MiddayRestoreTag {};
+ ActStone(MiddayRestoreTag,Piki*);
+ friend struct PcMiddayPikiActionFactoryAccess;
+public:
+#endif
+
 #if defined(PIKI_PC_PORT)
 	friend struct PcMiddayPikiActionAccess;
 #endif
@@ -2127,6 +2505,14 @@ protected:
  * @note Size: 0xC0.
  */
 struct ActTransport : public Action, virtual PaniAnimKeyListener {
+#if defined(PIKI_PC_PORT)
+private:
+ struct MiddayRestoreTag {};
+ ActTransport(MiddayRestoreTag,Piki*);
+ friend struct PcMiddayPikiActionFactoryAccess;
+public:
+#endif
+
 #if defined(PIKI_PC_PORT)
 	friend struct PcMiddayPikiActionAccess;
 #endif
@@ -2230,6 +2616,14 @@ protected:
  */
 class ActWatch : public Action {
 #if defined(PIKI_PC_PORT)
+private:
+ struct MiddayRestoreTag {};
+ ActWatch(MiddayRestoreTag,Piki*);
+ friend struct PcMiddayPikiActionFactoryAccess;
+public:
+#endif
+
+#if defined(PIKI_PC_PORT)
 	friend struct PcMiddayPikiActionAccess;
 #endif
 public:
@@ -2285,6 +2679,14 @@ protected:
  * @note Size: 0x2C.
  */
 struct ActWeed : public Action, private PaniAnimKeyListener {
+#if defined(PIKI_PC_PORT)
+private:
+ struct MiddayRestoreTag {};
+ ActWeed(MiddayRestoreTag,Piki*);
+ friend struct PcMiddayPikiActionFactoryAccess;
+public:
+#endif
+
 #if defined(PIKI_PC_PORT)
 	friend struct PcMiddayPikiActionAccess;
 #endif

@@ -241,6 +241,9 @@ struct CndBombable : public CndCollPart {
 class CollInfo {
 #if defined(PIKI_PC_PORT)
     friend struct PcMiddayCollisionAccess;
+    friend struct PcMiddayAncillaryAccess;
+    struct MiddayRestoreTag {};
+    CollInfo(MiddayRestoreTag, u16 capacity);
 #endif
 	friend class CollPart; // Accesses `mCollParts` in `CollPart::getChild`/`getChildAt`/`getNext`.
 

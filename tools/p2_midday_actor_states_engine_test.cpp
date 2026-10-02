@@ -14,6 +14,8 @@
 #include "MoviePlayer.h"
 #include "pc_midday_actor_archive.h"
 #include "p2_midday_piki_engine_checks.h"
+#include "p2_midday_actor_graph_checks.h"
+#include "pc_midday_view_piki.h"
 #include "pc_bbft.h"
 #include "pc_window.h"
 #include "pc_gpu_preference.h"
@@ -29,6 +31,7 @@
 using namespace pc_midday;
 namespace {
 bool strongStorageOnly=false;
+bool ownedGraphsOnly=false;
 void require(bool b,const std::string& message){if(!b){std::printf("FAIL MIDDAY_ACTOR_ENGINE %s\n",message.c_str());std::fflush(nullptr);std::_Exit(1);}}
 void requireError(bool ok,const char* stage,const std::string& error){require(ok,std::string(stage)+": "+(error.empty()?"unspecified failure":error));}
 template<class Check> void storageStage(const char* family,size_t index,const char* stage,std::string& error,Check check){
@@ -94,6 +97,38 @@ struct StorageCensus:StrongStorageVisitor {
   if(!slot.storage||!slot.owner||!slot.ownerType||!*slot.ownerType||!slot.member||!*slot.member||!keys.emplace(key,slot.storage).second||!slots.insert(slot.storage).second){error="duplicate or missing storage metadata";return false;}return true;
  }
 };
+void runOwnedGraphs(){
+ std::string error;error.reserve(512);
+ const double now=std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
+ Navi* n=naviMgr->getActiveNavi();Iterator iterator(pikiMgr);iterator.first();
+ auto* p=iterator.isDone()?nullptr:dynamic_cast<ViewPiki*>(static_cast<Piki*>(*iterator));
+ require(n&&p,"owned graph fixture actual Navi/ViewPiki");
+ Resolver nr,pr;nr.owner=n;nr.typedOwner=n;pr.owner=n;pr.typedOwner=p;
+ ActorBytes nb,pb,derived;
+ requireError(capture_navi(*n,nr,now,nb,error),"owned graph Navi capture",error);
+ requireError(capture_piki(*p,pr,now,pb,error)&&capture_view_piki(*p,pr,now,derived,error),"owned graph ViewPiki capture",error);
+ auto* originalNaviMgr=naviMgr;auto* originalPikiMgr=pikiMgr;auto* originalRouteMgr=routeMgr;
+ const auto printToggle=gsys->mTogglePrint;
+ PcSimRngCheckpoint before;
+ requireError(pc_sim_rng_capture(before,error),"owned graph RNG capture",error);
+ auto observe=[&](std::string& e){
+  if(naviMgr!=originalNaviMgr||pikiMgr!=originalPikiMgr||routeMgr!=originalRouteMgr||gsys->mTogglePrint!=printToggle){e="graph construction changed manager/global identity";return false;}
+  int count=0;Iterator live(pikiMgr);for(live.first();!live.isDone();live.next())++count;
+  if(count!=20||naviMgr->getActiveNavi()!=n){e="graph construction changed live inventory";return false;}
+  ActorBytes nextN,nextP,nextDerived;
+  if(!capture_navi(*n,nr,now,nextN,e)||!capture_piki(*p,pr,now,nextP,e)||!capture_view_piki(*p,pr,now,nextDerived,e))return false;
+  if(nextN!=nb||nextP!=pb||nextDerived!=derived||pc_sim_rng_state()!=before.simState||pc_cosmetic_rng_state()!=before.cosmeticState){e="graph construction changed live actor or RNG state";return false;}
+  return true;
+ };
+ ConstructorFence fence;requireError(fence.begin(error),"owned graph actual constructor fence (requires JAUDIOOFF)",error);
+ requireError(pc_midday_check_owned_navi_graph(*n,nb,nr,fence,1,observe,error),"owned Navi graph",error);
+ requireError(pc_midday_check_owned_piki_graph(*p,pb,derived,pr,fence,observe,error),"owned ViewPiki graph",error);
+ requireError(fence.finish(false,error),"owned graph abort fence release",error);
+ PcSimRngCheckpoint after;requireError(pc_sim_rng_capture(after,error),"owned graph RNG after abort",error);
+ require(after.version==before.version&&after.profile==before.profile&&after.simState==before.simState&&after.cosmeticState==before.cosmeticState&&after.simDraws==before.simDraws&&after.cosmeticDraws==before.cosmeticDraws,"owned graph exact RNG after abort");
+ std::printf("PASS MIDDAY_OWNED_GRAPHS live_inventory=20 fresh_graphs=1 full_world_restore=0 provider_enabled=0\n");
+ std::fflush(nullptr);std::_Exit(0);
+}
 void runStorage(){
  std::string error;const double now=std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
  std::vector<Navi*> captains;std::vector<Piki*> pikis;std::map<Creature*,int> counts;std::set<const void*> allSlots;
@@ -185,6 +220,7 @@ public:
         auto* n=naviMgr->getActiveNavi();if(!n||!n->getCurrState()||n->getCurrState()->getID()!=NAVISTATE_Walk)return result;
         int count=0;Iterator it(pikiMgr);for(it.first();!it.isDone();it.next())++count;
         if(count!=20)return result;
+        if(ownedGraphsOnly)runOwnedGraphs();
         if(strongStorageOnly)runStorage();
         if(!walkRestored) {
             Resolver resolver;resolver.owner=n;std::string error;ActorBytes original;
@@ -200,8 +236,11 @@ public:
 };
 }
 int main(int argc,char** argv) {
+    for(int i=1;i<argc;++i)if(std::strcmp(argv[i],"--owned-graphs")==0){ownedGraphsOnly=true;for(int j=i;j+1<argc;++j)argv[j]=argv[j+1];--argc;argv[argc]=nullptr;--i;}
     for(int i=1;i<argc;++i)if(std::strcmp(argv[i],"--strong-storage-only")==0){strongStorageOnly=true;for(int j=i;j+1<argc;++j)argv[j]=argv[j+1];--argc;argv[argc]=nullptr;--i;}
-    SDL_setenv("PIKMIN_RANDOMIZER_TEST_BACKGROUND","1",1);SDL_setenv("SDL_AUDIODRIVER","dummy",1);SDL_SetMainReady();pc_gpu_preference_apply();pc_bbft_init(argc,argv);
+    SDL_setenv("PIKMIN_RANDOMIZER_TEST_BACKGROUND","1",1);SDL_setenv("SDL_AUDIODRIVER","dummy",1);SDL_SetMainReady();
+    if(ownedGraphsOnly){pc_sim_rng_note_main_thread();std::string error;requireError(pc_sim_rng_begin_offline(0x68,0x168,error),"owned graph portable bootstrap",error);}
+    pc_gpu_preference_apply();pc_bbft_init(argc,argv);
     require(pc_randomizer_enabled(),"ordinary randomizer assets required");
     if(!pc_window_init("Midday actor component fixture",960,540))return 3;
     pc_settings_init();pc_window_set_display_mode(0);pc_window_set_window_size(960,540);pc_window_center();

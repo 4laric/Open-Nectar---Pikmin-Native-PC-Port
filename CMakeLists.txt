@@ -266,6 +266,10 @@ set(PC_PORT_SOURCES
     pc_port/pc_midday_view_piki_schema.cpp
     pc_port/pc_midday_view_piki_prepare.cpp
     pc_port/pc_midday_actor_shell.cpp
+    pc_port/pc_midday_actor_graph.cpp
+    pc_port/pc_midday_actor_ancillary.cpp
+    pc_port/pc_midday_state_factory.cpp
+    pc_port/pc_midday_piki_action_factory.cpp
     pc_port/pc_midday_creature_shell.cpp
     pc_port/pc_midday_navi_shell.cpp
     pc_port/pc_midday_piki_shell.cpp
@@ -3098,6 +3102,9 @@ target_include_directories(p2_midday_view_piki_test PRIVATE pc_port)
 target_compile_definitions(p2_midday_view_piki_test PRIVATE PIKI_PC_PORT)
 target_compile_options(p2_midday_view_piki_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
 add_test(NAME p2_midday_view_piki_test COMMAND p2_midday_view_piki_test)
+add_executable(p2_midday_allocation_owner_test tools/p2_midday_allocation_owner_test.cpp)
+target_include_directories(p2_midday_allocation_owner_test PRIVATE pc_port)
+add_test(NAME p2_midday_allocation_owner_test COMMAND p2_midday_allocation_owner_test)
 
 add_executable(p2_midday_view_piki_fields_test
     tools/p2_midday_view_piki_fields_test.cpp

@@ -1,4 +1,6 @@
 #include "pc_p2_demon_drop_state.h"
+#include "pc_midday_allocation_owner.h"
+#include "pc_midday_state_factory.h"
 #include "pc_p2_demon_admission.h"
 #include "NaviState.h"
 #include "NaviMgr.h"
@@ -110,6 +112,7 @@ DropState* registered(Navi* n) {
 }
 bool pc_demon_drop_silent_damage() { return gSilentDamage>0; }
 NaviState* pc_demon_drop_state_create() { return new DropState(); }
+NaviState* pc_midday::allocate_demon_drop_state(AllocationOwner& owner) { return owner.make<DropState>(); }
 bool pc_demon_drop_begin(Navi* n,std::uint64_t g,float damage,float speed) {
     auto* s=registered(n);
     if(!s||s->retired||!n->isAlive()||n->mHealth<=1||!pc_demon_captain_admission_eligible(n)||n->mRope||n->isStickTo()||
