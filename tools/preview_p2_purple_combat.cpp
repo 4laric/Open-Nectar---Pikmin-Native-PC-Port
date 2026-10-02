@@ -237,6 +237,13 @@ class PurpleCombatApp : public PlugPikiApp {
                 const Vector3f offset=captain->mCentre-n->mSRT.t;
                 const float sum=part->mRadius+captain->mRadius+1.f;
                 const float dy=std::max(0.f,std::fabs(part->mCentre.y-captain->mCentre.y)-.1f);
+                if(mode("sdl_acquire")) {
+                    const Vector3f separation=part->mCentre-captain->mCentre;
+                    std::printf("P2_PURPLE_PLUCK_PAIR tick=%d captain_id=%u violet_id=%u captain_centre=%.6f,%.6f,%.6f captain_radius=%.6f violet_centre=%.6f,%.6f,%.6f violet_radius=%.6f offset=%.6f,%.6f,%.6f raw_sphere_gap=%.6f padded_sum=%.6f padded_dy=%.6f projected=%d read_only=1\n",
+                        ticks,unsigned(captain->getID().mId),unsigned(part->getID().mId),captain->mCentre.x,captain->mCentre.y,captain->mCentre.z,captain->mRadius,
+                        part->mCentre.x,part->mCentre.y,part->mCentre.z,part->mRadius,offset.x,offset.y,offset.z,
+                        std::sqrt(separation.x*separation.x+separation.y*separation.y+separation.z*separation.z)-part->mRadius-captain->mRadius,sum,dy,int(dy<sum));
+                }
                 if(dy<sum) pluckObstacles.push_back({Vector3f(part->mCentre.x-offset.x,n->mSRT.t.y,part->mCentre.z-offset.z),
                     std::sqrt(sum*sum-dy*dy)});
             }
@@ -252,10 +259,28 @@ class PurpleCombatApp : public PlugPikiApp {
         pluckObstacles.clear();
         collectPluckObstacles(violet->mCollInfo->getBoundingSphere(),n,captainParts);
     }
+    void pluckTrace(const char* event,Navi* n,PikiHeadItem* head,Pom* violet) {
+        if(!mode("sdl_acquire"))return;
+        const double seconds=std::chrono::duration<double>(std::chrono::steady_clock::now()-fixtureStarted).count();
+        float clearance=std::numeric_limits<float>::infinity();
+        for(const auto& obstacle:pluckObstacles)clearance=std::min(clearance,planarDistance(n->mSRT.t,obstacle.centre)-obstacle.radius);
+        CollPart* captainPart=nullptr;CollPart* violetPart=nullptr;Vector3f push(0,0,0);
+        const bool contact=n->mCollInfo && n->mCollInfo->hasInfo() && violet->mCollInfo && violet->mCollInfo->hasInfo()
+            && n->mCollInfo->checkCollision(violet->mCollInfo,&captainPart,&violetPart,push);
+        std::printf("P2_PURPLE_PLUCK_TRACE event=%s tick=%d wall_seconds=%.6f dt=%.9f captain=%.6f,%.6f,%.6f head=%p head_xyz=%.6f,%.6f,%.6f can_pull=%d purple_head=%d violet=%p violet_xyz=%.6f,%.6f,%.6f violet_state=%d range=%.6f velocity=%.6f,%.6f,%.6f target_velocity=%.6f,%.6f,%.6f face=%.6f navi_state=%d raw=%d,%d normalized=%.6f,%.6f waypoint=%u route_size=%u obstacles=%u min_start_clearance=%.6f raw_contact=%d captain_part=%u violet_part=%u push=%.6f,%.6f,%.6f captain_atari=%d violet_atari=%d read_only=1\n",
+            event,ticks,seconds,gsys->getFrameTime(),n->mSRT.t.x,n->mSRT.t.y,n->mSRT.t.z,static_cast<void*>(head),head->mSRT.t.x,head->mSRT.t.y,head->mSRT.t.z,
+            int(head->canPullout()),int(head->mP2Purple),static_cast<void*>(violet),violet->mSRT.t.x,violet->mSRT.t.y,violet->mSRT.t.z,violet->getCurrentState(),C_NAVI_PARM(n,mPluckDistanceOutsideOnyon),
+            n->mVelocity.x,n->mVelocity.y,n->mVelocity.z,n->mTargetVelocity.x,n->mTargetVelocity.y,n->mTargetVelocity.z,n->mFaceDirection,n->getCurrState()->getID(),
+            n->mKontroller?int(n->mKontroller->mMainStickX):0,n->mKontroller?int(n->mKontroller->mMainStickY):0,
+            n->mKontroller?n->mKontroller->getMainStickX():0,n->mKontroller?n->mKontroller->getMainStickY():0,
+            unsigned(pluckRouteIndex),unsigned(pluckRoute.size()),unsigned(pluckObstacles.size()),clearance,int(contact),
+            captainPart?unsigned(captainPart->getID().mId):0,violetPart?unsigned(violetPart->getID().mId):0,push.x,push.y,push.z,int(n->isAtari()),int(violet->isAtari()));
+    }
     void planPluckRoute(Navi* n,PikiHeadItem* head,Pom* violet,float pluckRange) {
         require(violet && violet->mCollInfo && violet->mCollInfo->hasInfo(),"Violet collision data required for ordinary approach");
         pluckObstacles.clear();pluckRoute.clear();pluckRouteIndex=0;
         refreshPluckObstacles(n,violet);
+        pluckTrace("plan_begin",n,head,violet);
         auditBody("captain_route",n);
         for(const auto& obstacle:pluckObstacles) std::printf("P2_PURPLE_PLUCK_OBSTACLE xyz=%.3f,%.3f,%.3f radius=%.3f live_part_pairs=1\n",
             obstacle.centre.x,obstacle.centre.y,obstacle.centre.z,obstacle.radius);
@@ -285,6 +310,12 @@ class PurpleCombatApp : public PlugPikiApp {
                 const float candidate=cost[here]+planarDistance(nodes[here],nodes[next]);
                 if(candidate<cost[next]) {cost[next]=candidate;parent[next]=here;}
             }
+        }
+        if(mode("sdl_acquire")) {
+            unsigned goals=0,reachable=0;for(size_t i=0;i<count;++i)if(goal[i]){++goals;if(std::isfinite(cost[i]))++reachable;}
+            std::printf("P2_PURPLE_PLUCK_GRAPH tick=%d nodes=%u goals=%u reachable_goals=%u end=%d start_clear=%d read_only=1\n",
+                ticks,unsigned(count),goals,reachable,end,int(pluckSegmentClear(n->mSRT.t,n->mSRT.t)));
+            if(end<0)pluckTrace("plan_failure",n,head,violet);
         }
         require(end>=0,"no collision-clear controller approach to native pluck range");
         for(int i=end;i>0;i=parent[i]) {require(parent[i]>=0,"invalid pluck route");pluckRoute.push_back(nodes[i]);}
@@ -707,6 +738,10 @@ class PurpleCombatApp : public PlugPikiApp {
             n->mVelocity.x,n->mVelocity.z,n->mTargetVelocity.x,n->mTargetVelocity.z);
         if(distance>=pluckRange-.25f) {
             refreshPluckObstacles(n,violet);
+            pluckTrace("approach_refresh",n,head,violet);
+            if(mode("sdl_acquire"))std::printf("P2_PURPLE_PLUCK_REPLAN tick=%d new_head=%d empty=%d head_moved=%d segment_blocked=%d read_only=1\n",
+                ticks,int(routedHead!=head),int(pluckRoute.empty()),int(routedHead==head && planarDistance(routedHeadPosition,head->mSRT.t)>2.f),
+                int(!pluckRoute.empty() && !pluckSegmentClear(n->mSRT.t,pluckRoute[pluckRouteIndex])));
             if(routedHead!=head || pluckRoute.empty() || planarDistance(routedHeadPosition,head->mSRT.t)>2.f
                 || !pluckSegmentClear(n->mSRT.t,pluckRoute[pluckRouteIndex]))
                 planPluckRoute(n,head,violet,pluckRange);
@@ -724,6 +759,9 @@ class PurpleCombatApp : public PlugPikiApp {
             const float power=std::max(minimum,std::min(65.f,d*2.f));
             acquisitionInput(0,int(std::lround(power*(tx*axis.x+tz*axis.z)/d)),
                 int(std::lround(power*(tx*axis.z-tz*axis.x)/d)));
+            if(mode("sdl_acquire"))std::printf("P2_PURPLE_PLUCK_COMMAND tick=%d waypoint=%u target=%.6f,%.6f,%.6f distance=%.6f power=%.6f emitted_sdl=%d,%d emitted_a=%d read_only=1\n",
+                ticks,unsigned(pluckRouteIndex),target.x,target.y,target.z,d,power,int(SDL_JoystickGetAxis(ordinaryPad,SDL_CONTROLLER_AXIS_LEFTX)),
+                int(SDL_JoystickGetAxis(ordinaryPad,SDL_CONTROLLER_AXIS_LEFTY)),int(SDL_JoystickGetButton(ordinaryPad,SDL_CONTROLLER_BUTTON_A)));
             return false;
         }
         if(!head->canPullout()) {acquisitionInput();return false;}
