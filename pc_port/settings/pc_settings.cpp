@@ -13,6 +13,7 @@
  */
 
 #include "settings/pc_settings.h"
+#include "settings/pc_settings_file.h"
 #include "settings/pc_settings_rows.h"
 #include "settings/pc_glass_menu.h"
 #include "mods/pc_hd_models.h"
@@ -85,11 +86,26 @@ constexpr const char* kConfigFilename = "pikmin_settings.conf";
 // player's own file. Empty = the historical cwd-relative name.
 std::string sConfigPathPin;
 #endif
-const char* configFilename() {
+const char* configFallback() {
 #if PIKI_NETPLAY_BUILD
     if (!sConfigPathPin.empty()) return sConfigPathPin.c_str();
 #endif
     return kConfigFilename;
+}
+
+std::string configFilename() {
+    PcSettingsFilePath path;
+    if (!pc_settings_file_resolve(configFallback(), &path)) return "<invalid PIKMIN_SETTINGS_PATH>";
+#ifdef _WIN32
+    int count = WideCharToMultiByte(CP_UTF8, 0, path.value, -1, nullptr, 0, nullptr, nullptr);
+    if (!count) return "<unprintable settings path>";
+    std::string result(count, '\0');
+    WideCharToMultiByte(CP_UTF8, 0, path.value, -1, &result[0], count, nullptr, nullptr);
+    result.resize(count - 1);
+    return result;
+#else
+    return path.value;
+#endif
 }
 
 struct PcConfig {
@@ -1079,7 +1095,11 @@ unsigned char pc_settings_startup_language(void) {
         language = 0;
         if (const char* fromEnvironment = getenv("NECTAR_LANGUAGE")) {
             language = decodeLanguageCode(fromEnvironment, 0);
-        } else if (FILE* in = fopen(configFilename(), "r")) {
+        } else {
+            // Pre-main: never consult the dynamically constructed B2 path pin.
+            PcSettingsFilePath path;
+            FILE* in = pc_settings_file_resolve(kConfigFilename, &path) ? pc_settings_file_open(&path) : nullptr;
+            if (in) {
             char line[512];
             while (fgets(line, sizeof(line), in)) {
                 char* equals = strchr(line, '=');
@@ -1096,6 +1116,7 @@ unsigned char pc_settings_startup_language(void) {
                 }
             }
             fclose(in);
+            }
         }
     }
     if (sLanguage == 0xFF)
@@ -1204,16 +1225,15 @@ std::string renderConfig(const PcConfig& c) {
     return out.str();
 }
 
-void writeConfigText(const std::string& text) {
-    std::string path = std::string(configFilename());
-    std::ofstream out(path, std::ios::out | std::ios::trunc);
-    if (!out) {
-        printf("[PC Settings] Failed to write %s\n", path.c_str());
-        return;
+bool writeConfigText(const std::string& text) {
+    PcSettingsFilePath path;
+    if (!pc_settings_file_resolve(configFallback(), &path) ||
+        !pc_settings_file_commit(&path, text.data(), text.size())) {
+        printf("[PC Settings] Failed to save %s: error %d; previous settings preserved\n", configFilename().c_str(), errno);
+        return false;
     }
-    out << text;
-    out.close();
-    printf("[PC Settings] Saved %s\n", path.c_str());
+    printf("[PC Settings] Saved %s\n", configFilename().c_str());
+    return true;
 }
 
 #if PIKI_NETPLAY_BUILD
@@ -1234,8 +1254,14 @@ void saveConfig() {
 
 void loadConfig() {
     sConfig.applyDefaults();
-    std::string path = std::string(configFilename());
-    std::ifstream in(path, std::ios::in);
+    PcSettingsFilePath selected;
+    if (!pc_settings_file_resolve(configFallback(), &selected)) {
+        printf("[PC Settings] Invalid PIKMIN_SETTINGS_PATH; using defaults without legacy fallback.\n");
+        sHadConfigFile = false;
+        return;
+    }
+    std::string path = configFilename();
+    std::ifstream in(std::filesystem::path(selected.value), std::ios::in);
     if (!in) {
         printf("[PC Settings] No config file (%s); using defaults.\n", path.c_str());
         sHadConfigFile = false;
@@ -5556,10 +5582,13 @@ bool sessionGuardedSave() {
     const std::string text = renderConfig(out);
     if (text == sDiskRender) {
         printf("[PC Settings] netplay session: no local change to save; %s left untouched\n",
-               configFilename());
+               configFilename().c_str());
         return true;
     }
-    writeConfigText(text);
+    if (!writeConfigText(text)) {
+        printf("[PC Settings] netplay session: save failed; retaining disk baseline for retry\n");
+        return true; // Handled, but not committed: never fall through to unlocked save.
+    }
     sDiskConfig = out;
     sDiskRender = text;
     printf("[PC Settings] netplay session: saved local changes; the %d session-locked keys keep "
@@ -5655,7 +5684,7 @@ void pc_settings_session_begin(const char* adoptBlock) {
     sSessionGuard = true;
     printf("[PC Settings] netplay session: the %d sim-relevant keys are locked for the session; "
            "%s keeps this player's own values\n",
-           countSessionFields(), configFilename());
+           countSessionFields(), configFilename().c_str());
     if (adoptBlock != nullptr) {
         std::string diff;
         int changed = 0;
