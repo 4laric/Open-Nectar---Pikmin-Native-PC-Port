@@ -92,7 +92,7 @@ bool SceneReferenceResolver::typed(const FieldSchema& s,const LogicalRef& id,std
 bool SceneReferenceResolver::validateTyped(const FieldSchema& s,const LogicalRef& id,std::string& e)const{
  if(!schema_.empty()){
   const auto* expected=field(s.key.c_str(),s.reference,s.category,e);if(!expected)return false;
-  if(expected->targetType!=s.targetType||expected->ownership!=s.ownership||expected->nullable!=s.nullable||expected->ownerLink!=s.ownerLink)return fail(e,"compiled reference contract changed");
+  if(expected->targetType!=s.targetType||expected->ownership!=s.ownership||expected->nullable!=s.nullable||expected->ownerLink!=s.ownerLink||expected->strength!=s.strength)return fail(e,"compiled reference contract changed");
  }
  return typed(s,id,e);
 }

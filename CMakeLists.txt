@@ -390,6 +390,7 @@ set(PC_PORT_SOURCES
     pc_port/pc_midday_animation_context_engine.cpp
     pc_port/pc_midday_refcounts.cpp
     pc_port/pc_midday_refcounts_engine.cpp
+    pc_port/pc_midday_strong_graph.cpp
     pc_port/pc_p2_cave.cpp
     pc_port/pc_p2_cave_dialog_window.cpp
     pc_port/pc_p2_cave_generate.cpp
@@ -3307,3 +3308,9 @@ add_executable(pc_midday_refcounts_engine_test tools/pc_midday_refcounts_engine_
 target_include_directories(pc_midday_refcounts_engine_test PRIVATE pc_port)
 target_compile_options(pc_midday_refcounts_engine_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
 add_test(NAME pc_midday_refcounts_engine COMMAND pc_midday_refcounts_engine_test)
+
+add_executable(pc_midday_strong_graph_test tools/pc_midday_strong_graph_test.cpp
+    pc_port/pc_midday_strong_graph.cpp pc_port/pc_midday_actor_archive.cpp pc_port/pc_midday_refcounts.cpp)
+target_include_directories(pc_midday_strong_graph_test PRIVATE pc_port)
+target_compile_options(pc_midday_strong_graph_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+add_test(NAME pc_midday_strong_graph COMMAND pc_midday_strong_graph_test)

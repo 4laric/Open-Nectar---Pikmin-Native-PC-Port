@@ -111,5 +111,7 @@ int main(){
  check(!catalog.identify(RefKind::SlotListener,FieldCategory::Token64,nullptr,0,found,e,SceneSubject{1,55}));
  check(!catalog.identify(RefKind::SlotListener,FieldCategory::Token64,nullptr,0,found,e,SceneSubject{0,999}));
  check(!catalog.identify(RefKind::SlotListener,FieldCategory::Scalar,nullptr,0,found,e,SceneSubject{0,55}));
+ auto changedStrength=schema[0];changedStrength.strength=ReferenceStrength::StrongCreature;
+ check(!resolver.validateTyped(changedStrength,root,e));
  std::cout<<checks<<" scene catalog controls PASS\n";
 }
