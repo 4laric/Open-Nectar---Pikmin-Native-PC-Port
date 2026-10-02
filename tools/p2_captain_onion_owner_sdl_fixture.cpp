@@ -221,7 +221,10 @@ class CaptainSaveApp final:public PlugPikiApp {
                 startupFrames,i,static_cast<void*>(p),unsigned(p->getGeneratorID()),int(p->mMode),p->getState(),p->mActiveAction?p->mActiveAction->mCurrActionIdx:-1,p->mNavi?p->mNavi->mNaviID:-1,int(p->mIsCallable),int(p->mRope!=nullptr),std::sqrt(d2),std::sqrt(cursor.x*cursor.x+cursor.z*cursor.z));
             // Wait for genuine exit/LookAt transitions; do not substitute a new body.
             require(p->mMode==PikiMode::FreeMode || p->mMode==PikiMode::FormationMode || p->mMode==PikiMode::ExitMode,"startup mode must be observed free/formation/exit, not repaired work");
-            if(p->mMode==PikiMode::FreeMode && p->mIsCallable && !p->mRope && d2<nearest){nearest=d2;target=p;}
+            // LookAt has already received the native whistle. It remains FreeMode
+            // until its reaction animation finishes; callPikis excludes it too.
+            // Approach an uncalled body instead, or release input and await cleanup.
+            if(p->mMode==PikiMode::FreeMode && p->getState()!=PIKISTATE_LookAt && p->mIsCallable && !p->mRope && d2<nearest){nearest=d2;target=p;}
         }
         if(!target){pad();return false;}
         // The same camera-relative left-stick transform used by onionMenu.
