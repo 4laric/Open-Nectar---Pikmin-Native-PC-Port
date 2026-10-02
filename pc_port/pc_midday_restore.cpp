@@ -38,7 +38,11 @@ bool restorePaused(const Snapshot& saved,const Binding& expected,const Coverage&
             if(!handle||!unique.insert(handle).second){e="invalid/duplicate staged actor handle";return false;}
             handles.emplace(actor.id,handle);
         }
-        // Every saved actor now exists. Zero denotes a schema-approved optional
+        // Pools/action topology must exist before any cross-actor or global
+        // token reference can resolve. Inactive referenced slots stay allocated.
+        for(const auto& actor:saved.actors)
+            if(!backend.allocateSubobjects(actor,handles.at(actor.id),e))return false;
+        // Every saved actor and its saved subobjects now exist. Zero denotes a schema-approved optional
         // reference; typed validators decide which roles may be absent.
         for(const auto& actor:saved.actors){
             std::vector<StagedHandle> references;references.reserve(actor.references.size());
