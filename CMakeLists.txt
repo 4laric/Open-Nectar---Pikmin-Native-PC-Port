@@ -419,6 +419,8 @@ set(PC_PORT_SOURCES
     pc_port/pc_midday_economy_engine.cpp
     pc_port/pc_midday_reference_catalog.cpp
     pc_port/pc_midday_reference_catalog_engine.cpp
+    pc_port/pc_midday_animation_stage.cpp
+    pc_port/pc_midday_animation_stage_engine.cpp
     pc_port/pc_midday_animation_context.cpp
     pc_port/pc_midday_animation_context_engine.cpp
     pc_port/pc_midday_refcounts.cpp
@@ -3442,3 +3444,9 @@ target_include_directories(pc_midday_resolved_fields_test PRIVATE pc_port includ
 target_compile_definitions(pc_midday_resolved_fields_test PRIVATE PIKI_PC_PORT)
 target_compile_options(pc_midday_resolved_fields_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
 add_test(NAME pc_midday_resolved_fields COMMAND pc_midday_resolved_fields_test)
+
+add_executable(pc_midday_animation_stage_test tools/pc_midday_animation_stage_test.cpp pc_port/pc_midday_animation_stage.cpp pc_port/pc_midday_animation_context.cpp pc_port/pc_midday_resolved_fields.cpp pc_port/pc_midday_actor_archive.cpp)
+target_include_directories(pc_midday_animation_stage_test PRIVATE pc_port include)
+target_compile_definitions(pc_midday_animation_stage_test PRIVATE PIKI_PC_PORT)
+target_compile_options(pc_midday_animation_stage_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+add_test(NAME pc_midday_animation_stage COMMAND pc_midday_animation_stage_test)
