@@ -94,8 +94,12 @@ public:
 /**
  * @brief TODO
  */
+namespace pc_midday { struct DemoStageTag; }
 struct DemoFlags {
 	DemoFlags();
+#if defined(PIKI_PC_PORT)
+	explicit DemoFlags(const pc_midday::DemoStageTag&);
+#endif
 
 	void initGame();
 	void initCourse();

@@ -396,6 +396,8 @@ set(PC_PORT_SOURCES
     pc_port/pc_midday_item_factory_plan.cpp
     pc_port/pc_midday_item_factory_engine.cpp
     pc_port/pc_midday_item_manager_engine.cpp
+    pc_port/pc_midday_demo.cpp
+    pc_port/pc_midday_demo_engine.cpp
     pc_port/pc_midday_player_core.cpp
     pc_port/pc_midday_player_core_engine.cpp
     pc_port/pc_midday_economy.cpp
@@ -3393,3 +3395,8 @@ add_executable(pc_midday_item_factory_plan_test tools/pc_midday_item_factory_pla
     pc_port/pc_midday_inventory.cpp pc_port/pc_midday_capture.cpp pc_port/pc_midday_codec.cpp)
 target_include_directories(pc_midday_item_factory_plan_test PRIVATE pc_port)
 add_test(NAME pc_midday_item_factory_plan COMMAND pc_midday_item_factory_plan_test)
+
+# Mid-day DemoFlags wire controls; native physical staging stays separate.
+add_executable(pc_midday_demo_test tools/pc_midday_demo_test.cpp pc_port/pc_midday_demo.cpp)
+target_include_directories(pc_midday_demo_test PRIVATE pc_port)
+add_test(NAME pc_midday_demo COMMAND pc_midday_demo_test)
