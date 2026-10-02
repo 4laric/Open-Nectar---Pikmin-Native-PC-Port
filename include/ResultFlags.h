@@ -11,7 +11,11 @@ class Creature;
 /**
  * @brief TODO
  */
+namespace pc_midday { struct ResultStageTag; }
 struct ResultFlags {
+#if defined(PIKI_PC_PORT)
+	friend struct PcMiddayResultAccess;
+#endif
 public:
 	/**
 	 * @brief TODO
@@ -34,6 +38,9 @@ public:
 	};
 
 	ResultFlags();
+#if defined(PIKI_PC_PORT)
+	explicit ResultFlags(const pc_midday::ResultStageTag&);
+#endif
 
 	void initGame();
 	void saveCard(RandomAccessStream&);

@@ -424,3 +424,19 @@ void ResultFlags::setFlag(int index, u8 flag)
 
 	mStates[b] = newFlag;
 }
+
+#if defined(PIKI_PC_PORT)
+#include "pc_midday_result.h"
+#include <set>
+bool PcMiddayResultAccess::compiled(std::vector<pc_midday::ResultDescriptor>&out,std::string&e){
+ static_assert(MAX_DAYS==30,"Result day topology changed");
+ constexpr size_t count=sizeof(ResultFlags::flagTable)/sizeof(ResultFlags::flagTable[0]);
+ if(count<2||count>153||ResultFlags::flagTable[count-1].mScreenId!=-1){e="Result compiled sentinel/count invalid";return false;}
+ std::vector<pc_midday::ResultDescriptor>v;std::set<int>ids;v.reserve(count-1);
+ for(size_t i=0;i<count-1;++i){const auto&d=ResultFlags::flagTable[i];
+  if(d.mScreenId<0||d.mScreenId>=148||d.mStore>2||!ids.insert(d.mScreenId).second){e="Result compiled descriptor invalid";return false;}
+  v.push_back({d.mScreenId,d.mPriority,d.mStore,d.mIsAutoSet});
+ }
+ out=std::move(v);e.clear();return true;
+}
+#endif

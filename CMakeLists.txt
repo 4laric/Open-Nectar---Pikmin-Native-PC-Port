@@ -398,6 +398,8 @@ set(PC_PORT_SOURCES
     pc_port/pc_midday_item_manager_engine.cpp
     pc_port/pc_midday_demo.cpp
     pc_port/pc_midday_demo_engine.cpp
+    pc_port/pc_midday_result.cpp
+    pc_port/pc_midday_result_engine.cpp
     pc_port/pc_midday_player_core.cpp
     pc_port/pc_midday_player_core_engine.cpp
     pc_port/pc_midday_economy.cpp
@@ -3400,3 +3402,7 @@ add_test(NAME pc_midday_item_factory_plan COMMAND pc_midday_item_factory_plan_te
 add_executable(pc_midday_demo_test tools/pc_midday_demo_test.cpp pc_port/pc_midday_demo.cpp)
 target_include_directories(pc_midday_demo_test PRIVATE pc_port)
 add_test(NAME pc_midday_demo COMMAND pc_midday_demo_test)
+
+add_executable(pc_midday_result_test tools/pc_midday_result_test.cpp pc_port/pc_midday_result.cpp)
+target_include_directories(pc_midday_result_test PRIVATE pc_port)
+add_test(NAME pc_midday_result COMMAND pc_midday_result_test)
