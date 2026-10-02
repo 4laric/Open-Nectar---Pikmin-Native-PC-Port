@@ -17,6 +17,7 @@
 #if defined(PIKI_PC_PORT)
 #include "zen/ogNitaku.h"
 #include "zen/ogFileChkSel.h"
+#include "zen/ogFileSelect.h"
 #include "zen/ogMemChk.h"
 #include "zen/DrawSave.h"
 #endif
@@ -58,6 +59,18 @@ PcSaveUiSnapshot ogScrResultMgr::pcSaveUiSnapshot() const
     const DrawSaveFailure* failure = save->mSaveFail;
     const ogScrFileChkSelMgr* file = save->mFileChkSelMgr;
     const ogScrMemChkMgr* memory = save->mMemCheckMgr;
+    // First-save slot selection lives inside this save manager, not the title UI.
+    // The outer memory checker can remain Finished while file selection updates.
+    if (save->mStatus == ogSaveMgr::PreparingSave && value.fileSelection
+        && failure && failure->pcInactive() && file && file->mIsSaveOperation
+        && file->mState == ogScrFileChkSelMgr::MemoryCheckInProgress && file->mIsScreenVisible) {
+        const ogScrMemChkMgr* slotMemory = file->mMemChkMgr;
+        const ogScrFileSelectMgr* slots = file->mFileSelectMgr;
+        if (slotMemory && slotMemory->pcInactive() && slots) {
+            value.cardSlot = slots->pcSaveInputSlot();
+            value.cardSlotInputReady = value.cardSlot >= 0;
+        }
+    }
     value.nestedUiBlocked = !failure || !failure->pcInactive() || !file
         || file->mState != ogScrFileChkSelMgr::Null || !memory || !memory->pcInactive()
         || value.fileSelection;

@@ -23,6 +23,8 @@ struct PcSaveUiSnapshot {
     bool secondaryInputReady = false;
     bool secondaryYes = false; // secondary prompt is NOT the save confirmation
     bool fileSelection = false;
+    bool cardSlotInputReady = false;
+    int cardSlot = -1; // meaningful only when cardSlotInputReady; save-mode selector only
     bool nestedUiBlocked = true;
 };
 PcPauseSnapshot pc_pause_observe();

@@ -11,6 +11,7 @@
 #include "Graphics.h"
 #include "pc_gfx.h"
 #include "pc_diary_observer.h"
+#include "p2_purple_save_input.h"
 #include "system.h"
 #include "App.h"
 #include "Node.h"
@@ -237,7 +238,7 @@ class PurpleCombatApp : public PlugPikiApp {
                 const Vector3f offset=captain->mCentre-n->mSRT.t;
                 const float sum=part->mRadius+captain->mRadius+1.f;
                 const float dy=std::max(0.f,std::fabs(part->mCentre.y-captain->mCentre.y)-.1f);
-                if(mode("sdl_acquire")) {
+                if(sdlAcquisitionMode()) {
                     const Vector3f separation=part->mCentre-captain->mCentre;
                     std::printf("P2_PURPLE_PLUCK_PAIR tick=%d captain_id=%u violet_id=%u captain_centre=%.6f,%.6f,%.6f captain_radius=%.6f violet_centre=%.6f,%.6f,%.6f violet_radius=%.6f offset=%.6f,%.6f,%.6f raw_sphere_gap=%.6f padded_sum=%.6f padded_dy=%.6f projected=%d read_only=1\n",
                         ticks,unsigned(captain->getID().mId),unsigned(part->getID().mId),captain->mCentre.x,captain->mCentre.y,captain->mCentre.z,captain->mRadius,
@@ -260,7 +261,7 @@ class PurpleCombatApp : public PlugPikiApp {
         collectPluckObstacles(violet->mCollInfo->getBoundingSphere(),n,captainParts);
     }
     void pluckTrace(const char* event,Navi* n,PikiHeadItem* head,Pom* violet) {
-        if(!mode("sdl_acquire"))return;
+        if(!sdlAcquisitionMode())return;
         const double seconds=std::chrono::duration<double>(std::chrono::steady_clock::now()-fixtureStarted).count();
         float clearance=std::numeric_limits<float>::infinity();
         for(const auto& obstacle:pluckObstacles)clearance=std::min(clearance,planarDistance(n->mSRT.t,obstacle.centre)-obstacle.radius);
@@ -311,7 +312,7 @@ class PurpleCombatApp : public PlugPikiApp {
                 if(candidate<cost[next]) {cost[next]=candidate;parent[next]=here;}
             }
         }
-        if(mode("sdl_acquire")) {
+        if(sdlAcquisitionMode()) {
             unsigned goals=0,reachable=0;for(size_t i=0;i<count;++i)if(goal[i]){++goals;if(std::isfinite(cost[i]))++reachable;}
             std::printf("P2_PURPLE_PLUCK_GRAPH tick=%d nodes=%u goals=%u reachable_goals=%u end=%d start_clear=%d read_only=1\n",
                 ticks,unsigned(count),goals,reachable,end,int(pluckSegmentClear(n->mSRT.t,n->mSRT.t)));
@@ -353,6 +354,8 @@ class PurpleCombatApp : public PlugPikiApp {
     int sunsetTicks=0, sunsetDay=-1, expectedDay=-1, savedMaturity=-1, resumeReady=0;
     int ordinaryMenuFrames=0,ordinaryDiaryFrames=0;
     bool releaseDiaryInput=false,diaryRevealObserved=false,diaryAdvanceObserved=false;
+    bool releaseObservedSaveInput=false;
+    unsigned observedSaveActions=0;
     int sdlPhase=0,sdlStableAim=0,sdlThrowTicks=0;
     bool sdlStarted=false,sdlThrowObserved=false,sdlGeometryLogged=false;
     bool sdlAimReleasePending=false;
@@ -364,6 +367,8 @@ class PurpleCombatApp : public PlugPikiApp {
         const char* value=std::getenv("P2_PURPLE_COMBAT_MODE");
         return value && std::strcmp(value,name)==0;
     }
+    bool sdlAcquisitionMode() const { return mode("sdl_acquire") || mode("sdl_dayend"); }
+    bool ordinarySaveMode() const { return mode("natural_dayend") || mode("sdl_dayend"); }
     void injectInitializedGuard(Navi* n) {
         const char* test=std::getenv("P2_PURPLE_GUARD_CASE");
         if(!test && std::getenv("P2_FIXTURE_FORCE_CAPTAIN_DOWN")) test="health";
@@ -467,9 +472,39 @@ class PurpleCombatApp : public PlugPikiApp {
         sunsetDay=gameflow.mWorldClock.mCurrentDay;expectedDay=pc_randomizer_next_day(sunsetDay);
         require(expectedDay==sunsetDay+1 && flowCont.mGameEndFlag==GAMEEND_None,"ordinary next day");
         sunsetRequested=true;pc_p2_input_script_clear(1);ordinaryInput(KBBTN_START);
+        if(mode("sdl_dayend")) releaseObservedSaveInput=true;
+        acquired=nullptr;input=nullptr; // Fixture references must not outlive native sunset teardown.
         milestone("ordinary_sunset_menu_requested",ticks);
         std::printf("P2_PURPLE_ORDINARY_SAVE_BEGIN day=%d expected_day=%d maturity=%d field=20 stock=0 direct_stock_helpers=0 clock_advanced=0 SDL_menu_input=1\n",
             sunsetDay,expectedDay,savedMaturity);
+    }
+    void observedSaveInput(bool confirming) {
+        if(confirming) {
+            if(++ordinaryDiaryFrames==1) milestone("ordinary_day_advanced",ticks);
+        } else ++ordinaryMenuFrames;
+        if(releaseObservedSaveInput) {
+            ordinaryInput();releaseObservedSaveInput=false;return;
+        }
+        const PcPauseSnapshot pause=pc_pause_observe();
+        const PcDiaryAction diary=pc_diary_observe();
+        const PcSaveUiSnapshot save=pc_save_ui_observe();
+        const PurpleSaveInput action=purple_save_input(confirming,pause,diary,save);
+        require(action!=PurpleSaveInput::Unexpected,"unexpected ordinary save menu/slot/secondary prompt");
+        if(action==PurpleSaveInput::Neutral) {ordinaryInput();return;}
+        require(++observedSaveActions<240,"bounded observed save input actions");
+        if(action==PurpleSaveInput::RevealDiary || action==PurpleSaveInput::AdvanceDiary) {
+            ++diaryActions;
+            const bool reveal=action==PurpleSaveInput::RevealDiary;
+            diaryRevealObserved|=reveal;diaryAdvanceObserved|=!reveal;
+            ordinaryInput(reveal?KBBTN_B:KBBTN_A);
+            std::printf("P2_PURPLE_ORDINARY_DIARY action=%d input=%s observer=%d SDL_input=1\n",diaryActions,reveal?"B":"A",int(diary));
+        } else if(action==PurpleSaveInput::Down || action==PurpleSaveInput::Up) {
+            ordinaryInput(0,action==PurpleSaveInput::Down?-65:65,0,true);
+        } else ordinaryInput(KBBTN_A);
+        releaseObservedSaveInput=true;
+        std::printf("P2_PURPLE_OBSERVED_SAVE_INPUT action=%u intent=%d pause=%d main=%d sub=%d results=%d save=%d primary=%d yes=%d slot_ready=%d slot=%d observer_read_only=1 SDL_input=1\n",
+            observedSaveActions,int(action),pause.state,pause.mainSelection,pause.subSelection,save.resultState,save.saveState,
+            int(save.primaryInputReady),int(save.primaryYes),int(save.cardSlotInputReady),save.cardSlot);
     }
     void ordinarySunsetStep() {
         require(++sunsetTicks<9000,"ordinary SDL day-save timeout");
@@ -477,7 +512,8 @@ class PurpleCombatApp : public PlugPikiApp {
         if(gameflow.mIsDayEndActive) sunsetSeen=true;
         require(gameflow.mWorldClock.mCurrentDay<=expectedDay,"ordinary save extra day advance");
         const bool confirming=gameflow.mWorldClock.mCurrentDay==expectedDay;
-        if(!confirming) {
+        if(mode("sdl_dayend")) observedSaveInput(confirming);
+        else if(!confirming) {
             ++ordinaryMenuFrames;
             if(ordinaryMenuFrames==2) ordinaryInput();
             // Preserve the observed working schedule. The earlier20-frame
@@ -715,7 +751,7 @@ class PurpleCombatApp : public PlugPikiApp {
     }
 
     void acquisitionInput(unsigned buttons=0,int x=0,int y=0) {
-        if(mode("sdl_acquire")) ordinaryInput(buttons,y,x,true);
+        if(sdlAcquisitionMode()) ordinaryInput(buttons,y,x,true);
         else pc_p2_input_script_set(1,buttons,x,y);
     }
     bool approachAndPluck(Navi* n,PikiHeadItem* head,Pom* violet) {
@@ -739,7 +775,7 @@ class PurpleCombatApp : public PlugPikiApp {
         if(distance>=pluckRange-.25f) {
             refreshPluckObstacles(n,violet);
             pluckTrace("approach_refresh",n,head,violet);
-            if(mode("sdl_acquire"))std::printf("P2_PURPLE_PLUCK_REPLAN tick=%d new_head=%d empty=%d head_moved=%d segment_blocked=%d read_only=1\n",
+            if(sdlAcquisitionMode())std::printf("P2_PURPLE_PLUCK_REPLAN tick=%d new_head=%d empty=%d head_moved=%d segment_blocked=%d read_only=1\n",
                 ticks,int(routedHead!=head),int(pluckRoute.empty()),int(routedHead==head && planarDistance(routedHeadPosition,head->mSRT.t)>2.f),
                 int(!pluckRoute.empty() && !pluckSegmentClear(n->mSRT.t,pluckRoute[pluckRouteIndex])));
             if(routedHead!=head || pluckRoute.empty() || planarDistance(routedHeadPosition,head->mSRT.t)>2.f
@@ -759,7 +795,7 @@ class PurpleCombatApp : public PlugPikiApp {
             const float power=std::max(minimum,std::min(65.f,d*2.f));
             acquisitionInput(0,int(std::lround(power*(tx*axis.x+tz*axis.z)/d)),
                 int(std::lround(power*(tx*axis.z-tz*axis.x)/d)));
-            if(mode("sdl_acquire"))std::printf("P2_PURPLE_PLUCK_COMMAND tick=%d waypoint=%u target=%.6f,%.6f,%.6f distance=%.6f power=%.6f emitted_sdl=%d,%d emitted_a=%d read_only=1\n",
+            if(sdlAcquisitionMode())std::printf("P2_PURPLE_PLUCK_COMMAND tick=%d waypoint=%u target=%.6f,%.6f,%.6f distance=%.6f power=%.6f emitted_sdl=%d,%d emitted_a=%d read_only=1\n",
                 ticks,unsigned(pluckRouteIndex),target.x,target.y,target.z,d,power,int(SDL_JoystickGetAxis(ordinaryPad,SDL_CONTROLLER_AXIS_LEFTX)),
                 int(SDL_JoystickGetAxis(ordinaryPad,SDL_CONTROLLER_AXIS_LEFTY)),int(SDL_JoystickGetButton(ordinaryPad,SDL_CONTROLLER_BUTTON_A)));
             return false;
@@ -1218,7 +1254,7 @@ class PurpleCombatApp : public PlugPikiApp {
 public:
     void draw(Graphics& gfx) override {
         PlugPikiApp::draw(gfx);
-        if(mode("natural_dayend") && (ordinaryDiaryFrames==30 || ordinaryDiaryFrames==90
+        if(ordinarySaveMode() && (ordinaryDiaryFrames==30 || ordinaryDiaryFrames==90
             || ordinaryDiaryFrames==180 || ordinaryDiaryFrames==240)) {
             const std::string path="ordinary-diary-"+std::to_string(ordinaryDiaryFrames)+".ppm";
             ordinaryCapture(path.c_str());
@@ -1247,9 +1283,9 @@ public:
         }
         require(ticks<(sunsetRequested?15000:6000),"global fixture timeout");
         if(mode("persistence_resume")) pc_p2_input_script_set(1,(!n || gameflow.mIsUIOverlayActive) && ticks%20<4?KBBTN_A:0,0,0);
-        if(mode("natural_resume")) ordinaryInput((!n || gameflow.mIsUIOverlayActive) && ticks%20<4?KBBTN_A:0);
+        if(mode("natural_resume")) ordinaryInput(); // No blind A presses into load/title/save UI.
         if(sunsetRequested) {
-            if(mode("natural_dayend")) ordinarySunsetStep();else sunsetStep();
+            if(ordinarySaveMode()) ordinarySunsetStep();else sunsetStep();
             if(gameflow.mMoviePlayer&&gameflow.mMoviePlayer->mIsActive) gameflow.mMoviePlayer->requestSkip();
             return result;
         }
@@ -1270,7 +1306,7 @@ public:
             return result;
         }
         if (!acquired) {
-            if(mode("sdl_acquire")) {
+            if(sdlAcquisitionMode()) {
                 if(!activeSeen) {ordinaryInput();return result;}
                 acquired=sdlStep(n);return result;
             }
@@ -1330,7 +1366,7 @@ public:
             return result;
         }
         if(mode("sdl_acquire")) {ordinaryInput();std::fflush(nullptr);std::_Exit(0);}
-        if(mode("natural_dayend")) beginOrdinarySave(n);
+        if(ordinarySaveMode()) beginOrdinarySave(n);
         else if(mode("persistence_dayend")) beginPersistence(n);
         else if(mode("transport_delivery") || mode("transport_positive") || mode("transport_red_control") || mode("transport_staged") || mode("transport_manual")) transportStep(n);
         else combatStep(n);
@@ -1344,14 +1380,14 @@ int main(int argc,char** argv) {
         || !std::strcmp(guardCase,"global") || !std::strcmp(guardCase,"dead_state") || !std::strcmp(guardCase,"missing")
         || !std::strcmp(guardCase,"health_pause") || !std::strcmp(guardCase,"missing_movie"),"unknown initialized guard case");
     const char* mode=std::getenv("P2_PURPLE_COMBAT_MODE");
-    if(mode && std::strcmp(mode,"sdl_acquire") && std::strcmp(mode,"natural_dayend") && std::strcmp(mode,"natural_resume") && std::strcmp(mode,"adult_direct") && std::strcmp(mode,"persistence_dayend") && std::strcmp(mode,"persistence_resume") && std::strcmp(mode,"transport_delivery") && std::strcmp(mode,"transport_positive") && std::strcmp(mode,"transport_red_control") && std::strcmp(mode,"transport_staged") && std::strcmp(mode,"transport_manual")) {
-        std::printf("P2_PURPLE_COMBAT_UNIMPLEMENTED mode=%s implemented=sdl_acquire,adult_direct,persistence_dayend,persistence_resume,natural_dayend,natural_resume,transport_delivery,transport_positive,transport_red_control,transport_staged,transport_manual\n",mode); return 2;
+    if(mode && std::strcmp(mode,"sdl_acquire") && std::strcmp(mode,"sdl_dayend") && std::strcmp(mode,"natural_dayend") && std::strcmp(mode,"natural_resume") && std::strcmp(mode,"adult_direct") && std::strcmp(mode,"persistence_dayend") && std::strcmp(mode,"persistence_resume") && std::strcmp(mode,"transport_delivery") && std::strcmp(mode,"transport_positive") && std::strcmp(mode,"transport_red_control") && std::strcmp(mode,"transport_staged") && std::strcmp(mode,"transport_manual")) {
+        std::printf("P2_PURPLE_COMBAT_UNIMPLEMENTED mode=%s implemented=sdl_acquire,sdl_dayend,adult_direct,persistence_dayend,persistence_resume,natural_dayend,natural_resume,transport_delivery,transport_positive,transport_red_control,transport_staged,transport_manual\n",mode); return 2;
     }
     SDL_SetMainReady(); pc_gpu_preference_apply(); pc_bbft_init(argc,argv);
     require(pc_randomizer_purple_campaign() && pc_randomizer_p2_bridge(),"ordinary Purple seed campaign required");
     if(!pc_window_init(mode && !std::strcmp(mode,"transport_manual")?"Purple carry smoke - staged Purple - F7 resets":"Purple campaign combat fixture",960,540)) return 3;
     pc_settings_init(); pc_window_set_display_mode(PC_WINDOW_FULLSCREEN_WINDOWED);
-    if(mode && (!std::strcmp(mode,"sdl_acquire") || !std::strcmp(mode,"natural_dayend") || !std::strcmp(mode,"natural_resume"))) ordinaryController();
+    if(mode && (!std::strcmp(mode,"sdl_acquire") || !std::strcmp(mode,"sdl_dayend") || !std::strcmp(mode,"natural_dayend") || !std::strcmp(mode,"natural_resume"))) ordinaryController();
     pc_window_set_window_size(960,540); pc_window_center();
     std::puts("Experimental preview window set to 960x540 windowed and centered");
     int w=0,h=0,x=0,y=0; SDL_Window* window=SDL_GL_GetCurrentWindow();
