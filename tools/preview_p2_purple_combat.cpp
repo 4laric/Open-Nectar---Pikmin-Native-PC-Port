@@ -324,6 +324,8 @@ class PurpleCombatApp : public PlugPikiApp {
     bool releaseDiaryInput=false,diaryRevealObserved=false,diaryAdvanceObserved=false;
     int sdlPhase=0,sdlStableAim=0,sdlThrowTicks=0;
     bool sdlStarted=false,sdlThrowObserved=false,sdlGeometryLogged=false;
+    Piki* sdlTracePiki=nullptr;
+    int sdlTracePikiState=-1;
     int diaryActions=0;
     unsigned saveIndexBefore=0;
     bool mode(const char* name) const {
@@ -764,6 +766,23 @@ class PurpleCombatApp : public PlugPikiApp {
         require(sdlFinitePoint(part->mCentre) && std::isfinite(part->mRadius) && part->mRadius>=0.f,"SDL invalid raw collision bound");
         for(int i=0;i<part->getChildCount();++i)sdlValidateParts(part->getChildAt(i),depth+1);
     }
+    void sdlAimTrace(Navi* n,Pom* violet,const char* decision,float ex,float ez,float tolerance,int ready,int stableBefore) {
+        const double seconds=std::chrono::duration<double>(std::chrono::steady_clock::now()-fixtureStarted).count();
+        const Vector3f current=n->mCursorPosition+n->mSRT.t;
+        Camera* camera=n->controlCamera();
+        const Vector3f basis=camera?camera->mViewXAxis:Vector3f(0,0,0);
+        const float desiredX=n->mSRT.t.x+(violet->mSRT.t.x-n->mSRT.t.x)*1.2f;
+        const float desiredZ=n->mSRT.t.z+(violet->mSRT.t.z-n->mSRT.t.z)*1.2f;
+        std::printf("P2_PURPLE_SDL_AIM tick=%d wall_seconds=%.6f decision=%s dt=%.9f desired=%.6f,%.6f rendered=%.6f,%.6f current=%.6f,%.6f error=%.6f,%.6f error_norm=%.6f tolerance=%.6f ready=%d stable_before=%d stable_after=%d raw=%d,%d normalized=%.6f,%.6f emitted_sdl=%d,%d emitted_a=%d camera_present=%d camera_x=%.6f,%.6f,%.6f captain=%.6f,%.6f,%.6f state=%d read_only=1\n",
+            ticks,seconds,decision,gsys->getFrameTime(),desiredX,desiredZ,n->mCursorWorldPos.x,n->mCursorWorldPos.z,current.x,current.z,
+            ex,ez,std::sqrt(ex*ex+ez*ez),tolerance,ready,stableBefore,sdlStableAim,
+            n->mKontroller?int(n->mKontroller->mMainStickX):0,n->mKontroller?int(n->mKontroller->mMainStickY):0,
+            n->mKontroller?n->mKontroller->getMainStickX():0,n->mKontroller?n->mKontroller->getMainStickY():0,
+            ordinaryPad?int(SDL_JoystickGetAxis(ordinaryPad,SDL_CONTROLLER_AXIS_LEFTX)):0,
+            ordinaryPad?int(SDL_JoystickGetAxis(ordinaryPad,SDL_CONTROLLER_AXIS_LEFTY)):0,
+            ordinaryPad?int(SDL_JoystickGetButton(ordinaryPad,SDL_CONTROLLER_BUTTON_A)):0,
+            int(camera!=nullptr),basis.x,basis.y,basis.z,n->mSRT.t.x,n->mSRT.t.y,n->mSRT.t.z,n->getCurrState()->getID());
+    }
     void sdlDirection(Navi* n,float dx,float dz,int power) {
         require(n->controlCamera()!=nullptr,"SDL acquisition camera missing");
         const float distance=std::sqrt(dx*dx+dz*dz);
@@ -794,6 +813,12 @@ class PurpleCombatApp : public PlugPikiApp {
                 ++red;
                 if(p->getState()==PIKISTATE_Normal && p->mMode==PikiMode::FormationMode && !p->isStickTo())++ready;
             }
+            if(sdlPhase==2 && (p->getState()==PIKISTATE_Flying || p==sdlTracePiki)) {
+                const bool changed=p!=sdlTracePiki || p->getState()!=sdlTracePikiState;
+                std::printf("P2_PURPLE_SDL_FLIGHT_TRACE tick=%d piki=%p state=%d transition=%d xyz=%.6f,%.6f,%.6f velocity=%.6f,%.6f,%.6f read_only=1\n",
+                    ticks,static_cast<void*>(p),p->getState(),int(changed),p->mSRT.t.x,p->mSRT.t.y,p->mSRT.t.z,p->mVelocity.x,p->mVelocity.y,p->mVelocity.z);
+                sdlTracePiki=p;sdlTracePikiState=p->getState();
+            }
             if(ticks%30==0 && p->getState()==PIKISTATE_Flying)
                 std::printf("P2_PURPLE_SDL_FLIGHT xyz=%.3f,%.3f,%.3f velocity=%.3f,%.3f,%.3f\n",
                     p->mSRT.t.x,p->mSRT.t.y,p->mSRT.t.z,p->mVelocity.x,p->mVelocity.y,p->mVelocity.z);
@@ -808,6 +833,8 @@ class PurpleCombatApp : public PlugPikiApp {
             sdlStarted=true;
             std::puts("P2_PURPLE_SDL_START field=20 red=20 scripted_throw=0 direct_throw_api=0 actor_state_writes=0 starting_withdrawal_fixture=1");
         }
+        if(sdlPhase==2 && !sdlThrowObserved && n->getCurrState()->getID()==NAVISTATE_Throw)
+            milestone("SDL_native_throw_state_observed",ticks);
         if(sdlPhase==2 && n->getCurrState()->getID()==NAVISTATE_Throw)sdlThrowObserved=true;
         if(ticks%30==0)std::printf("P2_PURPLE_SDL_PROGRESS phase=%d state=%d captain=%.3f,%.3f,%.3f cursor=%.3f,%.3f,%.3f red=%d purple=%d ready=%d violet_state=%d throw_observed=%d\n",
             sdlPhase,n->getCurrState()->getID(),n->mSRT.t.x,n->mSRT.t.y,n->mSRT.t.z,
@@ -869,11 +896,26 @@ class PurpleCombatApp : public PlugPikiApp {
             const float ex=n->mSRT.t.x+dx*1.2f-n->mCursorWorldPos.x;
             const float ez=n->mSRT.t.z+dz*1.2f-n->mCursorWorldPos.z;
             const float tolerance=std::max(5.f,C_NAVI_PARM(n,mCursorMoveSpeed)*gsys->getFrameTime()*.75f);
-            if(std::sqrt(ex*ex+ez*ez)>tolerance) {sdlStableAim=0;sdlDirection(n,ex,ez,20);return nullptr;}
-            ordinaryInput();if(!ready || ++sdlStableAim<3)return nullptr;
+            const int stableBefore=sdlStableAim;
+            if(std::sqrt(ex*ex+ez*ez)>tolerance) {
+                sdlStableAim=0;sdlDirection(n,ex,ez,20);
+                sdlAimTrace(n,violet,"correct",ex,ez,tolerance,ready,stableBefore);return nullptr;
+            }
+            ordinaryInput();if(!ready || ++sdlStableAim<3) {
+                sdlAimTrace(n,violet,ready?"wait_stable":"wait_ready",ex,ez,tolerance,ready,stableBefore);return nullptr;
+            }
+            sdlAimTrace(n,violet,"request_throw",ex,ez,tolerance,ready,stableBefore);
             sdlPhase=2;sdlThrowTicks=0;milestone("SDL_A_throw_requested",ticks);
         }
-        if(sdlPhase==2)ordinaryInput(sdlThrowTicks++<18?KBBTN_A:0);
+        if(sdlPhase==2) {
+            ordinaryInput(sdlThrowTicks++<18?KBBTN_A:0);
+            if(sdlThrowTicks==1 || sdlThrowTicks==19) {
+                milestone(sdlThrowTicks==1?"SDL_A_pressed":"SDL_A_released",ticks);
+                std::printf("P2_PURPLE_SDL_A_EDGE tick=%d hold_tick=%d emitted_a=%d raw=%d,%d read_only=1\n",ticks,sdlThrowTicks,
+                    int(SDL_JoystickGetButton(ordinaryPad,SDL_CONTROLLER_BUTTON_A)),
+                    int(SDL_JoystickGetAxis(ordinaryPad,SDL_CONTROLLER_AXIS_LEFTX)),int(SDL_JoystickGetAxis(ordinaryPad,SDL_CONTROLLER_AXIS_LEFTY)));
+            }
+        }
         return nullptr;
     }
     Piki* naturalStep(Navi* n) {
