@@ -1,5 +1,10 @@
 #ifndef _PEVE_MOTIONEVENTS_H
 #define _PEVE_MOTIONEVENTS_H
+#if defined(PIKI_PC_PORT)
+#define PC_MIDDAY_EVENT_DEFAULT = {}
+#else
+#define PC_MIDDAY_EVENT_DEFAULT
+#endif
 
 #include "Peve/Condition.h"
 #include "Peve/Event.h"
@@ -29,9 +34,9 @@ struct PeveAccelerationEvent : public PeveEvent {
 
 	// _00     = VTBL
 	// _00-_10 = PeveEvent
-	NVector3fIO* mPositionIO; // _10
-	NVector3fIO* mVelocityIO; // _14
-	NVector3fIO* mAccelIO;    // _18
+	NVector3fIO* mPositionIO PC_MIDDAY_EVENT_DEFAULT; // _10
+	NVector3fIO* mVelocityIO PC_MIDDAY_EVENT_DEFAULT; // _14
+	NVector3fIO* mAccelIO PC_MIDDAY_EVENT_DEFAULT;    // _18
 };
 
 /**
@@ -52,14 +57,14 @@ struct PeveCircleMoveEvent : public PeveEvent {
 
 	// _00     = VTBL
 	// _00-_10 = PeveEvent
-	f32 mAngle;                       // _10
+	f32 mAngle PC_MIDDAY_EVENT_DEFAULT;                       // _10
 	PeveTimeCondition mTimeCondition; // _14
-	NVector3fIO* mPositionIO;         // _20
-	NVector3fIO* mCenterPositionIO;   // _24
-	f32 mPositionLerpFactor;          // _28
-	f32 mRadius;                      // _2C
-	f32 mHeightOffset;                // _30
-	f32 mAngularSpeed;                // _34
+	NVector3fIO* mPositionIO PC_MIDDAY_EVENT_DEFAULT;         // _20
+	NVector3fIO* mCenterPositionIO PC_MIDDAY_EVENT_DEFAULT;   // _24
+	f32 mPositionLerpFactor PC_MIDDAY_EVENT_DEFAULT;          // _28
+	f32 mRadius PC_MIDDAY_EVENT_DEFAULT;                      // _2C
+	f32 mHeightOffset PC_MIDDAY_EVENT_DEFAULT;                // _30
+	f32 mAngularSpeed PC_MIDDAY_EVENT_DEFAULT;                // _34
 };
 
 /**
@@ -156,13 +161,13 @@ struct PeveHorizontalSinWaveEvent : public PeveEvent {
 
 	// _00     = VTBL
 	// _00-_10 = PeveEvent
-	NVector3fIO* mPositionIO;  // _10
+	NVector3fIO* mPositionIO PC_MIDDAY_EVENT_DEFAULT;  // _10
 	NVector3f mLinearVelocity; // _14
-	f32 mOffset;          // _20
-	f32 mAmplitude;       // _24
-	f32 mStartingTheta;   // _28
-	f32 mAngularVelocity; // _2C
-	f32 mTheta;           // _30
+	f32 mOffset PC_MIDDAY_EVENT_DEFAULT;          // _20
+	f32 mAmplitude PC_MIDDAY_EVENT_DEFAULT;       // _24
+	f32 mStartingTheta PC_MIDDAY_EVENT_DEFAULT;   // _28
+	f32 mAngularVelocity PC_MIDDAY_EVENT_DEFAULT; // _2C
+	f32 mTheta PC_MIDDAY_EVENT_DEFAULT;           // _30
 };
 
 /**
@@ -267,3 +272,5 @@ struct PeveWaitEvent : public PeveEvent {
 };
 
 #endif
+
+#undef PC_MIDDAY_EVENT_DEFAULT

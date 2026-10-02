@@ -2970,3 +2970,16 @@ unsigned long pc_p2_long_legs_corpse_count() {
     sweepCorpses();
     return static_cast<unsigned long>(corpses.size());
 }
+
+#if defined(PIKI_PC_PORT)
+#include "pc_midday_projectile_hosts.h"
+namespace pc_midday {
+bool longlegs_projectile_fields(ActorArchive& outer){
+ PrefixArchive a(outer,"longlegsProjectiles"),pool(a,"pool");if(!projectile_fields(shellPool,pool)||!a.field("nextSelfToken",shellSelfToken))return false;
+ u32 count=a.mode()==Mode::Capture?u32(shells.size()):0;if(!a.scalar("shellCount",ScalarKind::U32,&count)||count>10)return a.fail("Houdai shell list count");
+ std::vector<HoudaiShell> staged;if(a.mode()==Mode::Apply)staged.resize(count);
+ for(u32 i=0;i<count;++i){P2CannonStone* stone=nullptr;u64 token=0;if(a.mode()==Mode::Capture){stone=shells[i].stone;token=shells[i].sourceToken;}PrefixArchive p(a,("shell."+std::to_string(i)).c_str());if(!p.ref("stone",RefKind::ProjectileToken,stone)||!p.token64("source",RefKind::ProjectileToken,token))return false;if(a.mode()==Mode::Apply)staged[i]={stone,token};}
+ if(a.mode()==Mode::Apply)shells.swap(staged);return true;
+}
+}
+#endif

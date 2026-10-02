@@ -26,6 +26,9 @@ struct SeedProp : public CreatureProp {
  * @note Size: 0x2FC
  */
 struct SeedItem : public Creature {
+#if defined(PIKI_PC_PORT)
+ friend struct PcMiddayWorldAccess;
+#endif
 public:
 	SeedItem(CreatureProp*, Shape**);
 
@@ -53,12 +56,32 @@ protected:
 
 	// _00      = VTBL
 	// _00-_2B8 = Creature
-	int mStateId;          // _2B8
+	int mStateId
+#if defined(PIKI_PC_PORT)
+ {}
+#endif
+ ;          // _2B8
 	SearchData mSearch[3]; // _2BC
-	f32 mGrowthTimer;      // _2E0
-	Shape* mCurrentShape;  // _2E4
-	Shape* mSeedShape;     // _2E8
-	Shape* mPlantedShape;  // _2EC
+	f32 mGrowthTimer
+#if defined(PIKI_PC_PORT)
+ {}
+#endif
+ ;      // _2E0
+	Shape* mCurrentShape
+#if defined(PIKI_PC_PORT)
+ {}
+#endif
+ ;  // _2E4
+	Shape* mSeedShape
+#if defined(PIKI_PC_PORT)
+ {}
+#endif
+ ;     // _2E8
+	Shape* mPlantedShape
+#if defined(PIKI_PC_PORT)
+ {}
+#endif
+ ;  // _2EC
 	Vector3f _2F0;         // _2F0
 };
 

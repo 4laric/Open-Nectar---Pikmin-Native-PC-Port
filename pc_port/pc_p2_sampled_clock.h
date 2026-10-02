@@ -108,6 +108,18 @@ struct Batch {
 
 class Clock {
 public:
+    // Explicit checkpoint state; clip content is resolved independently by the
+    // caller's content catalog. Binding never seeks, starts or emits events.
+    struct SavedState { double frame; std::uint64_t generation,cycle; bool active,entry,paused; };
+    SavedState captureState() const { return {frame_,generation_,cycle_,active_,entry_,paused_}; }
+    static bool validState(const Clip& clip,const SavedState& s) {
+        return std::isfinite(s.frame)&&s.frame>=0.0&&(!s.active||(s.generation!=0&&clip.valid()&&(clip.looping()?s.frame<clip.loopEnd:s.frame<=double(clip.poses.duration))));
+    }
+    bool restoreState(const Clip& clip,const SavedState& s) {
+        if(!validState(clip,s))return false;
+        clip_=clip;frame_=s.frame;generation_=s.generation;cycle_=s.cycle;active_=s.active;entry_=s.entry;paused_=s.paused;return true;
+    }
+
     static constexpr std::size_t MaxEvents = 4096, MaxWraps = 256;
 
     bool start(const Clip& clip) {

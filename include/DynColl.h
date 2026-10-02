@@ -61,7 +61,17 @@ struct DynCollShape : public DynCollObject {
 	 */
 	DynCollShape(Shape* model)
 	{
-		mCollisionModel = model;
+		#if defined(PIKI_PC_PORT)
+        // These meaningful mutable fields may be checkpointed before first refresh.
+        mVertexList = nullptr;
+        mCollTriList = nullptr;
+        mJointVisibility = nullptr;
+        mCollGroupCount = 0;
+        mCollGroupList = nullptr;
+        mInverseMatrix.makeIdentity();
+        mViewMtx.makeIdentity();
+#endif
+        mCollisionModel = model;
 		if (mCollisionModel) {
 			createDupCollData();
 		}

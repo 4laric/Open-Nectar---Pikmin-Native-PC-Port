@@ -69,10 +69,22 @@ struct BuildingItem : public ItemCreature {
 	PermanentEffect _3D8;                 // _3D8
 	PermanentEffect _3E8;                 // _3E8
 	CreaturePlatMgr mPlatMgr;             // _3F8
-	int mNumStages;                       // _440
-	int mCurrStage;                       // _444
+	int mNumStages
+#if defined(PIKI_PC_PORT)
+ {}
+#endif
+ ;                       // _440
+	int mCurrStage
+#if defined(PIKI_PC_PORT)
+ {}
+#endif
+ ;                       // _444
 	Vector3f _448;                        // _448
-	WayPoint* mWayPoint;                  // _454
+	WayPoint* mWayPoint
+#if defined(PIKI_PC_PORT)
+ {}
+#endif
+ ;                  // _454
 	CollInfo mBuildCollision;             // _458
 	CollPart mBuildParts[10];             // _46C
 	u32 mBuildPartIDs[10];                // _87C

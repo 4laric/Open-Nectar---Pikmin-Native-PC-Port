@@ -80,6 +80,9 @@ public:
  * @note Size: 0x3D4.
  */
 class Pom : public Boss {
+#if defined(PIKI_PC_PORT)
+ friend struct PcMiddayEnemyAccess;
+#endif
 	friend struct PomAi;
 
 public:
@@ -113,6 +116,9 @@ private:
  * @note Size: 0x24.
  */
 struct PomAi : public PaniAnimKeyListener {
+#if defined(PIKI_PC_PORT)
+ friend struct PcMiddayEnemyAccess;
+#endif
 public:
 	PomAi(Pom*);
 
@@ -182,6 +188,9 @@ private:
  * @note Size: 0x8.
  */
 struct PomGenOpenStarCallBack : public zen::CallBack1<zen::particleGenerator*> {
+#if defined(PIKI_PC_PORT)
+ friend struct PcMiddayEnemyAccess;
+#endif
 public:
 	PomGenOpenStarCallBack() { }
 
@@ -199,7 +208,11 @@ public:
 private:
 	// _00     = VTBL
 	// _00-_04 = zen::CallBack1
-	bool* mIsActive; // _04, points to _0A in PomAi
+	bool* mIsActive
+#if defined(PIKI_PC_PORT)
+ = nullptr
+#endif
+; // _04, points to _0A in PomAi
 };
 
 #endif

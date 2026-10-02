@@ -262,6 +262,30 @@ set(PC_PORT_SOURCES
     pc_port/pc_midday_piki_states.cpp
     pc_port/pc_midday_piki_actions.cpp
     pc_port/pc_midday_piki_runtime.cpp
+    pc_port/pc_midday_enemy.cpp
+    pc_port/pc_midday_enemy_subobjects.cpp
+    pc_port/pc_midday_enemy_schema.cpp
+    pc_port/pc_midday_enemy_adapter.cpp
+    pc_port/pc_midday_enemy_validate.cpp
+    pc_port/pc_midday_boss.cpp
+    pc_port/pc_midday_boss_schema.cpp
+    pc_port/pc_midday_world_items.cpp
+    pc_port/pc_midday_world_structures.cpp
+    pc_port/pc_midday_world_pellet.cpp
+    pc_port/pc_midday_world_schema.cpp
+    pc_port/pc_midday_world_resources.cpp
+    pc_port/pc_midday_world_resources_schema.cpp
+    pc_port/pc_midday_projectile.cpp
+    pc_port/pc_midday_projectile_schema.cpp
+    pc_port/pc_midday_projectile_hosts_schema.cpp
+    pc_port/pc_midday_projectile_bomb.cpp
+    pc_port/pc_midday_projectile_bomb_schema.cpp
+    pc_port/pc_midday_collision.cpp
+    pc_port/pc_midday_collision_schema.cpp
+    pc_port/pc_midday_particle.cpp
+    pc_port/pc_midday_particle_schema.cpp
+    pc_port/pc_midday_effect.cpp
+    pc_port/pc_midday_effect_schema.cpp
     pc_port/pc_p2_material_scope.cpp
     pc_port/pc_p2_material_binding.cpp
     pc_port/pc_p2_color_binding.cpp
@@ -3058,6 +3082,76 @@ add_executable(p2_midday_creature_test
 target_include_directories(p2_midday_creature_test PRIVATE pc_port)
 target_compile_options(p2_midday_creature_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
 add_test(NAME p2_midday_creature_test COMMAND p2_midday_creature_test)
+add_executable(p2_midday_projectile_test
+    tools/p2_midday_projectile_test.cpp
+    pc_port/pc_midday_projectile.cpp
+    pc_port/pc_midday_projectile_schema.cpp
+    pc_port/pc_midday_actor_archive.cpp
+    pc_port/pc_p2_cannon_stone.cpp
+    pc_port/pc_p2_rock_hazard.cpp
+    pc_port/pc_p2_groink.cpp
+    pc_port/pc_p2_groink_volley.cpp
+    pc_port/pc_p2_bombsarai_bomb.cpp)
+target_include_directories(p2_midday_projectile_test PRIVATE pc_port)
+target_compile_definitions(p2_midday_projectile_test PRIVATE PIKI_PC_PORT)
+target_compile_options(p2_midday_projectile_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+add_test(NAME p2_midday_projectile_test COMMAND p2_midday_projectile_test)
+add_executable(p2_midday_collision_test
+    tools/p2_midday_collision_test.cpp
+    pc_port/pc_midday_collision_schema.cpp
+    pc_port/pc_midday_actor_archive.cpp)
+target_include_directories(p2_midday_collision_test PRIVATE pc_port)
+target_compile_definitions(p2_midday_collision_test PRIVATE PIKI_PC_PORT)
+target_compile_options(p2_midday_collision_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+add_test(NAME p2_midday_collision_test COMMAND p2_midday_collision_test)
+add_executable(p2_midday_enemy_schema_test
+    tools/p2_midday_enemy_schema_test.cpp
+    pc_port/pc_midday_enemy_schema.cpp
+    pc_port/pc_midday_enemy_validate.cpp
+    pc_port/pc_midday_creature_schema.cpp
+    pc_port/pc_midday_collision_schema.cpp
+    pc_port/pc_midday_boss_schema.cpp
+    pc_port/pc_midday_actor_archive.cpp)
+target_include_directories(p2_midday_enemy_schema_test PRIVATE pc_port)
+target_compile_definitions(p2_midday_enemy_schema_test PRIVATE PIKI_PC_PORT)
+target_compile_options(p2_midday_enemy_schema_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+add_test(NAME p2_midday_enemy_schema_test COMMAND p2_midday_enemy_schema_test)
+add_executable(p2_midday_world_schema_test
+    tools/p2_midday_world_schema_test.cpp
+    pc_port/pc_midday_world_schema.cpp
+    pc_port/pc_midday_world_resources_schema.cpp
+    pc_port/pc_midday_particle_schema.cpp
+    pc_port/pc_midday_creature_schema.cpp
+    pc_port/pc_midday_collision_schema.cpp
+    pc_port/pc_midday_actor_archive.cpp)
+target_include_directories(p2_midday_world_schema_test PRIVATE pc_port)
+target_compile_definitions(p2_midday_world_schema_test PRIVATE PIKI_PC_PORT)
+target_compile_options(p2_midday_world_schema_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+add_test(NAME p2_midday_world_schema_test COMMAND p2_midday_world_schema_test)
+add_executable(p2_midday_particle_test
+    tools/p2_midday_particle_test.cpp
+    pc_port/pc_midday_particle_schema.cpp
+    pc_port/pc_midday_actor_archive.cpp)
+target_include_directories(p2_midday_particle_test PRIVATE pc_port)
+target_compile_definitions(p2_midday_particle_test PRIVATE PIKI_PC_PORT)
+target_compile_options(p2_midday_particle_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+add_test(NAME p2_midday_particle_test COMMAND p2_midday_particle_test)
+add_executable(p2_midday_world_resources_test
+    tools/p2_midday_world_resources_test.cpp
+    pc_port/pc_midday_world_resources_schema.cpp
+    pc_port/pc_midday_actor_archive.cpp)
+target_include_directories(p2_midday_world_resources_test PRIVATE pc_port)
+target_compile_definitions(p2_midday_world_resources_test PRIVATE PIKI_PC_PORT)
+target_compile_options(p2_midday_world_resources_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+add_test(NAME p2_midday_world_resources_test COMMAND p2_midday_world_resources_test)
+add_executable(p2_midday_effect_test
+    tools/p2_midday_effect_test.cpp
+    pc_port/pc_midday_effect_schema.cpp
+    pc_port/pc_midday_actor_archive.cpp)
+target_include_directories(p2_midday_effect_test PRIVATE pc_port)
+target_compile_definitions(p2_midday_effect_test PRIVATE PIKI_PC_PORT)
+target_compile_options(p2_midday_effect_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+add_test(NAME p2_midday_effect_test COMMAND p2_midday_effect_test)
 pikmin_add_ci_fixture(midday_actor_states tools/p2_midday_actor_states_engine_test.cpp)
 
 # #1154/#1161 ordinary natural WFG acquisition and cave party route; build only.

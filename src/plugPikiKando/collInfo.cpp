@@ -367,6 +367,13 @@ CollPart* CollPart::getNext()
  */
 CollPart::CollPart()
 {
+#if defined(PIKI_PC_PORT)
+    // A newly allocated part may be checkpointed before its first refresh.
+    mRadius = 0.0f;
+    mCentre.set(0.0f, 0.0f, 0.0f);
+    mJointMatrix.makeIdentity();
+    mPartType = PART_Collision;
+#endif
 	mIsUpdateActive = true;
 	mNextIndex = mFirstChildIndex = -1;
 	mCollInfo                     = nullptr;
@@ -645,6 +652,10 @@ bool CollPart::samePlatShape(Shape* shape)
  */
 CollInfo::CollInfo(int maxParts)
 {
+#if defined(PIKI_PC_PORT)
+    mCollParts = nullptr;
+    mPartIDs = nullptr;
+#endif
 	mShape      = nullptr;
 	mPartsCount = 0;
 	if (maxParts == 0) {

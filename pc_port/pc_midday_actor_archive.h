@@ -6,6 +6,8 @@
 namespace pc_midday {
 using ActorBytes = std::vector<u8>;
 enum class FieldCategory : u8 { Scalar, Reference, Handle, Token64 };
+// Content means a registered content-bound resource identity; mutable resource
+// payloads are still required. It does not assert immutable state.
 enum class ReferenceOwnership { AnyLive, Self, ActorSubobject, Content,
     ResourceSubobject, ResourceSelf };
 struct FieldSchema {

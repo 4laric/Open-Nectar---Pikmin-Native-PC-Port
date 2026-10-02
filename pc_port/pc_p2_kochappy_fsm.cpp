@@ -815,3 +815,24 @@ void pc_p2_kochappy_fsm_update(BTeki* actor)
 		std::fflush(stdout);
 	}
 }
+
+#include "pc_midday_enemy.h"
+namespace pc_midday {
+bool enemy_kochappy_fields(BTeki& actor,ActorArchive& outer) {
+ PrefixArchive ar(outer,"enemy.p2.kochappy");auto* key=static_cast<PelletView*>(&actor);const auto found=actors.find(key);
+ bool present=ar.mode()==Mode::Capture&&found!=actors.end();if(!ar.scalar("present",ScalarKind::Bool,&present))return false;
+ if(!present){if(ar.mode()==Mode::Apply)actors.erase(key);return true;}
+ FsmActor value=ar.mode()==Mode::Capture?found->second:FsmActor{};
+ int state=value.state,last=value.returnState;
+ if(!ar.scalar("state",ScalarKind::S32,&state)||!ar.scalar("returnState",ScalarKind::S32,&last)||state<0||state>=9||last<0||last>=9)return ar.fail("invalid Kochappy state");value.state=static_cast<State>(state);value.returnState=static_cast<State>(last);
+#define FIELD(k,x) if(!ar.field(#x,value.x))return false;
+#define VECTOR(x) if(!ar.field(#x,value.x))return false;
+#include "pc_midday_enemy_kochappy_fields.inc"
+#undef FIELD
+#undef VECTOR
+ for(int i=0;i<p2chappymouth::MaxSlots;++i)if(!ar.ref(("mouth."+std::to_string(i)).c_str(),RefKind::Creature,value.mouth[i]))return false;
+ if(value.sourceId!=1&&value.sourceId!=44)return ar.fail("invalid Kochappy source family");
+ if(ar.mode()==Mode::Apply)actors[key]=value;
+ return true;
+}
+}

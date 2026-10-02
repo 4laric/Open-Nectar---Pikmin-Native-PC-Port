@@ -164,6 +164,9 @@ public:
     static P2BombSaraiVec3 throwVelocity(P2BombSaraiThrowKind kind, float faceDir);
 
 private:
+#if defined(PIKI_PC_PORT)
+    friend struct PcMiddayProjectileAccess;
+#endif
     void detonate(P2BombSaraiCarrierFn carrier, void* carrierContext);
 
     P2BombSaraiBombConfig mConfig;
@@ -214,6 +217,9 @@ public:
     const P2BombSaraiBomb* bombAt(int slot) const;
 
 private:
+#if defined(PIKI_PC_PORT)
+    friend struct PcMiddayProjectileAccess;
+#endif
     static constexpr int kMaxBombs = 16;
     int mCapacity;
     P2BombSaraiBomb mBombs[kMaxBombs];

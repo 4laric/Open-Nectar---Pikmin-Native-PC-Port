@@ -54,7 +54,11 @@ struct KusaItem : public ItemCreature {
 	CollPart mKusaParts[10];  // _3DC
 	u32 mPartIDs[10];         // _7EC
 	Vector3f mGroundPosition; // _814
-	BoBaseItem* mBaseItem;    // _820
+	BoBaseItem* mBaseItem
+#if defined(PIKI_PC_PORT)
+ {}
+#endif
+ ;    // _820
 };
 
 /////////// Stick Base Item (CUT/CRASHES) ///////////
@@ -82,10 +86,26 @@ struct BoBaseItem : public ItemCreature {
 	CollPart mBaseParts[10];                    // _3DC
 	u32 mPartIDs[10];                           // _7EC
 	Vector3f mGroundPosition;                   // _814
-	KusaItem* mStickItem;                       // _820
-	bool mIsActive;                             // _824
-	s8 mEffectDuration;                         // _825
-	zen::particleGenerator* mParticleGenerator; // _828
+	KusaItem* mStickItem
+#if defined(PIKI_PC_PORT)
+ {}
+#endif
+ ;                       // _820
+	bool mIsActive
+#if defined(PIKI_PC_PORT)
+ {}
+#endif
+ ;                             // _824
+	s8 mEffectDuration
+#if defined(PIKI_PC_PORT)
+ {}
+#endif
+ ;                         // _825
+	zen::particleGenerator* mParticleGenerator
+#if defined(PIKI_PC_PORT)
+ {}
+#endif
+ ; // _828
 };
 
 #endif

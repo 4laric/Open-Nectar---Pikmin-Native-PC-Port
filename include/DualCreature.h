@@ -15,6 +15,10 @@ class MapMgr;
  * @note Size: 0x440.
  */
 struct DualCreature : public DynCreature {
+#if defined(PIKI_PC_PORT)
+ friend struct PcMiddayWorldAccess;
+ friend struct PcMiddayPelletAccess;
+#endif
 public:
 	DualCreature();
 

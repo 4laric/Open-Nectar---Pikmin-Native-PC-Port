@@ -72,6 +72,9 @@ public:
  * @brief TODO
  */
 struct EventTypeCallBack : public zen::CallBack1<zen::particleGenerator*> {
+#if defined(PIKI_PC_PORT)
+ friend struct PcMiddayTekiAccess;
+#endif
 public:
 	virtual bool invoke(zen::particleGenerator*); // _08
 
@@ -80,13 +83,20 @@ public:
 protected:
 	// _00     = VTBL
 	// _00-_04 = zen::CallBack1
-	TAIeffectAttackParam* mParam; // _04
+	TAIeffectAttackParam* mParam
+#if defined(PIKI_PC_PORT)
+ = nullptr
+#endif
+; // _04
 };
 
 /**
  * @brief TODO
  */
 struct CylinderTypeCallBack : public zen::CallBack1<zen::particleGenerator*> {
+#if defined(PIKI_PC_PORT)
+ friend struct PcMiddayTekiAccess;
+#endif
 public:
 	virtual bool invoke(zen::particleGenerator*); // _08
 
@@ -100,13 +110,20 @@ public:
 protected:
 	// _00     = VTBL
 	// _00-_04 = zen::CallBack1
-	TAIeffectAttackParam* mParam; // _04
+	TAIeffectAttackParam* mParam
+#if defined(PIKI_PC_PORT)
+ = nullptr
+#endif
+; // _04
 };
 
 /**
  * @brief TODO
  */
 struct ConeTypeCallBack : public zen::CallBack1<zen::particleGenerator*> {
+#if defined(PIKI_PC_PORT)
+ friend struct PcMiddayTekiAccess;
+#endif
 public:
 	virtual bool invoke(zen::particleGenerator*); // _08
 
@@ -119,8 +136,16 @@ public:
 protected:
 	// _00     = VTBL
 	// _00-_04 = zen::CallBack1
-	TAIeffectAttackParam* mParam; // _04
-	f32 mConeHalfAngle;           // _08
+	TAIeffectAttackParam* mParam
+#if defined(PIKI_PC_PORT)
+ = nullptr
+#endif
+; // _04
+	f32 mConeHalfAngle
+#if defined(PIKI_PC_PORT)
+ = 0
+#endif
+;           // _08
 };
 
 #endif

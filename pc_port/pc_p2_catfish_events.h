@@ -76,6 +76,13 @@ struct Dispatched {
 // returns every crossed gameplay action exactly once per crossing.
 class Receiver {
 public:
+    struct SavedState { p2sampled::Clock::SavedState clock; bool active; };
+    SavedState captureState() const { return {clock_.captureState(),active_}; }
+    bool restoreState(const p2sampled::Clip& clip,const std::string& name,const SavedState& s) {
+        if((s.active&&!s.clock.active)||(s.active&&name!=clip.poses.name)||!clock_.restoreState(clip,s.clock))return false;
+        active_=s.active;clip_=name;return true;
+    }
+
     bool start(const p2sampled::Clip& clip, const std::string& clipName) {
         clip_ = clipName;
         active_ = clock_.start(clip);

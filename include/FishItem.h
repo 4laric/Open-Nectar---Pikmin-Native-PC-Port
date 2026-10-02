@@ -32,8 +32,16 @@ struct FishGenerator : public ItemCreature {
 
 	// _00      = VTBL
 	// _00-_3C8 = ItemCreature
-	int mFishCount;         // _3C8
-	int mMaxFish;           // _3CC
+	int mFishCount
+#if defined(PIKI_PC_PORT)
+ {}
+#endif
+ ;         // _3C8
+	int mMaxFish
+#if defined(PIKI_PC_PORT)
+ {}
+#endif
+ ;           // _3CC
 	Fish* mFish;            // _3D0
 	Vector3f mSchoolCentre; // _3D4
 	Vector3f _3E0;          // _3E0

@@ -791,3 +791,40 @@ void pc_p2_catfish_update(BTeki* actor) {
         std::fflush(stdout);
     }
 }
+
+#include "pc_midday_enemy.h"
+namespace pc_midday {
+bool enemy_catfish_fields(BTeki& actor,ActorArchive& outer) {
+ PrefixArchive ar(outer,"enemy.p2.catfish");auto* key=static_cast<PelletView*>(&actor);auto found=actors.find(key);
+ bool present=ar.mode()==Mode::Capture&&found!=actors.end();if(!ar.scalar("present",ScalarKind::Bool,&present))return false;
+ if(!present){if(ar.mode()==Mode::Apply)actors.erase(key);return true;}
+ Catfish value=ar.mode()==Mode::Capture?found->second:Catfish{};
+ int state=ar.mode()==Mode::Capture?value.state:0;if(!ar.scalar("state",ScalarKind::S32,&state)||state<0||state>7)return ar.fail("invalid Catfish state");value.state=static_cast<State>(state);
+ static const char* names[]={"attack","dead","flick","move1","type5","wait1","waitact2"};int clip=-1;
+ if(ar.mode()==Mode::Capture)for(int i=0;i<7;++i)if(value.clip==names[i])clip=i;
+ if(!ar.scalar("clip",ScalarKind::S32,&clip)||clip<0||clip>6)return ar.fail("invalid Catfish animation");value.clip=names[clip];
+#define F(x) if(!ar.field(#x,value.x))return false;
+ F(stateTime) F(heading) F(home) F(wanderTarget) F(wanderValid) F(phase) F(rng) F(deadLogged) F(escaped) F(sfxState) F(logTimer)
+#undef F
+ for(int i=0;i<p2catfish::kMouthSlots;++i)if(!ar.ref(("mouth."+std::to_string(i)).c_str(),RefKind::Creature,value.slots[i]))return false;
+ u32 count=ar.mode()==Mode::Capture?static_cast<u32>(value.consumed.size()):0;
+ if(!ar.scalar("consumed.count",ScalarKind::U32,&count)||count>2)return ar.fail("invalid Catfish consumed set");
+ std::vector<Piki*> consumed;if(ar.mode()==Mode::Capture)consumed.assign(value.consumed.begin(),value.consumed.end());else consumed.resize(count);
+ for(u32 i=0;i<count;++i)if(!ar.ref(("consumed."+std::to_string(i)).c_str(),RefKind::Creature,consumed[i]))return false;
+ auto saved=value.events.captureState();
+#define C(x) if(!ar.field("clock." #x,saved.x))return false;
+ C(active) C(clock.active) C(clock.entry) C(clock.paused) C(clock.frame) C(clock.generation) C(clock.cycle)
+#undef C
+ const p2sampled::Clip* content=nullptr;
+ if(ar.mode()==Mode::Capture&&!value.events.clip().empty()){auto i=clips.find(value.events.clip());if(i==clips.end())return ar.fail("Catfish clock content missing");content=&i->second.sampled;}
+ if(!ar.ref("clock.content",RefKind::Animation,content))return false;
+ if(ar.mode()==Mode::Apply){
+  if(saved.clock.active&&!content)return ar.fail("active Catfish clock missing clip");
+  p2sampled::Clip empty;const auto& bound=content?*content:empty;
+  if(!value.events.restoreState(bound,content?bound.poses.name:std::string(),saved))return ar.fail("invalid Catfish clock restore");
+  value.consumed.clear();for(auto* p:consumed)if(!p||!value.consumed.insert(p).second)return ar.fail("invalid Catfish consumed identity");
+  actors[key]=value;
+ }
+ return true;
+}
+}

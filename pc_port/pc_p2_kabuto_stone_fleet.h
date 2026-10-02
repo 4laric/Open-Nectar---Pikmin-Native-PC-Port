@@ -1,4 +1,7 @@
 #pragma once
+#if defined(PIKI_PC_PORT)
+struct PcMiddayProjectileAccess;
+#endif
 
 // Kabuto 75 (Armored Cannon Beetle Larva) travelling Stone fleet (#884).
 //
@@ -437,6 +440,9 @@ public:
     }
 
 private:
+#if defined(PIKI_PC_PORT)
+    friend struct ::PcMiddayProjectileAccess;
+#endif
     struct Slot {
         bool used = false;
         P2CannonStone stone;

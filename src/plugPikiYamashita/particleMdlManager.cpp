@@ -19,6 +19,10 @@ DEFINE_PRINT("particleMdlManager");
  */
 void zen::particleMdlManager::init(u32 particleNum, u32 childNum)
 {
+#if defined(PIKI_PC_PORT)
+    mMiddayParticleCapacity = particleNum;
+    mMiddayChildCapacity = childNum;
+#endif
 	int i;
 
 	mPtclList = new particleMdl[particleNum];

@@ -111,3 +111,20 @@ bool pc_p2_kochappy_stun_active(const BTeki* actor)
     auto found = actors.find(const_cast<BTeki*>(actor));
     return found != actors.end() && found->second.state.phase != p2purpleimpact::Phase::None;
 }
+
+#include "pc_midday_enemy.h"
+namespace pc_midday {
+bool enemy_stun_fields(BTeki& actor,ActorArchive& outer) {
+ PrefixArchive ar(outer,"enemy.p2.purpleStun");auto it=actors.find(&actor);bool present=ar.mode()==Mode::Capture&&it!=actors.end();
+ if(!ar.scalar("present",ScalarKind::Bool,&present))return false;if(!present){if(ar.mode()==Mode::Apply)actors.erase(&actor);return true;}
+ Runtime value=ar.mode()==Mode::Capture?it->second:Runtime{};
+ // Actor registration incarnations are remapped by the staged logical catalog;
+ // never restore an old process's numeric allocation counter.
+ if(!ar.token64("lifetime",RefKind::Creature,value.lifetime)||!ar.token64("targetLifetime",RefKind::Creature,value.state.targetLifetime))return false;
+ int phase=ar.mode()==Mode::Capture?static_cast<int>(value.state.phase):0;
+ if(!ar.scalar("phase",ScalarKind::S32,&phase)||phase<0||phase>2)return ar.fail("invalid Purple stun phase");value.state.phase=static_cast<p2purpleimpact::Phase>(phase);
+ if(!ar.field("fitDuration",value.fitDuration)||!ar.field("fitElapsed",value.state.fitElapsed)||!ar.field("bounceUpdates",value.state.bounceUpdates))return false;
+ if(ar.mode()==Mode::Apply){if(!value.lifetime||value.fitDuration<=0||value.state.fitElapsed<0)return ar.fail("invalid remapped Purple stun runtime");actors[&actor]=value;}
+ return true;
+}
+}

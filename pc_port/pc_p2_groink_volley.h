@@ -1,4 +1,7 @@
 #pragma once
+#if defined(PIKI_PC_PORT)
+struct PcMiddayProjectileAccess;
+#endif
 
 #include <pc_p2_groink.h>
 #include <array>
@@ -54,6 +57,9 @@ public:
     const std::array<Segment, kCapacity>& segments() const { return mSegments; }
 
 private:
+#if defined(PIKI_PC_PORT)
+    friend struct ::PcMiddayProjectileAccess;
+#endif
     std::array<P2GroinkPolicy, kCapacity> mNodes{};
     std::array<bool, kCapacity> mPrimary{};
     std::array<std::size_t, kCapacity> mActive{}, mInactive{};
