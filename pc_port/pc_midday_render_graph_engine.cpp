@@ -47,6 +47,7 @@ bool captureRenderGraph(u64 generation,const std::vector<RenderObservation>& sou
 }
 struct IsolatedRenderAllocations::Impl {
  ConstructorFence* fence=nullptr;
+ RenderGraph layout;
  std::map<u64,std::unique_ptr<Material[]>> materials;
  std::map<u64,std::unique_ptr<PVWTevInfo>> tevs;
  std::map<u64,std::unique_ptr<PVWTextureData[]>> textures;
@@ -55,6 +56,12 @@ struct IsolatedRenderAllocations::Impl {
 IsolatedRenderAllocations::IsolatedRenderAllocations()=default;
 IsolatedRenderAllocations::~IsolatedRenderAllocations()=default;
 bool IsolatedRenderAllocations::heldBy(const ConstructorFence& f)const{return impl_&&impl_->fence==&f&&f.held();}
+bool IsolatedRenderAllocations::matchesLayout(const RenderGraph& graph)const{
+ if(!impl_||impl_->layout.generation!=graph.generation||impl_->layout.nodes.size()!=graph.nodes.size()||impl_->layout.links.size()!=graph.links.size())return false;
+ for(size_t i=0;i<graph.nodes.size();++i){const auto& a=impl_->layout.nodes[i];const auto& b=graph.nodes[i];if(a.id!=b.id||a.factory!=b.factory||a.kind!=b.kind||a.count!=b.count)return false;}
+ for(size_t i=0;i<graph.links.size();++i){const auto& a=impl_->layout.links[i];const auto& b=graph.links[i];if(a.materials!=b.materials||a.slot!=b.slot||a.pvw!=b.pvw||a.tev!=b.tev||a.textures!=b.textures||a.textureCount!=b.textureCount)return false;}
+ return true;
+}
 void* IsolatedRenderAllocations::allocation(u64 id)const{if(!impl_)return nullptr;auto m=impl_->materials.find(id);if(m!=impl_->materials.end())return m->second.get();auto t=impl_->tevs.find(id);if(t!=impl_->tevs.end())return t->second.get();auto x=impl_->textures.find(id);return x==impl_->textures.end()?nullptr:x->second.get();}
 bool IsolatedRenderAllocations::prepare(const RenderGraph& graph,const RestoreGate& gate,ConstructorFence& fence,std::string& e,size_t failAt){
  if(impl_||!fence.held()||!pc_sim_rng_constructor_suppression(true,e)){if(e.empty())e="render allocation requires fresh owner and exact physical fence";return false;}
@@ -64,7 +71,7 @@ bool IsolatedRenderAllocations::prepare(const RenderGraph& graph,const RestoreGa
  std::vector<RenderObservation> layout;std::set<u64> ids;uintptr_t address=1;
  for(const auto& node:graph.nodes){auto size=nativeSize(node.kind);layout.push_back({node.id,node.factory,node.kind,node.count,address,size});address+=size*node.count;ids.insert(node.id);if(node.payloads.size()!=node.count){e="render payload coverage incomplete";return false;}}
  RenderGraph plan;if(!planRenderGraph(graph.generation,layout,graph.links,ids,plan,e))return false;
- try{size_t attempts=0;auto point=[&]{if(++attempts==failAt)throw std::bad_alloc();};point();auto staged=std::make_unique<Impl>();staged->fence=&fence;
+ try{size_t attempts=0;auto point=[&]{if(++attempts==failAt)throw std::bad_alloc();};point();auto staged=std::make_unique<Impl>();staged->fence=&fence;staged->layout=std::move(plan);
   for(const auto& node:graph.nodes){point();switch(node.kind){case RenderKind::Materials:staged->materials.emplace(node.id,std::make_unique<Material[]>(node.count));break;case RenderKind::Tev:staged->tevs.emplace(node.id,std::make_unique<PVWTevInfo>());break;case RenderKind::Textures:staged->textures.emplace(node.id,std::make_unique<PVWTextureData[]>(node.count));break;}}
   impl_=std::move(staged);e.clear();return true;
  }catch(const std::exception& x){e=std::string("render allocation failed: ")+x.what();return false;}

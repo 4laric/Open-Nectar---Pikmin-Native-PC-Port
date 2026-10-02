@@ -37,6 +37,7 @@ public:
  bool prepare(const RenderGraph&,const RestoreGate&,ConstructorFence&,std::string&,size_t failAt=0);
  void* allocation(u64)const;
  bool heldBy(const ConstructorFence&)const;
+ bool matchesLayout(const RenderGraph&)const;
  // Allocation only: default objects are NOT ready for consumers. Restore still
  // needs installed immutable descriptor setup and complete typed payload bind.
  // Retain this owner and the exact physical fence through abort/destruction.
