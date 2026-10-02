@@ -221,8 +221,14 @@ struct PikiProp : public CreatureProp {
  *
  * @note Size: 0x74.
  */
+#if defined(PIKI_PC_PORT)
+namespace pc_midday { struct MonoManagerStageTag; }
+#endif
 class PikiMgr : public MonoObjectMgr {
 public:
+#if defined(PIKI_PC_PORT)
+	explicit PikiMgr(const pc_midday::MonoManagerStageTag&);
+#endif
 	PikiMgr(Navi*);
 
 	virtual ~PikiMgr() { }                  // _48

@@ -402,6 +402,7 @@ set(PC_PORT_SOURCES
     pc_port/pc_midday_item_manager_engine.cpp
     pc_port/pc_midday_demo.cpp
     pc_port/pc_midday_demo_engine.cpp
+    pc_port/pc_midday_mono_manager_engine.cpp
     pc_port/pc_midday_player_resources.cpp
     pc_port/pc_midday_player_resources_engine.cpp
     pc_port/pc_midday_result.cpp

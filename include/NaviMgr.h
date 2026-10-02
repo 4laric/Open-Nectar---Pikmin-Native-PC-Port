@@ -167,8 +167,14 @@ struct NaviProp : public CreatureProp {
 /**
  * @brief TODO
  */
+#if defined(PIKI_PC_PORT)
+namespace pc_midday { struct MonoManagerStageTag; }
+#endif
 class NaviMgr : public MonoObjectMgr {
 public:
+#if defined(PIKI_PC_PORT)
+	explicit NaviMgr(const pc_midday::MonoManagerStageTag&);
+#endif
 	NaviMgr();
 
 	virtual ~NaviMgr() { }                  // _48
