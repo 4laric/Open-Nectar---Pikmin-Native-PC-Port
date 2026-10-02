@@ -36,6 +36,8 @@
 namespace {
 SDL_Joystick* pad=nullptr;
 constexpr unsigned Target=346002, Partner=346010;
+// Production SDL->PAD conversion divides by256; preserve intended PAD strength.
+constexpr int contact_sdl_axis(int padAxis) { return padAxis * 256; }
 void require(bool ok,const char* why){
     if(!ok){std::printf("FAIL P2_ELECBUG_CONTACT %s\n",why);std::fflush(nullptr);std::_Exit(1);}
 }
@@ -44,8 +46,8 @@ void input(unsigned keys=0,int x=0,int y=0){
     pc_window_input_assign(1,PC_INPUT_DEV_NONE,-1);
     SDL_JoystickSetVirtualButton(pad,SDL_CONTROLLER_BUTTON_A,(keys&KBBTN_A)!=0);
     SDL_JoystickSetVirtualButton(pad,SDL_CONTROLLER_BUTTON_B,(keys&KBBTN_B)!=0);
-    SDL_JoystickSetVirtualAxis(pad,SDL_CONTROLLER_AXIS_LEFTX,Sint16(x*32767/74));
-    SDL_JoystickSetVirtualAxis(pad,SDL_CONTROLLER_AXIS_LEFTY,Sint16(-y*32767/74));
+    SDL_JoystickSetVirtualAxis(pad,SDL_CONTROLLER_AXIS_LEFTX,Sint16(contact_sdl_axis(x)));
+    SDL_JoystickSetVirtualAxis(pad,SDL_CONTROLLER_AXIS_LEFTY,Sint16(-contact_sdl_axis(y)));
     SDL_JoystickUpdate();
 }
 float distance(const Vector3f& a,const Vector3f& b){return std::hypot(a.x-b.x,a.z-b.z);}
