@@ -149,7 +149,8 @@ class CaveMixedRouteApp final : public PlugPikiApp {
             return;
         }
         if(state!=NAVISTATE_Walk){fixturePad(0);return;}
-        // Production class Blue=1; this is not the P2 species namespace Blue=0.
+        // Production selection uses GlobalGameOptions::Blue (0), as returned
+        // by pc_throw_selection_class. Keep the named enum, not a guessed ID.
         // D-pad selection happens before A. The HUD is only a preview eligibility
         // check; actual pending/held membership above governs the release.
         if(pc_preferred_throw_color_for(n)!=int(Blue)){
