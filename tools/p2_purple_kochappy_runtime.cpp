@@ -8,6 +8,8 @@
 #include <fstream>
 #include <string>
 #include "system.h"
+#include "AIConstant.h"
+#include "CreatureProp.h"
 #include "App.h"
 #include "Node.h"
 #include "FlowController.h"
@@ -403,6 +405,40 @@ void receiverRouteClearance(Navi* n,int target){
  // point iswithin.125 of a checked sample. Inflate by.125 to reject entire line.
  for(int j=0;j<=steps;++j)receiverCheckSphere(rvadd(center,rvscale(rvsub(guide,center),double(j)/steps)),radius+.10+.125);
 }
+// INCLINE_OBSERVER90_BEGIN
+// Fixture-only post-idle observation. Ground is reset by Creature::move;
+// collision latch is reset by Creature::updateAI. Normal/model/wall pointers
+// are retained engine fields, never an asserted fresh callback by themselves.
+double receiverCounterMilliseconds(Uint64 start,Uint64 end,Uint64 frequency){
+ return frequency&&end>=start?double(end-start)*1000./double(frequency):-1.;
+}
+void receiverInclineObserve(Navi* n,int target,int age){
+ const Uint64 start=SDL_GetPerformanceCounter(),frequency=SDL_GetPerformanceFrequency();
+ if(!mapMgr||!mapMgr->mMapModel||target<0||target>=ReceiverRouteCount)return;
+ auto* shape=mapMgr->mMapModel;int groundFace=-1,retainedNormalFace=-1,retainedWallFace=-1;
+ for(int i=0;i<shape->mTriCount;++i){const auto& t=shape->mTriList[i];
+  if(n->mGroundTriangle==&t)groundFace=i;
+  if(n->mCollNormal==&t.mTriangle.mNormal)retainedNormalFace=i;
+  if(n->mWallPlane==&t.mTriangle)retainedWallFace=i;
+ }
+ const int face=ReceiverRouteFloor[target].face;const auto& t=shape->mTriList[face];
+ const double offset=n->isCreatureFlag(CF_EnableGroundOffset)?n->mGroundOffset:0.;
+ const RouteVec center={n->mSRT.t.x,n->mSRT.t.y-offset+n->mCollisionRadius,n->mSRT.t.z};
+ RouteVec v[3];for(int k=0;k<3;++k){const auto& p=shape->mVertexList[t.mVertexIndices[k]];v[k]={p.x,p.y,p.z};}
+ const auto& normal=t.mTriangle.mNormal;
+ const double signedPlane=center.x*normal.x+center.y*normal.y+center.z*normal.z-t.mTriangle.mOffset;
+ const double triangleDistance=routeTriangleDistance(center,v[0],v[1],v[2]);
+ const double observeMs=receiverCounterMilliseconds(start,SDL_GetPerformanceCounter(),frequency);
+ std::printf("P2_PURPLE_KOCHAPPY_INCLINE_OBSERVE age=%d waypoint=%d post_idle=1 state=%d collision_latch=%u ground_ptr=%p ground_face=%d retained_normal_ptr=%p retained_normal_face=%d retained_wall_ptr=%p retained_wall_face=%d retained_model_ptr=%p pointer_alone_fresh_contact=0 sphere=%.6f,%.6f,%.6f target_face=%d target_normal=%.6f,%.6f,%.6f plane_distance=%.6f triangle_distance=%.6f radius=%.6f frame_time=%.6f gravity=%.6f acceleration=%.6f bounce=%.6f air_resistance=%.6f flags=%u velocity=%.6f,%.6f,%.6f target_velocity=%.6f,%.6f,%.6f bias=%.6f,%.6f,%.6f observer_compute_ms=%.6f print_cost_included=0 actor_writes=0\n",
+  age,target,n->getCurrState()->getID(),unsigned(n->mCollisionOccurred),static_cast<void*>(n->mGroundTriangle),groundFace,static_cast<void*>(n->mCollNormal),retainedNormalFace,static_cast<const void*>(n->mWallPlane),retainedWallFace,static_cast<void*>(n->mCurrCollisionModel),center.x,center.y,center.z,face,normal.x,normal.y,normal.z,signedPlane,triangleDistance,n->mCollisionRadius,gsys->getFrameTime(),AICONST.mGravity(),n->mProps->mCreatureProps.mAcceleration(),n->mProps->mCreatureProps.mBounceFactor(),n->mAirResistance,unsigned(n->mCreatureFlags),n->mVelocity.x,n->mVelocity.y,n->mVelocity.z,n->mTargetVelocity.x,n->mTargetVelocity.y,n->mTargetVelocity.z,n->_B0.x,n->_B0.y,n->_B0.z,observeMs);
+}
+void receiverObservedClearance(Navi* n,int target,int age){
+ const Uint64 start=SDL_GetPerformanceCounter(),frequency=SDL_GetPerformanceFrequency();
+ receiverRouteClearance(n,target);
+ const double elapsed=receiverCounterMilliseconds(start,SDL_GetPerformanceCounter(),frequency);
+ std::printf("P2_PURPLE_KOCHAPPY_CLEARANCE_COST age=%d waypoint=%d clearance_ms=%.6f print_cost_included=0 original_call_count=1 actor_writes=0\n",age,target,elapsed);
+}
+// INCLINE_OBSERVER90_END
 class PurpleKochappyApp:public PlugPikiApp {
  int frame=0,age=0,phase=0,start=0,settled=0,throwCount=0;
  int receiverWaypoint=0;
@@ -501,7 +537,8 @@ public:
    if(n->getPlatePikis()==20&&age-start>30){
     // Do not replace the strict loaded50-unit approach with an easier endpoint.
     // Follow each original corridor centroid/portal through ordinary SDL only.
-    if(receiverWaypoint<ReceiverRouteCount)receiverRouteClearance(n,receiverWaypoint);
+    if(receiverWaypoint<ReceiverRouteCount)receiverObservedClearance(n,receiverWaypoint,age);
+    if(receiverWaypoint<ReceiverRouteCount)receiverInclineObserve(n,receiverWaypoint,age);
     while(receiverWaypoint<ReceiverRouteCount){
      const auto& w=ReceiverRoute[receiverWaypoint];const Vector3f goal(w.x,0.f,w.z);
      if(distance(n->mSRT.t,goal)>ReceiverRouteReach)break;
@@ -511,7 +548,7 @@ public:
     if(receiverWaypoint<ReceiverRouteCount){
      const auto& w=ReceiverRoute[receiverWaypoint];const Vector3f goal(w.x,0.f,w.z);
      if(age%30==0)std::printf("P2_PURPLE_KOCHAPPY_ROUTE_TARGET age=%d waypoint=%d total=%d target_xz=%.4f,%.4f distance=%.4f reach=%.4f followers=%d live=%d SDL_walk=1 actor_writes=0\n",age,receiverWaypoint,ReceiverRouteCount,w.x,w.z,distance(n->mSRT.t,goal),ReceiverRouteReach,n->getPlatePikis(),live);
-     receiverRouteClearance(n,receiverWaypoint);
+     receiverObservedClearance(n,receiverWaypoint,age);
      point(n,goal,true,KeyConfig::_instance->mSetCursorKey.mBind,ReceiverRouteReach);return result;
     }
     if(distance(n->mSRT.t,violet->mSRT.t)>approach){point(n,violet->mSRT.t,true,KeyConfig::_instance->mSetCursorKey.mBind);return result;}
