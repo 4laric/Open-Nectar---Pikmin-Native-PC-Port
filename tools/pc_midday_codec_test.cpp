@@ -18,6 +18,9 @@
 #include <unistd.h>
 #include <sys/wait.h>
 #include <signal.h>
+#ifdef __linux__
+#include <sys/syscall.h>
+#endif
 #endif
 using namespace pc_midday;
 namespace fs=std::filesystem;
@@ -38,6 +41,16 @@ int child(const fs::path& exe,const fs::path& dir,const std::string& point,std::
     GetExitCodeProcess(process.hProcess,&code);CloseHandle(process.hThread);CloseHandle(process.hProcess);
     return int(code);
 #else
+#if !defined(__linux__) || !defined(SYS_pidfd_open) || !defined(SYS_pidfd_send_signal)
+    (void)exe;(void)dir;(void)point;(void)observe;
+    throw std::runtime_error("safe child supervision requires Linux pidfd support");
+#else
+    // Refuse unavailable kernel/policy support before creating any child.
+    const int selfPidfd=int(syscall(SYS_pidfd_open,getpid(),0));
+    if(selfPidfd<0)throw std::runtime_error("pidfd preflight failed before fork (errno="+std::to_string(errno)+")");
+    const int preflightSignal=int(syscall(SYS_pidfd_send_signal,selfPidfd,0,nullptr,0));
+    const int preflightError=errno;close(selfPidfd);
+    if(preflightSignal!=0)throw std::runtime_error("pidfd signal preflight failed before fork (errno="+std::to_string(preflightError)+")");
     pid_t pid=fork();if(pid<0)throw std::runtime_error("fork failed");
     if(!pid){execl(exe.c_str(),exe.c_str(),dir.c_str(),point.c_str(),nullptr);_Exit(99);}
     int status=0;
@@ -46,14 +59,29 @@ int child(const fs::path& exe,const fs::path& dir,const std::string& point,std::
         for(;;){
             const pid_t waited=waitpid(pid,&status,WNOHANG);
             if(waited==pid)return true;
-            if(waited<0&&errno!=EINTR)throw std::runtime_error("child status unknown: waitpid failed (errno="+std::to_string(errno)+")");
+            if(waited<0){
+                if(errno!=EINTR)throw std::runtime_error("child status unknown: waitpid failed (errno="+std::to_string(errno)+")");
+                if(std::chrono::steady_clock::now()>=deadline)throw std::runtime_error("child status unknown: bounded waitpid interrupted");
+                continue;
+            }
             if(std::chrono::steady_clock::now()>=deadline)return false;
             std::this_thread::sleep_for(std::chrono::milliseconds(10));
         }
     };
+    // A numeric PID may be recycled after an external/autoreap. Only signal
+    // the stable kernel child handle, and only after waitpid proves ownership.
+    const int pidfd=int(syscall(SYS_pidfd_open,pid,0));
+    if(pidfd<0){
+        const int reason=errno;
+        if(!waitBounded(std::chrono::seconds(1)))throw std::runtime_error("pidfd unavailable; child status remains unreaped; no signal issued (errno="+std::to_string(reason)+")");
+        throw std::runtime_error("pidfd unavailable; child was reaped without signalling (errno="+std::to_string(reason)+")");
+    }
+    struct ChildHandle {int fd;~ChildHandle(){close(fd);}} owned{pidfd};
     auto stopAndReap=[&](){
-        if(kill(pid,SIGKILL)!=0&&errno!=ESRCH)throw std::runtime_error("child termination unknown: kill failed (errno="+std::to_string(errno)+")");
-        if(!waitBounded(std::chrono::seconds(1)))throw std::runtime_error("child remains unreaped after bounded SIGKILL wait");
+        if(waitBounded(std::chrono::seconds(0)))return;
+        if(syscall(SYS_pidfd_send_signal,owned.fd,SIGKILL,nullptr,0)!=0&&errno!=ESRCH)
+            throw std::runtime_error("child termination unknown: pidfd signal failed (errno="+std::to_string(errno)+")");
+        if(!waitBounded(std::chrono::seconds(1)))throw std::runtime_error("child remains unreaped after bounded pidfd SIGKILL wait");
     };
     try{if(observe)observe();}catch(...){
         const auto original=std::current_exception();
@@ -62,16 +90,11 @@ int child(const fs::path& exe,const fs::path& dir,const std::string& point,std::
         }
         std::rethrow_exception(original);
     }
-    bool completed=false;
-    try{completed=waitBounded(std::chrono::seconds(10));}catch(...){
-        const auto original=std::current_exception();
-        try{stopAndReap();}catch(const std::exception& failure){
-            std::throw_with_nested(std::runtime_error(std::string("child wait failed; cleanup unknown: ")+failure.what()));
-        }
-        std::rethrow_exception(original);
-    }
+    // Unknown wait status is a failure, never authority to signal any process.
+    const bool completed=waitBounded(std::chrono::seconds(10));
     if(!completed){stopAndReap();return 99;}
     return WIFEXITED(status)?WEXITSTATUS(status):99;
+#endif
 #endif
 }
 int main(int argc,char** argv){try{
