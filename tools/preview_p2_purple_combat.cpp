@@ -323,7 +323,7 @@ class PurpleCombatApp : public PlugPikiApp {
     int ordinaryMenuFrames=0,ordinaryDiaryFrames=0;
     bool releaseDiaryInput=false,diaryRevealObserved=false,diaryAdvanceObserved=false;
     int sdlPhase=0,sdlStableAim=0,sdlThrowTicks=0;
-    bool sdlStarted=false,sdlThrowObserved=false;
+    bool sdlStarted=false,sdlThrowObserved=false,sdlGeometryLogged=false;
     int diaryActions=0;
     unsigned saveIndexBefore=0;
     bool mode(const char* name) const {
@@ -747,6 +747,23 @@ class PurpleCombatApp : public PlugPikiApp {
             expectedDay,savedMaturity,int(GameStat::mapPikis));
         std::fflush(nullptr);std::_Exit(0);
     }
+    static bool sdlFinitePoint(const Vector3f& p) {
+        return std::isfinite(p.x) && std::isfinite(p.y) && std::isfinite(p.z);
+    }
+    static bool sdlCursorRangeFeasible(float minimum,float radius,float speed) {
+        if(!std::isfinite(minimum) || !std::isfinite(radius) || !std::isfinite(speed)
+            || minimum<0.f || radius<=minimum || speed<=0.f)return false;
+        const float stand=std::min(100.f,radius/1.4f);
+        return stand>0.f && stand*1.2f>=minimum && (stand+5.f)*1.2f<radius;
+    }
+    void sdlValidateParts(CollPart* part,int depth=0) {
+        require(part && depth<32,"SDL collision tree missing or too deep");
+        if(!sdlGeometryLogged || ticks%30==0 || !sdlFinitePoint(part->mCentre) || !std::isfinite(part->mRadius) || part->mRadius<0.f)
+        std::printf("P2_PURPLE_SDL_BOUND depth=%d id=%u centre=%.6f,%.6f,%.6f radius=%.6f read_only=1\n",
+            depth,unsigned(part->getID().mId),part->mCentre.x,part->mCentre.y,part->mCentre.z,part->mRadius);
+        require(sdlFinitePoint(part->mCentre) && std::isfinite(part->mRadius) && part->mRadius>=0.f,"SDL invalid raw collision bound");
+        for(int i=0;i<part->getChildCount();++i)sdlValidateParts(part->getChildAt(i),depth+1);
+    }
     void sdlDirection(Navi* n,float dx,float dz,int power) {
         require(n->controlCamera()!=nullptr,"SDL acquisition camera missing");
         const float distance=std::sqrt(dx*dx+dz*dz);
@@ -813,15 +830,38 @@ class PurpleCombatApp : public PlugPikiApp {
         }
         const float dx=violet->mSRT.t.x-n->mSRT.t.x,dz=violet->mSRT.t.z-n->mSRT.t.z;
         const float distance=std::sqrt(dx*dx+dz*dz),radius=C_NAVI_PARM(n,mCursorMaxRadius);
-        require(std::isfinite(radius) && radius>105.f,"SDL loaded cursor radius");
-        if(sdlPhase==0) {
-            const float stand=std::min(100.f,radius/1.4f);
-            if(distance>stand+5.f) {
-                Vector3f target=n->mSRT.t;target.x+=dx*(distance-stand)/distance;target.z+=dz*(distance-stand)/distance;
-                refreshPluckObstacles(n,violet);
-                require(pluckSegmentClear(n->mSRT.t,target),"SDL approach requires clear native route");
-                sdlDirection(n,dx,dz,65);return nullptr;
+        const float minimum=C_NAVI_PARM(n,mCursorMinRadius),speed=C_NAVI_PARM(n,mCursorMoveSpeed);
+        const float stand=std::min(100.f,radius/1.4f);
+        // Read actual loaded values before any range/geometry rejection. Asset
+        // p46 overrides the constructor default; the legal baseline loads 100.
+        if(!sdlGeometryLogged || ticks%30==0 || !sdlCursorRangeFeasible(minimum,radius,speed))
+        std::printf("P2_PURPLE_SDL_CONTROL tick=%d phase=%d min=%.6f max=%.6f speed=%.6f neutral=%.6f cursor_band=%.6f distance=%.6f stand=%.6f cursor=%.6f,%.6f,%.6f port=%u frozen=%d raw=%d,%d normalized=%.6f,%.6f read_only=1\n",
+            ticks,sdlPhase,minimum,radius,speed,C_NAVI_PARM(n,mNeutralStickThreshold),C_NAVI_PARM(n,mCursorMoveStickThreshold),distance,stand,
+            n->mCursorWorldPos.x,n->mCursorWorldPos.y,n->mCursorWorldPos.z,
+            n->mKontroller?n->mKontroller->mPlayerNum:0,int(n->mKontroller && n->mKontroller->mIsControllerFrozen),
+            n->mKontroller?int(n->mKontroller->mMainStickX):0,n->mKontroller?int(n->mKontroller->mMainStickY):0,
+            n->mKontroller?n->mKontroller->getMainStickX():0,n->mKontroller?n->mKontroller->getMainStickY():0);
+        require(sdlCursorRangeFeasible(minimum,radius,speed),"SDL loaded cursor range cannot fit approach band");
+        require(sdlFinitePoint(n->mSRT.t) && sdlFinitePoint(violet->mSRT.t)
+            && sdlFinitePoint(n->mCursorWorldPos) && std::isfinite(distance) && distance>.01f,"SDL invalid live geometry");
+        if(sdlPhase==0 || sdlPhase==1) {
+            require(n->mCollInfo && n->mCollInfo->hasInfo() && violet->mCollInfo && violet->mCollInfo->hasInfo(),"SDL live collision bounds missing");
+            sdlValidateParts(n->mCollInfo->getBoundingSphere());
+            sdlValidateParts(violet->mCollInfo->getBoundingSphere());
+            refreshPluckObstacles(n,violet);
+            require(!pluckObstacles.empty(),"SDL projected collision bounds missing");
+            for(const auto& obstacle:pluckObstacles)
+                require(sdlFinitePoint(obstacle.centre) && std::isfinite(obstacle.radius) && obstacle.radius>0.f,"SDL invalid projected collision bound");
+            sdlGeometryLogged=true;
+            // These forbidden captain-origin circles include live part-centre
+            // offsets and height separation; enclosing radii alone do not.
+            Vector3f target=n->mSRT.t;
+            if(sdlPhase==0 && distance>stand+5.f) {
+                target.x+=dx*(distance-stand)/distance;target.z+=dz*(distance-stand)/distance;
             }
+            require(sdlFinitePoint(target) && pluckSegmentClear(target,target)
+                && pluckSegmentClear(n->mSRT.t,target),"SDL approach requires clear native route and stopping point");
+            if(sdlPhase==0 && distance>stand+5.f) {sdlDirection(n,dx,dz,65);return nullptr;}
             sdlPhase=1;
         }
         if(sdlPhase==1) {
