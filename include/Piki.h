@@ -1,6 +1,12 @@
 #ifndef _PIKI_H
 #define _PIKI_H
 
+#if defined(PIKI_PC_PORT)
+#define PC_MIDDAY_PIKI_ACTOR_DEFAULT {}
+#else
+#define PC_MIDDAY_PIKI_ACTOR_DEFAULT
+#endif
+
 #include "Creature.h"
 #include "GlobalGameOptions.h"
 #include "OdoMeter.h"
@@ -256,31 +262,31 @@ public:
 	// _00-_2B8 = Creature
 	// _2B8     = PaniAnimKeyListener
 	OdoMeter mOdometer;                   // _2BC
-	PathFinder::Buffer* mPathBuffers;     // _2CC
+	PathFinder::Buffer* mPathBuffers PC_MIDDAY_PIKI_ACTOR_DEFAULT; // _2CC; no route graph may exist during construction
 	u32 mRouteHandle;                     // _2D0
 	bool mUseAsyncPathfinding;            // _2D4
 	s16 mRouteSourceIndex;                // _2D6
 	s16 mRouteDestinationIndex;           // _2D8
-	bool mIsRetryPathfind;                // _2DA
-	s16 mCurrRoutePoint;                  // _2DC
+	bool mIsRetryPathfind PC_MIDDAY_PIKI_ACTOR_DEFAULT;                // _2DA
+	s16 mCurrRoutePoint PC_MIDDAY_PIKI_ACTOR_DEFAULT;                  // _2DC
 	Vector3f mRouteStartPos;              // _2E0
 	Vector3f mRouteGoalPos;               // _2EC
 	Vector3f mSplineControlPts[4];        // _2F8
-	s16 mNumRoutePoints;                  // _328
+	s16 mNumRoutePoints PC_MIDDAY_PIKI_ACTOR_DEFAULT;                  // _328
 	Creature* mRouteTargetCreature;       // _32C
 	bool mIsLooking;                      // _330
-	f32 _334;                             // _334
+	f32 _334 PC_MIDDAY_PIKI_ACTOR_DEFAULT;                             // _334
 	SmartPtr<Creature> mLookAtCreature;   // _338
 	immut Vector3f* mLookatPosPtr;        // _33C
-	u8 mLookTimer;                        // _340
+	u8 mLookTimer PC_MIDDAY_PIKI_ACTOR_DEFAULT;                        // _340
 	f32 mHorizontalRotation;              // _344
 	f32 mVerticalRotation;                // _348
 	f32 mOldFaceDirection;                // _34C
-	int mBlendMotionIdx;                  // _350
+	int mBlendMotionIdx PC_MIDDAY_PIKI_ACTOR_DEFAULT;                  // _350
 	PaniPikiAnimMgr mPikiAnimMgr;         // _354
 	u8 mEmotion;                          // _400
 	Creature* mCarryingShipPart;          // _404
-	u8 mActionState;                      // _408
+	u8 mActionState PC_MIDDAY_PIKI_ACTOR_DEFAULT;                      // _408
 	bool mIsCallable;                     // _409
 	UpdateContext mPikiUpdateContext;     // _40C
 	UpdateContext mPikiLookUpdateContext; // _418
@@ -291,7 +297,7 @@ public:
 	RippleEffect* mRippleEffect;          // _430
 	FreeLightEffect* mFreeLightEffect;    // _434
 	SlimeEffect* mSlimeEffect;            // _438
-	int mPlayerId;                        // _43C
+	int mPlayerId PC_MIDDAY_PIKI_ACTOR_DEFAULT;                        // _43C
 #if defined(PIKI_PC_PORT)
 	bool mPcSieging = false; ///< VS: golpeando el cohete rival (acción suspendida)
 #endif
@@ -305,23 +311,23 @@ public:
 	f32 mMotionSpeed;                     // _47C
 	int _480;                             // _480
 	int _484;                             // _484
-	f32 mMoveSpeed;                       // _488
+	f32 mMoveSpeed PC_MIDDAY_PIKI_ACTOR_DEFAULT;                       // _488
 	f32 mDeathTimer;                      // _48C, controls death scale, among other things
 	PikiStateMachine* mFSM;               // _490
-	Creature* mCurrNectar;                // _494
-	f32 mFlickIntensity;                  // _498
-	f32 mRotationAngle;                   // _49C
+	Creature* mCurrNectar PC_MIDDAY_PIKI_ACTOR_DEFAULT;                // _494
+	f32 mFlickIntensity PC_MIDDAY_PIKI_ACTOR_DEFAULT;                  // _498
+	f32 mRotationAngle PC_MIDDAY_PIKI_ACTOR_DEFAULT;                   // _49C
 	bool mIsWhistlePending;               // _4A0, have been whistled, haven't joined party yet
 	CollPart* mSwallowMouthPart;          // _4A4
 	Creature* mLeaderCreature;            // _4A8
 	Vector3f mPluckVelocity;              // _4AC
-	int mFormationPriority;               // _4B8
+	int mFormationPriority PC_MIDDAY_PIKI_ACTOR_DEFAULT;               // _4B8
 	Vector3f mPushTargetPos;              // _4BC
 	Vector3f _4C8;                        // _4C8
 	u8 _4D4[0x4];                         // _4D4, unknown
 	int _4D8;                             // _4D8
 	Piki* mPushTargetPiki;                // _4DC
-	immut Plane* mWallPlane;              // _4E0
+	immut Plane* mWallPlane PC_MIDDAY_PIKI_ACTOR_DEFAULT;              // _4E0
 	DynCollObject* mWallObj;              // _4E4
 	int _4E8;                             // _4E8
 	f32 _4EC;                             // _4EC
@@ -333,9 +339,9 @@ public:
 	Navi* mNavi;                          // _504
 	Colour mCurrentColour;                // _508
 	Colour mDefaultColour;                // _50C
-	u16 mColor;                           // _510, red/yellow/blue
+	u16 mColor PC_MIDDAY_PIKI_ACTOR_DEFAULT;                           // _510, red/yellow/blue
 	int mFloweringTimer;                  // _514
-	bool _518;                            // _518
+	bool _518 PC_MIDDAY_PIKI_ACTOR_DEFAULT;                            // _518
 	bool _519;                            // _519
 	u32 _51C;                             // _51C, unknown
 	int mHappa;                           // _520, leaf/bud/flower - see PikiHappa enum
@@ -344,9 +350,9 @@ public:
 	AState<Piki>* mCurrentState;          // _52C
 	Colour mStartBlendColour;             // _530
 	Colour mTargetBlendColour;            // _534
-	f32 mColourBlendRatio;                // _538
+	f32 mColourBlendRatio PC_MIDDAY_PIKI_ACTOR_DEFAULT;                // _538
 	SearchData mPikiSearchData[6];        // _53C
-	bool mEraseOnKill;                    // _584
+	bool mEraseOnKill PC_MIDDAY_PIKI_ACTOR_DEFAULT;                    // _584
     // Experimental sequel identity, never an index into legacy three-color arrays.
     bool mP2Purple = false;
     bool mP2White = false;
@@ -383,4 +389,5 @@ public:
 	AnimMgr* mAnimMgr;      // _24
 };
 
+#undef PC_MIDDAY_PIKI_ACTOR_DEFAULT
 #endif
