@@ -11,7 +11,14 @@
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif
+// The game uses an unrelated u32 HWND in AtxStream.h. Keep the SDK's
+// opaque window handle under a private name without changing the game ABI.
+// Restore any caller macro exactly after importing SDK declarations.
+#pragma push_macro("HWND")
+#undef HWND
+#define HWND PcSettingsFileWindowsHWND
 #include <windows.h>
+#pragma pop_macro("HWND")
 #include <wchar.h>
 #include <io.h>
 #include <fcntl.h>
