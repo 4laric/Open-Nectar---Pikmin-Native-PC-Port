@@ -2,10 +2,13 @@
 #include <cstdio>
 #define CHECK(x) do {if(!(x)){std::fprintf(stderr,"worldmap check failed line%d: %s\n",__LINE__,#x);return __LINE__;}}while(false)
 struct TestNode {
+    virtual ~TestNode()=default;
     const char* name=nullptr;TestNode* child=nullptr;TestNode* next=nullptr;TestNode* parent=nullptr;
     TestNode* Child(){return child;} TestNode* Next(){return next;} TestNode* Parent(){return parent;}
     const char* Name(){return name;}
 };
+struct TestMap:TestNode{};
+struct TestSetup:TestNode{};
 PcWorldMapSnapshot ready(std::uint64_t frame=1) {
     PcWorldMapSnapshot s;s.available=true;s.contextReady=true;s.courseOpen=true;
     s.coursePointOperation=true;s.cursorMoveReady=true;s.mode=2;s.returnStatus=5;s.selectedCourse=0;
@@ -13,6 +16,18 @@ PcWorldMapSnapshot ready(std::uint64_t frame=1) {
 }
 int main() {
     using I=PcWorldMapInput;
+    TestMap typedMap;TestSetup typedSetup;TestNode impostor;
+    TestMap* checkedMap=nullptr;TestSetup* checkedSetup=nullptr;
+    PcWorldMapLiveOwner<TestNode> typed{&typedMap,&typedSetup};
+    CHECK(pc_world_map_typed_owner(typed,checkedMap,checkedSetup));
+    CHECK(checkedMap==&typedMap && checkedSetup==&typedSetup);
+    typed.map=&impostor;
+    CHECK(!pc_world_map_typed_owner(typed,checkedMap,checkedSetup));
+    CHECK(!checkedMap && !checkedSetup);
+    typed.map=&typedMap;typed.setup=&impostor;
+    CHECK(!pc_world_map_typed_owner(typed,checkedMap,checkedSetup));
+    CHECK(!checkedMap && !checkedSetup);
+    typed.setup=nullptr;CHECK(!pc_world_map_typed_owner(typed,checkedMap,checkedSetup));
     TestNode root,map,setup;
     map.name="<MapSelectSection>";setup.name="MapSelect section";
     root.child=&map;map.parent=&root;map.child=&setup;setup.parent=&map;
