@@ -2,7 +2,9 @@
 #include "pc_midday_actor_archive.h"
 class ViewPiki;class RouteMgr;class CollInfo;
 namespace pc_midday {
-// Disposable stage only, immediately after new ViewPiki(validatedProps).
+// Disposable stage only, after the complete constructor subobject graph exists.
+// Inert create_view_piki_shell output alone is insufficient: it deliberately
+// has no path/action/FSM/effect allocations. This bridge does not allocate them.
 // constructorRoute is the actual staged routeMgr used during construction;
 // caller must keep it unchanged throughout construction/preparation/binding.
 // canonicalCollision is scene-owned new CollInfo(4), still count-zero. This

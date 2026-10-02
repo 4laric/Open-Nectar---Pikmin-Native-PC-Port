@@ -52,6 +52,14 @@ extern "C" int pc_settings_get_whistle_radius_pct(void);
 #endif
 
 class Navi : public Creature, public PaniAnimKeyListener, public PelletView {
+#if defined(PIKI_PC_PORT)
+private:
+	friend struct PcMiddayActorShellAccess;
+	struct MiddayRestoreTag {};
+	// Inert root only: no updates, pool publication or complete-family bind until
+	// the staged owner has allocated and validated every required subobject.
+	Navi(MiddayRestoreTag, CreatureProp*, int);
+#endif
 public:
 	struct Locus {
 		Locus() { mCanBeThrown = TRUE; }; // Only the DLL has it, so it was probably inline.

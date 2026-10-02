@@ -265,6 +265,10 @@ set(PC_PORT_SOURCES
     pc_port/pc_midday_view_piki.cpp
     pc_port/pc_midday_view_piki_schema.cpp
     pc_port/pc_midday_view_piki_prepare.cpp
+    pc_port/pc_midday_actor_shell.cpp
+    pc_port/pc_midday_creature_shell.cpp
+    pc_port/pc_midday_navi_shell.cpp
+    pc_port/pc_midday_piki_shell.cpp
     pc_port/pc_midday_enemy.cpp
     pc_port/pc_midday_enemy_subobjects.cpp
     pc_port/pc_midday_enemy_schema.cpp

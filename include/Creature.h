@@ -105,6 +105,11 @@ struct DynCollAttachment {
  * @note Size: 0x2B5.
  */
 class Creature : public RefCountable, public EventTalker {
+#if defined(PIKI_PC_PORT)
+protected:
+    struct MiddayRestoreTag {};
+    Creature(MiddayRestoreTag, CreatureProp*);
+#endif
 public:
 	Creature(CreatureProp*);
 

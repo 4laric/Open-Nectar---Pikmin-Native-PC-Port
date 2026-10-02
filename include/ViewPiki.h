@@ -15,6 +15,12 @@ class MapMgr;
 #endif
 
 class ViewPiki : public Piki {
+#if defined(PIKI_PC_PORT)
+private:
+    struct MiddayRestoreTag {};
+    ViewPiki(MiddayRestoreTag, CreatureProp*);
+    friend struct PcMiddayActorShellAccess;
+#endif
 public:
 	ViewPiki(CreatureProp*);
 
