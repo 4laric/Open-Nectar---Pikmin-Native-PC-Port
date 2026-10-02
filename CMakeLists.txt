@@ -403,6 +403,8 @@ set(PC_PORT_SOURCES
     pc_port/pc_midday_demo.cpp
     pc_port/pc_midday_demo_engine.cpp
     pc_port/pc_midday_mono_manager_engine.cpp
+    pc_port/pc_midday_resolved_fields.cpp
+    pc_port/pc_midday_player_resource_bind_engine.cpp
     pc_port/pc_midday_player_resource_stage.cpp
     pc_port/pc_midday_player_resource_stage_engine.cpp
     pc_port/pc_midday_player_root.cpp
@@ -3433,3 +3435,9 @@ add_test(NAME pc_midday_player_resources COMMAND pc_midday_player_resources_test
 add_executable(pc_midday_player_root_test tools/pc_midday_player_root_test.cpp pc_port/pc_midday_player_root.cpp pc_port/pc_midday_player_core.cpp)
 target_include_directories(pc_midday_player_root_test PRIVATE pc_port)
 add_test(NAME pc_midday_player_root COMMAND pc_midday_player_root_test)
+
+add_executable(pc_midday_resolved_fields_test tools/pc_midday_resolved_fields_test.cpp pc_port/pc_midday_resolved_fields.cpp pc_port/pc_midday_actor_archive.cpp)
+target_include_directories(pc_midday_resolved_fields_test PRIVATE pc_port include)
+target_compile_definitions(pc_midday_resolved_fields_test PRIVATE PIKI_PC_PORT)
+target_compile_options(pc_midday_resolved_fields_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+add_test(NAME pc_midday_resolved_fields COMMAND pc_midday_resolved_fields_test)
