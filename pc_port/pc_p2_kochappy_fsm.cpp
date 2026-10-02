@@ -586,6 +586,20 @@ bool pc_p2_kochappy_fsm_suppress_ai(const BTeki* actor)
 	return ready && actors.count(static_cast<PelletView*>(const_cast<BTeki*>(actor))) != 0;
 }
 
+PcKochappyFsmSnapshot pc_p2_kochappy_fsm_observe(const BTeki* actor)
+{
+ PcKochappyFsmSnapshot value;
+ if(!ready||!actor)return value;
+ const auto found=actors.find(static_cast<PelletView*>(const_cast<BTeki*>(actor)));
+ if(found==actors.end())return value;
+ const auto& state=found->second;
+ value.available=true;value.state=int(state.state);value.stateTime=state.stateTime;
+ value.attackFired=state.attackFired;value.swallowFired=state.swallowFired;value.flickFired=state.flickFired;
+ value.stunPaused=state.stunPaused;
+ value.terminal=state.state==p2kochappyfsm::STATE_DEAD||state.state==p2kochappyfsm::STATE_PRESS;
+ return value;
+}
+
 // Source Obj::pressCallBack transitions to Press (health 0, type1 anim, then
 // the terminal Demo kill). No in-engine P1 Chappy press callback is wired to
 // this P2 actor, so callers that own a bounded squash event may invoke this.
