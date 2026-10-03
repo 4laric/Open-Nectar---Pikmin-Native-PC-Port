@@ -23,6 +23,7 @@
 #include "pc_p2_captain.h"
 #include "pc_p2_captor_forget.h"
 #include "pc_p2_original_piki_origin.h"
+#include "pc_p2_original_piki_pool.h"
 #include "pc_p2_bud_conversion_origin.h"
 #include "pc_p2_species.h"
 #endif
@@ -103,7 +104,13 @@ Creature* PikiMgr::birthWithFieldLimit(int fieldLimit, bool allowSproutExtra)
 		return nullptr;
 	}
 
+#if defined(PIKI_PC_PORT) && PIKI_PC_PORT
+    if (!pc_p2_original_piki_pool_can_allocate()) return nullptr;
+#endif
 	Creature* born = MonoObjectMgr::birth();
+#if defined(PIKI_PC_PORT) && PIKI_PC_PORT
+    pc_p2_original_piki_pool_observe_birth(this,static_cast<Piki*>(born));
+#endif
 #if defined(PIKI_PC_PORT) && PIKI_PC_PORT
 	// Lane-11 Bulbmin: a recycled slot must not inherit the previous
 	// occupant's dependent id/leader. Lane 12 (#130): the same slot must not
@@ -120,6 +127,29 @@ Creature* PikiMgr::birthWithFieldLimit(int fieldLimit, bool allowSproutExtra)
 #endif
 	return born;
 }
+
+#if defined(PIKI_PC_PORT) && PIKI_PC_PORT
+bool PikiMgr::sourcePoolSlotLive(Piki* p) noexcept
+{
+    if (!p || !mObjectList || !mEntryStatus) return false;
+    const int i=getIndex(p);
+    return i>=0 && i<mMaxElements && mObjectList[i]==p && mEntryStatus[i]==0;
+}
+bool PikiMgr::sourcePoolSlotRetired(Piki* p) noexcept
+{
+    if (!p || !mObjectList || !mEntryStatus) return false;
+    const int i=getIndex(p);
+    return i>=0 && i<mMaxElements && mObjectList[i]==p && mEntryStatus[i]==-1;
+}
+bool pc_p2_original_piki_pool_slot_retired(PikiMgr* mgr,Piki* p) noexcept
+{
+    return mgr && p && mgr->sourcePoolSlotRetired(p);
+}
+bool pc_p2_original_piki_pool_slot_live(PikiMgr* mgr,Piki* p) noexcept
+{
+    return mgr && p && mgr->sourcePoolSlotLive(p);
+}
+#endif
 
 /**
  * @todo: Documentation

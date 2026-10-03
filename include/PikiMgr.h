@@ -238,6 +238,8 @@ public:
     // Call only from verified original source container/head transactions.
     Creature* birthOriginalP2Container();
     Creature* birthOriginalP2Sprout();
+    bool sourcePoolSlotLive(Piki*) noexcept;
+    bool sourcePoolSlotRetired(Piki*) noexcept;
 #endif
 private:
     Creature* birthWithFieldLimit(int fieldLimit, bool allowSproutExtra);
