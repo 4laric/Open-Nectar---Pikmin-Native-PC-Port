@@ -69,7 +69,7 @@ public:
  virtual bool releaseSlot(Handle,Navi*,int,std::string&)=0;
  virtual bool slotPosition(Handle,Navi*,int,Vector3f&,std::string&)const=0;
  virtual bool formed(Handle,Navi*,std::string&)=0;
- virtual bool sortSlot(Handle,Navi*,int,unsigned happa,std::string&)=0;
+ virtual bool sortSlot(Handle,Navi*,int,int happa,std::string&)=0;
  // Actual source entity census/action admission. Absence is an error, never
  // fabricated "no nearby task"; source actor producers own this query.
  // This query is read-only: Execute applies the real update-context gate and
@@ -132,7 +132,8 @@ bool handle(const Piki*,Handle&);
 bool snapshot(Handle,RuntimeState&);
 bool frame(Handle,Frame&,std::string&);
 bool squad(Navi*,std::vector<Frame>&,std::string&);
-bool sortFormation(Handle,unsigned happa,std::string&);
+// Retail -1 prioritizes the selected body maturity; 0..2 rotates explicit priority.
+bool sortFormation(Handle,int happa,std::string&);
 bool transition(Handle,State,std::string&);
 bool update(Handle,float delta,std::string&);
 bool animate(Handle,float delta,std::string&);
