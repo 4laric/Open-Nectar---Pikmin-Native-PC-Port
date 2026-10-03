@@ -1298,7 +1298,15 @@ class PurpleCombatApp : public PlugPikiApp {
         const float gx=goal.x-n->mSRT.t.x,gz=goal.z-n->mSRT.t.z;
         require(std::isfinite(gx)&&std::isfinite(gz)&&std::hypot(gx,gz)>.01f
             &&std::fabs(n->mCursorPosition.y)<.001f,"cursor probe actual route/head goal invalid");
-        const float desired=std::atan2(gx,gz),cursorSpeed=C_NAVI_PARM(n,mCursorMoveSpeed),cap=C_NAVI_PARM(n,mCursorMaxRadius);
+        float desired=std::atan2(gx,gz);
+        const char* sideProbe=std::getenv("P2_PURPLE_SDL_POSE_SIDE_PROBE");
+        if(sideProbe && std::strcmp(sideProbe,"1")==0) {
+            // If the head-facing pose has no collision-clear pluck point,
+            // sample both side-facing poses through ordinary cursor input.
+            // The same finite budget and every live pose/collision gate remain.
+            desired+=sdlPoseProbeBudget.frames()<=32?1.570796327f:-1.570796327f;
+        }
+        const float cursorSpeed=C_NAVI_PARM(n,mCursorMoveSpeed),cap=C_NAVI_PARM(n,mCursorMaxRadius);
         int selectedX=0,selectedY=0;bool found=false;float bestError=std::numeric_limits<float>::infinity();
         for(int bearing=0;bearing<144;++bearing)for(int power=1;power<=74;++power) {
             const float rawAngle=bearing*6.283185307f/144.f;
