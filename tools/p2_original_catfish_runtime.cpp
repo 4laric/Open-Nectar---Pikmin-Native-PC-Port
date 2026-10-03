@@ -27,6 +27,7 @@
 #include "pc_p2_original_catfish_native.h"
 #include "pc_p2_original_group_engine.h"
 #include "pc_p2_catfish.h"
+#include "pc_p2_catfish_mouth.h"
 #include "settings/pc_settings.h"
 #include "settings/pc_settings_p2d.h"
 namespace {
@@ -99,6 +100,7 @@ public:
    { struct Heap{int prior;Heap():prior(gsys->setHeap(SYSHEAP_App)){}~Heap(){gsys->setHeap(prior);}} heap;
      tekiMgr->setUsingType(TEKI_Namazu,true);tekiMgr->startStage(); }
    before=tekiMgr->getSize();enter();}
+  require(pc_p2_catfish_mouth_body_intact(static_cast<BTeki*>(actor)),"authored source body collider retained after actual update");
   if(human)return result;
   if(++age<180)return result;
   unsigned alive=0;require(pc_p2_original_groups().state(generator.get(),state,alive)&&alive==1,"original group retained live actor");

@@ -77,8 +77,13 @@ bool pc_p2_catfish_mouth_birth(BTeki* a,std::string& error){
  if(!pc_p2_catfish_mouth_follow(a,"wait1",0)){pc_p2_catfish_mouth_forget(a);error="original Catfish initial joint pose refused";return false;}
  std::printf("P2_ORIGINAL_CATFISH_PARTS source=26 body_nodes=3 mouth_slots=2 radius=20 authored_joints=1\n");error.clear();return true;
 }
+bool pc_p2_catfish_mouth_owns_body(BTeki* a){return actors.find(a)!=actors.end();}
+bool pc_p2_catfish_mouth_body_intact(BTeki* a){
+ auto found=actors.find(a);return found!=actors.end()&&a->mCollInfo==found->second->trees.body;
+}
 bool pc_p2_catfish_mouth_follow(BTeki* a,const std::string& clip,float frame){
  auto found=actors.find(a);if(found==actors.end())return false;auto& s=*found->second;
+ if(a->mCollInfo!=s.trees.body)return false;
  const int index=bank->clip(clip);if(index<0)return false;
  Matrix4f world;world.makeSRT(Vector3f(1,1,1),Vector3f(0,a->getDirection(),0),a->getPosition());p2attach::Affine owner;
  for(int r=0;r<3;++r)for(int c=0;c<4;++c)owner.m[r][c]=world.mMtx[r][c];
