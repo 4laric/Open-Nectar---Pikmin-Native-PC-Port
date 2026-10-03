@@ -2,6 +2,7 @@
 #include "pc_p2_original_corpse_native.h"
 #include "pc_p2_original_actor.h"
 #include "pc_p2_original_pelplant_native.h"
+#include "pc_p2_original_foliage_native.h"
 #include "pc_p2_demon_host.h"
 #ifdef PIKI_PC_PORT
 #include "pc_p2_life_gauge_hooks.h"
@@ -197,6 +198,9 @@ f32 BTeki::viewGetHeight()
  */
 void BTeki::viewDraw(Graphics& gfx, immut Matrix4f& mat)
 {
+#if defined(PIKI_PC_PORT) && PIKI_PC_PORT
+    if (pc_p2_original_foliage_draw(this, gfx, mat)) return;
+#endif
 	gfx.useMatrix(Matrix4f::ident, 0);
 	mTekiAnimator->updateContext();
 	mTekiShape->mShape->updateAnim(gfx, mat, nullptr, this);
@@ -533,6 +537,7 @@ void BTeki::startAI(int)
 void BTeki::update()
 {
 #if defined(PIKI_PC_PORT) && PIKI_PC_PORT
+    if (pc_p2_original_foliage_update(this)) return;
     if (pc_p2_original_pelplant_update(this)) return;
 #endif
 	releaseP2DeathStickers();
@@ -806,6 +811,9 @@ void BTeki::doAI()
 	if (pc_p2_catfish_suppress_ai(this)) {
 		return;
 	}
+	if (pc_p2_hanachirashi_suppress_ai(this)) {
+		return;
+	}
 	if (pc_p2_hana_suppress_ai(this)) {
 		return;
 	}
@@ -980,6 +988,7 @@ void BTeki::becomeCorpse()
 void BTeki::doKill()
 {
 #if defined(PIKI_PC_PORT) && PIKI_PC_PORT
+    pc_p2_original_foliage_forget(this);
     pc_p2_original_pelplant_forget_teki(this);
 #endif
 	PRINT_NAKATA("BTeki::doKill:%08x\n", this);
@@ -1061,6 +1070,12 @@ void BTeki::updateTimers()
  */
 bool BTeki::stimulate(immut Interaction& interaction)
 {
+#if defined(PIKI_PC_PORT) && PIKI_PC_PORT
+    if (pc_p2_original_foliage_owned(this)) {
+        if (dynamic_cast<const InteractPress*>(&interaction)) pc_p2_original_foliage_earthquake(this);
+        return false;
+    }
+#endif
 	if (interaction.actCommon(this)) {
 		return interaction.actTeki(static_cast<Teki*>(this));
 	}
@@ -1072,6 +1087,9 @@ bool BTeki::stimulate(immut Interaction& interaction)
  */
 f32 BTeki::getiMass()
 {
+#if defined(PIKI_PC_PORT) && PIKI_PC_PORT
+    if (pc_p2_original_foliage_owned(this)) return 0.0f;
+#endif
 	f32 weight = getParameterF(TPF_Weight);
 	if (weight <= 0.0f) {
 		return 0.0f;
@@ -2083,6 +2101,9 @@ void BTeki::eventPerformed(immut TekiEvent& event)
  */
 void BTeki::collisionCallback(immut CollEvent& event)
 {
+#if defined(PIKI_PC_PORT) && PIKI_PC_PORT
+    if (pc_p2_original_foliage_collision(this, event.mCollider)) return;
+#endif
 	if (!isAlive()) {
 		return;
 	}
@@ -2096,8 +2117,20 @@ void BTeki::collisionCallback(immut CollEvent& event)
 /**
  * @todo: Documentation
  */
+#if defined(PIKI_PC_PORT) && PIKI_PC_PORT
+bool BTeki::needFlick(Creature* target)
+{
+    // Retail Plants disables collision flick: callbacks still run, physics does not.
+    if (pc_p2_original_foliage_owned(this)) return false;
+    return Creature::needFlick(target);
+}
+#endif
+
 bool BTeki::ignoreAtari(Creature* target)
 {
+#if defined(PIKI_PC_PORT) && PIKI_PC_PORT
+    if (pc_p2_original_foliage_owned(this) && target && target->isTeki()) return true;
+#endif
 #if defined(PIKI_PC_PORT) && PIKI_PC_PORT
 	if (pc_p2_queen_teki_ignore_atari(this, target)) {
 		return true;
@@ -2335,6 +2368,7 @@ void BTeki::updateLifeGauge()
 void BTeki::refresh(Graphics& gfx)
 {
 #if defined(PIKI_PC_PORT) && PIKI_PC_PORT
+    if (pc_p2_original_foliage_refresh(this, gfx)) return;
     if (pc_p2_original_pelplant_refresh(this, gfx)) return;
 #endif
 	if (mDeadState == 0) {
@@ -2434,6 +2468,7 @@ void BTeki::drawTekiShape(Graphics& gfx)
 	Matrix4f onCamMtx;
 	gfx.mCamera->mLookAtMtx.multiplyTo(mWorldMtx, onCamMtx);
 #if defined(PIKI_PC_PORT) && PIKI_PC_PORT
+    if (pc_p2_original_foliage_draw(this, gfx, onCamMtx)) return;
     if (pc_p2_original_pelplant_draw(this, gfx, onCamMtx)) return;
 #endif
 	gfx.useMatrix(Matrix4f::ident, 0);
@@ -2517,6 +2552,9 @@ void BTeki::drawRange(Graphics& gfx, immut Vector3f& centre, f32 range, immut Co
  */
 void BTeki::refresh2d(Graphics& gfx)
 {
+#if defined(PIKI_PC_PORT) && PIKI_PC_PORT
+    if (pc_p2_original_foliage_owned(this)) return;
+#endif
 #ifdef PIKI_PC_PORT
 	const bool gaugeDrawn = mDeadState == 0 && tekiMgr->hasModel(mTekiType) && isVisible() && !isCreatureFlag(CF_UseAICulling)
 	                     && getTekiOption(TEKIOPT_LifeGaugeVisible);

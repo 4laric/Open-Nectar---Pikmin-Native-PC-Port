@@ -658,6 +658,17 @@ CollInfo::CollInfo(int maxParts)
 	}
 }
 
+#if defined(PIKI_PC_PORT)
+CollInfo::CollInfo(int count, CollPart* parts, u32* ids)
+    : mUseDefaultMaxParts(false), mCollParts(parts), mPartIDs(ids),
+      mPartsCount(0), mMaxParts(count > 0 && count <= 65535 ? count : 0), mShape(nullptr)
+{
+    if (!mMaxParts || !parts || !ids) {
+        ERROR("code-owned CollInfo requires bounded arrays\n");
+    }
+}
+#endif
+
 /**
  * @brief Enables sticking on all parts.
  */
@@ -985,6 +996,16 @@ void CollInfo::initInfo(Shape* shape, CollPart* parts, u32* ids)
 /**
  * @brief PC port (#246): initializes from a code-owned ObjCollInfo list rooted at @p root.
  */
+void CollInfo::initInfoTree(ObjCollInfo* root, CollPart* parts, u32* ids)
+{
+    if (!mUseDefaultMaxParts || !parts || !ids) {
+        ERROR("code-owned collision requires the default embedded arrays\n");
+    }
+    mCollParts = parts;
+    mPartIDs = ids;
+    initInfoTree(root);
+}
+
 void CollInfo::initInfoTree(ObjCollInfo* root)
 {
 	for (int i = 0; i < mMaxParts; i++) {
