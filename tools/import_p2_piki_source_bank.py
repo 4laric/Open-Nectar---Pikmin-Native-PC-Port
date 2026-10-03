@@ -7,11 +7,6 @@ complete source FSM/effects, selected Scene authority or gameplay acceptance.
 import argparse
 from pathlib import Path
 import hashlib,json,struct,math,re
-from experimental.pikmin2_assets import disc_files,archive_files
-from experimental.pikmin2_convert import blocks,decode,write_model,convert
-from experimental.pikmin2_purple import bca_pose
-from experimental.pikmin2_skinning import draw_matrices
-from experimental.pikmin2_rigid import joint_matrices
 MODELS={
  "purple":("piki_p2_black.bmd","d54d31dbf568d476861a3f02b6392eb0d405b0cb75d66101921fd074e9474770",3),
  "white":("piki_p2_white.bmd","a971c6ac48e04a6f99333cacc1f57faf1ebfa13db71c5a31e93c6ce293bb376d",4),
@@ -23,6 +18,11 @@ def require(value):
  if not value:raise ValueError("genuine species bank source/closure mismatch")
 
 def generate(iso,species,out):
+ from experimental.pikmin2_assets import disc_files,archive_files
+ from experimental.pikmin2_convert import blocks,decode,write_model,convert
+ from experimental.pikmin2_purple import bca_pose
+ from experimental.pikmin2_skinning import draw_matrices
+ from experimental.pikmin2_rigid import joint_matrices
  model_name,model_sha,source_species=MODELS[species]
  files=disc_files(iso);key='user/Kando/piki/pikis.szs';offset,size=files[key]
  with iso.open('rb') as f:
