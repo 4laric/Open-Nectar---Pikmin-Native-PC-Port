@@ -1,6 +1,7 @@
 #if defined(PIKI_PC_PORT)
 #include "pc_p2_captive_navi_policy.h"
 #include "pc_p2_original_piki_init.h"
+#include "pc_p2_original_piki_origin.h"
 #endif
 #include "pc_p2_purple.h"
 #include "pc_p2_purple_flight.h"
@@ -13,6 +14,8 @@
 #include "pc_randomizer.h"
 #include "pc_bbft.h"
 #include "Piki.h"
+#include "pc_p2_cave_campaign_party_engine.h"
+#include "pc_p2_original_piki_origin.h"
 #include "pc_p2_kurage_receiver.h"
 #include "AIConstant.h"
 #include "AIPerf.h"
@@ -1165,7 +1168,11 @@ int Piki::graspSituation(Creature** outTarget)
 	{
 		Creature* c    = *iterPellet;
 		Pellet* pellet = static_cast<Pellet*>(c);
-		if (pellet->isAlive() && pellet->getMinFreeSlotIndex() != -1) {
+		if (pellet->isAlive() && pellet->getMinFreeSlotIndex() != -1
+#if defined(PIKI_PC_PORT)
+            && !pc_p2_original_piki_body_wild(this)
+#endif
+        ) {
 			if (roughCull(c, this, getCentreSize() + minTestDist + c->getCentreSize())) {
 				continue;
 			}
@@ -1333,9 +1340,10 @@ void Piki::initColor(int color)
     mP2Purple=false;mP2White=false;mP2Bulbmin=false;mP2AnimationTime=0;
 #if defined(PIKI_PC_PORT)
     const bool originalSourceColor = color >= Blue && color <= Yellow && pc_p2_original_piki_init_held(this);
-    if (!originalSourceColor && !pc_bbft_color_access(color)) color = Red;
+    if (!originalSourceColor && !pc_bbft_color_access(color)
+        && !pc_p2_original_piki_saved_color_held(this,color)) color = Red;
 #else
-    if (!pc_bbft_color_access(color)) color = Red;
+    if (!pc_bbft_color_access(color) && !pc_p2_original_piki_saved_color_held(this,color)) color = Red;
 #endif
 	mColor = color;
 #if defined(PIKI_PC_PORT)
@@ -1398,7 +1406,14 @@ void Piki::endKinoko()
  */
 void Piki::setColor(int color)
 {
+#if defined(PIKI_PC_PORT)
+    // Preserve an already-admitted source body's current pigment, without
+    // permitting a different color or changing any AP access flags.
+    const bool ownSourceColor = color == mColor && pc_p2_original_piki_body_color_access(this,color);
+    if (!ownSourceColor && !pc_bbft_color_access(color) && !pc_p2_original_piki_saved_color_held(this,color)) color = Red;
+#else
     if (!pc_bbft_color_access(color)) color = Red;
+#endif
 	mColor = color;
 	if (isKinoko()) {
 		mDefaultColour = kinokoColors[mColor];
@@ -2304,7 +2319,11 @@ void Piki::collisionCallback(immut CollEvent& event)
 
 	if (distCheck && collider->mObjType == OBJTYPE_Pellet && mMode == PikiMode::FormationMode) {
 		Pellet* pellet = static_cast<Pellet*>(collider);
-		if (pellet->isAlive() && pellet->getMinFreeSlotIndex() != -1) {
+		if (pellet->isAlive() && pellet->getMinFreeSlotIndex() != -1
+#if defined(PIKI_PC_PORT)
+            && !pc_p2_original_piki_body_wild(this)
+#endif
+        ) {
 			ActCrowd* crowd = static_cast<ActCrowd*>(mActiveAction->getCurrAction());
 			if (crowd && crowd->mState == ActCrowd::STATE_Formed) {
 				mActiveAction->abandon(nullptr);
@@ -2533,6 +2552,7 @@ void Piki::init(Navi* navi)
     mP2Spicy.clear();
 	pc_p2_purple_flight_cancel(this);
 	pc_p2_purple_impact_forget(this);
+    pc_p2_cave_campaign_party_forget(this);
 	mHorizontalRotation = 0.0f;
 	mVerticalRotation   = 0.0f;
 	mSRT.s.set(1.0f, 1.0f, 1.0f);

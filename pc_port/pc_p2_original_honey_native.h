@@ -1,5 +1,5 @@
 #pragma once
-#include "pc_p2_original_honey_policy.h"
+#include "pc_p2_original_honey_snapshot.h"
 #include "ObjectMgr.h"
 #include <memory>
 class Piki;class Navi;class Shape;class Graphics;class Creature;struct Matrix4f;
@@ -48,11 +48,6 @@ public:
  virtual bool validateAnimation(Phase,const std::string&,std::string&)=0;
  virtual bool restoreAnimation(Actor&,const std::string&,std::string&)=0;
  virtual void forget(Actor&){} // drop backend tracks before address reuse
-};
-struct Snapshot {
- ChildIdentity identity;HoneyKind kind=HoneyKind::Nectar;Phase phase=Phase::Fall;
- P2EggVec3 position,velocity;bool firstConsumption=false,jiggling=false;
- std::string animation;
 };
 class Manager final:public ObjectMgr {
 public:
