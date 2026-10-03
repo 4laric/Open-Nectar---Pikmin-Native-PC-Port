@@ -3414,3 +3414,7 @@ add_test(NAME p2_original_piki_origin COMMAND p2_original_piki_origin_test)
 pikmin_add_ci_fixture(surface_campaign_sdl tools/p2_surface_campaign_sdl_fixture.cpp)
 
 pikmin_add_ci_fixture(original_piki_physical tools/p2_original_piki_physical_runtime.cpp)
+add_executable(p2_campaign_treasure_test tools/test_p2_campaign_treasure.cpp)
+target_include_directories(p2_campaign_treasure_test PRIVATE pc_port)
+target_compile_options(p2_campaign_treasure_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_campaign_treasure_test COMMAND p2_campaign_treasure_test)
