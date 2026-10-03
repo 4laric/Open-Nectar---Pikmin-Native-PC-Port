@@ -21,8 +21,16 @@
 
 // Campaign SAVE owner supplies selected bootstrap/card authority (#1229).
 std::string pc_randomizer_campaign_treasure_source();
+#if defined(__GNUC__)
+extern void pc_p2_equipment_reconcile_courses() __attribute__((weak));
+#endif
 
 namespace {
+void reconcileEquipment() {
+#if defined(__GNUC__)
+    if(pc_p2_equipment_reconcile_courses)pc_p2_equipment_reconcile_courses();
+#endif
+}
 struct Bound {
     p2treasureplacements::Row row;
     const p2treasure::Entry* entry=nullptr;
@@ -134,13 +142,13 @@ void pc_p2_campaign_treasure_setup() {
         }
         actors.push_back(actor);
     }
-    if(actors.empty()){ready=true;return;}
+    if(actors.empty()){ready=true;reconcileEquipment();return;}
     std::string bytes;
     if(!p2treasureplacements::bounded("assets/dataDir/courses/pikmin2treasures/pod.mod",32u*1024u*1024u,bytes)
        ||p2treasureplacements::hash(bytes)!=config.podHash)reject("original receiver model mismatch");
     const int heap=gsys->setHeap(SYSHEAP_App);
     podShape=gameflow.loadShape("courses/pikmin2treasures/pod.mod",true);if(!podShape)reject("receiver shape load failed");textures(podShape);
-    gsys->setHeap(heap);ready=true;
+    gsys->setHeap(heap);ready=true;reconcileEquipment();
     std::printf("P2_TREASURE_READY stage=%d physical_sources=%zu placement=%s\n",stage,actors.size(),config.source.c_str());
 }
 Suckable* pc_p2_campaign_treasure_goal(Pellet* pellet) {
@@ -152,6 +160,7 @@ bool pc_p2_campaign_treasure_deliver(Pellet* pellet) {
     const int partsBefore=playerState->getCurrParts();
     const auto credit=p2treasurestate::state.credit(catalog,actor->row.id,actor->entry->value);
     if(credit==p2treasurestate::Credit::Invalid||playerState->getCurrParts()!=partsBefore)reject("receipt refused or P1 repairs changed");
+    if(credit==p2treasurestate::Credit::Added)reconcileEquipment();
     std::printf("P2_TREASURE_RECEIPT id=%s value=%d new=%d stage=%d cargo=%u receiver=%u native_suction_completed=1 seeds=0\n",
         actor->row.id.c_str(),actor->entry->value,int(credit==p2treasurestate::Credit::Added),stage,actor->row.cargo,actor->row.receiver);
     std::fflush(stdout);return true;
