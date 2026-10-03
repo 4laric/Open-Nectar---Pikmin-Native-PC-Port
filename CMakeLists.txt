@@ -356,6 +356,8 @@ set(PC_PORT_SOURCES
     pc_port/pc_p2_white_poison.cpp
     pc_port/pc_p2_cave.cpp
     pc_port/pc_p2_cave_visible.cpp
+    pc_port/pc_p2_original_cave.cpp
+    pc_port/pc_p2_original_cave_native.cpp
     pc_port/pc_p2_cave_campaign_cache_engine.cpp
     pc_port/pc_p2_cave_dialog_window.cpp
     pc_port/pc_p2_cave_generate.cpp
@@ -1399,6 +1401,10 @@ add_test(NAME p2_dweevil_death_clip_test COMMAND p2_dweevil_death_clip_test)
 add_executable(p2_cave_visible_policy_test pc_port/pc_p2_cave_visible_policy_test.cpp)
 target_include_directories(p2_cave_visible_policy_test PRIVATE pc_port)
 add_test(NAME p2_cave_visible_policy_test COMMAND p2_cave_visible_policy_test)
+add_executable(p2_original_cave_test tools/p2_original_cave_test.cpp pc_port/pc_p2_original_cave.cpp)
+target_include_directories(p2_original_cave_test PRIVATE pc_port)
+target_compile_options(p2_original_cave_test PRIVATE -UNDEBUG)
+add_test(NAME p2_original_cave_test COMMAND p2_original_cave_test)
 
 # Lane 35 cave unit-pool partition + phased trunk growth (#474). Header-only
 # engine-free policy; no shared generator source is claimed or ported here.
