@@ -19,6 +19,7 @@
 #include "pc_p2_sprays.h"
 #include "pc_p2_cave_campaign_party_engine.h"
 #include "pc_p2_cave_campaign_cache_engine.h"
+#include "pc_p2_cave_campaign_cache.h"
 #include "pc_randomizer.h"
 #include "MemoryCard.h"
 #include "pc_p2_original_resource_state.h"
