@@ -85,7 +85,7 @@ public:
  }
  void refresh(Graphics& g)override{ItemCreature::refresh(g);}
  void refresh2d(Graphics&)override{}
- void doKill()override{if(node){node->del();node=nullptr;}mCollInfo=nullptr;bodies.erase(std::remove(bodies.begin(),bodies.end(),this),bodies.end());pendingRetirement.erase(std::remove(pendingRetirement.begin(),pendingRetirement.end(),this),pendingRetirement.end());if(mSeContext)mSeContext->releaseEvent();Creature::doKill();}
+ void doKill()override{if(node){node->del();node=nullptr;}mCollInfo=nullptr;bodies.erase(std::remove(bodies.begin(),bodies.end(),this),bodies.end());pendingRetirement.erase(std::remove(pendingRetirement.begin(),pendingRetirement.end(),this),pendingRetirement.end());if(mSeContext)mSeContext->releaseEvent();mLifeGauge.countOff();}
  void doSave(RandomAccessStream& s)override{std::vector<std::uint8_t> bytes;std::string e;if(!barrelExport(row(uid),state,deadClip.duration,bytes,e)||s.getPending()<int(bytes.size()))die("barrel creature cache invalid/full");for(auto v:bytes)s.writeByte(v);}
  void doLoad(RandomAccessStream& s)override{std::string e;BarrelState next;if(!readState(s,next,e))die(e.c_str());restore(next);}
  bool readState(RandomAccessStream& s,BarrelState& out,std::string& e){if(s.getPending()<112){e="truncated barrel cache";return false;}std::vector<std::uint8_t> bytes(112);for(auto& v:bytes)v=s.readByte();return barrelImport(row(uid),bytes,deadClip.duration,out,e);}
