@@ -15,6 +15,7 @@
 #include "FlowController.h"
 #include "MoviePlayer.h"
 #include "Navi.h"
+#include "pc_p2_purple_impact_policy.h"
 #include "Kontroller.h"
 #include "NaviMgr.h"
 #include "NaviState.h"
@@ -101,6 +102,7 @@ struct CrowdObserver:ActCrowd {
 SDL_Joystick* pad=nullptr;
 bool human(){return std::getenv("P2_PURPLE_KOCHAPPY_HUMAN")!=nullptr;}
 bool recoveryOnly(){const char* value=std::getenv("P2_PURPLE_KOCHAPPY_RECOVERY_ONLY");return value&&!std::strcmp(value,"1");}
+bool nearLayout(){const char* value=std::getenv("P2_PURPLE_KOCHAPPY_NEAR_LAYOUT");return value&&!std::strcmp(value,"1");}
 void require(bool yes,const char* message){if(!yes){std::printf("FAIL P2_PURPLE_KOCHAPPY %s\n",message);std::fflush(nullptr);std::_Exit(1);}}
 float distance(const Vector3f& a,const Vector3f& b){float x=a.x-b.x,z=a.z-b.z;return std::sqrt(x*x+z*z);}
 void input(unsigned keys=0,int x=0,int y=0,int cx=0,int cy=0){
@@ -445,6 +447,36 @@ void receiverRouteClearance(Navi* n,int target){
  // point iswithin.125 of a checked sample. Inflate by.125 to reject entire line.
  for(int j=0;j<=steps;++j)receiverCheckSphere(rvadd(center,rvscale(rvsub(guide,center),double(j)/steps)),radius+.10+.125);
 }
+// Explicit prebirth fixture layout. These values validate staging and guide
+// ordinary input; they never assign a live actor position or simulation state.
+struct NearLayoutPlan {
+ Vector3f captain,violet,enemy;float floor=0;
+ void load(){
+  std::ifstream in("p2-purple-near-layout.txt");std::string header,extra;
+  require(bool(in>>header>>captain.x>>captain.z>>violet.x>>violet.z>>enemy.x>>enemy.z>>floor)
+   &&header=="P2_PURPLE_KOCHAPPY_NEAR_LAYOUT_1"&&!(in>>extra),"strict prebirth near layout descriptor");
+  require(std::isfinite(captain.x)&&std::isfinite(captain.z)&&std::isfinite(violet.x)&&std::isfinite(violet.z)
+   &&std::isfinite(enemy.x)&&std::isfinite(enemy.z)&&std::isfinite(floor),"finite prebirth near layout");
+ }
+ void validate(Navi* n,Pom* flower,Teki* receiver){
+  require(distance(n->mSRT.t,captain)<3&&distance(flower->mSRT.t,violet)<3&&distance(receiver->mSRT.t,enemy)<3,"near layout actual initialized actor positions");
+  require(distance(captain,enemy)>240&&distance(captain,violet)>50&&distance(captain,violet)<90,"near layout initial receiver separation and native throw range");
+  require(std::fabs(mapMgr->getMinY(captain.x,captain.z,true)-floor)<.1f
+   &&std::fabs(mapMgr->getMinY(violet.x,violet.z,true)-floor)<.1f
+   &&std::fabs(mapMgr->getMinY(enemy.x,enemy.z,true)-floor)<.1f,"near layout actual flat source floor");
+ }
+ void clearance(Navi* n,const Vector3f& target){
+  receiverWallCache();const double radius=n->mCollisionRadius;
+  require(std::isfinite(radius)&&std::fabs(radius-8.5)<.001,"near route actual collision radius");
+  const double y=mapMgr->getMinY(target.x,target.z,true);
+  require(std::isfinite(y)&&std::fabs(y-floor)<.1,"near ordinary route stays on staged source floor");
+  const double offset=n->isCreatureFlag(CF_EnableGroundOffset)?n->mGroundOffset:0.;
+  RouteVec a={n->mSRT.t.x,n->mSRT.t.y-offset+radius,n->mSRT.t.z},b={target.x,y+radius,target.z};
+  double length=std::sqrt(rvdot(rvsub(b,a),rvsub(b,a)));require(std::isfinite(length)&&length<512,"near route bounded ordinary guide");
+  int steps=std::max(1,int(std::ceil(length/.25)));
+  for(int j=0;j<=steps;++j)receiverCheckSphere(rvadd(a,rvscale(rvsub(b,a),double(j)/steps)),radius+.10+.125);
+ }
+};
 // INCLINE_OBSERVER90_BEGIN
 // Fixture-only post-idle observation. Ground is reset by Creature::move;
 // collision latch is reset by Creature::updateAI. Normal/model/wall pointers
@@ -496,8 +528,10 @@ class PurpleKochappyApp:public PlugPikiApp {
  int frame=0,age=0,phase=0,start=0,settled=0,throwCount=0;
  int receiverWaypoint=0;
  bool gatherDiverted=false;
+ bool nearThrowStarted=false,nearThrowReleased=false;int nearThrowAge=0;
  PcKochappyReentryProgress reentryProgress;
  PcKochappyRouteCatchup routeCatchup;
+ NearLayoutPlan near;
  bool seenCaptain=false,wasActive=false,sawFit=false,sawPause=false,recovered=false,deathDuringStun=false;
  Teki* enemy=nullptr;Pom* violet=nullptr;Piki* purple=nullptr;
  PcKochappyFsmSnapshot pausedFsm;
@@ -636,6 +670,7 @@ public:
    require(enemy->mGenerator&&violet->mGenerator,"source actor generator identities missing");
    enemyGenerator=enemy->mGenerator;violetGenerator=violet->mGenerator;violetGeneratorId=unsigned(violetGenerator->_70);
    require(std::fabs(enemy->mHealth-200)<.01f,"sourceRedhealth200");
+   if(nearLayout()){near.load();near.validate(n,violet,enemy);std::puts("P2_PURPLE_KOCHAPPY_NEAR_LAYOUT prebirth_fixture_positions=1 original_course_positions=0 actor_writes=0");}
    std::puts("P2_PURPLE_KOCHAPPY_READY engineering_preview=1 startingRed=20 startingPurple=0 actor_writes=0 tutorial_AP_gate=OPEN");std::fflush(nullptr);
    if(std::getenv("P2_PURPLE_KOCHAPPY_READY_ONLY"))std::_Exit(0);
    phase=1;start=age;
@@ -688,6 +723,7 @@ public:
     std::fflush(nullptr);
    }
    if(n->getPlatePikis()==20&&age-start>30){
+    if(!nearLayout()){
     if(gatherDiverted){
      require(reentryProgress.mayBegin(receiverWaypoint),"route repeated gather diversion without forward progress or budget exhausted");
      require(receiverWaypoint<=ReceiverRouteCount,"route reentry history exceeds original route");
@@ -721,7 +757,8 @@ public:
      receiverObservedClearance(n,receiverWaypoint,age);
      point(n,goal,true,KeyConfig::_instance->mSetCursorKey.mBind,ReceiverRouteReach);return result;
     }
-    if(distance(n->mSRT.t,violet->mSRT.t)>approach){point(n,violet->mSRT.t,true,KeyConfig::_instance->mSetCursorKey.mBind);return result;}
+    } // Historical source terrain route remains the default.
+    if(distance(n->mSRT.t,violet->mSRT.t)>approach){if(nearLayout())near.clearance(n,violet->mSRT.t);point(n,violet->mSRT.t,true,KeyConfig::_instance->mSetCursorKey.mBind,nearLayout()?approach:15.f);return result;}
     std::printf("P2_PURPLE_KOCHAPPY_APPROACH loaded_cursor_radius=%.4f captain_bud_xz=%.4f target_distance=%.4f SDL_walk=1\n",radius,distance(n->mSRT.t,violet->mSRT.t),approach);
     phase=2;start=age;
    }
@@ -754,15 +791,31 @@ public:
    PikiHeadItem* head=nullptr;Iterator hs(itemMgr->getPikiHeadMgr());CI_LOOP(hs){PikiHeadItem* h=static_cast<PikiHeadItem*>(*hs);if(h->isAlive()&&h->mP2Purple)head=h;}
    if(!head&&purples==1){input();require(age-start<600,"ordinaryPurple birth/formation timeout");return result;}
    require(head,"ordinaryPurple sprout disappeared");
-   if(distance(n->mSRT.t,head->mSRT.t)>20)point(n,head->mSRT.t,true);
-   else input(head->canPullout()?KeyConfig::_instance->mExtractKey.mBind:0);
+   if(nearLayout()){
+    const float range=C_NAVI_PARM(n,mPluckDistanceOutsideOnyon);
+    require(std::isfinite(range)&&range>2&&range<30,"loaded native outside-Onion pluck range");
+    if(age%30==0){
+     std::printf("P2_PURPLE_KOCHAPPY_PLUCK_OBSERVE age=%d elapsed=%d captain_state=%d captain=%.4f,%.4f,%.4f head=%.4f,%.4f,%.4f head_state=%d pullable=%d distance=%.4f range=%.4f height=%.4f rough_culled=%d actual_A=%d velocity=%.4f,%.4f,%.4f actor_writes=0\n",age,age-start,n->getCurrState()->getID(),n->mSRT.t.x,n->mSRT.t.y,n->mSRT.t.z,head->mSRT.t.x,head->mSRT.t.y,head->mSRT.t.z,head->getCurrState()->getID(),int(head->canPullout()),distance(n->mSRT.t,head->mSRT.t),range,std::fabs(n->mSRT.t.y-head->mSRT.t.y),int(roughCull(n,head,range)),int(SDL_JoystickGetButton(pad,SDL_CONTROLLER_BUTTON_A)),n->mVelocity.x,n->mVelocity.y,n->mVelocity.z);std::fflush(nullptr);
+    }
+    if(distance(n->mSRT.t,head->mSRT.t)>=range-.25f){
+     const float dx=head->mSRT.t.x-violet->mSRT.t.x,dz=head->mSRT.t.z-violet->mSRT.t.z;
+     const float span=std::sqrt(dx*dx+dz*dz);require(span>1&&std::isfinite(span),"actual natural sprout separation");
+     const Vector3f goal(head->mSRT.t.x+dx/span*(range-1),head->mSRT.t.y,head->mSRT.t.z+dz/span*(range-1));
+     near.clearance(n,goal);point(n,goal,true,0,.5f);
+    // Native Walk handles Extract through keyClick; release between real
+    // attempts so eligibility/state transitions cannot consume the only edge.
+    }else input(head->canPullout()&&(age-start)%24<12?KeyConfig::_instance->mExtractKey.mBind:0);
+   }else{
+    if(distance(n->mSRT.t,head->mSRT.t)>20)point(n,head->mSRT.t,true);
+    else input(head->canPullout()?KeyConfig::_instance->mExtractKey.mBind:0);
+   }
    require(age-start<600,"ordinary approach/pluck timeout");return result;
   }
   require(purple&&purple->isAlive(),"naturalPurple lifetime lost");
   if(phase==4){
    if(n->getPlatePikis()<20){input(KeyConfig::_instance->mSetCursorKey.mBind);return result;}
-   if(distance(n->mSRT.t,enemy->mSRT.t)>120){point(n,enemy->mSRT.t,true);return result;}
-   phase=5;start=age;input();
+   if(distance(n->mSRT.t,enemy->mSRT.t)>120){if(nearLayout())near.clearance(n,enemy->mSRT.t);point(n,enemy->mSRT.t,true,0,nearLayout()?115.f:15.f);return result;}
+   phase=5;start=age;input();if(nearLayout())return result;
   }
   const bool active=pc_p2_kochappy_stun_active(enemy);
   const auto fsm=pc_p2_kochappy_fsm_observe(enemy);
@@ -783,10 +836,33 @@ public:
    require(!fsm.stunPaused&&!fsm.terminal&&enemy->mHealth>0,"natural recovery entered terminal state or retained pause");
    std::printf("P2_PURPLE_KOCHAPPY_RECOVERY elapsed=%.3f counter=%.6f fit=%d\n",activeSeconds,counter,int(sawFit));
    if(sawFit){require(activeSeconds>=10,"RedFit recovered before source10s");phase=6;start=age;lastCounter=counter;input();}
+   else if(nearLayout()){
+    // Source Fit is probabilistic. A real bounce-only recovery may be
+    // followed by another ordinary throw; never alter the roll or duration.
+    std::puts("P2_PURPLE_KOCHAPPY_BOUNCE_ONLY ordinary_rethrow=1 source_roll_unchanged=1");
+    nearThrowStarted=false;nearThrowReleased=false;nearThrowAge=0;start=age;input();
+   }
   }
   if(phase==7&&wasActive&&!active&&enemy->mHealth<=0){require(fsm.terminal&&!fsm.stunPaused,"terminal interruption missing ownFSM terminal/unpause");deathDuringStun=true;}
   wasActive=active;
   if(phase==5&&!active){
+   if(nearLayout()){
+    Vector3f aim=enemy->mSRT.t;aim.x+=20;
+    Piki* next=nullptr;Iterator current(pikiMgr);CI_LOOP(current){Piki* p=static_cast<Piki*>(*current);if(p==n->mNextThrowPiki&&p->isAlive())next=p;}
+    if(age%15==0)std::printf("P2_PURPLE_KOCHAPPY_SELECTION_OBSERVE age=%d navi_state=%d next_class=%d next_state=%d purple_state=%d preferred=%d cursor_error=%.4f started=%d released=%d ordinary_input=1 actor_writes=0\n",age,n->getCurrState()->getID(),next?pc_throw_selection_class(next):-1,next?next->getState():-1,purple->getState(),pc_preferred_throw_color_for(n),distance(n->mCursorWorldPos,aim),int(nearThrowStarted),int(nearThrowReleased));
+    if(nearThrowReleased){input(KeyConfig::_instance->mSetCursorKey.mBind);require(age-start<450,"ordinary Purple landing/impact not observed");return result;}
+    if(!nearThrowStarted){
+     if(n->getCurrState()->getID()!=NAVISTATE_Walk){input();require(age-start<90,"ordinary Gather release did not reach Walk");return result;}
+     nearThrowStarted=true;
+    }
+    ++nearThrowAge;
+    if(next==purple&&purple->getState()==PIKISTATE_Hanged&&distance(n->mCursorWorldPos,enemy->mSRT.t)<p2purpleimpact::EarthquakeRadius){
+     require(++throwCount<=8,"bounded ordinary Purple throw attempts exhausted");nearThrowReleased=true;input();std::printf("P2_PURPLE_KOCHAPPY_PURPLE_RELEASE age=%d observed_Hanged=1 ordinary_A_release=1 selection_setter=0 actor_writes=0\n",age);std::fflush(nullptr);return result;
+    }
+    const bool cycle=next&&next!=purple&&nearThrowAge%12==0;
+    point(n,aim,false,KeyConfig::_instance->mThrowKey.mBind|(cycle?KBBTN_DPAD_RIGHT:0));
+    require(nearThrowAge<150,"ordinary held Purple selection timeout");return result;
+   }
    const int cycle=(age-start)%150;
    // Cycle once while holding A: the native selection path chooses Purple.
    Vector3f aim=enemy->mSRT.t;aim.x+=40; // ordinary cursor target near quake radius, no actor relocation
@@ -819,6 +895,8 @@ public:
 };
 }
 int main(int argc,char**argv){
+ const char* near=std::getenv("P2_PURPLE_KOCHAPPY_NEAR_LAYOUT");
+ require(!near||(!std::strcmp(near,"1")&&recoveryOnly()&&!human()),"near layout requires explicit ordinary recovery opt-in");
  const char* recovery=std::getenv("P2_PURPLE_KOCHAPPY_RECOVERY_ONLY");
  require(!recovery||(!std::strcmp(recovery,"1")&&!human()),"recovery-only requires explicit ordinary automated opt-in");
  require(std::getenv("PIKMIN_P2_TEST_START_DAY")&&!std::strcmp(std::getenv("PIKMIN_P2_TEST_START_DAY"),"5"),"inherit existing test-only actual day5 bootstrap");

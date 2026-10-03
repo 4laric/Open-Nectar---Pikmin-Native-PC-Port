@@ -571,6 +571,7 @@ class PurpleCombatApp : public PlugPikiApp {
     unsigned observedSaveActions=0;
     int sdlPhase=0,sdlStableAim=0,sdlThrowTicks=0;
     bool sdlStarted=false,sdlThrowObserved=false,sdlGeometryLogged=false;
+    bool sdlRecruitComplete=false;
     bool sdlAimReleasePending=false;
     Piki* sdlTracePiki=nullptr;
     int sdlTracePikiState=-1;
@@ -1178,9 +1179,27 @@ class PurpleCombatApp : public PlugPikiApp {
         const float anchorError=actual.fixed?pluckLength(pluckSub(predicted.anchor,actual.anchor)):0.f;
         std::printf("P2_PURPLE_PLUCK_PULSE_OBS tick=%d frame=%d dt=%.9f position_error=%.6f velocity_error=%.6f target_error=%.6f anchor_error=%.6f fixed=%d expected_fixed=%d command=%.6f,%.6f actor_writes=0\n",
             ticks,sdlPulseFrames,dt,positionError,velocityError,targetError,anchorError,int(actual.fixed),int(predicted.fixed),sdlPulseCommand.x,sdlPulseCommand.z);
-        // Deviations are diagnostic failures, never synthetic corrections.
-        require(positionError<.1f && velocityError<1.f && targetError<.5f && anchorError<.1f
-            && actual.fixed==predicted.fixed,"native pulse deviated from qualified movement forecast");
+        // Native map/contact resolution is allowed to disagree with the fixture
+        // forecast. Neutralize ordinary input and replan from the observed body;
+        // the prediction is never an acceptance oracle or a synthetic correction.
+        const bool forecastMatches=positionError<.1f && velocityError<1.f && targetError<.5f && anchorError<.1f
+            && actual.fixed==predicted.fixed;
+        const char* observedController=std::getenv("P2_PURPLE_SDL_OBSERVED_REPLAN");
+        if(!forecastMatches) {
+            require(observedController && std::strcmp(observedController,"1")==0,
+                "native pulse deviated from qualified movement forecast");
+            std::printf("P2_PURPLE_PLUCK_FORECAST_CONTACT tick=%d collision=%u changed_velocity=%u "
+                "ground=%p previous=%p model=%p platform=%p wall=%p wall_object=%p "
+                "actual_position=%.9g,%.9g actual_velocity=%.9g,%.9g predicted_position=%.9g,%.9g "
+                "predicted_velocity=%.9g,%.9g forecast_accepted=0 SDL_neutral=1 actor_writes=0\n",
+                ticks,unsigned(n->mCollisionOccurred),unsigned(n->mHasCollChangedVelocity),
+                static_cast<void*>(n->mGroundTriangle),static_cast<void*>(n->mPreviousTriangle),
+                static_cast<void*>(n->mCurrCollisionModel),static_cast<void*>(n->mCollPlatform),
+                static_cast<const void*>(n->mWallPlane),static_cast<void*>(n->mWallCollObj),
+                actual.position.x,actual.position.z,actual.velocity.x,actual.velocity.z,
+                predicted.position.x,predicted.position.z,predicted.velocity.x,predicted.velocity.z);
+            pluckRoute.clear();
+        }
         require(sdlNeutralEnvelopeClear(actual,tau),"native pulse neutral envelope crosses live collision bounds");
         const float neutralStep=std::min(1.f/30.f,tau*.5f),neutralMaximum=neutralStep*(1.f-neutralStep/tau);
         const bool pulling=actual.fixed&&pluckLength(pluckSub(actual.anchor,actual.position))>.00001f;
@@ -1297,7 +1316,15 @@ class PurpleCombatApp : public PlugPikiApp {
         const float gx=goal.x-n->mSRT.t.x,gz=goal.z-n->mSRT.t.z;
         require(std::isfinite(gx)&&std::isfinite(gz)&&std::hypot(gx,gz)>.01f
             &&std::fabs(n->mCursorPosition.y)<.001f,"cursor probe actual route/head goal invalid");
-        const float desired=std::atan2(gx,gz),cursorSpeed=C_NAVI_PARM(n,mCursorMoveSpeed),cap=C_NAVI_PARM(n,mCursorMaxRadius);
+        float desired=std::atan2(gx,gz);
+        const char* sideProbe=std::getenv("P2_PURPLE_SDL_POSE_SIDE_PROBE");
+        if(sideProbe && std::strcmp(sideProbe,"1")==0) {
+            // If the head-facing pose has no collision-clear pluck point,
+            // sample both side-facing poses through ordinary cursor input.
+            // The same finite budget and every live pose/collision gate remain.
+            desired+=sdlPoseProbeBudget.frames()<=32?1.570796327f:-1.570796327f;
+        }
+        const float cursorSpeed=C_NAVI_PARM(n,mCursorMoveSpeed),cap=C_NAVI_PARM(n,mCursorMaxRadius);
         int selectedX=0,selectedY=0;bool found=false;float bestError=std::numeric_limits<float>::infinity();
         for(int bearing=0;bearing<144;++bearing)for(int power=1;power<=74;++power) {
             const float rawAngle=bearing*6.283185307f/144.f;
@@ -1350,6 +1377,48 @@ class PurpleCombatApp : public PlugPikiApp {
             refreshPluckObstacles(n,violet);
             pluckTrace("motion_snapshot",n,head,violet);
             require(pluckSegmentClear(n->mSRT.t,n->mSRT.t),"SDL pluck captain starts inside live collision bounds");
+            const char* observed=std::getenv("P2_PURPLE_SDL_OBSERVED_REPLAN");
+            if(observed && std::strcmp(observed,"1")==0) {
+                // The native controller resolves map contacts and fixed-position
+                // springs. Steer from the measured pose rather than requiring
+                // equality to the fixture's integration or a motionless anchor.
+                if(!head->canPullout()) {acquisitionInput();return false;}
+                if(distance<pluckRange-.25f) {
+                    require(std::isfinite(head->mSRT.t.y)&&std::fabs(head->mSRT.t.y-n->mSRT.t.y)<25.f,
+                        "native pluck height gate");
+                    acquisitionInput(KBBTN_A);++pluckAttempts;
+                    milestone("native_sprout_pluck_requested",ticks);
+                    std::printf("P2_PURPLE_PLUCK_ATTEMPT attempt=%d captain_position_staged=0 native_input=1 forced_pluck_state=0 distance=%.3f observed_controller=1\n",pluckAttempts,distance);
+                    return true;
+                }
+                if(sdlPoseProbeActive) {
+                    sdlPoseProbeClear(n,violet);
+                    acquisitionInput();sdlPoseProbeActive=false;sdlPoseProbeYawObserved=false;
+                    pluckRoute.clear();return false;
+                }
+                if(pluckRoute.empty() || routedHead!=head || planarDistance(routedHeadPosition,head->mSRT.t)>2.f
+                    || !pluckSegmentClear(n->mSRT.t,pluckRoute[pluckRouteIndex])) {
+                    if(!planPluckRoute(n,head,violet,pluckRange)) {
+                        acquisitionInput();sdlProbePose(n,head,violet,pluckTau);return false;
+                    }
+                }
+                while(pluckRouteIndex+1<pluckRoute.size() && planarDistance(n->mSRT.t,pluckRoute[pluckRouteIndex])<4.f
+                    && pluckSegmentClear(n->mSRT.t,pluckRoute[pluckRouteIndex+1]))++pluckRouteIndex;
+                const Vector3f& target=pluckRoute[pluckRouteIndex];
+                const float tx=target.x-n->mSRT.t.x,tz=target.z-n->mSRT.t.z,d=std::hypot(tx,tz);
+                if(d<.5f) {acquisitionInput();pluckRoute.clear();return false;}
+                require(n->controlCamera()!=nullptr,"observed approach camera missing");
+                require(sdlPulseTerrainClear(sdlPoint(n->mSRT.t),sdlPoint(target),n->mSRT.t.y,.05f),
+                    "observed approach live terrain changed");
+                const Vector3f& axis=n->controlCamera()->mViewXAxis;
+                const float minimum=std::ceil(74.f*(cursorBand+.05f));
+                const float power=std::max(minimum,std::min(40.f,d*2.f));
+                acquisitionInput(0,int(std::lround(power*(tx*axis.x+tz*axis.z)/d)),
+                    int(std::lround(power*(tx*axis.z-tz*axis.x)/d)));
+                std::printf("P2_PURPLE_PLUCK_OBSERVED_STEER tick=%d distance=%.6f waypoint_distance=%.6f speed=%.6f power=%.6f collision=%u changed_velocity=%u actor_writes=0\n",
+                    ticks,distance,d,pluckSpeed,power,unsigned(n->mCollisionOccurred),unsigned(n->mHasCollChangedVelocity));
+                return false;
+            }
             if(sdlPoseProbeActive) {
                 sdlPoseProbeClear(n,violet);
                 if(sdlCancelOwnedCollision(n,pluckTau)) {
@@ -1785,6 +1854,38 @@ class PurpleCombatApp : public PlugPikiApp {
         require(sdlCursorRangeFeasible(minimum,radius,speed),"SDL loaded cursor range cannot fit approach band");
         require(sdlFinitePoint(n->mSRT.t) && sdlFinitePoint(violet->mSRT.t)
             && sdlFinitePoint(n->mCursorWorldPos) && std::isfinite(distance) && distance>.01f,"SDL invalid live geometry");
+        // Optional ordinary-input prerequisite for private layouts where walking
+        // straight to the flower leaves the newly withdrawn Reds at the Onion.
+        // Aim the native cursor at a real Red, then whistle; readiness is observed
+        // from the genuine Formation state, never assigned by this fixture.
+        const char* recruit=std::getenv("P2_PURPLE_SDL_RECRUIT_BEFORE_APPROACH");
+        if(sdlPhase==0 && !sdlRecruitComplete && recruit && std::strcmp(recruit,"1")==0) {
+            if(ready>0) {
+                sdlRecruitComplete=true;ordinaryInput();
+                std::printf("P2_PURPLE_SDL_RECRUIT_PASS ready=%d ordinary_B_whistle=1 actor_state_writes=0\n",ready);
+                return nullptr;
+            }
+            Piki* nearest=nullptr;float nearestDistance=1.e30f;
+            Iterator recruits(pikiMgr);CI_LOOP(recruits) {
+                Piki* p=static_cast<Piki*>(*recruits);
+                if(!p || !p->isAlive() || p->mColor!=Red || p->mP2Purple || p->mP2White || p->isStickTo())continue;
+                const float distance=planarDistance(n->mSRT.t,p->mSRT.t);
+                if(distance<nearestDistance){nearest=p;nearestDistance=distance;}
+            }
+            require(nearest && nearestDistance>.01f,"ordinary recruit Red missing");
+            const float aimDistance=std::min(nearestDistance,radius*.95f);
+            const float aimX=n->mSRT.t.x+(nearest->mSRT.t.x-n->mSRT.t.x)*aimDistance/nearestDistance;
+            const float aimZ=n->mSRT.t.z+(nearest->mSRT.t.z-n->mSRT.t.z)*aimDistance/nearestDistance;
+            const float errorX=aimX-n->mCursorWorldPos.x,errorZ=aimZ-n->mCursorWorldPos.z;
+            const float tolerance=std::max(5.f,C_NAVI_PARM(n,mCursorMoveSpeed)*gsys->getFrameTime()*.75f);
+            if(ticks%30==0)std::printf("P2_PURPLE_SDL_RECRUIT ready=0 nearest=%.3f state=%d mode=%d cursor_error=%.3f actor_state_writes=0\n",
+                nearestDistance,nearest->getState(),int(nearest->mMode),std::sqrt(errorX*errorX+errorZ*errorZ));
+            if(std::sqrt(errorX*errorX+errorZ*errorZ)>tolerance) {
+                if(sdlAimReleasePending){ordinaryInput();sdlAimReleasePending=false;}
+                else{sdlDirection(n,errorX,errorZ,20);sdlAimReleasePending=true;}
+            } else {ordinaryInput(KBBTN_B);sdlAimReleasePending=false;}
+            return nullptr;
+        }
         if(sdlPhase==0 || sdlPhase==1) {
             require(n->mCollInfo && n->mCollInfo->hasInfo() && violet->mCollInfo && violet->mCollInfo->hasInfo(),"SDL live collision bounds missing");
             sdlValidateParts(n->mCollInfo->getBoundingSphere());
