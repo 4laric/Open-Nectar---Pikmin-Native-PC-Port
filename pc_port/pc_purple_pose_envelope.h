@@ -51,6 +51,17 @@ private:
  std::array<Part,32> parts_{};unsigned count_=0;std::uintptr_t owner_=0;bool failed_=false;
 };
 
+// Native classic cursor displacement and source tangent projection at its cap.
+inline bool pcPurpleCursorStep(float x,float z,float dx,float dz,float speed,float dt,float cap,float& nextX,float& nextZ){
+ if(!std::isfinite(x)||!std::isfinite(z)||!std::isfinite(dx)||!std::isfinite(dz)||std::fabs(std::hypot(dx,dz)-1.f)>.001f
+  ||!std::isfinite(speed)||speed<0||!std::isfinite(dt)||dt<=0||dt>1.f/30.f||!std::isfinite(cap)||cap<=0)return false;
+ float vx=dx*speed,vz=dz*speed;nextX=x+vx*dt;nextZ=z+vz*dt;
+ const float length=std::hypot(nextX,nextZ);if(!std::isfinite(length))return false;
+ if(length>=cap){if(length<=0)return false;const float ux=nextX/length,uz=nextZ/length,dot=ux*vx+uz*vz;
+  vx-=dot*ux;vz-=dot*uz;nextX=x+vx*dt;nextZ=z+vz*dt;}
+ return std::isfinite(nextX)&&std::isfinite(nextZ)&&std::hypot(nextX,nextZ)>0;
+}
+
 // navi.cpp movement-neutral classic cursor: displacement <=speed*dt,
 // then yaw +=0.2*shortest(cursor angle-yaw). Tangent clipping is a projection.
 inline bool pcPurpleCursorYawBound(float yaw,float cursorX,float cursorZ,float speed,float dt,float& halfArc){
