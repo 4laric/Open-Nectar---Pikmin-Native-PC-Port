@@ -234,5 +234,19 @@ int main() {
     }
     check(!PcPurplePoseEnvelope::projectedRadius(*captured,14,6,reserve,-.1f),"negative arc refuses");
     check(!PcPurplePoseEnvelope::projectedRadius(*captured,14,6,reserve,INFINITY),"nonfinite arc refuses");
+    float nextX=0,nextZ=0;
+    check(pcPurpleCursorStep(0,100,0,1,100,1.f/30.f,100,nextX,nextZ)&&nextX==0&&std::fabs(nextZ-100)<.00001f,"native radial cursor cap removes outward step");
+    check(pcPurpleCursorStep(0,100,1,0,100,1.f/30.f,100,nextX,nextZ)&&nextX>0&&nextZ<100,"native tangential cursor projection retained");
+    check(pcPurpleCursorStep(0,50,0,1,100,1.f/30.f,100,nextX,nextZ)&&std::fabs(nextZ-53.333333f)<.0001f,"below-cap native cursor step");
+    check(!pcPurpleCursorStep(0,100,2,0,100,1.f/30.f,100,nextX,nextZ),"nonunit cursor direction refuses");
+    check(!pcPurpleCursorStep(0,100,1,0,100,.04f,100,nextX,nextZ),"cursor timing outside model refuses");
+    check(!pcPurpleCursorStep(0,100,1,0,INFINITY,1.f/30.f,100,nextX,nextZ),"invalid cursor speed refuses");
+    PcPurpleSaveBudget engineeringBudget(true);
+    check(engineeringBudget.acquisitionLimit()==90&&engineeringBudget.wholeLimit()==150,"explicit engineering90 has bounded total150");
+    check(engineeringBudget.observe(89)&&engineeringBudget.acquired(89,true)&&engineeringBudget.observe(148.9),"late engineering acquisition gets only original save60");
+    check(!engineeringBudget.observe(149),"engineering post-save hard60 refuses");
+    PcPurpleSaveBudget engineeringLate(true);check(!engineeringLate.acquired(90,true),"engineering acquisition hard90 refuses");
+    PcPurpleSaveBudget defaultBudget;check(!defaultBudget.acquired(60,true),"default acquisition hard60 unchanged");
+    PcPurpleSaveBudget engineeringReset(true);check(engineeringReset.acquired(80,true)&&!engineeringReset.acquired(81,true),"engineering cannot reset phase fence");
     std::puts("Purple collision trace controls PASS");
 }
