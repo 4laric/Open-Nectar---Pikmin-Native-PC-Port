@@ -1,4 +1,5 @@
 #include "pc_p2_authored_cave_route.h"
+#include "pc_p2_authored_piki_catalog.h"
 #include <filesystem>
 #include <fstream>
 #include <sstream>
@@ -26,8 +27,8 @@ bool pc_p2_authored_cave_route_validate(const P2AuthoredCaveRoute& selected,
         return refuse("authored route bytes differ from selected digest");
     P2AuthoredCaveRoute actual;std::string magic,version,seedText,end,extra;
     std::istringstream in(raw);
-    if(!(in>>magic>>version>>seedText>>actual.token)
-        ||magic!="P2_AUTHORED_CAVE_ROUTE"||version!="1"
+    if(!(in>>magic>>version>>seedText>>actual.token>>actual.pikiGeneratorsSha)
+        ||magic!="P2_AUTHORED_CAVE_ROUTE"||version!="2"
         ||!p2CaveSeedUint64(seedText,actual.seed)||!actual.surface.read(in)
         ||!actual.floor.read(in)||!actual.exit.read(in)||!(in>>end)
         ||end!="END"||(in>>extra))return refuse("malformed authored route input");
@@ -41,5 +42,5 @@ bool pc_p2_authored_cave_route_validate(const P2AuthoredCaveRoute& selected,
             ||P2AuthoredCaveSession::hash(ini)!=stage->mapSha)
             return refuse("authored stage INI bytes differ from selected digest");
     }
-    error.clear();return true;
+    return pc_p2_authored_piki_catalog_validate(selected,runRoot,error);
 }

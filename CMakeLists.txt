@@ -415,6 +415,7 @@ set(PC_PORT_SOURCES
     pc_port/pc_p2_cave_campaign_party_engine.cpp
     pc_port/pc_p2_surface_save.cpp
     pc_port/pc_p2_authored_cave_route.cpp
+    pc_port/pc_p2_authored_piki_catalog.cpp
     pc_port/pc_p2_authored_cave_campaign.cpp
     pc_port/pc_p2_original_piki_physical.cpp
     pc_port/pc_p2_original_piki_recruit.cpp
@@ -2635,7 +2636,7 @@ add_executable(p2_authored_cave_session_test tools/p2_authored_cave_session_test
 target_include_directories(p2_authored_cave_session_test PRIVATE pc_port)
 target_compile_options(p2_authored_cave_session_test PRIVATE -UNDEBUG)
 add_test(NAME p2_authored_cave_session_test COMMAND p2_authored_cave_session_test)
-add_executable(p2_authored_checkpoint_test tools/p2_authored_checkpoint_test.cpp pc_port/pc_p2_authored_cave_route.cpp pc_port/netplay/pc_netplay_randstate.cpp pc_port/pc_randomizer_outbox.cpp pc_port/pc_p2_delivery_host.cpp pc_port/pc_p2_proxy.cpp pc_port/pc_p2_original_progress.cpp pc_port/pc_p2_original_lifecycle.cpp)
+add_executable(p2_authored_checkpoint_test tools/p2_authored_checkpoint_test.cpp pc_port/pc_p2_authored_cave_route.cpp pc_port/pc_p2_authored_piki_catalog.cpp pc_port/netplay/pc_netplay_randstate.cpp pc_port/pc_randomizer_outbox.cpp pc_port/pc_p2_delivery_host.cpp pc_port/pc_p2_proxy.cpp pc_port/pc_p2_original_progress.cpp pc_port/pc_p2_original_lifecycle.cpp)
 target_include_directories(p2_authored_checkpoint_test PRIVATE pc_port)
 target_compile_options(p2_authored_checkpoint_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
 target_link_libraries(p2_authored_checkpoint_test PRIVATE p2_retail_cave_catalog)

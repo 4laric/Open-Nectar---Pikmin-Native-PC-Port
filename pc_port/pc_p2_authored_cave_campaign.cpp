@@ -1,5 +1,6 @@
 #include "pc_p2_authored_cave_campaign.h"
 #include "pc_p2_authored_cave_route.h"
+#include "pc_p2_authored_piki_catalog.h"
 #include "pc_p2_campaign_flush.h"
 #include "pc_p2_cave_campaign_cache.h"
 #include "pc_p2_cave_campaign_cache_engine.h"
@@ -43,6 +44,7 @@
 #include <cstring>
 #include <cstdint>
 #include <optional>
+#include <unordered_map>
 
 // Match the historical cave route's optional netplay seam in both profiles.
 __attribute__((weak)) bool pc_netplay_session_active(void);
@@ -60,6 +62,8 @@ void setParty(const P2CaveCampaignParty& party){
 StageInfo* surfaceStage=nullptr;
 StageInfo* floorStage=nullptr;
 bool prepared=false,sceneReady=false,restored=false,requested=false,pending=false;
+struct AuthoredBirth {Generator* generator=nullptr;unsigned uid=0,source=0;P2CavePartyPoint position;std::string catalog;};
+std::unordered_map<Piki*,AuthoredBirth> authoredBirths;
 bool detaching=false,restoringParty=false;
 zen::ogScrFileChkSelMgr* saveChoice=nullptr;
 bool choosingSave=false;
@@ -160,6 +164,39 @@ void moveParty(P2CaveCampaignParty& party,bool entering){
     party.inside=entering;
     party.landing=true;
 }
+}
+bool pc_p2_authored_piki_generator(const void* raw){
+    if(!raw||!authored()||pc_randomizer_original_session())return false;
+    const auto& route=pc_randomizer_authored_cave_route();
+    if(!flowCont.mCurrentStage||!flowCont.mCurrentStage->mFileName
+        ||route.surface.file!=flowCont.mCurrentStage->mFileName
+        ||route.surface.stage!=flowCont.mCurrentStage->mStageID
+        ||route.surface.index!=flowCont.mCurrentStage->mStageIndex)return false;
+    auto* g=static_cast<const Generator*>(raw);
+    if(!g->mGenObject||g->mGenObject->mID!='piki'||(g->mCarryOverFlags&15)!=15)return false;
+    auto* piki=static_cast<GenObjectPiki*>(g->mGenObject);
+    return piki->mSpawnColor()==Red&&piki->mSpawnState()==2;
+}
+void pc_p2_authored_piki_birth(Piki* body,Generator* generator){
+    if(!body||!pc_p2_authored_piki_generator(generator))return;
+    const auto uid=pc_randomizer_generator_id(generator);
+    const auto& route=pc_randomizer_authored_cave_route();
+    if(!pc_p2_authored_piki_catalog_saved(route,uid,generator->_70))return;
+    authoredBirths[body]={generator,uid,generator->_70,{body->mSRT.t.x,body->mSRT.t.y,body->mSRT.t.z},route.pikiGeneratorsSha};
+    std::printf("P2_AUTHORED_PIKI_BIRTH uid=%u source=%u catalog=%s native_birth=1\n",uid,generator->_70,route.pikiGeneratorsSha.c_str());
+}
+void pc_p2_authored_piki_forget(Piki* body){authoredBirths.erase(body);}
+bool pc_p2_authored_piki_origin(Piki* body,std::uint32_t& uid,P2CavePartyPoint& point){
+    const auto found=authoredBirths.find(body);if(found==authoredBirths.end())return false;
+    const auto& birth=found->second;
+    if(!body||body->mGenerator!=birth.generator||birth.catalog!=pc_randomizer_authored_cave_route().pikiGeneratorsSha
+        ||!pc_p2_authored_piki_catalog_saved(pc_randomizer_authored_cave_route(),birth.uid,birth.source))return false;
+    uid=birth.uid;point=birth.position;return true;
+}
+bool pc_p2_authored_piki_matches(Piki* body,const P2CavePartyBody& saved){
+    std::uint32_t uid=0;P2CavePartyPoint point;
+    return authored()&&saved.sourceKey.empty()&&saved.originRealm==0&&saved.generator
+        &&saved.generator==saved.originGenerator&&pc_p2_authored_piki_origin(body,uid,point)&&uid==saved.generator;
 }
 void pc_p2_cave_campaign_prepare(){
     prepared=false;surfaceStage=nullptr;floorStage=nullptr;
@@ -278,6 +315,7 @@ void pc_p2_cave_campaign_scene_exit(){
     detaching=pending&&permitGeneration!=0;
     sceneReady=false;pc_p2_cave_items_shutdown();pc_p2_cave_geometry_shutdown();pc_p2_cave_rooms_shutdown();
     pc_p2_cave_campaign_party_scene_exit();
+    authoredBirths.clear();
 }
 P2CaveBoundarySnapshot pc_p2_cave_campaign_boundary(){
     P2CaveBoundarySnapshot result;
@@ -440,6 +478,7 @@ bool pc_p2_cave_campaign_owns_heads(){
     if(!authored()||!prepared)return false;
     const auto& party=savedParty();
     return party.present&&party.resumeLiving&&party.inside==inside()
+        &&sameProof()
         &&flowCont.mCurrentStage==(inside()?floorStage:surfaceStage);
 }
 int pc_p2_cave_campaign_floor(){return authored()&&prepared&&inside()?1:0;}

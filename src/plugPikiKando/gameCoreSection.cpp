@@ -1659,7 +1659,7 @@ void GameCoreSection::initStage()
 
 #endif
 	const bool livingSurfaceCache = pc_p2_surface_save_living_scene()
-        || (pc_p2_cave_campaign_owns_heads() && !pc_randomizer_authored_cave_session().party.landing);
+        || (pc_p2_cave_campaign_owns_heads() && hasAuthoritativeStageCache);
 	if(livingSurfaceCache&&!hasAuthoritativeStageCache){
         std::fprintf(stderr,"Living surface checkpoint lost its authoritative stage cache\n");std::abort();
     }
