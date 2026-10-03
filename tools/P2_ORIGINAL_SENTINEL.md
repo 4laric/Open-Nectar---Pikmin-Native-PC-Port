@@ -186,6 +186,8 @@ cmake -S output/native-original-sentinel -B output/source77-root-build -G Ninja 
   -DPIKMIN_NETPLAY_BUILD=OFF -DPIKMIN_NATIVE_JAUDIO=OFF `
   -DPIKMIN_NATIVE_OPTIMIZE=OFF -DPIKMIN_ENABLE_IPO=ON
 cmake --build output/source77-root-build --target pikmin_pc
+cmake --build output/source77-root-build --target pc_p2_original_shijimi_group_test
+ctest --test-dir output/source77-root-build -R "^pc_p2_original_shijimi_group_test$" --output-on-failure
 ```
 
 Use a private build directory and the supported platform toolchain. The root
@@ -205,3 +207,8 @@ independent selected whole-party membership, and the complete cold graph remain
 required. Missing services refuse; no Scene or party stubs are supplied. Gameplay
 and SAVE remain unqualified. Prior353/union06/07 receipts describe the earlier
 private harness composition and must not be relabelled as root-entry evidence.
+The root source77 option also declares the pure group control target once. Its
+two sources are the actual producer/journal implementation and the controlled
+RNG/lifecycle/drop/codec test; the test main is never a production game source.
+The private wrapper only relocates that target's output for receipt hashing.
+These controls do not provide native gameplay or SAVE acceptance.
