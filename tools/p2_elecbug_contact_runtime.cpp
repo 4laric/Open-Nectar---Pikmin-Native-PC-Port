@@ -413,6 +413,7 @@ public:
                 if(!std::strcmp(mode,"red-electric")) {
                     const Vector3f goal=pressAim(n,enemy,partner);
                     const float error=distance(n->mCursorWorldPos,goal);
+                    require(std::isfinite(error),"finite Red cursor alignment");
                     if(error>3.f){point(n,goal,false,KBBTN_A);return result;}
                     std::printf("P2_ELECBUG_RED_AIM frame=%d error=%.6f cursor=%.6f,%.6f goal=%.6f,%.6f ordinary_pad=1\n",frame,error,n->mCursorWorldPos.x,n->mCursorWorldPos.z,goal.x,goal.z);
                 }
