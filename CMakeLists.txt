@@ -269,6 +269,8 @@ set(PC_PORT_SOURCES
     pc_port/pc_p2_original_lifecycle.cpp
     pc_port/pc_p2_original_armor.cpp
     pc_port/pc_p2_original_armor_native.cpp
+    pc_port/pc_p2_original_cannon.cpp
+    pc_port/pc_p2_original_cannon_native.cpp
     pc_port/pc_p2_original_group.cpp
     pc_port/pc_p2_original_dispatch.cpp
     pc_port/pc_p2_original_course.cpp
@@ -3474,3 +3476,14 @@ pikmin_add_ci_fixture(original_catfish tools/p2_original_catfish_runtime.cpp)
 add_executable(pc_p2_original_catfish_captain_guard_test tools/test_p2_original_catfish_captain_guard.cpp)
 target_compile_options(pc_p2_original_catfish_captain_guard_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
 add_test(NAME pc_p2_original_catfish_captain_guard_test COMMAND pc_p2_original_catfish_captain_guard_test)
+
+add_executable(pc_p2_original_cannon_test tools/test_p2_original_cannon.cpp
+    pc_port/pc_p2_original_cannon.cpp pc_port/pc_p2_original_spawn_plan.cpp
+    pc_port/pc_p2_original_drop.cpp pc_port/pc_p2_original_catalog.cpp)
+target_include_directories(pc_p2_original_cannon_test PRIVATE pc_port)
+target_compile_options(pc_p2_original_cannon_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME pc_p2_original_cannon_test COMMAND pc_p2_original_cannon_test)
+add_executable(pc_p2_original_cannon_stones_test tools/test_p2_original_cannon_stones.cpp pc_port/pc_p2_cannon_stone.cpp)
+target_include_directories(pc_p2_original_cannon_stones_test PRIVATE pc_port)
+target_compile_options(pc_p2_original_cannon_stones_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME pc_p2_original_cannon_stones_test COMMAND pc_p2_original_cannon_stones_test)
