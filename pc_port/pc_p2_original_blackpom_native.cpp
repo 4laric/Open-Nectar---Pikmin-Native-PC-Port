@@ -10,16 +10,36 @@
 #include <cmath>
 #include <fstream>
 #include <map>
+#include <set>
 #include <cstdio>
 #include <cstdlib>
 extern Matrix4f invCamMat;
+// Exact Purple owner API (#1281). Definitions arrive from its published core
+// pin; these declarations introduce no alternate state or conversion authority.
+bool pc_p2_original_pom_intake(Pom*,Piki*,CollPart*);
+void pc_p2_original_pom_touch(Pom*,Creature*);
+bool pc_p2_original_pom_preflight(std::string&);
+bool pc_p2_original_pom_bind(Pom*,const p2original::InstanceIdentity&,unsigned,std::string&);
+bool pc_p2_original_pom_start(Pom*,std::string&);
+bool pc_p2_original_pom_release(Pom*,std::string&);
+bool pc_p2_original_pom_pose(const Pom*,unsigned&,float&);
 namespace p2original { namespace blackpom {
 namespace {
 const char* clips[]={"wait","dead","type1","type2","type3","type4"};
 const int durations[]={1,40,30,30,40,20};
 bool refuse(std::string& e,const char* s){e=s;return false;}
 struct AppHeap {int previous;AppHeap():previous(gsys->setHeap(SYSHEAP_App)){}~AppHeap(){gsys->setHeap(previous);}};
+std::set<Native*>& owners(){static std::set<Native*> all;return all;}
+void require(bool result,const std::string& e){if(!result){std::fprintf(stderr,"Original BlackPom: %s\n",e.c_str());std::abort();}}
+class Core final:public Mechanic {
+ bool preflight(std::string& e)override{return pc_p2_original_pom_preflight(e);}
+ bool bind(Pom* p,const InstanceIdentity& i,unsigned t,std::string& e)override{return pc_p2_original_pom_bind(p,i,t,e);}
+ bool start(Pom* p,std::string& e)override{return pc_p2_original_pom_start(p,e);}
+ bool release(Pom* p,std::string& e)override{return pc_p2_original_pom_release(p,e);}
+ bool pose(const Pom* p,unsigned& motion,float& frame)const override{return pc_p2_original_pom_pose(p,motion,frame);}
+};
 }
+std::unique_ptr<Mechanic> coreMechanic(){return std::make_unique<Core>();}
 struct Native::Impl {
  Mechanic& mechanic;p2posefamily::Bank bank{"ORIGINAL_BLACKPOM"};
  p2poseload::Shared shared;std::array<std::vector<Shape*>,6> shapes;
@@ -36,6 +56,11 @@ struct Native::Impl {
  };
  std::map<Pom*,std::unique_ptr<Tree>> trees;
  std::map<Pom*,unsigned> actors;unsigned reserved=0;bool loaded=false;
+ std::set<const Pom*> started;
+ std::set<const Pom*> releasing;
+ std::function<bool(Pom*,std::string&)> death;
+ std::function<bool(Pom*,const InstanceIdentity&,unsigned,std::string&)> bound;
+ int petal=0;
  explicit Impl(Mechanic& core):mechanic(core){}
  bool load(std::string& e){
   if(loaded)return true;
@@ -57,6 +82,11 @@ struct Native::Impl {
    // cannot silently select the inherited P1 flower or Chappy model.
    if(shapes[i].empty())return refuse(e,"BlackPom physical poses missing");
   }
+  int r,g,b,a;
+  if(!(in>>word>>petal>>r>>g>>b>>a)||word!="petal"||petal!=0||r!=28||g!=0||b!=52||a!=255)
+   return refuse(e,"BlackPom source Violet petal mapping missing");
+  for(const auto& clip:shapes)for(auto* shape:clip)if(!shape||shape->mMaterialCount<=petal)
+   return refuse(e,"BlackPom source Violet petal material unresolved");
   if(in>>extra)return refuse(e,"BlackPom resource index trailing data");
   std::ifstream joints("p2-original-blackpom-joints.txt");
   if(!(joints>>magic)||magic!="P2_ORIGINAL_BLACKPOM_JOINTS_1")return refuse(e,"BlackPom actual collision joint bank absent");
@@ -86,8 +116,8 @@ struct Native::Impl {
   loaded=true;return true;
  }
 };
-Native::Native(Mechanic& core):m(std::make_unique<Impl>(core)){}
-Native::~Native(){if(!m->actors.empty()){std::fputs("BlackPom owner destroyed before actual root release\n",stderr);std::abort();}}
+Native::Native(Mechanic& core):m(std::make_unique<Impl>(core)){owners().insert(this);}
+Native::~Native(){if(!m->actors.empty()){std::fputs("BlackPom owner destroyed before actual root release\n",stderr);std::abort();}owners().erase(this);}
 bool Native::prepare(unsigned count,std::string& e){
  if(!count||count>10||!gsys||!bossMgr)return refuse(e,"BlackPom managers/count unavailable");
  if(!m->actors.empty()||m->reserved)return refuse(e,"BlackPom factory already reserved");
@@ -118,6 +148,7 @@ bool Native::bind(Pom* body,unsigned token,std::string& e){
  // Mark ownership before callback: a failed partial bind still needs release.
  it->second=token;
  if(!m->mechanic.bind(body,identity,token,e))return false;
+ if(m->bound&&!m->bound(body,identity,token,e))return false;
  {
   AppHeap heap;
   auto tree=std::make_unique<Impl::Tree>();
@@ -138,12 +169,15 @@ bool Native::bind(Pom* body,unsigned token,std::string& e){
   }
   tree->previous=body->mCollInfo;body->mCollInfo=&tree->own;m->trees.emplace(body,std::move(tree));
  }
- if(!m->mechanic.start(body,e)||!follow(body,e))return false;
+ if(!m->mechanic.start(body,e))return false;
+ m->started.insert(body);
+ if(!follow(body,e))return false;
  e.clear();return true;
 }
 bool Native::release(Pom* body,std::string& e){
  auto it=m->actors.find(body);if(it==m->actors.end())return refuse(e,"BlackPom release does not own root");
  if(it->second){if(!m->mechanic.release(body,e))return false;it->second=0;}
+ m->started.erase(body);
  auto tree=m->trees.find(body);
  if(tree!=m->trees.end()){
   Stickers attached(body);Iterator sticker(&attached);
@@ -152,14 +186,17 @@ bool Native::release(Pom* body,std::string& e){
  }
  // Floor owner retires its original registry handle before freeing manager slot.
  unsigned source=0,token=0;if(originalActors().query(body,source,token))return refuse(e,"BlackPom registry authority must retire before pool reuse");
- // Revoke leaf dispatch before kill enters native retirement hooks.
- m->actors.erase(it);body->kill(false);e.clear();return true;
+ // Keep source dispatch through Creature::kill cleanup and Pom::doKill. An
+ // unstarted source root never initialized the inherited P1 effect callbacks.
+ m->releasing.insert(body);body->kill(false);m->releasing.erase(body);
+ m->actors.erase(it);e.clear();return true;
 }
 bool Native::nativeRetired(Pom* body,std::string& e){
  auto it=m->actors.find(body);if(it==m->actors.end())return refuse(e,"BlackPom native retirement does not own root");
  unsigned source=0,token=0;
  if(originalActors().query(body,source,token))return refuse(e,"BlackPom native retirement still has original registry authority");
  if(it->second&&!m->mechanic.release(body,e))return false;
+ m->started.erase(body);
  auto tree=m->trees.find(body);
  if(tree!=m->trees.end()){
   Stickers attached(body);Iterator sticker(&attached);
@@ -173,6 +210,25 @@ bool Native::cancel(std::string& e){
  m->reserved=0;e.clear();return true;
 }
 bool Native::owns(const Creature* body)const{return m->actors.count(const_cast<Pom*>(dynamic_cast<const Pom*>(body)))!=0;}
+bool Native::active(const Pom* body)const{
+ auto it=m->actors.find(const_cast<Pom*>(body));if(it==m->actors.end()||!it->second||!m->started.count(body))return false;
+ unsigned source=0,token=0;return originalActors().query(body,source,token)&&source==6&&token==it->second;
+}
+Native* Native::owner(const Creature* body){for(auto* n:owners())if(n->owns(body))return n;return nullptr;}
+void Native::onDeath(std::function<bool(Pom*,std::string&)> callback){m->death=std::move(callback);}
+void Native::onBind(std::function<bool(Pom*,const InstanceIdentity&,unsigned,std::string&)> callback){m->bound=std::move(callback);}
+bool Native::beforeKill(Pom* body,std::string& e){
+ auto it=m->actors.find(body);if(it==m->actors.end())return refuse(e,"BlackPom actual death lacks owning root");
+ if(m->releasing.count(body)){e.clear();return true;}
+ if(!m->death)return refuse(e,"BlackPom actual death lacks source floor retirement callback");
+ if(!m->death(body,e))return false;
+ return nativeRetired(body,e);
+}
+bool Native::press(Pom* body,Piki* donor,CollPart* part,bool descending){
+ if(!active(body))return false;
+ auto tree=m->trees.find(body);if(tree==m->trees.end()||part!=tree->second->resolved[1]||!descending)return false;
+ return pc_p2_original_pom_intake(body,donor,part);
+}
 bool Native::collider(const Pom* body,unsigned part,Vector3f& center,float& radius)const{
  auto it=m->actors.find(const_cast<Pom*>(body));if(it==m->actors.end()||!it->second||part>=7)return false;
  unsigned source=0,token=0;
@@ -220,6 +276,34 @@ bool Native::draw(Pom* body,Graphics& gfx){
  if(clip){for(std::size_t i=1;i<clip->frames.size();++i)if(std::fabs(float(clip->frames[i])-frame)<std::fabs(float(clip->frames[index])-frame))index=i;}
  else index=std::min(shapes.size()-1,std::size_t(frame*shapes.size()/durations[motion]));
  Matrix4f root,view;root.makeSRT(Vector3f(1,1,1),Vector3f(0,body->mFaceDirection,0),body->mSRT.t);gfx.mCamera->mLookAtMtx.multiplyTo(root,view);
- gfx.useMatrix(Matrix4f::ident,0);shapes[index]->updateAnim(gfx,view,nullptr,body);shapes[index]->drawshape(gfx,*gfx.mCamera,nullptr);return true;
+ auto* shape=shapes[index];Colour saved;shape->mMaterialList[m->petal].getColour(saved);
+ shape->mMaterialList[m->petal].setColour(Colour(28,0,52,255));
+ gfx.useMatrix(Matrix4f::ident,0);shape->updateAnim(gfx,view,nullptr,body);shape->drawshape(gfx,*gfx.mCamera,nullptr);
+ shape->mMaterialList[m->petal].setColour(saved);return true;
 }
 } }
+PcOriginalBlackPomPress pc_p2_original_blackpom_flying_press(Creature* body,Piki* piki,CollPart* part,bool descending){
+ auto* owner=p2original::blackpom::Native::owner(body);if(!owner)return {};
+ return {true,owner->press(static_cast<Pom*>(body),piki,part,descending)};
+}
+bool pc_p2_original_blackpom_update(Pom* body){
+ auto* owner=p2original::blackpom::Native::owner(body);if(!owner)return false;
+ if(!owner->active(body))return true; // Partial/unbound roots never execute P1 AI.
+ // Core's PomAi entry executes actual source states/keys. No P1 animation
+ // update, source tick injection or draw-driven clock is used here.
+ body->doAI();
+ // Completed source death may have retired this leaf during doAI.
+ if(owner->owns(body)){std::string e;p2original::blackpom::require(owner->follow(body,e),e);}
+ return true;
+}
+bool pc_p2_original_blackpom_refresh(Pom* body,Graphics& gfx){
+ auto* owner=p2original::blackpom::Native::owner(body);return owner&&owner->draw(body,gfx);
+}
+bool pc_p2_original_blackpom_collision(Pom* body,Creature* collider){
+ auto* owner=p2original::blackpom::Native::owner(body);if(!owner)return false;
+ if(owner->active(body))pc_p2_original_pom_touch(body,collider);return true;
+}
+bool pc_p2_original_blackpom_before_kill(Pom* body){
+ auto* owner=p2original::blackpom::Native::owner(body);if(!owner)return false;
+ std::string e;p2original::blackpom::require(owner->beforeKill(body,e),e);return true;
+}

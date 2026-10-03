@@ -13,7 +13,10 @@ before manager construction; no late pool reinitialization is permitted.
 The Purple owner supplies `Mechanic`: original source conversion/event/collision
 behavior, budget five, own-species refunds, one-for-one capacity-safe sprouts,
 ordinary plucking, remaining capacity and completed retirement. No implementation
-of that mechanic is supplied here, and no provider is installed implicitly.
+of that mechanic is supplied here; `coreMechanic()` adapts the Purple owner's
+published hooks. Core pin fce554d27c76487cc06c82453f6dec959fe20e94 is the
+initial API dependency, with explicit source initialization followup pending.
+No floor provider is installed implicitly.
 Inherited Pom animation/collision cannot qualify retail source events merely
 because the root's type is Pom. Original BlackPom bank draws sampled poses with
 approximate materials; this explicit presentation limit is not source-event
@@ -33,13 +36,20 @@ run owner's ordinary mechanic; release mechanic references; retire exact
 registry handle; release actual manager root. Native completed death needs the
 owning provider's coordinated `nativeRetired` callback after exact registry
 retirement and before manager-slot reuse; this callback never kills a root.
-`cancel` releases unused reservations only after partial roots are cleaned. The current
-leaf is not yet wired into Pom update/collision/native-death dispatch. Never use
-an unbound root in ordinary gameplay or free a reused address.
+`onDeath` lets the owning provider retire the exact original registry handle
+before native retirement. `onBind` installs the authoritative consumer's donor
+snapshot/head callback after core binding and before start. `cancel` releases
+unused reservations only after partial roots are cleaned. Pom update, draw,
+collision and death dispatch use the source owner; partial roots never execute
+P1 AI/effects. The flying contact hook precedes generic boss sticking and accepts
+only descending contact with the actual slot and successful native swallow.
+Never use an unbound root in ordinary gameplay or free a reused address.
 
 `tools/install_original_blackpom.py` validates the source archive hashes and all
 converted pose hashes before private stage writes. It installs 31 source poses
-and six clip frame lists; no Chappy/proxy actor sidecar is generated. Legal data
+and six clip frame lists. Source MAT3/INF1 proves the Violet petal material,
+rendered RGB(28,0,52) with opaque PVW alpha; shading remains approximate.
+No Chappy/proxy actor sidecar is generated. Legal data
 remains in ignored output. Run it with `--imported <flora extraction> --stage
 <private stage> --source-root <read-only randomizer converter source>`.
 It also validates the raw model, animation and collider hashes and exports all

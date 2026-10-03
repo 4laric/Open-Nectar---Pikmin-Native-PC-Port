@@ -5,6 +5,8 @@
 class Pom;
 class Graphics;
 class Creature;
+class Piki;
+class CollPart;
 struct Vector3f;
 namespace p2original { namespace blackpom {
 // The Purple owner implements this adapter with the qualified ordinary bud
@@ -20,6 +22,9 @@ public:
  // Actual mechanic motion/frame, independent of camera and render sampling.
  virtual bool pose(const Pom*,unsigned& motion,float& frame)const=0;
 };
+// Concrete adapter to the Purple owner's exported source6 core hooks. Requires
+// that owner's source pin in the linked game; no alternate mechanic is created.
+std::unique_ptr<Mechanic> coreMechanic();
 class Native {
 public:
  explicit Native(Mechanic&);
@@ -43,8 +48,23 @@ public:
  bool collider(const Pom*,unsigned part,Vector3f& center,float& radius)const;
  // Simulation update only: seats actual collider tree, independently of draw.
  bool follow(Pom*,std::string&);
+ bool press(Pom*,Piki*,CollPart*,bool descending);
+ void onDeath(std::function<bool(Pom*,std::string&)>);
+ // Called after exact core binding and before start. The authoritative body/
+ // SAVE consumer installs its actual donor snapshot and successful head hook.
+ void onBind(std::function<bool(Pom*,const InstanceIdentity&,unsigned,std::string&)>);
+ bool beforeKill(Pom*,std::string&);
+ static Native* owner(const Creature*);
  bool owns(const Creature*)const;
+ bool active(const Pom*)const;
 private:
  struct Impl;std::unique_ptr<Impl> m;
 };
 } }
+struct PcOriginalBlackPomPress {bool handled=false,accepted=false;};
+// Only actual managed source6; an owned rejected contact still blocks P1 stick.
+PcOriginalBlackPomPress pc_p2_original_blackpom_flying_press(Creature*,Piki*,CollPart*,bool descending);
+bool pc_p2_original_blackpom_update(Pom*);
+bool pc_p2_original_blackpom_refresh(Pom*,Graphics&);
+bool pc_p2_original_blackpom_collision(Pom*,Creature*);
+bool pc_p2_original_blackpom_before_kill(Pom*);
