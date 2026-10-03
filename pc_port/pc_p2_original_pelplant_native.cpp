@@ -13,6 +13,8 @@
 #include "pc_p2_original_actor.h"
 #include "pc_p2_original_drop_engine.h"
 #include "pc_p2_original_pelplant_blend.h"
+#include "pc_p2_original_pelplant_geometry.h"
+#include "sysNew.h"
 #include <fstream>
 #include <sstream>
 #include <algorithm>
@@ -46,7 +48,8 @@ struct Track {
  Matrix4f capture;
  u32 pelletFlags=0;
  bool nativeDying=false;
- Shape* blendShape=nullptr;
+ std::unique_ptr<Geometry> geometry;
+ p2pose::Track presented;
  p2pose::Pose blendLeft,blendRight,blendResult;
 };
 }
@@ -55,7 +58,7 @@ struct Native::Impl final:Engine {
  Provider provider;
  Resources resource;
  std::array<std::array<Clip,10>,4> variants;
- std::array<p2posefamily::Bank,4> banks;p2posefamily::Actors presentation;
+ std::array<p2posefamily::Bank,4> banks;
  std::array<p2poseload::Shared,4> owners;
  std::array<p2flyer::Sphere,6> spheres;
  std::array<std::array<char,5>,6> colliderIds{},colliderCodes{};
@@ -140,6 +143,7 @@ struct Native::Impl final:Engine {
  bool resources(Resources& out,std::string& e)override{
   AppHeapScope heap;
   if(!load(e))return false;
+  for(const auto& bank:banks)if(!bank.owner()||!Geometry::admits(*bank.owner()))return reject(e,"Pelplant owned geometry requires a static flattened single-joint bank");
   auto* chassis=tekiMgr->getTekiShapeObject(TEKI_Palm);
   if(!chassis||!chassis->mShape||!chassis->mAnimMgr||!tekiMgr->getTekiParameters(TEKI_Palm)||!tekiMgr->getStrategy(TEKI_Palm))return reject(e,"Pelplant native chassis shape/animation/parameters/strategy not preloaded before course admission");
   if(!ledger)ledger=pc_p2_receipt_host_open("p2-original-pelplant-onion.txt");if(!ledger)return reject(e,"Pelplant ordinary Onion observation ledger invalid");
@@ -175,10 +179,9 @@ struct Native::Impl final:Engine {
   actor->setTekiOption(BTeki::TEKI_OPTION_ATARI);actor->setTekiOption(BTeki::TEKI_OPTION_ALIVE);
   actor->setTekiOption(BTeki::TEKI_OPTION_SHAPE_VISIBLE);
   auto& blendTrack=*tracks.at(actor);const auto* base=banks[0].basePose();
-  const int oldHeap=gsys->setHeap(SYSHEAP_App);
-  blendTrack.blendShape=base?p2pose::privateShape(banks[0].basePath().c_str(),*banks[0].owner(),*base):nullptr;
-  gsys->setHeap(oldHeap);
-  if(!blendTrack.blendShape)return reject(e,"Pelplant private wither geometry allocation failed");
+  if(!base||!Geometry::admits(*banks[0].owner()))return reject(e,"Pelplant private geometry static admission failed");
+  blendTrack.geometry=std::make_unique<Geometry>(*banks[0].owner());
+  blendTrack.presented.shape=&blendTrack.geometry->shape;blendTrack.presented.size(*base);
   blendTrack.blendLeft=blendTrack.blendRight=blendTrack.blendResult=*base;
   if(!tracks.at(actor)->collision.bind(actor,spheres.data(),6))return reject(e,"Pelplant retail collider allocation failed");return true;
  }
@@ -200,7 +203,7 @@ struct Native::Impl final:Engine {
  bool motion(Host& h,unsigned animation,bool blend,std::string&)override{auto& t=*tracks.at(h.creature);
   // Our source blend owns the whole transition. Discard the generic renderer's
   // cached Full pose so it cannot fade back to Full when WaitSmall begins.
-  if(blend)presentation.forget(h.creature);
+  if(blend)t.presented.view.reset();
   t.motion=animation;t.frame=0;t.blend=blend;t.blendTime=0;return true;}
  bool flags(Host& h,bool vulnerable,bool living,bool cullable,float radius,std::string&)override{
   if(!std::isfinite(radius)||radius<=0)return false;
@@ -225,7 +228,7 @@ struct Native::Impl final:Engine {
   if(h.captured){cargo.erase(h.captured);h.captured->kill(false);h.captured=nullptr;}
   std::string ignored;
   flick(h,ignored); // Detach ordinary stickers before collider retirement.
-  presentation.forget(h.creature);track->second->collision.detach(static_cast<BTeki*>(h.creature));
+  track->second->collision.detach(static_cast<BTeki*>(h.creature));
   // Native manager kill belongs to the course's coordinated retirement hook;
   // provider removes its typed state before invoking the actual native funnel.
   const bool dying=track->second->nativeDying;
@@ -265,6 +268,30 @@ struct Native::Impl final:Engine {
 Native::Native(std::function<bool(unsigned)> met):m(std::make_unique<Impl>(std::move(met))){natives().insert(this);}
 Native::~Native(){if(m->provider.size())fail("Native provider destroyed before owned course cleanup");if(m->ledger)pc_p2_receipt_host_close(m->ledger);natives().erase(this);}
 Provider& Native::provider(){return m->provider;}
+bool Native::geometryOwnershipControl(std::string& e){
+ if(!m->loaded||m->provider.size())return reject(e,"geometry ownership control requires loaded banks and no live family");
+ // Warm the renderer's exact-registration vector before measuring ownership.
+ for(auto& bank:m->banks){if(!bank.owner()||!bank.basePose()||!Geometry::admits(*bank.owner()))return reject(e,"geometry control static bank unresolved");
+  Shape unsupported=*bank.owner();unsupported.mJointCount=2;if(Geometry::admits(unsupported))return reject(e,"geometry control admitted an articulated bank");
+  unsupported=*bank.owner();unsupported.mEnvelopeCount=1;if(Geometry::admits(unsupported))return reject(e,"geometry control admitted weighted geometry");
+  Geometry geometry(*bank.owner());if(!p2pose::write(geometry.shape,*bank.basePose()))return reject(e,"geometry control warmup write failed");}
+ const auto before=piki_pc_allocation_stats();
+ for(unsigned pass=0;pass<32;++pass)for(auto& bank:m->banks){
+  const Shape& shared=*bank.owner();const Vector3f original=shared.mVertexList[0];
+  Geometry geometry(shared);p2pose::Pose changed=*bank.basePose();changed.positions[0].x+=1;
+  if(geometry.shape.mVertexList==shared.mVertexList||geometry.shape.mNormalList==shared.mNormalList
+    ||geometry.shape.mJointList==shared.mJointList||geometry.shape.mCurrentAnimation==shared.mCurrentAnimation
+    ||geometry.shape.mMaterialList!=shared.mMaterialList||geometry.shape.mMeshList!=shared.mMeshList
+    ||!(geometry.shape.mShapeFlags&ShapeFlags::AlwaysRedraw)||!p2pose::write(geometry.shape,changed)
+    ||shared.mVertexList[0].x!=original.x||shared.mVertexList[0].y!=original.y||shared.mVertexList[0].z!=original.z)
+   return reject(e,"owned geometry aliases mutable bank storage or loses borrowed resources");
+ }
+ const auto after=piki_pc_allocation_stats();
+ if(before.liveBlocks!=after.liveBlocks||before.liveBytes!=after.liveBytes||before.unknownFrees!=after.unknownFrees)
+  return reject(e,"owned geometry repeated disposal allocation checkpoint differs");
+ std::printf("P2_ORIGINAL_PELPLANT_GEOMETRY_OWNERSHIP cycles=128 live_blocks=%zu live_bytes=%zu borrowed_materials=1 owned_mutable_storage=1 disposal=1\n",after.liveBlocks,after.liveBytes);
+ e.clear();return true;
+}
 bool Native::owns(const Creature* actor)const{return m->tracks.count(const_cast<Creature*>(actor))!=0;}
 bool Native::captured(const Pellet* pellet)const{return m->cargo.count(const_cast<Pellet*>(pellet))!=0;}
 bool Native::updateCaptured(Pellet* pellet){auto it=m->cargo.find(pellet);if(it==m->cargo.end())return false;m->follow(*it->second);return true;}
@@ -274,7 +301,7 @@ bool Native::tick(BTeki* actor,float dt,std::string& e){Host* h=m->provider.look
  else if(t.frame>=m->variants[0][motion].duration){event=Event::End;if(motion>=4&&motion<=6){t.frame=std::fmod(t.frame,float(m->variants[0][motion].duration));event=Event::LoopEnd;}}
  else if(previous<29&&t.frame>=29&&motion>=4&&motion<=6)event=Event::LoopEnd;
  if(!m->provider.tick(actor,dt,event,e))return false;
- actor->mStoredDamage=0;actor->mHealth=h->health;m->presentation.advance(actor,dt);m->follow(*h);
+ actor->mStoredDamage=0;actor->mHealth=h->health;t.presented.advance(dt);m->follow(*h);
  if(h->dead){if(!m->death)return reject(e,"Pelplant completed death lacks coordinated course retirement");return m->death(actor,e);}return true;
 }
 bool Native::draw(BTeki* actor,Graphics& gfx,const Matrix4f& view){Host* h=m->provider.lookup(actor);if(!h||!gfx.mCamera)return false;auto& t=*m->tracks.at(actor);auto& clip=m->variants[h->captured?amountIndex(h->initial.amount):0][t.motion];
@@ -287,9 +314,13 @@ bool Native::draw(BTeki* actor,Graphics& gfx,const Matrix4f& view){Host* h=m->pr
   if(!start||!end||!samplePose(start->poses,start->frames,t.frame,t.blendLeft)
     ||!samplePose(end->poses,end->frames,t.frame,t.blendRight)
     ||!p2pose::blendInto(t.blendLeft,t.blendRight,witherWeight(t.blendTime),t.blendResult)
-    ||!p2pose::write(*t.blendShape,t.blendResult))fail("Pelplant wither visible geometry blend invalid");
-  shape=t.blendShape;
- }else shape=m->presentation.draw(actor,bank,names[t.motion],std::min(t.frame,float(clip.duration-1)),h->token);
+    ||!p2pose::write(t.geometry->shape,t.blendResult))fail("Pelplant wither visible geometry blend invalid");
+  shape=&t.geometry->shape;
+ }else {const auto* entry=bank.clip(names[t.motion]);
+  float frame=std::min(t.frame,float(clip.duration-1));if(entry&&p2motion::isDeathClip(names[t.motion]))frame=std::min(frame,entry->holdFrame);
+  if(entry&&p2pose::present(t.presented,names[t.motion],entry->poses.size(),[entry](std::size_t i)->const p2pose::Pose&{return entry->poses[i];},
+      entry->frames,frame,p2motion::tunables(),entry->seamContinuous).ok)shape=&t.geometry->shape;
+ }
  if(!shape){std::size_t best=0;for(std::size_t i=1;i<clip.frames.size();++i)if(std::fabs(float(clip.frames[i])-t.frame)<std::fabs(float(clip.frames[best])-t.frame))best=i;shape=clip.shapes[best];}
  shape->updateAnim(gfx,view,nullptr,actor);shape->drawshape(gfx,*gfx.mCamera,nullptr);return true;
 }
