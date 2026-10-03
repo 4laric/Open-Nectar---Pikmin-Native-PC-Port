@@ -13,6 +13,23 @@ bool sourceGroundHeight(Position,float&,std::string&);
 class Services : public p2originalresource::Engine {
 public:
  virtual bool contentsReady(const P2EggConfig&,const p2originalresource::ContentsRequirements&,std::string&)=0;
+ // Actual NativeHost supplies this authority scope before a fresh genItem draw.
+ // Preflight mutable metadata/retained limits here; callback births can inspect
+ // the same journal's pending record. False must leave no active scope.
+ // rootSource is the real field37 or captured parent16, never a new cargo UID.
+ virtual bool beginContents(const Host&,const p2originalresource::SourceIdentity&,
+                            unsigned rootSource,const P2EggConfig& config,
+                            const P2EggVec3&,const p2originalresource::EggContents&,
+                            std::string& e){
+  p2originalresource::ContentsRequirements required;
+  if(!p2originalresource::requirements(config,required,e))return false;
+  if(rootSource!=16&&rootSource!=37){e="Egg contents scope source is invalid";return false;}
+  if(required.pelletOne||required.pelletFive){e="Egg numeric scoped consumer is not installed";return false;}
+  e.clear();return true;
+ }
+ // Called exactly once after admitted generation, including exceptional exit.
+ // Drop borrowed host/journal scope references; do not replay/retire rewards.
+ virtual void endContents()noexcept{}
  virtual bool breakEffectsReady(std::string& e){e.clear();return false;}
  virtual bool capturedIdentity(Creature*,std::string&,std::string&)=0;
  virtual bool capturedSourceIdentity(Creature*,p2originalresource::SourceIdentity&,std::string&)=0;

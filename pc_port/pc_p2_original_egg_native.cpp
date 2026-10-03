@@ -159,8 +159,13 @@ struct Native::Impl final:Engine {
   p2originalresource::SourceIdentity identity;
   if(h.dependent){auto& t=*tracks.at(h.creature);if(!t.hasDependentIdentity)return fail(e,"Egg contents missing captured source incarnation");identity=t.dependentIdentity;}
   else {unsigned source=0,token=0;InstanceIdentity id;if(!actors.query(h.creature,source,token,&id)||source!=37||token!=h.token)return fail(e,"Egg contents missing exact owned source registry");identity={id.catalog,id.generator,id.ordinal,id.epoch,id.activation};}
-  auto p=h.creature->getPosition();p2originalresource::ContentsRecord record;
-  return contentsState.generate(identity,config,{p.x,p.y,p.z},services,record,e);
+  auto p=h.creature->getPosition();const P2EggVec3 origin{p.x,p.y,p.z};p2originalresource::ContentsRecord record;
+  // Existing complete/pending entries never call a new physical birth. Keep
+  // their idempotent path independent of fresh retained-capacity preflight.
+  if(contentsState.find(identity))return contentsState.generate(identity,config,origin,services,record,e);
+  if(!services.beginContents(h,identity,h.dependent?16u:37u,config,origin,contentsState,e))return false;
+  struct Scope {Services& services;~Scope(){services.endContents();}} scope{services};
+  return contentsState.generate(identity,config,origin,services,record,e);
  }
  bool breakEffects(Host& h,std::string& e)override{return services.breakEffects(h.creature,e);}
  bool kill(Host& h,std::string&)override{h.creature->kill(false);return true;}

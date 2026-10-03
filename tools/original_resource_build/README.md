@@ -169,3 +169,18 @@ ContentsRequirements. Current unforced Eggs require real nectar, both sprays and
 Mitite group providers. Numeric One/Five providers are required only when an
 actual forced configuration makes them reachable. Mitite fallback also requires
 nectar. Spray reachability includes dynamic made flags and their nectar fallback.
+
+Fresh Egg destruction now calls Services::beginContents with the actual Host,
+full source identity, real root type (37 field / 16 carried), verified config,
+physical origin and the existing producer journal before any genItem RNG. The
+consumer preflights mutable metadata and retained limits, then authenticates the
+exact pending attempted outcome through EggContents::find during synchronous
+birth. endContents clears this borrowed scope on normal or exceptional exit.
+Default services refuse reachable numeric outcomes until a scoped numeric
+consumer is installed. Existing complete/pending records take the original
+idempotent path with no new scope, birth or RNG. The const record pointer cannot
+be retained across journal restore/destruction. Later numeric Onyon acceptance
+needs complete/born provenance and its own once-only physical receipt; consume's
+idempotent true result is not a new reward grant. Scope policy logs are
+original-resources-1252-scope-build17.log, scope-build18.log, scope-ctest18.log
+and scope-no-work18.log (20 policies PASS, changed native Egg object compiled).

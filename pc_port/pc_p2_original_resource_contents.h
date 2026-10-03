@@ -89,6 +89,10 @@ public:
     // A reentrant call before completion returns false with a pending error.
     bool generate(const SourceIdentity&, const P2EggConfig&, const P2EggVec3&,
                   Engine&, ContentsRecord&, std::string& error);
+    // Read-only actual producer record for synchronous scoped consumers. Pending
+    // birth has attempted=true/born=false; completion follows the callback.
+    // Never retain this pointer across restore or owner destruction.
+    const ContentsRecord* find(const SourceIdentity&) const;
     std::vector<ContentsRecord> snapshot() const;
     bool restore(const std::vector<ContentsRecord>&, std::string& error);
     // Actual accepted resource absorption/death owner marks its child. No
