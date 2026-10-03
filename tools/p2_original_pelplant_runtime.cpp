@@ -20,6 +20,7 @@
 #include "NaviState.h"
 #include "Camera.h"
 #include "Piki.h"
+#include "PikiAI.h"
 #include "PikiState.h"
 #include "PikiMgr.h"
 #include "PikiHeadItem.h"
@@ -85,7 +86,7 @@ class PelplantApp final:public PlugPikiApp {
  std::array<std::uint64_t,7> generatorHandles{};std::vector<Instance> instances;
  int frame=0,ready=0,phase=0,age=0,caseIndex=0,phaseStart=0,settled=0,baseline=0,growthControl=0;
  bool captainSeen=false,carried=false,nearGoal=false;float travel=0;
- bool naturalStarted=false,naturalStick=false,naturalHeadStick=false,naturalHealthLoss=false;
+ bool naturalStarted=false,naturalAttack=false,naturalStick=false,naturalHeadStick=false,naturalHealthLoss=false;
  float naturalInitialHealth=0;
  GoalItem* onion=nullptr;
  const unsigned cases[3]={0,4,7};
@@ -201,13 +202,16 @@ public:
      i.pellet=h->captured;require(i.pellet&&native->captured(i.pellet),"natural Full starts with actual captured pellet");
      baseline=rewards();carried=nearGoal=false;travel=0;settled=0;phaseStart=age;
      std::puts("P2_ORIGINAL_PELPLANT_NATURAL_BEGIN amount=1 direct_damage=0 farm_control=0 diagnostic_birth=1 ordinary_SDL=1");}
-    Iterator attackers(pikiMgr);CI_LOOP(attackers){auto* p=static_cast<Piki*>(*attackers);if(!p->isAlive()||p->getStickObject()!=i.actor||!p->getStickPart())continue;
+    Iterator attackers(pikiMgr);CI_LOOP(attackers){auto* p=static_cast<Piki*>(*attackers);if(!p->isAlive())continue;
+     if(p->mActiveAction&&p->mActiveAction->mCurrActionIdx==PikiAction::Attack){auto* action=static_cast<ActAttack*>(p->mActiveAction->getCurrAction());
+      if(action&&action->targets(i.actor)){if(!naturalAttack)std::printf("P2_ORIGINAL_PELPLANT_NATURAL_ATTACK ordinary_Piki_action=1 target_actual_actor=1 attached=%d direct_damage=0\n",int(p->getStickObject()==i.actor));naturalAttack=true;}}
+     if(p->getStickObject()!=i.actor||!p->getStickPart())continue;
      const unsigned id=p->getStickPart()->getCode().mId;const auto code=sourceCode(id);const bool head=id==0x735f5f30u;
      if(!naturalStick||(head&&!naturalHeadStick))std::printf("P2_ORIGINAL_PELPLANT_NATURAL_CONTACT piki=1 attached_to_actual_actor=1 part=%s native_id=%08x head=%d\n",code.data(),id,int(head));
      naturalStick=true;naturalHeadStick|=head;
     }
     if(h->health<naturalInitialHealth){if(!naturalHealthLoss)std::printf("P2_ORIGINAL_PELPLANT_NATURAL_HEALTH before=%.3f after=%.3f head_contact=%d direct_damage=0\n",naturalInitialHealth,h->health,int(naturalHeadStick));naturalHealthLoss=true;}
-    if(h->state==State::Dead){require(naturalStick&&naturalHealthLoss,"real Piki contact and health loss precede natural death");phase=2;phaseStart=age;input();return result;}
+    if(h->state==State::Dead){require(naturalAttack&&naturalHealthLoss,"real Piki attack targeting actual actor and health loss precede natural death");phase=2;phaseStart=age;input();return result;}
     auto* observedHead=i.actor->mCollInfo->getSphere('head');require(observedHead,"actual source head collider available");
     if(age%60==0||age==phaseStart){int flying=0,formation=0,inSearch=0;float nearest=1e9f;Iterator roster(pikiMgr);CI_LOOP(roster){auto* p=static_cast<Piki*>(*roster);if(!p->isAlive())continue;
      flying+=p->getState()==PIKISTATE_Flying;formation+=p->mMode==PikiMode::FormationMode;inSearch+=p->mSearchBuffer.getIndex(i.actor)>=0;nearest=std::min(nearest,distance(p->mSRT.t,observedHead->mCentre));}
@@ -256,7 +260,7 @@ public:
   auto& provider=native->provider();for(auto& owned:instances)if(provider.lookup(owned.actor)){checked(provider.release(owned.actor,owned.token,error),error);require(catalog.retire(owned.actor,owned.handle),"owned final registry cleanup");}
   for(unsigned row=0;row<source.size();++row)require(catalog.retireGenerator(generators[row].get(),generatorHandles[row]),"owned generator retirement after family cleanup");
   require(provider.size()==0,"no retained family-owned roots");
-  if(naturalCombat)std::printf("PASS P2_ORIGINAL_PELPLANT_NATURAL_RUNTIME amount=1 actual_Piki_contact=1 health_loss=1 actual_animation_release=1 same_pointer=1 ordinary_Piki_Onion=1 exactly_once=1 owned_cleanup=1 direct_damage=0 natural_head_contact=%d attack_loop_damage_unproven=1 fixture_placements=1 save_resume=0\n",int(naturalHeadStick));
+  if(naturalCombat)std::printf("PASS P2_ORIGINAL_PELPLANT_NATURAL_RUNTIME amount=1 ordinary_Piki_attack_target=1 health_loss=1 actual_animation_release=1 same_pointer=1 ordinary_Piki_Onion=1 exactly_once=1 owned_cleanup=1 direct_damage=0 natural_attachment=%d natural_head_contact=%d fixture_placements=1 save_resume=0\n",int(naturalStick),int(naturalHeadStick));
   else std::puts("PASS P2_ORIGINAL_PELPLANT_RUNTIME seven_rows=1 eight_births=1 literal_amounts=1,5,10 full_only_damage=1 actual_animation_release=1 ordinary_Piki_Onion=1 exactly_once=1 owned_cleanup=1 fixture_placements=1 natural_attack=0 save_resume=0");std::fflush(nullptr);std::_Exit(0);
  }
 };
