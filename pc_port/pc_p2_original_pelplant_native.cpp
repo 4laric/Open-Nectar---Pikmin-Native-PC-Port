@@ -295,6 +295,9 @@ bool Native::draw(BTeki* actor,Graphics& gfx,const Matrix4f& view){Host* h=m->pr
 }
 bool Native::drawCaptured(Pellet* pellet,Graphics& gfx,const Matrix4f& view){auto it=m->cargo.find(pellet);if(it==m->cargo.end()||!gfx.mCamera)return false;
  Matrix4f transform;gfx.mCamera->mLookAtMtx.multiplyTo(m->tracks.at(it->second->creature)->capture,transform);
+ // Same native context preparation as ordinary Pellet::doRender. Shape joint
+ // overrides refer to these shared contexts; init/startAI alone is insufficient.
+ gfx.useMatrix(Matrix4f::ident,0);pellet->mAnimator.updateContext();
  float c=pellet->mConfig->mPelletColor();pellet->mAnimatedMaterials.animate(&c);
  pellet->mShapeObject->mShape->updateAnim(gfx,transform,nullptr,nullptr);pellet->mShapeObject->mShape->drawshape(gfx,*gfx.mCamera,&pellet->mAnimatedMaterials);return true;
 }
