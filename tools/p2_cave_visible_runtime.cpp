@@ -34,13 +34,16 @@ bool entered=false,returned=false;
 P2CaveCampaignParty floorParty;
 auto start=std::chrono::steady_clock::now();
 void finish(int code){std::fflush(nullptr);std::_Exit(code);}
-bool same(const P2CaveCampaignParty& a,const P2CaveCampaignParty& b){
+bool same(const P2CaveCampaignParty& a,const P2CaveCampaignParty& b,bool owners=true){
     if(a.bodies.size()!=b.bodies.size() || a.captains.size()!=b.captains.size() || a.active!=b.active)return false;
     for(size_t i=0;i<a.captains.size();++i)if(a.captains[i].slot!=b.captains[i].slot
         || a.captains[i].health!=b.captains[i].health || a.captains[i].maxHealth!=b.captains[i].maxHealth)return false;
-    for(size_t i=0;i<a.bodies.size();++i){auto& x=a.bodies[i];auto& y=b.bodies[i];
+    for(auto& x:a.bodies){
+        const P2CavePartyBody* found=nullptr;
+        for(auto& body:b.bodies)if(body.key==x.key){found=&body;break;}
+        if(!found)return false;auto& y=*found;
         if(x.key!=y.key || !x.sameOrigin(y) || x.species!=y.species || x.growth!=y.growth
-            || x.health!=y.health || x.maxHealth!=y.maxHealth || x.owner!=y.owner || x.player!=y.player)return false;}
+            || x.health!=y.health || x.maxHealth!=y.maxHealth || (owners&&(x.owner!=y.owner || x.player!=y.player)))return false;}
     return true;
 }
 class Observer:public PlugPikiApp {
@@ -77,7 +80,8 @@ public:int idle()override{
             if(ticks<90)b=ticks%30<12?1:0;
             else if(move(boundary.x,boundary.z)<45){stage=1;ticks=0;std::puts("CAVE_VISIBLE_INPUT near_hole ordinary_movement=1");}
         }else if(stage==1){
-            if(ticks==15){a=1;++entryClicks;std::puts("CAVE_VISIBLE_INPUT enter_A=1 F6=0");}
+            if(ticks>=15&&ticks<19)a=1;
+            if(ticks==15){++entryClicks;std::puts("CAVE_VISIBLE_INPUT enter_A=1 F6=0");}
             if(boundary.floor==1){stage=2;ticks=0;entered=true;}
         }else if(stage==2){
             if(ticks>=45){
@@ -87,11 +91,17 @@ public:int idle()override{
             }
         }else if(stage==3){
             x=ticks<8?1:0;
-            if(ticks>120&&formation==0){stage=4;ticks=0;std::puts("CAVE_VISIBLE_INPUT dismiss20_on_dry_bank=1 Red_water_crossing_claim=0");}
+            if(ticks>120&&formation==0){
+                P2CaveCampaignParty dismissed;
+                if(!pc_p2_cave_campaign_party_capture(dismissed,true)||!same(dismissed,floorParty,false)||!dismissed.valid())finish(13);
+                floorParty=dismissed;stage=4;ticks=0;
+                std::puts("CAVE_VISIBLE_INPUT dismiss20_on_dry_bank=1 actual_owner_reference_captured=1 Red_water_crossing_claim=0");
+            }
         }else if(stage==4){if(move(500,0)<20){stage=5;ticks=0;}}
         else if(stage==5){if(move(boundary.x,boundary.z)<45){stage=6;ticks=0;}}
         else if(stage==6){
-            if(ticks==15){a=1;++exitClicks;std::puts("CAVE_VISIBLE_INPUT return_A=1 F6=0");}
+            if(ticks>=15&&ticks<19)a=1;
+            if(ticks==15){++exitClicks;std::puts("CAVE_VISIBLE_INPUT return_A=1 F6=0");}
             if(boundary.floor==0){stage=7;ticks=0;returned=true;}
         }else if(stage==7&&ticks>=60){
             P2CaveCampaignParty actual;const bool captured=pc_p2_cave_campaign_party_capture(actual,false);
