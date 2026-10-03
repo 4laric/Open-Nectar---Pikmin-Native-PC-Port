@@ -91,7 +91,14 @@ public:
   }
   if(!native){if(n->getCurrState()->getID()!=NAVISTATE_Walk)return result;
    unsigned live=0;Iterator it(pikiMgr);CI_LOOP(it){auto* p=static_cast<Piki*>(*it);if(p->isAlive())++live;}
-   require(live==20,"20 live Pikmin fixture baseline");before=tekiMgr->getSize();enter();}
+   require(live==20,"20 live Pikmin fixture baseline");
+   // This diagnostic terrain has no enemy generators. Preload the provider's
+   // neutral chassis resources before it allocates the genuine source actor;
+   // never inject a P1 enemy merely to make its resource-usage scan notice us.
+   require(tekiMgr->getSize()==0,"empty enemy pool before fixture resource preload");
+   { struct Heap{int prior;Heap():prior(gsys->setHeap(SYSHEAP_App)){}~Heap(){gsys->setHeap(prior);}} heap;
+     tekiMgr->setUsingType(TEKI_Namazu,true);tekiMgr->startStage(); }
+   before=tekiMgr->getSize();enter();}
   if(human)return result;
   if(++age<180)return result;
   unsigned alive=0;require(pc_p2_original_groups().state(generator.get(),state,alive)&&alive==1,"original group retained live actor");
