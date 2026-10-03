@@ -77,7 +77,7 @@ class FoliageApp final:public PlugPikiApp {
   CatalogRow r;r.course="tutorial";r.member="plantsgen.txt";r.index=index;r.sourceKey="tutorial/plantsgen.txt#"+std::to_string(index);
   r.enemy.source=source;r.enemy.uid=uid;r.enemy.count=1;r.enemy.position=at;r.enemy.directionDegrees=facing;return r;
  }
- int rewards(){auto* onion=itemMgr->getContainer(Red);require(onion,"real Red Onion");return heads()+onion->getTotalStorePikis();}
+ int rewards(){int total=heads();for(int color=0;color<3;++color){auto* onion=itemMgr->getContainer(color);if(onion)total+=onion->getTotalStorePikis();}return total;}
  void checkEconomy(){require(pelletMgr->getSize()==pelletBaseline&&rewards()==rewardBaseline,"decorative foliage produced no cargo or rewards");}
  void install(bool reentry){
   HeapScope heap;std::string e;std::vector<GroupBinding> bindings;
