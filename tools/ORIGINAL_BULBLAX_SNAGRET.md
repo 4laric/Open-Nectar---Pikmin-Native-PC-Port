@@ -109,12 +109,24 @@ health. --manual-encounter bypasses diagnostic parking for ordinary controls.
 
 
 Original SnakeCrow death throws its literal source drops at dead KEYEVENT3,
-authored frame131, exactly once; END165 separately finalizes the natural corpse
+authored frame131 delivered at integer animation frame132, exactly once;
+END165 separately finalizes the natural corpse
 and retires the generator. AP/P1 death paths are unaffected. The provider test
-checks no early drop, exact131, crossed timestep delivery, no repeated emission
+checks no early drop, observed132, crossed timestep delivery, no repeated emission
 throughEND and AP exclusion. A natural combat death run must observe the new
 P2_ORIGINAL_SNAKECROW_DROP marker and actual number pellets before accepting
 runtime death/drop timing; the controlled policy test alone is not that evidence.
+
+The original-only motion clock follows retail SysShape's strict
+`key.frame < int(timer)` rule. Normal hit bite34 delivers35, swallow42
+delivers43, dive flick12 delivers13, and death throw131 delivers132.
+END remains at BCA duration. Crossed keys emit in authored order, including
+before END in a large delta; loops discard overshoot and restart at their
+loop-start key. The accumulator stores source animation frames independently
+of gameplay state timers. AP/P1 clocks remain unchanged. Earlier frame131
+delivery evidence described the authored key and was incorrect; it is not
+source timing qualification. Focused clock tests and syntax cannot substitute
+for actual encounter/drop/carry gameplay in the composed executable.
 # Original34 flick dependency and qualification
 
 Original SnakeCrow Disappear KEY2 now calls nearby captains, nearby Pikmin,

@@ -61,6 +61,7 @@
 #include "pc_p2_original_snagret_bank.h"
 #include "pc_p2_original_snagret_death.h"
 #include "pc_p2_original_snagret_flick.h"
+#include "pc_p2_original_snagret_clock.h"
 #include "pc_p2_hanachirashi_receiver.h"
 #include "pc_p2_original_drop_engine.h"
 #include "pc_p2_original_bulblax_snagret_native.h"
@@ -177,6 +178,7 @@ struct Snake {
     const SpeciesParms* parms = &SNAKE_CROW;
     State state = SNAKE_STAY;
     float stateTime = 0.0f;
+    p2original::bulblax_snagret::MotionClock originalClock;
     float heading = 0.0f;
     Vector3f home;
     Vector3f burrowPos;        // where a SnakeCrow is pinned; moves with each appearNearByTarget
@@ -455,6 +457,7 @@ void doFlick(BTeki* a, unsigned generator, bool original) {
 void enter(Snake& s, State state, const char* clip) {
     s.state = state;
     s.stateTime = 0.0f;
+    s.originalClock.reset();
     if (clip) s.clip = clip;
     s.biteFired = false;
     s.swallowFired = false;
@@ -564,6 +567,7 @@ int holding(BTeki* a, Snake& s) {
 void setPhase(Snake& s) {
     const float duration = clipDuration(s.parms->name, s.clip);
     const float len = duration > 0.0f ? duration : 1.0f;
+    if(s.original){s.phase=s.originalClock.frame()/(len*30.0f);return;}
     if (clipLoops(s.parms->name, s.clip)) {
         s.phase = s.stateTime / len;
         s.phase -= std::floor(s.phase);
@@ -870,8 +874,16 @@ void pc_p2_snakejoint_update(BTeki* actor) {
         setState(actor, s, SNAKE_DEAD, "dead");
     }
 
-    const float previousStateTime=s.stateTime;
     s.stateTime += dt;
+    std::vector<int> originalEvents;
+    if(s.original){
+        Clip* clip=findClip(parms.name,s.clip);
+        if(!clip){std::fputs("P2_ORIGINAL_SNAKECROW admitted clip lost\n",stderr);std::abort();}
+        bool loop=false;for(const auto& event:clip->events)if(event.second==1)loop=true;
+        originalEvents=s.originalClock.advance(dt*30.0f,clip->events,int(std::lround(clip->duration*30.0f)),loop);
+    }
+    const auto key=[&](int type){return p2original::bulblax_snagret::delivered(originalEvents,type);};
+    const auto ended=[&](const char* clip){return s.original?key(1000):s.stateTime>=clipDuration(parms.name,clip);};
     switch (s.state) {
     case SNAKE_STAY: {
         stop(actor);
@@ -900,7 +912,7 @@ void pc_p2_snakejoint_update(BTeki* actor) {
     case SNAKE_APPEAR2: {
         stop(actor);
         const char* clip = s.state == SNAKE_APPEAR1 ? "appear1" : "appear2";
-        if (s.stateTime >= clipDuration(parms.name, clip)) {
+        if (ended(clip)) {
             Creature* target = nearestTarget(pos, parms.sight);
             if (findAttack(actor, s, p2captor::SnakeAnyZone)) {
                 setState(actor, s, SNAKE_ATTACK, "hit");
@@ -971,11 +983,11 @@ void pc_p2_snakejoint_update(BTeki* actor) {
         int bite = eventFrame(parms.name, s.clip, 3);
         if (bite < 0) bite = BITE_FALLBACK;
         const float frame = s.stateTime * 30.0f;
-        if (!s.biteFired && frame >= float(bite)) {
+        if (!s.biteFired && (s.original?key(3):frame >= float(bite))) {
             s.biteFired = true;
             biteZone(actor, s, generator, bite);
         }
-        if (s.stateTime >= clipDuration(parms.name, s.clip)) {
+        if (ended(s.clip.c_str())) {
             if (holding(actor, s) > 0) { // source isSwallowPikmin
                 setState(actor, s, SNAKE_EAT, "waitact1");
             } else {
@@ -989,7 +1001,7 @@ void pc_p2_snakejoint_update(BTeki* actor) {
         // Exactly-once swallow at the banked waitact1 KEYEVENT_2 event.
         int swallow = eventFrame(parms.name, "waitact1", 2);
         if (swallow < 0) swallow = SWALLOW_FALLBACK;
-        if (!s.swallowFired && s.stateTime * 30.0f >= float(swallow)) {
+        if (!s.swallowFired && (s.original?key(2):s.stateTime * 30.0f >= float(swallow))) {
             s.swallowFired = true;
             int white = 0;
             const int killed = p2captorhost::swallow(actor, s.held, mouthGeometry(s).slots,
@@ -997,7 +1009,7 @@ void pc_p2_snakejoint_update(BTeki* actor) {
             std::printf("P2_SNAKEJOINT_EAT generator=%u pikmin=%d white=%d\n", generator, killed, white);
             std::fflush(stdout);
         }
-        if (s.stateTime >= clipDuration(parms.name, "waitact1")) {
+        if (ended("waitact1")) {
             attackFollowUp(actor, s, pos);
         }
         break;
@@ -1016,31 +1028,32 @@ void pc_p2_snakejoint_update(BTeki* actor) {
         stop(actor);
         int flick = eventFrame(parms.name, "dive", 2);
         if (flick < 0) flick = FLICK_FALLBACK;
-        if (!s.flickFired && s.stateTime * 30.0f >= float(flick)) {
+        if (!s.flickFired && (s.original?key(2):s.stateTime * 30.0f >= float(flick))) {
             s.flickFired = true;
             doFlick(actor, generator, s.original);
         }
-        if (s.stateTime >= clipDuration(parms.name, "dive")) {
+        if (ended("dive")) {
             setState(actor, s, SNAKE_STAY, "appear1");
         }
         break;
     }
     case SNAKE_DEAD:
         stop(actor);
-        // Retail StateDead KEYEVENT_3 (frame131) throws source items before
+        // Retail StateDead authored KEYEVENT_3 131 delivers at integer132,
+        // throwing source items before
         // END kills. Never route original drops through an AP/P1 personality.
-        if(s.deathItems.advance(s.original,previousStateTime,s.stateTime)){
+        if(s.deathItems.key(s.original,key(3))){
             if(!pc_p2_original_spawn_items(actor)){
                 std::fputs("P2_ORIGINAL_SNAKECROW death event lost original registry\n",stderr);
                 std::abort();
             }
-            std::printf("P2_ORIGINAL_SNAKECROW_DROP generator=%u frame=131 before_end=1\n",generator);
+            std::printf("P2_ORIGINAL_SNAKECROW_DROP generator=%u authored_frame=131 earliest_delivery_frame=132 before_end=1\n",generator);
             std::fflush(stdout);
         }
         // dieSoon() only runs inside the P1 doAI block, which is suppressed
         // for registered snagrets; pcEscapeNow() finalizes the corpse outside
         // doAI, fired exactly once when the dead clip completes. Mirrors frog.
-        if (!s.escaped && s.stateTime >= clipDuration(parms.name, "dead")) {
+        if (!s.escaped && ended("dead")) {
             s.escaped = true;
             actor->pcEscapeNow();
         }

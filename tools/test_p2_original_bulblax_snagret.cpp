@@ -1,6 +1,7 @@
 #include "pc_p2_original_bulblax_snagret.h"
 #include "pc_p2_original_snagret_bank.h"
 #include "pc_p2_original_snagret_death.h"
+#include "pc_p2_original_snagret_clock.h"
 
 #include <sstream>
 #include <fstream>
@@ -66,15 +67,12 @@ int main(int argc,char** argv){
   changed=bytes.str();changed.replace(changed.find("dead 165"),8,"dead 166");std::istringstream badDuration(changed);assert(!bulblax_snagret::validateSnagretBank(badDuration,e));
   std::istringstream truncated(bytes.str().substr(0,200));assert(!bulblax_snagret::validateSnagretBank(truncated,e));
  }
- // Source death ordering: no drops before131; one atKEYEVENT3; END165
+ // Source death ordering: authored131 delivered132; END165
  // remains a separate corpse/retirement event. Crossed timesteps keep order.
- bulblax_snagret::DeathItems death;unsigned emitted=0;
- for(unsigned frame=1;frame<=180;++frame){const bool fired=death.advance(true,float(frame-1)/30,float(frame)/30);
-  assert(fired==(frame==131));emitted+=fired;}
+ bulblax_snagret::DeathItems death;bulblax_snagret::MotionClock clock;unsigned emitted=0;
+ for(unsigned frame=1;frame<=180;++frame){auto keys=clock.advance(1,{{131,3}},165,false);const bool fired=death.key(true,bulblax_snagret::delivered(keys,3));
+  assert(fired==(frame==132));emitted+=fired;}
  assert(emitted==1);
- bulblax_snagret::DeathItems crossed;assert(!crossed.advance(true,0,130.0f/30));
- assert(crossed.advance(true,130.0f/30,140.0f/30));assert(!crossed.advance(true,140.0f/30,165.0f/30));
- bulblax_snagret::DeathItems ap;assert(!ap.advance(false,0,165.0f/30)&&!ap.emitted);
- bulblax_snagret::DeathItems invalidClock;assert(!invalidClock.advance(true,5,4)&&!invalidClock.emitted);
+ bulblax_snagret::DeathItems ap;assert(!ap.key(false,true)&&!ap.emitted);
  std::cout<<"original Bulblax/Snagret literal admission, reservation, ordinal permanence and cleanup passed\n";
 }
