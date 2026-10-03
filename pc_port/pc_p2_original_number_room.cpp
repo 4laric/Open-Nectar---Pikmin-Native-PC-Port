@@ -1,4 +1,5 @@
 #include "pc_p2_original_number_room.h"
+#include "pc_p2_original_number_triangle.h"
 #include <cmath>
 #include <cstdint>
 #include <cstring>
@@ -32,8 +33,9 @@ bool make(unsigned turn,float centreX,float centreZ,Matrix3x4& out,std::string& 
  const float cxcz=cx*cz,cxsz=cx*sz,sxsy=sx*sy,sxsz=sx*sz,sxcz=sx*cz;
  Matrix3x4 m;
  m[0]=cy*cz;m[4]=cy*sz;m[8]=-sy;
- m[1]=std::fma(sxsy,cz,-cxsz);m[5]=std::fma(sxsy,sz,cxcz);m[9]=sx*cy;
- m[2]=std::fma(cxcz,sy,sxsz);m[6]=std::fma(cxsz,sy,-sxcz);m[10]=cx*cy;
+ if(!triangle::sourceFma(sxsy,cz,-cxsz,m[1])||!triangle::sourceFma(sxsy,sz,cxcz,m[5])||
+    !triangle::sourceFma(cxcz,sy,sxsz,m[2])||!triangle::sourceFma(cxsz,sy,-sxcz,m[6]))return fail(e,"source room fused arithmetic unavailable");
+ m[9]=sx*cy;m[10]=cx*cy;
  m[3]=centreX*170.0f;m[7]=0;m[11]=centreZ*170.0f;
  for(float value:m)if(!std::isfinite(value))return fail(e,"source room matrix arithmetic overflow");
  out=m;e.clear();return true;
@@ -44,7 +46,8 @@ bool transformVertex(const Matrix3x4& m,Vec3 v,Vec3& out,std::string& e){
  Vec3 candidate;float* values[]={&candidate.x,&candidate.y,&candidate.z};
  for(unsigned row=0;row<3;++row){const unsigned i=row*4;
   const float lane0=m[i]*v.x,lane1=m[i+1]*v.y;
-  const float combined0=std::fma(m[i+2],v.z,lane0),combined1=std::fma(m[i+3],1.0f,lane1);
+  float combined0,combined1;
+  if(!triangle::sourceFma(m[i+2],v.z,lane0,combined0)||!triangle::sourceFma(m[i+3],1.0f,lane1,combined1))return fail(e,"source room fused vertex arithmetic unavailable");
   *values[row]=combined0+combined1;
  }
  if(!finite(candidate))return fail(e,"source room transformed vertex overflow");

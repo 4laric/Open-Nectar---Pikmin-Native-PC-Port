@@ -6,7 +6,7 @@
 #include <cstring>
 #include <limits>
 using namespace p2originalnumber::room;
-namespace {std::uint32_t bits(float v){std::uint32_t x;std::memcpy(&x,&v,4);return x;}}
+namespace {std::uint32_t bits(float v){std::uint32_t x;std::memcpy(&x,&v,4);return x;}float fromBits(std::uint32_t x){float v;std::memcpy(&v,&x,4);return v;}}
 int main(){
  unsigned checks=0;auto check=[&](bool ok){++checks;assert(ok);};Matrix3x4 m;std::string error;Vec3 out{99,99,99};
  check(make(0,0,0,m,error));check(m[0]==1&&m[5]==1&&m[10]==1&&bits(m[8])==0x80000000);
@@ -27,5 +27,8 @@ int main(){
  // in a left-associated sum (1e20 + 1 - 1e20 + 0).
  Matrix3x4 paired{{1,1,1,0,0,1,0,0,0,0,1,0}};
  check(transformVertex(paired,{1e20f,1,-1e20f},out,error)&&out.x==1);
+ // Exact rational golden: host MinGW fmaf rounds this fused lane incorrectly.
+ Matrix3x4 fusedLane{{12.5f,0,15.f,0,0,1,0,0,0,0,1,0}};
+ check(transformVertex(fusedLane,{-fromBits(0x3ec90328),0,fromBits(0xbf3d43b2)},out,error)&&bits(out.x)==bits(-0x1.ffe964p+3f));
  std::printf("Original number source room transform: %u controls passed\n",checks);
 }

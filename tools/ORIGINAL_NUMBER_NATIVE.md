@@ -51,8 +51,13 @@ JMath LUT indexing/initializer values, explicit makeTR fused arithmetic and
 PSMTXMultVec paired-lane order. The LUT quarter values agree with independent
 libm and 100-digit decimal evaluation; no original PPC runtime-table identity is
 claimed. In particular, the 180-degree transform has a nonzero sine and cannot
-use a quantized quarter-turn matrix. Planes/spheres still need the source raw
-PPC reciprocal-square-root estimate; host sqrt cannot establish that step.
+use a quantized quarter-turn matrix. The triangle arithmetic helper implements
+the raw PPC reciprocal-square-root estimate using independently expressed
+coefficient facts pinned to an emulator reference, plus exact source plane and
+sphere instruction order. It supplies a correctly rounded binary32 FMA backend:
+an exact rational control found a MinGW fmaf error, so room transforms use this
+backend instead. Arithmetic controls are portable engineering evidence; original
+hardware floating-point status and runtime bit identity remain unobserved.
 
 No producer installs this factory yet. The pure ledger, animation and geometry
 controls and compiled production objects are engineering evidence. They do not

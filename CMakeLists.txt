@@ -295,6 +295,7 @@ set(PC_PORT_SOURCES
     pc_port/pc_p2_original_number_motion.cpp
     pc_port/pc_p2_original_number_grid.cpp
     pc_port/pc_p2_original_number_room.cpp
+    pc_port/pc_p2_original_number_triangle.cpp
     pc_port/pc_p2_original_number_lod.cpp
     pc_port/pc_p2_original_number_lod_native.cpp
     pc_port/pc_p2_original_number_rigid.cpp
@@ -3536,10 +3537,14 @@ add_executable(p2_original_number_lod_test tools/p2_original_number_lod_test.cpp
 target_include_directories(p2_original_number_lod_test PRIVATE pc_port)
 target_compile_options(p2_original_number_lod_test PRIVATE -Wall -Wextra -Werror -UNDEBUG -ffp-contract=off)
 add_test(NAME p2_original_number_lod COMMAND p2_original_number_lod_test)
-add_executable(p2_original_number_room_test tools/p2_original_number_room_test.cpp pc_port/pc_p2_original_number_room.cpp)
+add_executable(p2_original_number_room_test tools/p2_original_number_room_test.cpp pc_port/pc_p2_original_number_room.cpp pc_port/pc_p2_original_number_triangle.cpp)
 target_include_directories(p2_original_number_room_test PRIVATE pc_port)
 target_compile_options(p2_original_number_room_test PRIVATE -Wall -Wextra -Werror -UNDEBUG -ffp-contract=off)
 add_test(NAME p2_original_number_room COMMAND p2_original_number_room_test)
+add_executable(p2_original_number_triangle_test tools/p2_original_number_triangle_test.cpp pc_port/pc_p2_original_number_triangle.cpp)
+target_include_directories(p2_original_number_triangle_test PRIVATE pc_port)
+target_compile_options(p2_original_number_triangle_test PRIVATE -Wall -Wextra -Werror -UNDEBUG -ffp-contract=off)
+add_test(NAME p2_original_number_triangle COMMAND p2_original_number_triangle_test)
 add_executable(p2_original_number_five_motion_test tools/p2_original_number_five_motion_test.cpp
     pc_port/pc_p2_original_number_five_motion.cpp pc_port/pc_p2_original_number_rigid.cpp
     pc_port/pc_p2_original_number_motion.cpp pc_port/pc_p2_original_number_lod.cpp)
@@ -3554,6 +3559,7 @@ set_source_files_properties(
     pc_port/pc_p2_original_number_grid.cpp
     pc_port/pc_p2_original_number_lod.cpp
     pc_port/pc_p2_original_number_room.cpp
+    pc_port/pc_p2_original_number_triangle.cpp
     pc_port/pc_p2_original_number_five_motion.cpp
     PROPERTIES COMPILE_OPTIONS "-ffp-contract=off;-fno-fast-math")
 
