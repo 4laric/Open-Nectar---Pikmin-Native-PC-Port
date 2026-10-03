@@ -1,5 +1,7 @@
 #include "pc_p2_original_captain_native_phases.h"
 #include "pc_p2_original_captain_body_borrower.h"
+#include "pc_p2_original_captain_native_trace.h"
+#include "pc_p2_retail_rooms.h"
 #include "pc_p2_retail_scene.h"
 #include "Navi.h"
 #include "NaviState.h"
@@ -12,8 +14,8 @@
 #include <algorithm>
 class MapMgr {}; // Physical pointer holder only; real query TU is a strong double.
 namespace p2retail {
-struct SourceRoomGeometry {};struct SourceWaterInputs {};
-class SceneRuntime {public:static std::unique_ptr<SceneContext> make(MapMgr& map,const std::string& campaign,const std::string& session,unsigned serial){auto c=std::unique_ptr<SceneContext>(new SceneContext);c->mMap=&map;c->mCampaign=campaign;c->mSession=session;c->mRevision=4;c->mSnapshot.scene.serial=serial;return c;}};
+
+class SceneRuntime {public:static void revision(SceneContext& c,unsigned value){c.mRevision=value;}static std::unique_ptr<SceneContext> make(MapMgr& map,const std::string& campaign,const std::string& session,unsigned serial){auto c=std::unique_ptr<SceneContext>(new SceneContext);c->mMap=&map;c->mCampaign=campaign;c->mSession=session;c->mRevision=4;c->mSnapshot.scene.serial=serial;return c;}};
 }
 using namespace p2original::captain;namespace bp=bodyphases;
 namespace {
@@ -34,7 +36,7 @@ struct WorldOwner:World {
  std::uint64_t incarnation()const override{return scene.epoch;}Phase phase()const override{return value;}Demo demo()const override{return Demo::Inactive;}Navi* captainAt(unsigned i)const override{return wrong?nullptr:scene.captainAt(i);}
 } world;
 const LoadedScene* sceneProvider=&scene;const World* worldProvider=&world;SourceBank* bankProvider=nullptr;bp::Owner* body=nullptr;
-bool lifetime=true,fsmTransition=false;bp::Facts observation;int animationCount=0,selectorCount=0,timerCount=0,execCount=0;int floorKey=0,wallKey=0;unsigned slip=0;bool floorOut=false,wallOut=false,platformFloor=false,below=false,expire=false,nested=false,retireDenied=false,flagChild=false;float randomDraw=1;bp::Vec3 traceNormal{0,1,0};
+bool lifetime=true,actorAlive=true,fsmTransition=false;bp::Facts observation;int animationCount=0,selectorCount=0,timerCount=0,execCount=0;int floorKey=0,wallKey=0;unsigned slip=0;bool floorOut=false,wallOut=false,platformFloor=false,below=false,expire=false,nested=false,retireDenied=false,flagChild=false;int traceRoom=-1,observedRoom=-1;bool roomRefuses=false;float randomDraw=1;bp::Vec3 traceNormal{0,1,0};
 struct Typed:NaviState,State {
  StateId id;Typed(StateId value):NaviState(48+int(value)),id(value){}
  const NaviState* nativeState()const override{return this;}StateId sourceStateId()const override{return id;}bool sourceAlive(const Navi&)const override{return true;}bool sourceInvincible()const override{return false;}
@@ -60,16 +62,16 @@ struct Provider:bp::Provider {
 struct Trace:bp::SourceSceneTrace {
  const LoadedScene& scene()const override{return ::scene;}
  bool floor(bp::FloorHandle handle,bp::FloorFacts& out,std::string&)const override{if(handle.incarnation!=::scene.epoch)return false;out={slip,8,traceNormal};return true;}
- bool map(Navi&,bp::TraceInfo& out,float rate,std::string&)override{events.push_back("map");out.sphere.center.x+=out.velocity.x*rate;out.sphere.center.y+=out.velocity.y*rate;out.sphere.center.z+=out.velocity.z*rate;out.floor=floorOut?bp::FloorHandle{&floorKey,::scene.epoch}:bp::FloorHandle{};out.floorNormal=traceNormal;out.wall=wallOut?bp::FloorHandle{&wallKey,::scene.epoch}:bp::FloorHandle{};out.wallNormal={1,0,0};return true;}
+ bool map(Navi&,bp::TraceInfo& out,float rate,std::string&)override{events.push_back("map");out.sphere.center.x+=out.velocity.x*rate;out.sphere.center.y+=out.velocity.y*rate;out.sphere.center.z+=out.velocity.z*rate;out.floor=floorOut?bp::FloorHandle{&floorKey,::scene.epoch}:bp::FloorHandle{};out.floorNormal=traceNormal;out.wall=wallOut?bp::FloorHandle{&wallKey,::scene.epoch}:bp::FloorHandle{};out.wallNormal={1,0,0};out.roomIndex=traceRoom;return true;}
  bool platforms(Navi&,bp::TraceInfo& out,float,std::string&)override{events.push_back("platform");if(platformFloor)out.floor={&floorKey,::scene.epoch};return true;}
  bool constrain(Navi&,bp::Sphere& out,std::string&)override{events.push_back("constrain");out.center.x=99;return true;}
- bool room(Navi&,int,std::string&)override{events.push_back("room");return true;}
+ bool room(Navi& n,int expected,std::string&)override{events.push_back("room");bp::Fields f;if(!body->readFields(&n,f,error))return false;observedRoom=f.roomIndex;return !roomRefuses&&observedRoom==expected;}
 } trace;
 void frame(){observation={};observation.deltaTime=.01f;observation.gravity=100;observation.mapPresent=true;observation.movieMotion=false;observation.movieActor=false;observation.movieExtra=false;observation.gameFrozen=false;observation.movieActive=false;observation.naviManagerFlag1=false;observation.stuck=false;observation.targetCollision=false;observation.platformsPresent=false;observation.hiddenCollision=false;observation.inWater=false;observation.rushBoots=false;observation.gamePaused=false;observation.frameTimer=1;observation.managerSlotOpen=true;}
 }
 const LoadedScene* pc_p2_original_captain_loaded_scene(){return sceneProvider;}const World* pc_p2_original_captain_world(){return worldProvider;}SourceBank* pc_p2_original_captain_source_bank(){return bankProvider;}
 
-bool pc_p2_original_captain_actor_lifetime(const Navi*,bool& out){if(!lifetime)return false;out=true;return true;}
+bool pc_p2_original_captain_actor_lifetime(const Navi*,bool& out){if(!lifetime)return false;out=actorAlive;return true;}
 void pc_p2_original_captain_invincibility_update(Navi*){events.push_back("iframe");++timerCount;}
 void pc_p2_original_captain_party_timers_update(Navi*){events.push_back("partyTimers");}
 namespace p2original {namespace captain {
@@ -82,10 +84,25 @@ bool selectWalkAnimation(Navi*,std::string&){events.push_back("selector");++sele
 }}
 namespace {
 const p2retail::SceneContext* prepared=nullptr;int queries=0;bool queryAvailable=true,queryWrong=false,queryExpire=false,queryRetire=false,queryRetireDenied=false;float expectedWaterY=0;
-p2retail::SourceRoomGeometry geometry;p2retail::SourceWaterInputs inputs;
+// Immutable wide selected geometry exercises the REAL numeric grid and trace;
+// these authored triangles are engineering fixtures, not imported source assets.
+const p2retail::SourceRoomGeometry geometry=[](){p2retail::SourceRoomGeometry g;g.vertices={{{-1000,0,-1000}},{{-1000,0,1000}},{{1000,0,-1000}},{{1000,0,1000}}};g.triangles={{{0,2,1},0,0x28},{{2,3,1},0,0x28}};return g;}();
+p2retail::SourceWaterInputs inputs;
+const p2retail::SourceFloorParameters floorParameters{};
+const p2retail::SourceFloorParameters hiddenParameters=[](){p2retail::SourceFloorParameters p;p.hasHiddenCollision=true;return p;}();
+const p2retail::SourceRoomGeometry* geometryOwner=&geometry;
+const p2retail::SourceFloorParameters* parameterOwner=&floorParameters;
+unsigned geometryQueries=0,expireGeometryAt=0;
+
 }
 const p2retail::SceneContext* pc_p2_retail_scene_prepared()noexcept{return prepared;}
 const p2retail::SceneContext* pc_p2_retail_scene_committed()noexcept{return world.value==Phase::GameWorldActive?prepared:nullptr;}
+const p2retail::SourceRoomGeometry* pc_p2_retail_scene_source_geometry(const p2retail::SceneContext& c,std::uint64_t serial,std::uint64_t revision)noexcept{
+ ++geometryQueries;if(&c!=prepared||serial!=scene.epoch||revision!=4)return nullptr;
+ if(expireGeometryAt==geometryQueries)++scene.epoch;
+ return geometryOwner;
+}
+const p2retail::SourceFloorParameters* pc_p2_retail_scene_floor_parameters(const p2retail::SceneContext& c,std::uint64_t serial,std::uint64_t revision)noexcept{return &c==prepared&&serial==scene.epoch&&revision==4?parameterOwner:nullptr;}
 bool pc_p2_retail_scene_find_water(const p2retail::SceneContext& c,std::uint64_t serial,std::uint64_t revision,const std::array<float,3>& position,p2retail::SourceWaterResult& out,std::string& e){
  ++queries;events.push_back("findWater");if(!queryAvailable){e="engineering Scene930 query unavailable";return false;}
  if(&c!=prepared||serial!=scene.epoch||revision!=4||position[1]!=expectedWaterY)throw std::runtime_error("exact cached sphere/query ownership");
@@ -96,6 +113,10 @@ bool pc_p2_retail_scene_find_water(const p2retail::SceneContext& c,std::uint64_t
 int main(int argc,char** argv){try{
  check(argc==2,"actual private Navi parameter argument");std::ifstream file(argv[1],std::ios::binary);bytes.assign(std::istreambuf_iterator<char>(file),{});SourceBank bank;bankProvider=&bank;NaviStateMachine machine;machine.registerState(&typed);machine.registerState(&second);a.mStateMachine=&machine;b.mStateMachine=&machine;a.current=&typed;b.current=&typed;frame();MapMgr map;auto context=p2retail::SceneRuntime::make(map,scene.c,scene.f,scene.epoch);prepared=context.get();
  world.value=Phase::GameWorldActive;check(!bp::createNativePhases(*context,provider,trace,bank,error),"actual composition requires Loading");world.value=Phase::Loading;
+ geometryOwner=nullptr;check(!bp::createNativeTrace(*context,error),"actual trace requires selected geometry owner");geometryOwner=&geometry;
+ parameterOwner=nullptr;check(!bp::createNativeTrace(*context,error),"actual trace requires selected floor parameter owner");parameterOwner=&floorParameters;
+ auto nativeTrace=bp::createNativeTrace(*context,error);check(bool(nativeTrace),"Loading builds actual numeric trace from immutable wide selected geometry");
+ parameterOwner=&hiddenParameters;auto hiddenTrace=bp::createNativeTrace(*context,error);check(bool(hiddenTrace),"actual hidden selected parameters bind separately");parameterOwner=&floorParameters;
  check(bp::createNativePhases(*context,provider,trace,bank,error),"real native composition initializes both actual body and water owners");body=pc_p2_original_captain_body_phase_owner(&a);check(body&&body==pc_p2_original_captain_body_phase_owner(&b),"genuine source composition owns both actors");bp::Fields fields;check(body->readFields(&a,fields,error)&&!fields.bounding&&!fields.previous,"source cached center deliberately unknown before simulation");auto firstBirth=fields.initializationSerial;
  bool wet=true;check(bp::cachedNativeWater(&a,wet,error)&&!wet&&queries==0,"genuine init cached null without fresh map query");check(!bp::createNativePhases(*context,provider,trace,bank,error),"live composition cannot be overwritten");world.value=Phase::GameWorldActive;
  events.clear();check(!bp::body_animation(&a,error)&&queries==0&&events==std::vector<std::string>{"cellLOD","clocks"},"unknown cached sphere refuses exactly at animation water point");
@@ -114,6 +135,24 @@ int main(int argc,char** argv){try{
  auto clock=std::find(events.begin(),events.end(),"clocks"),execute=std::find(events.begin(),events.end(),"exec"),mapEvent=std::find(events.begin(),events.end(),"map"),queryEvent=std::find(events.begin(),events.end(),"findWater");
  check(execute<clock&&clock<queryEvent&&queryEvent<mapEvent,"literal source manager update before animation before simulation");
  nativecontrol::AnimationFrame observed;check(bp::nativeAnimationFrame(&a,observed,error)&&observed.displacementKnown&&observed.faceDirectionOffset==.3f&&observed.deltaTime==.01f,"native control observations borrow actual source phase fields and GameSystem facts");
+ traceRoom=9;check(bp::body_simulation(&a,0,error)&&observedRoom==9,"source roomIndex published before actual Room callback");traceRoom=10;roomRefuses=true;check(!bp::body_simulation(&a,0,error)&&observedRoom==10&&body->readFields(&a,fields,error)&&fields.roomIndex==10,"Room refusal retains literal source partial roomIndex write");traceRoom=-1;roomRefuses=false;
+ // Trace calls execute production NativeTrace and Numeric411 against actual
+ // composition/BodyBorrowerGuard; only geometry/session providers are doubles.
+ check(!bp::createNativeTrace(*context,error),"active native trace construction refuses");
+ bp::TraceInfo info;info.sphere={{0,5,0},8.5f};info.velocity={0,-10,0};info.roomIndex=-1;
+ check(nativeTrace->map(a,info,.1f,error)&&info.floor.triangle&&info.floor.incarnation==scene.epoch&&info.floorNormal.y>.99f,"real numeric trace selects genuine source table floor identity");
+ bp::FloorFacts ground;check(nativeTrace->floor(info.floor,ground,error)&&ground.slip==2&&ground.contents==8&&ground.planeNormal.y>.99f,"actual mapcode slip and contents decoded from selected original triangle");
+ bp::FloorFacts unchanged{99,99,{9,9,9}};int foreignTriangle=0;check(!nativeTrace->floor({&foreignTriangle,scene.epoch},unchanged,error)&&unchanged.slip==99,"foreign native floor identity refuses without writing facts");check(!nativeTrace->floor({info.floor.triangle,scene.epoch+1},unchanged,error)&&unchanged.slip==99,"source floor wrong incarnation refuses");
+ auto same=[](const bp::TraceInfo& x,const bp::TraceInfo& y){auto v=[](bp::Vec3 a,bp::Vec3 b){return a.x==b.x&&a.y==b.y&&a.z==b.z;};return v(x.sphere.center,y.sphere.center)&&x.sphere.radius==y.sphere.radius&&v(x.velocity,y.velocity)&&x.floor.triangle==y.floor.triangle&&x.floor.incarnation==y.floor.incarnation&&x.wall.triangle==y.wall.triangle&&x.wall.incarnation==y.wall.incarnation&&v(x.floorNormal,y.floorNormal)&&v(x.wallNormal,y.wallNormal)&&x.traceRadius==y.traceRadius&&x.roomIndex==y.roomIndex;};
+ bp::TraceInfo before=info;world.value=Phase::Loading;check(!nativeTrace->map(a,info,.1f,error)&&same(info,before),"trace requires actual Active body borrower and keeps output");world.value=Phase::GameWorldActive;
+ actorAlive=false;check(nativeTrace->map(a,info,0,error),"genuine known CF-dead body remains physically traceable");actorAlive=true;
+ before=info;++scene.epoch;check(!nativeTrace->map(a,info,.1f,error)&&same(info,before),"expired source scene refuses atomically");--scene.epoch;
+ p2retail::SceneRuntime::revision(*context,5);check(!nativeTrace->map(a,info,.1f,error)&&same(info,before),"selected revision expiry leaves all TraceInfo unchanged");check(!nativeTrace->floor(info.floor,unchanged,error)&&unchanged.slip==99,"selected revision expiry leaves floor facts unchanged");p2retail::SceneRuntime::revision(*context,4);
+ prepared=nullptr;check(!nativeTrace->map(a,info,.1f,error)&&same(info,before),"missing selected context refuses atomically");prepared=context.get();
+ geometryOwner=nullptr;check(!nativeTrace->map(a,info,.1f,error)&&same(info,before),"replaced selected geometry refuses atomically");geometryOwner=&geometry;
+ expireGeometryAt=geometryQueries+2;check(!nativeTrace->map(a,info,.1f,error)&&same(info,before),"source geometry callback expiry refuses numeric publication");expireGeometryAt=0;--scene.epoch;
+ parameterOwner=&hiddenParameters;check(!hiddenTrace->map(a,info,.1f,error)&&same(info,before),"actual hidden collision flag requires unavailable sentinel and refuses");bp::Sphere clamp=info.sphere;check(!hiddenTrace->constrain(a,clamp,error)&&clamp.center.y==info.sphere.center.y,"actual hidden clamp producer unavailable without fabricated bounds");parameterOwner=&floorParameters;
+ check(!nativeTrace->platforms(a,info,.1f,error)&&same(info,before),"missing original PlatMgr refuses without output");check(!nativeTrace->room(a,0,error),"missing original Room/RouteMgr receiver explicitly refuses");
  bp::BodyBorrowerGuard borrower;check(!borrower.current(error),"default borrowed trace guard has no source authority");
  check(bp::BodyBorrowerGuard::capture(*context,&a,borrower,error)&&borrower.current(error),"trace guard borrows actual committed scene/body generation");
  a.current=&second;check(!borrower.current(error),"source trace callback changing real FSM revokes borrower");a.current=&typed;
@@ -126,3 +165,4 @@ int main(int argc,char** argv){try{
  world.value=Phase::Loading;check(bp::createNativePhases(*context,provider,trace,bank,error),"actual replacement composition");body=pc_p2_original_captain_body_phase_owner(&a);check(body->readFields(&a,fields,error)&&fields.initializationSerial>firstBirth&&!fields.bounding,"replacement owner birth defeats scene-slot ABA without invented sphere");world.value=Phase::Inactive;check(bp::retireNativePhases(scene,error),"replacement inactive cleanup");body=nullptr;
  std::cout<<checks<<" actual native composition/body/water TU controls PASS (engineering doubles; no gameplay claim)\n";return 0;
  }catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}
+
