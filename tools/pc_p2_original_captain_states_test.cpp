@@ -97,6 +97,7 @@ bool SourceBank::supports(Navi* n,Motion motion,std::string& e)const{order.push_
 bool SourceBank::enableMotionBlend(Navi* n,std::string&){order.push_back("enable-blend");blendLocks[n]=int(boundMotions[n].motion);boundMotions[n]={Motion::Nigeru,10,++motionGeneration,false,false};boundListeners[n]=Listener::SourceActor;return true;}
 bool SourceBank::state(const Navi* n,MotionState& out,std::string& e)const{if(!bankBound||slot(n)<0){e="test bank actor missing";return false;}out=motions[n];return true;}
 bool SourceBank::sourceBytes(SourceResource r,std::string& out,std::string& e)const{if(r!=SourceResource::Parameters){e="test source resource unavailable";return false;}out=resourceBytes;return true;}
+bool SourceBank::stateAnimator(const Navi* n,Animator channel,MotionState& out,std::string& e)const{if(channel==Animator::Self)return state(n,out,e);auto it=boundMotions.find(n);if(it==boundMotions.end()){e="test Bound motion unavailable";return false;}out=it->second;return true;}
 bool SourceBank::start(Navi* n,Motion m,std::string&){order.push_back("motion"+std::to_string(unsigned(m)));motions[n]={m,0,++motionGeneration,false,false};boundMotions[n]={m,0,++motionGeneration,false,false};blendLocks[n]=-1;boundListeners[n]=Listener::None;return true;}
 bool SourceBank::advance(Navi*,float,const std::function<bool(int)>& emit,std::string&){++bankAdvances;if(emitEnd){emitEnd=false;return emit(1000);}return true;}
 namespace nativecontrol {

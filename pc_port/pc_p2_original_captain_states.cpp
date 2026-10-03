@@ -251,7 +251,7 @@ bool pc_p2_original_captain_animation_key(Navi* n,int key,std::string& e){
  if(auto* state=dynamic_cast<NativeState*>(current))return state->sourceAnimationKey(n,key,e);
  if((typed->sourceStateId()==StateId::Flick||typed->sourceStateId()==StateId::KokeDamage)
   &&pc_p2_source_navi_reaction_animation_key){auto* bank=bankFor(n,e);MotionState self;
-   if(!bank||!bank->stateAnimator(n,Animator::Self,self,e))return false;
+   if(!bank||!bank->stateAnimator(n,p2original::captain::Animator::Self,self,e))return false;
    return pc_p2_source_navi_reaction_animation_key(n,typed->nativeState(),self.generation,key,e);}
  e="actual source receiver key handler is unavailable";return false;
 }
@@ -262,7 +262,7 @@ bool pc_p2_original_captain_actor_animation_key(Navi* n,int key,std::string& e){
  if(auto* state=dynamic_cast<NativeState*>(current))return state->sourceActorAnimationKey(n,key,e);
  if((typed->sourceStateId()==StateId::Flick||typed->sourceStateId()==StateId::KokeDamage)
   &&pc_p2_source_navi_reaction_animation_key){auto* bank=bankFor(n,e);MotionState self;
-   if(!bank||!bank->stateAnimator(n,Animator::Self,self,e))return false;
+   if(!bank||!bank->stateAnimator(n,p2original::captain::Animator::Self,self,e))return false;
    return pc_p2_source_navi_reaction_animation_key(n,typed->nativeState(),self.generation,key,e);}
  e="actual source receiver actor key handler is unavailable";return false;
 }
