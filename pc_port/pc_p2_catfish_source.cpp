@@ -32,8 +32,7 @@ CatVec vec(const Vector3f& v){return {v.x,v.y,v.z};}
 bool searchable(Piki* p){
  if(!p||!p->isAlive()||p->isStickToMouth())return false;
  switch(p->getState()){
- case PIKISTATE_Grow:case PIKISTATE_Bury:case PIKISTATE_NukareWait:
- case PIKISTATE_Pressed:case PIKISTATE_DenkiDying:case PIKISTATE_Swallowed:return false;
+ case PIKISTATE_Grow:case PIKISTATE_Bury:case PIKISTATE_NukareWait:return false;
  default:return true;}
 }
 std::vector<Creature*> scene(){
@@ -61,7 +60,10 @@ void enter(BTeki* a,Actor& s,State next,int flickNext=-1){
  s.previous=s.state;s.state=next;s.next=next;s.flickNext=flickNext;
  int anim=WaitAnim;s.speed=30;
  switch(next){
- case Wait:s.target=nullptr;stop(a);break;
+ case Wait:s.target=nullptr;stop(a);
+  // Source Wait init consumes rand*firstKeyFrame on every entry. Its first
+  // indexed key is frame0, so the authored starting timer remains zero.
+  (void)gsys->getRand(1.0f);break;
  case Turn:anim=TurnAnim;stop(a);break;
  case Walk:anim=MoveAnim;s.speed=40*(60.0f/50);break;
  case Attack:anim=AttackAnim;stop(a);break;
@@ -186,12 +188,18 @@ void pc_p2_catfish_source_update(BTeki* a){
   break;
  case Flick:
   for(const auto& e:events)if(e.type==2){flick(a,false,FLICK_BACKWARDS_ANGLE);a->mDamageCount=0;}
-  // Catfish::setEnemyNonStone is inherited empty; reset's bitter/bounce
-  // reaction needs the distinct original bitter receiver (not implemented).
+  // Catfish::setEnemyNonStone enables EB_NoInterrupt, and KEY3 reset clears
+  // it and updates bitter bounce state. That source reaction remains open
+  // until the distinct original bitter receiver/state is implemented.
   if(end)enter(a,s,flickReturn(s.previous,s.flickNext));
   break;
  case Dead:
   stop(a);if(end&&!s.escaped){s.escaped=true;a->pcEscapeNow();return;}break;
  }
  if(a->mHealth<=0&&s.state!=Dead)enter(a,s,Dead);
+ // KEY2 and enter() can replace the animation, and walking can rotate the
+ // actor. Keep the authored collision/mouth pose aligned with the clip that
+ // the visual bridge will draw this same frame; the earlier follow remains
+ // necessary for capture at the source attack event.
+ if(!pc_p2_catfish_mouth_follow(a,s.motion.clip(),s.motion.frame()))fail("final actual mouth follow failed");
 }
