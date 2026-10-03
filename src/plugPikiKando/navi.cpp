@@ -24,6 +24,8 @@ bool Navi::isAlive()
 	if (pc_p2_original_captain_actor_lifetime(this, alive)) return alive;
 	return Creature::isAlive();
 }
+#include "pc_p2_original_piki_origin.h"
+#include "pc_p2_original_piki_recruit.h"
 #endif
 #if defined(PIKI_PC_PORT)
 #include "audio/pc_audio_source.h"
@@ -365,7 +367,11 @@ void Navi::enterAllPikis()
 	CI_LOOP(iter)
 	{
 		Piki* piki = static_cast<Piki*>(*iter);
-		if (piki->isAlive() && piki->mMode == PikiMode::FormationMode) {
+		if (piki->isAlive() && piki->mMode == PikiMode::FormationMode
+#if defined(PIKI_PC_PORT)
+            && !pc_p2_original_piki_body_wild(piki)
+#endif
+        ) {
 			#if defined(PIKI_PC_PORT)
 			// The field limit is configurable, so this gather can no longer
 			// assume the squad fits. Stop filling rather than run off the array.
@@ -745,6 +751,7 @@ void Navi::rideUfo()
 void Navi::reset()
 {
 #if defined(PIKI_PC_PORT)
+	mOriginalP2ContactClock.reset();
 	pc_demon_reset(this);
 	pc_demon_drop_reset(this);
 #endif
@@ -1447,6 +1454,8 @@ void Navi::update()
 	PcAudioSource audioSource(mNaviID); // issue #1030: whose sounds these are
 #endif
 #if defined(PIKI_PC_PORT)
+	if(pc_p2_original_piki_recruit_pair_ready())
+		mOriginalP2ContactClock.update(mTargetVelocity.x,mTargetVelocity.y,mTargetVelocity.z);
 	pcUpdateLockOn();
 #endif
 	if (!mGroundTriangle) {
@@ -1686,6 +1695,11 @@ void Navi::callPikis(f32 radius, bool recallWorkers)
 			continue;
 		}
 
+#if defined(PIKI_PC_PORT)
+        std::string originalRecruitError;
+        const bool originalMovieActive=!gameflow.mMoviePlayer||gameflow.mMoviePlayer->mIsActive;
+        if(!pc_p2_original_piki_recruit_allowed(piki,mNaviID,originalMovieActive,true,originalRecruitError))continue;
+#endif
 		int state = piki->getState();
 		if (state == PIKISTATE_Drown) {
 			static_cast<PikiDrownState*>(piki->getCurrState())->mIsBeingWhistled = true;
@@ -1745,6 +1759,9 @@ void Navi::callPikis(f32 radius, bool recallWorkers)
                     workerEvent.cursorX=mCursorWorldPos.x;workerEvent.cursorY=mCursorWorldPos.y;workerEvent.cursorZ=mCursorWorldPos.z;
                 }
 #endif
+#if defined(PIKI_PC_PORT)
+                if(!pc_p2_original_piki_recruit_accepted(piki,mNaviID,originalMovieActive,true,originalRecruitError))continue;
+#endif
 				if (piki->isFired() && !pc_p2_has_red_immunity(piki)) {
 					piki->endFire();
 				}
@@ -1789,6 +1806,9 @@ void Navi::callPikis(f32 radius, bool recallWorkers)
                 workerEvent.afterMode=piki->mMode;workerEvent.afterState=piki->getState();pc_worker_observer_record(workerEvent);
 #endif
 			} else {
+#if defined(PIKI_PC_PORT)
+                if(!pc_p2_original_piki_recruit_accepted(piki,mNaviID,originalMovieActive,true,originalRecruitError))continue;
+#endif
 				pc_crowd_handover::abandonSquadBeforeHandover(piki, this);
 				piki->mNavi             = this;
 				piki->mIsWhistlePending = true;
@@ -2036,6 +2056,14 @@ void Navi::releasePikis()
 		}
 	}
 
+#if defined(PIKI_PC_PORT)
+    // A mixed diagnostic scene must not change ordinary-only P1 disbanding.
+    bool originalDisband=false;
+    if(pc_p2_original_piki_recruit_pair_ready())for(int i=0;i<pikiCount;++i){
+        OriginalPikiBody body;
+        if(pc_p2_original_piki_body_query(pikiList[i],body)){originalDisband=true;break;}
+    }
+#endif
 	for (pikiIdx = 0; pikiIdx < pikiCount; pikiIdx++) {
 		pikiList[pikiIdx]->changeMode(PikiMode::FreeMode, this);
         int color = pc_p2_purples_enabled()?pc_throw_selection_class(pikiList[pikiIdx]):pikiList[pikiIdx]->mColor;
@@ -2049,6 +2077,9 @@ void Navi::releasePikis()
 			pikiList[pikiIdx]->mNavi = nullptr;
 		}
 	}
+#if defined(PIKI_PC_PORT)
+    if(originalDisband)mOriginalP2ContactClock.disband();
+#endif
 }
 
 /**

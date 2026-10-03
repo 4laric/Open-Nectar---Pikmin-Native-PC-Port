@@ -58,8 +58,8 @@ struct Native::Impl final:Engine {
     if(banks.count(source))return reject(e,"duplicate original foliage bank");
     auto b=std::make_unique<Bank>();b->source=source;
     if(!(row>>b->name>>b->stem>>b->count>>b->duration)||b->count<2||b->count>64||b->duration<2||b->duration>10000)return reject(e,"invalid original foliage species row");
-    const std::string name=source==47?"Clover":source==49?"Ooinu_s":source==91?"KareOoinu_s":"Nekojarashi";
-    const std::string stem=source==47?"flora_Clover_clover":source==49?"flora_Ooinu_s_ooinu_s":source==91?"flora_KareOoinu_s_kareooinu_s":"flora_Nekojarashi_nekojarashi";
+    const std::string name=source==47?"Clover":source==49?"Ooinu_s":source==91?"KareOoinu_s":source==92?"KareOoinu_l":"Nekojarashi";
+    const std::string stem=source==47?"flora_Clover_clover":source==49?"flora_Ooinu_s_ooinu_s":source==91?"flora_KareOoinu_s_kareooinu_s":source==92?"flora_KareOoinu_l_karaooinu_l":"flora_Nekojarashi_nekojarashi";
     if(b->name!=name||b->stem!=stem)return reject(e,"original foliage model identity mismatch");
     banks.emplace(source,std::move(b));
    }else {
@@ -94,6 +94,14 @@ struct Native::Impl final:Engine {
   std::size_t total=0;
   for(auto& entry:banks){auto& b=*entry.second;
    if(!b.params||!b.layer||b.frames.empty()||b.spheres.empty())return reject(e,"incomplete foliage physical resource bank");
+   if(b.source==92){
+    if(b.territory!=45.f||b.lod!=80.f)return reject(e,"source92 literal sphere LOD mismatch");
+    if(b.spheres.size()!=2)return reject(e,"source92 literal collider count mismatch");
+    for(std::size_t i=0;i<2;++i){const auto& s=b.spheres[i];
+     if(b.jointIndices[i]!=0||s.parent!=(i==0?-1:0)||s.offset.x!=0||s.offset.y!=0||s.offset.z!=0||s.radius!=(i==0?50.f:35.f)
+      ||std::string(b.codes[i].data())!="____"||std::string(b.ids[i].data())!="f00"+std::to_string(i))return reject(e,"source92 literal collider geometry mismatch");
+    }
+   }
    for(std::size_t i=0;i<b.spheres.size();++i){if(!b.staticJoints.count(b.jointIndices[i]))return reject(e,"foliage collider joint unresolved");b.spheres[i].id=b.ids[i].data();b.spheres[i].code=b.codes[i].data();}
    if(!p2posefamily::loadFamilyClip(b.poses,b.name,b.stem,b.count,b.duration,b.frames,b.shared,total,b.shapes,e))return false;
    if(!b.poses.ready()||!b.poses.owner()||!pelplant::Geometry::admits(*b.poses.owner()))return reject(e,"foliage geometry requires source flattened single-joint physical bank");
@@ -117,8 +125,10 @@ struct Native::Impl final:Engine {
   actor->mTekiAnimator->init(&actor->mTekiShape->mAnimContext,actor->mTekiShape->mAnimMgr,tekiMgr->mMotionTable);
   actor->mDeadState=actor->mStateID=actor->mDamageCount=0;actor->_3A4=0;actor->mStoredDamage=0;actor->mPellet=nullptr;
   for(int i=0;i<4;++i)actor->mParticleGenerators[i]=nullptr;
+  // Surface owns a native generator; genuine cave births deliberately carry
+  // no P1 generator. Cave registry associations remain with the floor caller.
   actor->mGenerator=h.generator;actor->mSRT.t.set(p.x,p.y,p.z);actor->mFaceDirection=facing;actor->mSRT.r.set(0,facing,0);actor->mSRT.s.set(1,1,1);
-  actor->mHealth=actor->mMaxHealth=b.health;actor->mVelocity.set(0,0,0);actor->mCollisionRadius=b.spheres[0].radius;actor->mSize=b.spheres[0].radius;
+  actor->mHealth=actor->mMaxHealth=b.health;actor->mVelocity.set(0,0,0);actor->mVolatileVelocity.set(0,0,0);actor->mTargetVelocity.set(0,0,0);actor->mCollisionRadius=b.spheres[0].radius;actor->mSize=b.spheres[0].radius;
   actor->setCreatureFlag(CF_DisableMovement);actor->setCreatureFlag(CF_IsAiDisabled);
   for(unsigned option:{BTeki::TEKI_OPTION_VISIBLE,BTeki::TEKI_OPTION_ATARI,BTeki::TEKI_OPTION_ALIVE,BTeki::TEKI_OPTION_SHAPE_VISIBLE,BTeki::TEKI_OPTION_INVINCIBLE})actor->setTekiOption(option);
   actor->clearTekiOption(BTeki::TEKI_OPTION_ORGANIC);actor->clearTekiOption(BTeki::TEKI_OPTION_GRAVITATABLE);
@@ -159,7 +169,7 @@ bool Native::owns(const Creature* c)const{return m->tracks.count(const_cast<Crea
 bool Native::tick(BTeki* actor,float dt,std::string& e){
  auto* h=m->provider.lookup(actor);if(!h)return false;auto& t=*m->tracks.at(actor);
  if(!m->provider.tick(actor,dt,t.visible,e))return false;
- actor->mVelocity.set(0,0,0);actor->mStoredDamage=0;actor->mHealth=t.bank->health;
+ actor->mVelocity.set(0,0,0);actor->mVolatileVelocity.set(0,0,0);actor->mTargetVelocity.set(0,0,0);actor->mStoredDamage=0;actor->mHealth=t.bank->health;
  actor->mSRT.t.set(h->position.x,h->position.y,h->position.z);actor->mGrid.updateGrid(actor->mSRT.t);actor->mGrid.updateAIGrid(actor->mSRT.t,false);
  t.presented.advance(dt);m->follow(actor,t);return true;
 }

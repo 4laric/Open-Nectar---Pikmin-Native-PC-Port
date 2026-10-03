@@ -243,6 +243,12 @@ class CollInfo {
 
 public:
 	CollInfo(int);
+#if defined(PIKI_PC_PORT)
+    // Code-owned native source tree; arrays outlive every attached sticker.
+    // Borrows storage and performs no allocation, so its owning leaf can clean
+    // up once all actual references have been detached.
+    CollInfo(int, CollPart* parts, u32* ids);
+#endif
 
 	void enableStick();
 	void disableStick();
@@ -262,6 +268,7 @@ public:
 	// (no parent Shape); the caller must keep every part's update disabled
 	// or give it an updater, since there is no shape to sample joints from.
 	void initInfoTree(ObjCollInfo* root);
+	void initInfoTree(ObjCollInfo* root, CollPart* parts, u32* ids);
 #endif
 	void makeTubesChild(u32, int);
 	void setUpdater(u32, CollPartUpdater*);

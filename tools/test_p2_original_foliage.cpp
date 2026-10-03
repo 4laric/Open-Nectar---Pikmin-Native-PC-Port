@@ -1,4 +1,5 @@
 #include "pc_p2_original_foliage.h"
+#include "pc_p2_retail_cave_context.h"
 #include <cmath>
 #include <iostream>
 #include <limits>
@@ -23,9 +24,9 @@ struct ControlledEngine final:Engine {
 };
 CatalogRow row(unsigned uid,unsigned source=91,unsigned count=1){CatalogRow r;r.course="tutorial";r.member="plantsgen.txt";r.sourceKey="literal-source:"+std::to_string(uid);r.index=uid;r.enemy.uid=uid;r.enemy.source=source;r.enemy.count=count;return r;}
 void identityAndResources(){
- std::string e;CHECK(supported(91)&&supported(88)&&supported(47)&&supported(49)&&!supported(50));
+ std::string e;CHECK(supported(91)&&supported(88)&&supported(47)&&supported(49)&&supported(92)&&!supported(50));
  auto literal=row(1);CHECK(decode(literal,e));
- for(auto source:{0u,46u,48u,50u,90u,92u}){auto bad=literal;bad.enemy.source=source;CHECK(!decode(bad,e));}
+ for(auto source:{0u,46u,48u,50u,90u,93u}){auto bad=literal;bad.enemy.source=source;CHECK(!decode(bad,e));}
  for(auto version:{"0000","0001","?????"}){auto bad=literal;bad.enemy.generatorVersion=version;CHECK(!decode(bad,e));}
  auto bad=literal;bad.enemy.generatorTail={"0"};CHECK(!decode(bad,e));bad=literal;bad.enemy.uid=0;CHECK(!decode(bad,e));
  bad=literal;bad.enemy.pelletColor=0;bad.enemy.pelletSize=1;CHECK(!decode(bad,e));
@@ -71,6 +72,19 @@ void forestIdentityAndResources(){
  Creature* noActor=nullptr;CHECK(!p.birth(zero,&largeGen,0,{},0,noActor,e)&&!noActor);CHECK(!p.birth(dead,&smallGen,1,{},0,noActor,e)&&!noActor);
  CHECK(p.release(largeActor,47,e)&&p.release(smallActor,49,e));CHECK(p.preflight(rows,e)&&p.reserve(rows,e));
 }
+void brownLargeIdentityAndEnd(){
+ ControlledEngine engine;Provider p(engine);std::string e;const unsigned sources[]={47,49,88,91,92};std::vector<CatalogRow> zeros;
+ for(auto source:sources){auto literal=row(100+source,source,0);CHECK(decode(literal,e));auto sentinel=literal;sentinel.enemy.pelletColor=0;sentinel.enemy.pelletSize=1;CHECK(!decode(sentinel,e));zeros.push_back(literal);}
+ CHECK(p.preflight(zeros,e));for(auto source:sources){CHECK(engine.resourceCalls[source]==1);}
+ CHECK(p.reserve(zeros,e)&&engine.reserved==0&&engine.allocations==0);
+ auto large=row(92,92),small=row(91,91);CHECK(p.preflight({large,small},e));auto alias=large;alias.enemy.source=91;CHECK(!p.reserve({alias,small},e));
+ auto tail=large;tail.enemy.generatorTail={"0"};CHECK(!decode(tail,e));auto version=large;version.enemy.generatorVersion="0004";CHECK(!decode(version,e));
+ engine.bank.duration=60;CHECK(p.preflight({large,small},e)&&p.reserve({large,small},e));Generator generator;Creature collider;Creature* actor=nullptr;
+ CHECK(p.birth(large,&generator,0,{},0,actor,e)&&p.lookup(actor)->row.enemy.source==92);CHECK(!p.bind(small,actor,92,e));CHECK(p.bind(large,actor,92,e));
+ CHECK(p.collision(actor,&collider,true,false,0,2,0,true,e));auto* h=p.lookup(actor);CHECK(h->active&&h->touched&&engine.sounds==1);
+ CHECK(p.tick(actor,1.9f,true,e)&&h->active&&std::fabs(h->frame-57)<.001f);CHECK(p.tick(actor,.1f,true,e)&&!h->active&&!h->touched&&h->frame==59);
+ CHECK(p.release(actor,92,e)&&p.size()==0);CHECK(p.preflight(zeros,e)&&p.reserve(zeros,e));
+}
 void touchAndTiming(unsigned source){
  ControlledEngine engine;Provider p(engine);std::string e;auto r=row(1,source);CHECK(p.preflight({r},e)&&p.reserve({r},e));Generator g;Creature collider;Creature* actor=nullptr;
  CHECK(p.birth(r,&g,0,{0,10,0},0,actor,e));Host* h=p.lookup(actor);CHECK(h&&!h->active&&!h->touched&&h->frame==0);
@@ -96,4 +110,44 @@ void touchAndTiming(unsigned source){
  CHECK(p.tick(actor,0.1f,false,e)&&h->frame==6);engine.cleanupFails=false;
  CHECK(p.release(actor,0,e));CHECK(!p.tick(actor,0,true,e)&&!p.earthquake(actor,e));
 }
-int main(){try{identityAndResources();reservationAndCleanup();forestIdentityAndResources();for(auto source:{91u,88u,47u,49u})touchAndTiming(source);std::cout<<"Foliage sources91,88,47,49 literal identities, whole catalog/resource reservation, cleanup retention and touch timing controls PASS; native gameplay not claimed\n";}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}
+std::vector<CatalogRow> caveRows(){
+ const auto* d=p2retail::descriptor("tutorial_1");CHECK(d);const auto* f=p2retail::definition(*d,2);CHECK(f);std::vector<CatalogRow> out;
+ for(unsigned i=0;i<f->rows.size();++i){const auto& literal=f->rows[i];if(literal.sourceId!=91&&literal.sourceId!=92&&literal.sourceId!=47)continue;
+  CatalogRow r;r.course=d->cave;r.member=d->source;r.caveFloor=2;r.caveRow=i;r.index=2*256+i;r.sourceKey=r.course+"/"+r.member+"#"+std::to_string(r.index);
+  r.sourceForm=SourceForm::CaveTekiInfo;r.caveSourceSha256=d->sourceSha256;r.enemy.source=unsigned(literal.sourceId);r.enemy.uid=originalGeneratorUid(r.sourceKey);r.enemy.count=literal.minimum();r.enemy.generatorVersion="CAVE";out.push_back(r);
+ }return out;
+}
+void caveAuthenticationAndResources(){
+ auto rows=caveRows();std::string e;CHECK(rows.size()==3&&rows[0].enemy.source==91&&rows[0].enemy.count==6&&rows[1].enemy.source==92&&rows[1].enemy.count==4&&rows[2].enemy.source==47&&rows[2].enemy.count==2);
+ for(const auto& r:rows){CHECK(caveDecode(r,e)&&!decode(r,e));
+  for(unsigned field=0;field<14;++field){auto bad=r;switch(field){case 0:bad.sourceForm=SourceForm::SurfaceGenEnemy;break;case 1:++bad.caveFloor;break;case 2:++bad.caveRow;break;case 3:bad.caveSourceSha256[0]='0';break;case 4:bad.member+="x";break;case 5:++bad.index;break;case 6:bad.sourceKey+="x";break;case 7:++bad.enemy.uid;break;case 8:--bad.enemy.count;break;case 9:bad.enemy.generatorVersion="????";break;case 10:bad.enemy.generatorTail={"0"};break;case 11:bad.enemy.position.x=1;break;case 12:bad.enemy.deathCount=1;break;case 13:bad.enemy.treasureCode=1;break;}CHECK(!caveDecode(bad,e));}
+ }
+ ControlledEngine engine;Provider p(engine);engine.resourceFails=true;CHECK(!p.cavePrepare(rows,e)&&engine.allocations==0);engine.resourceFails=false;engine.resourceCalls.clear();
+ auto foreign=row(500,45,7);auto mixed=rows;mixed.push_back(foreign);CHECK(p.cavePrepare(mixed,e));CHECK(engine.resourceCalls.size()==3&&engine.resourceCalls[91]==1&&engine.resourceCalls[92]==1&&engine.resourceCalls[47]==1);
+ CHECK(!p.reserve(mixed,e));auto omitted=mixed;omitted.erase(omitted.begin());CHECK(!p.caveReserve(omitted,e));auto alias=mixed;alias[0].enemy.source=92;CHECK(!p.caveReserve(alias,e));
+ engine.reserveFails=true;CHECK(!p.caveReserve(mixed,e));engine.reserveFails=false;CHECK(p.caveReserve(mixed,e)&&engine.reserved==12&&engine.allocations==0);
+ for(unsigned source:{49u,88u}){auto bad=rows[0];bad.enemy.source=source;CHECK(!p.cavePrepare({bad},e));}
+ auto surface=row(1);CHECK(!p.cavePrepare({surface},e));CHECK(p.preflight({surface},e)&&!p.caveReserve({surface},e));
+}
+void caveLifetimeAndRegistry(){
+ auto rows=caveRows();ControlledEngine engine;Provider p(engine);ActorRegistry registry;std::string e;CHECK(p.cavePrepare(rows,e)&&p.caveReserve(rows,e));
+ CHECK(registry.install(std::string(64,'c'),rows,caveDecode,e));Generator association,other;std::uint64_t generatorHandles[3]{};
+ Generator* generators[]={&association,&other,new Generator};for(unsigned i=0;i<3;++i)CHECK(registry.generator(generators[i],rows[i].enemy.uid,generatorHandles[i],e));
+ struct Bound{Creature* actor;unsigned token;std::uint64_t handle;};std::vector<Bound> live;
+ for(unsigned r=0;r<rows.size();++r)for(unsigned ordinal=0;ordinal<rows[r].enemy.count;++ordinal){Creature* actor=nullptr;CHECK(!p.birth(rows[r],generators[r],ordinal,{},0,actor,e)&&!actor);
+  CHECK(p.caveBirth(rows[r],generators[r],ordinal,{0,10,0},0,actor,e));CHECK(p.lookup(actor)->generator==nullptr&&p.lookup(actor)->ordinal==ordinal);unsigned token=0;std::uint64_t handle=0;
+  CHECK(registry.actorActivation(actor,rows[r].enemy.uid,ordinal,7,2,token,handle,e)&&p.bind(rows[r],actor,token,e));unsigned source=0,found=0;InstanceIdentity id;
+  CHECK(registry.query(actor,source,found,&id)&&source==rows[r].enemy.source&&found==token&&id.generator==rows[r].enemy.uid&&id.ordinal==ordinal&&id.epoch==7&&id.activation==2);
+  Creature* duplicate=nullptr;CHECK(!p.caveBirth(rows[r],&association,ordinal,{},0,duplicate,e)&&!duplicate);live.push_back({actor,token,handle});
+ }
+ CHECK(p.size()==12&&engine.allocations==12);CHECK(!registry.retireGenerator(&association,generatorHandles[0]));CHECK(!p.preflight({row(1)},e));
+ auto first=live.front();CHECK(!p.release(first.actor,first.token+1,e));engine.cleanupFails=true;CHECK(!p.release(first.actor,first.token,e)&&p.size()==12);engine.cleanupFails=false;
+ for(const auto& b:live){CHECK(p.release(b.actor,b.token,e));unsigned source=0,token=0;CHECK(registry.query(b.actor,source,token));CHECK(!registry.retire(b.actor,b.handle+1));CHECK(registry.retire(b.actor,b.handle)&&!registry.query(b.actor,source,token));}
+ CHECK(p.size()==0);for(unsigned i=0;i<3;++i)CHECK(registry.retireGenerator(generators[i],generatorHandles[i]));delete generators[2];
+ CHECK(p.cavePrepare(rows,e)&&p.caveReserve(rows,e));Creature* failed=nullptr;engine.allocateFails=engine.cleanupFails=true;CHECK(!p.caveBirth(rows[0],&association,0,{},0,failed,e)&&failed&&p.lookup(failed)->generator==nullptr&&p.lookup(failed)->token==0);
+ engine.cleanupFails=false;CHECK(p.release(failed,0,e));engine.allocateFails=false;CHECK(!p.caveBirth(rows[0],nullptr,0,{},0,failed,e));CHECK(p.caveBirth(rows[0],&association,0,{},0,failed,e));CHECK(p.bind(rows[0],failed,123,e)&&p.release(failed,123,e));
+ // Five slots remain: refusal is ordinal consumption, not exhausted capacity.
+ CHECK(!p.caveBirth(rows[0],&other,0,{},0,failed,e)&&!failed);CHECK(p.caveBirth(rows[0],&association,1,{},0,failed,e));CHECK(!p.bind(rows[0],failed,123,e));CHECK(p.bind(rows[0],failed,124,e)&&p.release(failed,124,e));
+ CHECK(p.preflight({row(1)},e)&&p.reserve({row(1)},e));CHECK(!p.caveBirth(rows[0],&association,0,{},0,failed,e));
+}
+int main(){try{identityAndResources();reservationAndCleanup();forestIdentityAndResources();brownLargeIdentityAndEnd();for(auto source:{91u,88u,47u,49u,92u})touchAndTiming(source);caveAuthenticationAndResources();caveLifetimeAndRegistry();std::cout<<"Foliage surface controls and authenticated cave91,92,47 counts6,4,2 resource, identity, ordinal, token and retained cleanup controls PASS; native gameplay not claimed\n";}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

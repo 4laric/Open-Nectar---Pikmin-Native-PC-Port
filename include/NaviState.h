@@ -56,6 +56,7 @@ enum NaviStateID {
 #if defined(PIKI_PC_PORT)
 	NAVISTATE_DemonDrop = 36,
 	NAVISTATE_DemonEscape = 37,
+	NAVISTATE_HanachirashiFlick = 38,
 	// Original P2 identities occupy a separate range; receiver lanes retain
 	// their existing slots below 48. Retail NSID values are never P1 IDs.
 	NAVISTATE_OriginalBegin = 48,
