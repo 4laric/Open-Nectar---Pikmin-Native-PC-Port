@@ -3,6 +3,7 @@
 #include "pc_p2_original_shijimi_bank.h"
 #include "pc_p2_original_actor.h"
 #include "pc_p2_original_resource_contents.h"
+#include "pc_p2_shijimi_attachment.h"
 #include <memory>
 class BTeki;class Graphics;struct Matrix4f;
 namespace p2originalresource { namespace honey { class Manager; } }
@@ -25,6 +26,12 @@ public:
  virtual bool latch(Creature*,Color,std::string&)=0; // Down restart + genuine Hit24
  virtual void forget(Creature*)=0;
 };
+// Transient capture from an actual owned source77 body. Piki native lifetimes
+// authorize this read only; the durable reference codec excludes them.
+struct GenPikiStickerCapture {
+ Identity owner;
+ std::vector<LiveGenPikiAttachment> stickers;
+};
 // Owns actual manager-allocated native bodies and their private geometry. The
 // plant roots remain owned by foliage; parent cleanup never erases this journal.
 class Native {
@@ -36,6 +43,9 @@ public:
  bool tick(BTeki*,float seconds,std::string&);
  bool draw(BTeki*,Graphics&,const Matrix4f&);
  bool owns(const Creature*)const;
+ // Relationship capture only; no cold allocation, stick FSM or SAVE admission.
+ // Unsupported Bud/Onyon provenance refuses until their full branches exist.
+ bool captureGenPikiAttachments(Creature*,const AttachmentAuthority&,GenPikiStickerCapture&,std::string&)const;
  bool collision(BTeki*,Creature*,std::string&);
  bool wall(BTeki*,const Position& normal,std::string&);
  bool consume(const p2originalresource::ChildIdentity&,std::string&);
