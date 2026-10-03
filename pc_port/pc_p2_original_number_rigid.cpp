@@ -1,5 +1,7 @@
 #include "pc_p2_original_number_rigid.h"
+#include "pc_p2_original_number_triangle.h"
 #include <cmath>
+#include <limits>
 
 // Primary dependencies (native/pikmin2-research):
 // gameDynamics.cpp:53,103,299,793; dynCreature.cpp:143,596,667;
@@ -7,15 +9,21 @@
 // JSystem/JMath.h:219,270; trig.h:24. No native physics proxy or LOD guessing.
 namespace p2originalnumber { namespace rigid {
 namespace {
-Vec3 add(Vec3 a,Vec3 b){return {a.x+b.x,a.y+b.y,a.z+b.z};}
-Vec3 sub(Vec3 a,Vec3 b){return {a.x-b.x,a.y-b.y,a.z-b.z};}
-Vec3 scale(Vec3 a,float b){return {a.x*b,a.y*b,a.z*b};}
-float dot(Vec3 a,Vec3 b){return a.x*b.x+a.y*b.y+a.z*b.z;}
-Vec3 cross(Vec3 a,Vec3 b){return {a.y*b.z-a.z*b.y,a.z*b.x-a.x*b.z,a.x*b.y-a.y*b.x};}
+float roundedAdd(float a,float b){volatile float r=a+b;return r;}
+float roundedSub(float a,float b){volatile float r=a-b;return r;}
+float roundedMul(float a,float b){volatile float r=a*b;return r;}
+float roundedDivide(float a,float b){volatile float r=a/b;return r;}
+float refused(){return std::numeric_limits<float>::quiet_NaN();}
+float fused(float a,float b,float c){float r;if(!triangle::sourceFma(a,b,c,r))return refused();return r;}
+Vec3 add(Vec3 a,Vec3 b){return {roundedAdd(a.x,b.x),roundedAdd(a.y,b.y),roundedAdd(a.z,b.z)};}
+Vec3 sub(Vec3 a,Vec3 b){return {roundedSub(a.x,b.x),roundedSub(a.y,b.y),roundedSub(a.z,b.z)};}
+Vec3 scale(Vec3 a,float b){return {roundedMul(a.x,b),roundedMul(a.y,b),roundedMul(a.z,b)};}
+float dot(Vec3 a,Vec3 b){return fused(a.z,b.z,fused(a.x,b.x,roundedMul(a.y,b.y)));}
+Vec3 cross(Vec3 a,Vec3 b){return {fused(a.y,b.z,-roundedMul(a.z,b.y)),fused(a.z,b.x,-roundedMul(a.x,b.z)),fused(a.x,b.y,-roundedMul(a.y,b.x))};}
 bool finite(float a){return std::isfinite(a);}
 bool finite(Vec3 a){return finite(a.x)&&finite(a.y)&&finite(a.z);}
 bool finite(Quaternion a){return finite(a.w)&&finite(a.x)&&finite(a.y)&&finite(a.z);}
-float norm(Quaternion q){return q.w*q.w+dot({q.x,q.y,q.z},{q.x,q.y,q.z});}
+float norm(Quaternion q){return fused(q.w,q.w,dot({q.x,q.y,q.z},{q.x,q.y,q.z}));}
 bool finite(const Matrix3& m){for(float f:m)if(!finite(f))return false;return true;}
 bool finite(const Config& c){return finite(c.position)&&finite(c.velocity)&&finite(c.force)&&finite(c.rotatedMomentum)&&finite(c.momentum)&&finite(c.torque)&&finite(c.rotation)&&finite(norm(c.rotation))&&norm(c.rotation)>0&&finite(c.rotatedTransform);}
 bool valid(const State& s){
@@ -25,26 +33,41 @@ bool valid(const State& s){
 }
 bool fail(std::string& e,const char* message){e=message;return false;}
 bool valid(const Parameters& p){return finite(p.staticParameter)&&p.staticParameter>=0&&p.staticParameter<=5000&&finite(p.staticThreshold)&&p.staticThreshold>=0&&p.staticThreshold<=5000&&finite(p.microCollision)&&p.microCollision>=0&&p.microCollision<=10&&finite(p.elasticity)&&p.elasticity>=0&&p.elasticity<=1&&finite(p.fixedFrictionValue)&&p.fixedFrictionValue>=0&&p.fixedFrictionValue<=10000&&finite(p.rotatingMomentDamp)&&p.rotatingMomentDamp>=0&&p.rotatingMomentDamp<=1;}
-float normalize(Vec3& v){float n=std::sqrt(dot(v,v));if(n>0)v=scale(v,1.f/n);return n;}
-Quaternion multiply(Quaternion a,Quaternion b){Vec3 av{a.x,a.y,a.z},bv{b.x,b.y,b.z};Vec3 v=add(add(cross(av,bv),scale(bv,a.w)),scale(av,b.w));return {a.w*b.w-dot(av,bv),v.x,v.y,v.z};}
-Quaternion add(Quaternion a,Quaternion b){return {a.w+b.w,a.x+b.x,a.y+b.y,a.z+b.z};}
-Quaternion scale(Quaternion a,float s){return {s*a.w,s*a.x,s*a.y,s*a.z};}
-Quaternion inverse(Quaternion q){float n=norm(q);return {q.w/n,-q.x/n,-q.y/n,-q.z/n};}
-Quaternion normalize(Quaternion q){float inv=1.f/std::sqrt(norm(q));return {inv*q.w,inv*q.x,inv*q.y,inv*q.z};}
+// DynCreature friction inline normalise: fused XY, rounded Z square and
+// rounded sum, with NO separate-square guard (801A83D0,801A846C,801A853C).
+float normalize(Vec3& v){float n;const float q=roundedAdd(fused(v.x,v.x,roundedMul(v.y,v.y)),roundedMul(v.z,v.z));if(!triangle::sourceSqrt(q,n)){v={refused(),refused(),refused()};return refused();}if(n>0)v=scale(v,roundedDivide(1.f,n));return n;}
+// Verified actual GPVE01 derivative8013A710..754 and getYDegree
+// 8013A358..3AC / 8013A42C..484: fused cross, separately rounded
+// (cross + b.xyz*a.w) + a.xyz*b.w, fused scalar a.w*b.w-dot.
+Quaternion multiply(Quaternion a,Quaternion b){Vec3 av{a.x,a.y,a.z},bv{b.x,b.y,b.z};Vec3 v=add(add(cross(av,bv),scale(bv,a.w)),scale(av,b.w));return {fused(a.w,b.w,-dot(av,bv)),v.x,v.y,v.z};}
+Quaternion add(Quaternion a,Quaternion b){return {roundedAdd(a.w,b.w),roundedAdd(a.x,b.x),roundedAdd(a.y,b.y),roundedAdd(a.z,b.z)};}
+Quaternion scale(Quaternion a,float s){return {roundedMul(s,a.w),roundedMul(s,a.x),roundedMul(s,a.y),roundedMul(s,a.z)};}
+// Actual GPVE01 rev0 80412798: y*y, fused x*x,z*z,w*w; one fdivs,
+// then component products. Direct component division differs in binary32.
+Quaternion inverse(Quaternion q){float n=norm(q);if(!(n>0))return {q.w,-q.x,-q.y,-q.z};const float inv=roundedDivide(1.f,n);return {roundedMul(inv,q.w),roundedMul(-q.x,inv),roundedMul(-q.y,inv),roundedMul(-q.z,inv)};}
+// Actual GPVE01 rev0 8041284C is deliberately NONFUSED: four rounded
+// squares, (x*x+y*y)+z*z then +w*w, raw frsqrte estimate, reciprocal/products.
+Quaternion normalize(Quaternion q){const float xyz=roundedAdd(roundedAdd(roundedMul(q.x,q.x),roundedMul(q.y,q.y)),roundedMul(q.z,q.z));const float squared=roundedAdd(roundedMul(q.w,q.w),xyz);float length;if(!triangle::sourceSqrt(squared,length)||!(length>0))return {refused(),refused(),refused(),refused()};const float inv=roundedDivide(1.f,length);return {roundedMul(inv,q.w),roundedMul(inv,q.x),roundedMul(inv,q.y),roundedMul(inv,q.z)};}
+// Actual GPVE01 rev0 makeQ80428B88: separate products/adds/subtracts;
+// unlike SDK concatenation there are NO fused multiply-add instructions.
 Matrix3 matrix(Quaternion q){
- float yy=2.f*q.y*q.y,zz=2.f*q.z*q.z,xx=2.f*q.x*q.x;
- float xy=2.f*q.x*q.y,xz=2.f*q.x*q.z,yz=2.f*q.y*q.z;
- float sz=2.f*q.w*q.z,sx=2.f*q.w*q.x,sy=2.f*q.w*q.y;
- return {{1.f-yy-zz,xy-sz,xz+sy,xy+sz,1.f-xx-zz,yz-sx,xz-sy,yz+sx,1.f-xx-yy}};
+ const float yy=roundedMul(roundedMul(2.f,q.y),q.y),zz=roundedMul(roundedMul(2.f,q.z),q.z),xx=roundedMul(roundedMul(2.f,q.x),q.x);
+ const float xy=roundedMul(roundedMul(2.f,q.x),q.y),xz=roundedMul(roundedMul(2.f,q.x),q.z),yz=roundedMul(roundedMul(2.f,q.y),q.z);
+ const float sz=roundedMul(roundedMul(2.f,q.w),q.z),sx=roundedMul(roundedMul(2.f,q.w),q.x),sy=roundedMul(roundedMul(2.f,q.w),q.y);
+ return {{roundedSub(roundedSub(1.f,yy),zz),roundedSub(xy,sz),roundedAdd(xz,sy),roundedAdd(xy,sz),roundedSub(roundedSub(1.f,xx),zz),roundedSub(yz,sx),roundedSub(xz,sy),roundedAdd(yz,sx),roundedSub(roundedSub(1.f,xx),yy)}};
 }
-Vec3 transform(const Matrix3& m,Vec3 v){return {m[0]*v.x+m[1]*v.y+m[2]*v.z,m[3]*v.x+m[4]*v.y+m[5]*v.z,m[6]*v.x+m[7]*v.y+m[8]*v.z};}
+// PSMTXMultVec paired lanes: (z*m2 + round(x*m0)) fused, plus
+// (translation*1 + round(y*m1)) fused, then one separately rounded sum.
+Vec3 transformTranslated(const Matrix3& m,Vec3 v,Vec3 t){Vec3 out;float* dst[3]={&out.x,&out.y,&out.z};const float translation[3]={t.x,t.y,t.z};for(unsigned r=0;r<3;++r)*dst[r]=roundedAdd(fused(m[r*3+2],v.z,roundedMul(m[r*3],v.x)),fused(translation[r],1.f,roundedMul(m[r*3+1],v.y)));return out;}
+Vec3 transform(const Matrix3& m,Vec3 v){return transformTranslated(m,v,{});}
 Matrix3 transpose(const Matrix3& m){return {{m[0],m[3],m[6],m[1],m[4],m[7],m[2],m[5],m[8]}};}
-Matrix3 multiply(const Matrix3& a,const Matrix3& b){Matrix3 out{};for(unsigned r=0;r<3;++r)for(unsigned c=0;c<3;++c)out[r*3+c]=a[r*3]*b[c]+a[r*3+1]*b[3+c]+a[r*3+2]*b[6+c];return out;}
+Matrix3 multiply(const Matrix3& a,const Matrix3& b){Matrix3 out{};for(unsigned r=0;r<3;++r)for(unsigned c=0;c<3;++c)out[r*3+c]=fused(a[r*3+2],b[6+c],fused(a[r*3+1],b[3+c],roundedMul(a[r*3],b[c])));return out;}
 // Reproduce table initialization and integer lookup; host transcendental
-// implementation and sqrt remain portable rather than PPC bit assertions.
+// implementation remains unresolved rather than PPC/table bit assertions.
+// Arithmetic fixes below DO NOT qualify these source sin/cos table values.
 float tableSin(unsigned index){return float(std::sin((double(index)*double(6.2831855f))/2048.));}
 float tableCos(unsigned index){return float(std::cos((double(index)*double(6.2831855f))/2048.));}
-Vec3 world(const State& s,Vec3 local){return add(transform(matrix(s.baseRotation),local),s.basePosition);}
+Vec3 world(const State& s,Vec3 local){return transformTranslated(matrix(s.baseRotation),local,s.basePosition);}
 Vec3 yVector(Quaternion q){Quaternion out=multiply(multiply(q,{0,0,1,0}),inverse(q));return {out.x,out.y,out.z};}
 bool validTrace(const Trace& t){return finite(t.position)&&finite(t.velocity)&&finite(t.radius)&&t.radius>=0&&finite(t.restitution);}
 }
@@ -88,7 +111,7 @@ bool computeForces(State& out,const Parameters& p,bool applyFriction,std::string
    }
   }
  }
- if(!valid(s))return fail(e,"Five forces produced invalid state");
+ if(!valid(s))return fail(e,"Five source force arithmetic refused or produced invalid state");
  out=s;e.clear();return true;
 }
 bool integrate(State& out,float dt,std::string& e){
@@ -103,7 +126,7 @@ bool integrate(State& out,float dt,std::string& e){
   else c.rotation=add(c.rotation,halfTime);
  }else c.rotation=add(c.rotation,halfTime);
  c.rotation=normalize(c.rotation);
- if(!valid(s))return fail(e,"Five integration produced invalid state");
+ if(!valid(s))return fail(e,"Five source integration arithmetic refused or produced invalid state");
  out=s;e.clear();return true;
 }
 CollisionResult resolveCollision(State& out,Vec3 point,Vec3 normal,float restitution,std::string& e){
@@ -130,7 +153,7 @@ bool simulateHalfStep(State& out,float dt,const Parameters& params,TraceProvider
  };
  for(auto& particle:s.particles){
   particle.position=world(s,particle.local);Vec3 velocity=add(cross(s.current.rotatedMomentum,sub(particle.position,s.transformedPosition)),s.current.velocity);
-  float extra=dt*std::sqrt(dot(velocity,velocity));if(extra>50)extra=50;
+  float speed;if(!triangle::sourceVectorLength(velocity,speed))return fail(e,"Five source particle length refused");float extra=roundedMul(dt,speed);if(extra>50)extra=50;
   particle.touching=false;Trace request{particle.position,velocity,particle.radius+extra,1,true};Receiver receiver(s,particle,r,params.elasticity);
   if(!validTrace(request))return fail(e,"Five particle trace is invalid");
   const float sourceRadius=request.radius;

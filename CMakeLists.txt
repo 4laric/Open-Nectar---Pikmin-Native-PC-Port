@@ -3526,7 +3526,7 @@ add_executable(p2_original_number_motion_test tools/p2_original_number_motion_te
 target_include_directories(p2_original_number_motion_test PRIVATE pc_port)
 target_compile_options(p2_original_number_motion_test PRIVATE -Wall -Wextra -Werror -UNDEBUG -ffp-contract=off)
 add_test(NAME p2_original_number_motion COMMAND p2_original_number_motion_test)
-add_executable(p2_original_number_rigid_test tools/p2_original_number_rigid_test.cpp pc_port/pc_p2_original_number_rigid.cpp)
+add_executable(p2_original_number_rigid_test tools/p2_original_number_rigid_test.cpp pc_port/pc_p2_original_number_rigid.cpp pc_port/pc_p2_original_number_triangle.cpp)
 target_include_directories(p2_original_number_rigid_test PRIVATE pc_port)
 target_compile_options(p2_original_number_rigid_test PRIVATE -Wall -Wextra -Werror -UNDEBUG -ffp-contract=off)
 add_test(NAME p2_original_number_rigid COMMAND p2_original_number_rigid_test)
