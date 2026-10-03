@@ -278,6 +278,7 @@ set(PC_PORT_SOURCES
     pc_port/pc_p2_original_chappy.cpp
     pc_port/pc_p2_original_chappy_native.cpp
     pc_port/pc_p2_original_group_engine.cpp
+    pc_port/pc_p2_original_onyon.cpp
     pc_port/pc_p2_original_piki_init.cpp
     pc_port/pc_p2_original_piki_spawn.cpp
     pc_port/pc_p2_original_drop.cpp
@@ -3469,6 +3470,12 @@ add_executable(p2_original_session_test tools/pc_p2_original_session_test.cpp
 target_include_directories(p2_original_session_test PRIVATE pc_port)
 target_compile_options(p2_original_session_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
 add_test(NAME p2_original_session COMMAND p2_original_session_test "${CMAKE_CURRENT_BINARY_DIR}/original-session-tests")
+add_executable(p2_original_metadata_probe tools/pc_p2_original_metadata_probe.cpp
+    pc_port/pc_p2_original_manifest.cpp pc_port/pc_p2_original_piki_manifest.cpp
+    pc_port/pc_p2_original_catalog.cpp pc_port/pc_p2_original_spawn_plan.cpp
+    pc_port/pc_p2_original_lifecycle.cpp pc_port/pc_p2_original_onyon.cpp)
+target_include_directories(p2_original_metadata_probe PRIVATE pc_port)
+target_compile_options(p2_original_metadata_probe PRIVATE ${NATIVE_COMPILE_OPTIONS})
 add_executable(p2_original_calendar_test tools/pc_p2_original_calendar_test.cpp)
 target_include_directories(p2_original_calendar_test PRIVATE pc_port)
 target_compile_options(p2_original_calendar_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
