@@ -20,7 +20,6 @@
 #include "Piki.h"
 #include "PikiState.h"
 #include "PikiMgr.h"
-#include "PelletMgr.h"
 #include "Pellet.h"
 #include "PikiHeadItem.h"
 #include "ItemMgr.h"
