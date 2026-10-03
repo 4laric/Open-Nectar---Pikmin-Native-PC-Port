@@ -571,6 +571,7 @@ class PurpleCombatApp : public PlugPikiApp {
     unsigned observedSaveActions=0;
     int sdlPhase=0,sdlStableAim=0,sdlThrowTicks=0;
     bool sdlStarted=false,sdlThrowObserved=false,sdlGeometryLogged=false;
+    bool sdlRecruitComplete=false;
     bool sdlAimReleasePending=false;
     Piki* sdlTracePiki=nullptr;
     int sdlTracePikiState=-1;
@@ -1785,6 +1786,38 @@ class PurpleCombatApp : public PlugPikiApp {
         require(sdlCursorRangeFeasible(minimum,radius,speed),"SDL loaded cursor range cannot fit approach band");
         require(sdlFinitePoint(n->mSRT.t) && sdlFinitePoint(violet->mSRT.t)
             && sdlFinitePoint(n->mCursorWorldPos) && std::isfinite(distance) && distance>.01f,"SDL invalid live geometry");
+        // Optional ordinary-input prerequisite for private layouts where walking
+        // straight to the flower leaves the newly withdrawn Reds at the Onion.
+        // Aim the native cursor at a real Red, then whistle; readiness is observed
+        // from the genuine Formation state, never assigned by this fixture.
+        const char* recruit=std::getenv("P2_PURPLE_SDL_RECRUIT_BEFORE_APPROACH");
+        if(sdlPhase==0 && !sdlRecruitComplete && recruit && std::strcmp(recruit,"1")==0) {
+            if(ready>0) {
+                sdlRecruitComplete=true;ordinaryInput();
+                std::printf("P2_PURPLE_SDL_RECRUIT_PASS ready=%d ordinary_B_whistle=1 actor_state_writes=0\n",ready);
+                return nullptr;
+            }
+            Piki* nearest=nullptr;float nearestDistance=1.e30f;
+            Iterator recruits(pikiMgr);CI_LOOP(recruits) {
+                Piki* p=static_cast<Piki*>(*recruits);
+                if(!p || !p->isAlive() || p->mColor!=Red || p->mP2Purple || p->mP2White || p->isStickTo())continue;
+                const float distance=planarDistance(n->mSRT.t,p->mSRT.t);
+                if(distance<nearestDistance){nearest=p;nearestDistance=distance;}
+            }
+            require(nearest && nearestDistance>.01f,"ordinary recruit Red missing");
+            const float aimDistance=std::min(nearestDistance,radius*.95f);
+            const float aimX=n->mSRT.t.x+(nearest->mSRT.t.x-n->mSRT.t.x)*aimDistance/nearestDistance;
+            const float aimZ=n->mSRT.t.z+(nearest->mSRT.t.z-n->mSRT.t.z)*aimDistance/nearestDistance;
+            const float errorX=aimX-n->mCursorWorldPos.x,errorZ=aimZ-n->mCursorWorldPos.z;
+            const float tolerance=std::max(5.f,C_NAVI_PARM(n,mCursorMoveSpeed)*gsys->getFrameTime()*.75f);
+            if(ticks%30==0)std::printf("P2_PURPLE_SDL_RECRUIT ready=0 nearest=%.3f state=%d mode=%d cursor_error=%.3f actor_state_writes=0\n",
+                nearestDistance,nearest->getState(),int(nearest->mMode),std::sqrt(errorX*errorX+errorZ*errorZ));
+            if(std::sqrt(errorX*errorX+errorZ*errorZ)>tolerance) {
+                if(sdlAimReleasePending){ordinaryInput();sdlAimReleasePending=false;}
+                else{sdlDirection(n,errorX,errorZ,20);sdlAimReleasePending=true;}
+            } else {ordinaryInput(KBBTN_B);sdlAimReleasePending=false;}
+            return nullptr;
+        }
         if(sdlPhase==0 || sdlPhase==1) {
             require(n->mCollInfo && n->mCollInfo->hasInfo() && violet->mCollInfo && violet->mCollInfo->hasInfo(),"SDL live collision bounds missing");
             sdlValidateParts(n->mCollInfo->getBoundingSphere());
