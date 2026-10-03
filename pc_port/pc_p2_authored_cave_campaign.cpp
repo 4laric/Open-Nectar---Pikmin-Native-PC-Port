@@ -6,6 +6,10 @@
 #include "pc_p2_cave_campaign_party_engine.h"
 #include "pc_p2_cave_party_landing.h"
 #include "MapCode.h"
+#include "Shape.h"
+#include "CmdStream.h"
+#include "system.h"
+#include "pc_p2_cargo_ground.h"
 #include "pc_p2_cave_survivor_permit.h"
 #include "pc_p2_surface_save.h"
 #include "pc_p2_cave_rooms_engine.h"
@@ -78,6 +82,59 @@ bool adoptPermit(){
     if(!nonzero)return false;
     permitGeneration=generation;permitSha=digest;return true;
 }
+bool sameProof(){
+    std::uint64_t generation=0;std::array<std::uint8_t,32> digest{};
+    return permitGeneration&&pc_randomizer_checkpoint_info(&generation,digest.data())
+        &&generation==permitGeneration&&generation==pc_randomizer_active_campaign_generation()
+        &&digest==permitSha;
+}
+bool destinationFooting(P2CaveCampaignParty& party,bool entering){
+    const auto& destination=entering?selectedRoute.floor:selectedRoute.surface;
+    RandomAccessStream* file=gsys->openFile(destination.file.c_str());
+    if(!file)return false;
+    CmdStream stream(file);std::string model;
+    bool duplicate=false;
+    while(!stream.endOfCmds()&&!stream.endOfSection()){
+        stream.getToken(true);
+        if(stream.isToken("map_file")){
+            if(!model.empty())duplicate=true;
+            model=stream.getToken(true);
+        }
+    }
+    file->close();
+    if(duplicate||model.empty()||model.size()>255||model.rfind("courses/",0)!=0
+        ||model.find("..")!=std::string::npos||model.find('\\')!=std::string::npos)return false;
+    // Load the destination's actual native Shape without installing a MapMgr,
+    // scene, generators, water overlays or any actor. The scene heap owns it.
+    Shape* shape=gameflow.loadShape(model.c_str(),true);
+    if(!shape)return false;
+    if(!shape->mCollGroups||shape->mGridSize<=0)shape->createCollisions(MAP_GRID_SIZE);
+    if(!shape->mCollGroups||shape->mGridSize<=0)return false;
+    auto dry=[&](P2CavePartyPoint& point){
+        CollTriInfo* support=nullptr;float height=0;
+        for(CollGroup* group=shape->getCollTris(Vector3f(point.x,0,point.z));group;group=group->mNextCollGroup){
+            for(int i=0;i<group->mTriCount;++i){
+                auto* tri=group->mTriangleList[i];Vector3f at(point.x,0,point.z);
+                const auto& normal=tri->mTriangle.mNormal;
+                if(normal.y>0&&tri->inTriClampTo(at)
+                    &&pc_p2_cargo_ground_candidate(at.y,point.y+1,normal.x,normal.y,normal.z)
+                    &&(!support||at.y>height)){support=tri;height=at.y;}
+            }
+        }
+        if(!support||std::fabs(height-point.y)>10)return false;
+        const auto attr=MapCode::getAttribute(support);
+        if(attr==ATTR_Water||attr==ATTR_Hole)return false;
+        point.y=height;return point.valid();
+    };
+    auto next=party;
+    for(auto& c:next.captains)if(!dry(c.position))return false;
+    for(auto& b:next.bodies)if(!dry(b.position))return false;
+    if(!next.valid())return false;
+    party=std::move(next);
+    std::printf("P2_AUTHORED_DESTINATION_PREFLIGHT realm=%s model=%s captains=%zu bodies=%zu native_upward_dry=1\n",
+        entering?"floor":"surface",model.c_str(),party.captains.size(),party.bodies.size());
+    return true;
+}
 [[noreturn]] void invalid(const char* why){std::fprintf(stderr,"Invalid ordinary generated cave: %s\n",why);std::abort();}
 bool inside(){return pc_randomizer_generated_cave_cache().inside;}
 bool safe(){return sceneReady&&pc_randomizer_ready()
@@ -117,7 +174,10 @@ void pc_p2_cave_campaign_prepare(){
     config.spawnX=selectedRoute.floor.landing.x;config.spawnZ=selectedRoute.floor.landing.z;
     config.exitX=selectedRoute.exit.x;config.exitZ=selectedRoute.exit.z;
     FOREACH_NODE(StageInfo,flowCont.mStageList.mChild,stage){if(stage->mFileName
-        &&config.surface==stage->mFileName&&stage->mStageID==STAGE_Forest)surfaceStage=stage;}
+        &&config.surface==stage->mFileName&&stage->mStageID==selectedRoute.surface.stage
+        &&stage->mStageIndex==selectedRoute.surface.index){
+            if(surfaceStage)invalid("ambiguous selected native surface");surfaceStage=stage;
+        }}
     if(!surfaceStage||surfaceStage->mStageIndex!=selectedRoute.surface.index||surfaceStage->mStageID!=selectedRoute.surface.stage)invalid("missing ordinary source surface");
     // Allocated with the game setup heap; excluded from the fixed five-stage
     // story list/card serialization. Its heads are in typed floor state.
@@ -144,7 +204,7 @@ bool pc_p2_cave_campaign_resume_scene(){
 }
 void pc_p2_cave_campaign_select_stage(){
     if(!authored())return;
-    clearPermit();
+    detaching=false;restoringParty=false;
     if(!prepared)invalid("provider not prepared");
     if(inside()){
         const auto& party=savedParty();
@@ -200,7 +260,7 @@ void pc_p2_cave_campaign_scene_setup(){
             if(!party.valid())invalid("invalid destination landing geometry");
             setParty(party);
         }
-        if(!adoptPermit())invalid("party restore without authenticated selected checkpoint");
+        if(!sameProof())invalid("party restore selected checkpoint changed");
         restoringParty=true;
         pc_p2_cave_campaign_party_restore(party);
         restoringParty=false;restored=true;}
@@ -267,8 +327,8 @@ bool pc_p2_cave_campaign_update_save_choice(Controller* input){
         ||state==zen::ogScrFileChkSelMgr::SelectionC){
         // These are the actual controller-selected logical A/B/C slots. The
         // native inventory selects an unused/older physical backup itself.
-        CardQuickInfo infos[4];gameflow.mMemoryCard.getQuickInfos(infos);
-        gameflow.mPlayState.mSaveSlot=static_cast<u8>(state-zen::ogScrFileChkSelMgr::SelectionA);
+        gameflow.mPlayState.mSaveSlot=selection.mGameSaveSlot;
+        gameflow.mGamePrefs.mSpareMemCardSaveIndex=selection.mMemCardSaveIndex+1;
         requested=true;choosingSave=false;gameflow.mIsUIOverlayActive=FALSE;
         std::printf("P2_CAMPAIGN_SAVE_CHOICE_SELECTED slot=%u backup=%u native_inventory=1\n",
             unsigned(gameflow.mPlayState.mSaveSlot),unsigned(gameflow.mGamePrefs.mSpareMemCardSaveIndex));
@@ -303,6 +363,10 @@ bool pc_p2_cave_campaign_commit_transition(){
         ||gameflow.mGamePrefs.mMemCardSaveIndex>4
         ||gameflow.mPlayState.mSaveSlot>3){
         std::puts("P2_CAMPAIGN_BOUNDARY_HELD selected_native_save_slot=0");return false;}
+    moveParty(party,entering);
+    if(!destinationFooting(party,entering)){
+        std::puts("P2_CAMPAIGN_BOUNDARY_HELD unsafe_destination_footing=1");return false;
+    }
     const PcP2CampaignLiveCache oldLive;
     const auto oldBanks=pc_randomizer_generated_cave_cache();
     const auto oldSession=pc_randomizer_authored_cave_session();
@@ -328,7 +392,6 @@ bool pc_p2_cave_campaign_commit_transition(){
         if(!banks.leave(sourceImage)){rollback();return false;}
         pc_p2_campaign_cache_restore_image(surface);
     }
-    moveParty(party,entering);
     const auto destinationImage=pc_p2_campaign_cache_image();
     P2AuthoredCaveSession next;
     next.present=true;next.route=selectedRoute;next.day=gameflow.mWorldClock.mCurrentDay;next.party=party;
@@ -367,6 +430,7 @@ bool pc_p2_cave_campaign_survivor_permit(const std::string& sourceKey,std::uint3
     if(!authored()){
         return pc_p2_surface_save_survivor_permit(sourceKey,recordUid,attempt,activation,catalogFingerprint,generation,sha);
     }
+    if(!sameProof())return false;
     const auto& party=savedParty();
     return p2CaveSurvivorPermit(party,detaching||restoringParty,permitGeneration,
         pc_randomizer_active_campaign_generation(),permitSha,sourceKey,recordUid,attempt,
@@ -399,6 +463,7 @@ bool pc_p2_cave_campaign_survivor_body(const std::string& sourceKey,std::uint32_
     if(!authored()){
         return pc_p2_surface_save_survivor_body(sourceKey,recordUid,attempt,activation,catalogFingerprint,state,generation,sha);
     }
+    if(!sameProof())return false;
     return p2CaveSurvivorBody(savedParty(),detaching||restoringParty,
         permitGeneration,pc_randomizer_active_campaign_generation(),permitSha,
         sourceKey,recordUid,attempt,activation,catalogFingerprint,state,generation,sha);
