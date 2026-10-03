@@ -334,7 +334,7 @@ class PurpleCombatApp : public PlugPikiApp {
     struct PluckObstacle { Vector3f centre; float radius; };
     std::vector<PluckObstacle> pluckObstacles;
     std::vector<PluckObstacle> pluckAdmissionObstacles;
-    PcPurplePoseEnvelope capturedCaptainPoses;
+    PcPurpleMotionPoseCatalog capturedCaptainPoses;
     std::vector<Vector3f> pluckRoute;
     size_t pluckRouteIndex=0;
     bool sdlPluckBraking=false;
@@ -430,6 +430,17 @@ class PurpleCombatApp : public PlugPikiApp {
         collectCaptainParts(n->mCollInfo->getBoundingSphere(),captainParts);
         require(!captainParts.empty(),"captain collision parts absent");
         pluckObstacles.clear();pluckAdmissionObstacles.clear();
+        if(sdlAcquisitionMode()) {
+            auto& upper=n->mNaviAnimMgr.getUpperAnimator();auto& lower=n->mNaviAnimMgr.getLowerAnimator();
+            const int u=upper.getCurrentMotionIndex(),l=lower.getCurrentMotionIndex();
+            require(upper.mMotionTable&&lower.mMotionTable&&upper.mAnimInfo&&lower.mAnimInfo
+                &&upper.mMotionTable->mMotions&&lower.mMotionTable->mMotions
+                &&u>=0&&l>=0&&u<upper.mMotionTable->mMotionCount&&l<lower.mMotionTable->mMotionCount
+                &&u<PIKIANIM_COUNT&&l<PIKIANIM_COUNT
+                &&std::isfinite(upper.getCounter())&&std::isfinite(lower.getCounter()),"current native animator motion identity invalid");
+            require(capturedCaptainPoses.select(reinterpret_cast<std::uintptr_t>(n),u,l),"captured motion catalog owner/bound invalid");
+            if(ticks%30==0)std::printf("P2_PURPLE_PLUCK_POSE_MOTION tick=%d upper=%d lower=%d upper_frame=%.6f lower_frame=%.6f captured_same_motion_only=1 future_animation_transition_proven=0 actor_writes=0\n",ticks,u,l,upper.getCounter(),lower.getCounter());
+        }
         if(sdlAcquisitionMode())for(CollPart* part:captainParts) {
             const Vector3f offset=part->mCentre-n->mSRT.t;
             require(capturedCaptainPoses.observe(reinterpret_cast<std::uintptr_t>(n),reinterpret_cast<std::uintptr_t>(part),unsigned(part->getID().mId),offset.x,offset.y,offset.z,part->mRadius,n->mSRT.r.y),"captain pose identity/finite/bound invalid");
