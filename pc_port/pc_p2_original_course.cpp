@@ -14,6 +14,7 @@
 #include "pc_p2_original_manifest.h"
 #include "pc_p2_original_progress.h"
 #include "pc_p2_original_piki_native.h"
+#include "pc_p2_campaign_treasure_held.h"
 #include "Creature.h"
 #include "teki.h"
 #include "Pellet.h"
@@ -135,6 +136,9 @@ bool pc_p2_original_course_start(GeneratorList* list,std::string& e){
 }
 bool pc_p2_original_course_finish(std::string& e){
  if(!current){e.clear();return true;}
+ // Refuse before disposing generators, actors or their App-heap resources.
+ // A collected receipt cannot replace a pending physical cargo graph.
+ if(!pc_p2_campaign_treasure_held_unload(e))return false;
  if(current->started&&!pc_p2_original_course_unload(e))return false;
  if(current->pikis)pc_p2_original_piki_unload();
  current.reset();e.clear();return true;
