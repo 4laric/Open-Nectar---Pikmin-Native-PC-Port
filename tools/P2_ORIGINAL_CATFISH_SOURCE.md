@@ -60,8 +60,14 @@ unlock timer are not implemented by this FSM and require their owning
 systems. This code does not claim those reactions as completed.
 In particular, Catfish's actual setEnemyNonStone enables NoInterrupt;
 KEY3 reset clears it and updates bitter bounce. Those gates need the bitter
-receiver. Retail carcass Carry5 uses type5's loop10/29; the existing generic
-corpse visual still selects dead, so that carry clock also remains open.
+receiver. Retail carcass Carry5 uses type5 duration40 and loop10/29. The
+source corpse accessor exposes that clip and phase separately. Pre-carry
+starts paused at frame0, source carry-start resumes the clock, optional
+restart starts Carcass again, and carry-finish allows the loop to exit at
+frame39. BTeki's family update runs before its dead-state gate, so the
+retained actor-backed corpse advances without replaying death/drop events.
+The shared integration owner must connect actual pellet view callbacks and
+the corpse draw override; transport gameplay remains an acceptance gate.
 
 For direct gameplay use exactly20 Pikmin, the current original start overlay,
 a centered960x540 native window and private arena/save/logs. Observe Wait

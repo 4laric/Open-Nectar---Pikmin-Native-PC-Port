@@ -67,6 +67,15 @@ public:
  }
 private:int mId=WaitAnim;float mFrame=0;size_t mCursor=0;bool mFinish=false,mCompleted=false;
 };
+class CorpseMotion {
+public:
+ void prepare(){mMotion.start(CarryAnim);mRunning=false;}
+ void start(bool restart=false){if(restart)mMotion.start(CarryAnim);mRunning=true;}
+ void finish(){mMotion.finish();}
+ void advance(float delta){if(mRunning)mMotion.advance(delta);}
+ const Motion& motion()const{return mMotion;}
+private:Motion mMotion;bool mRunning=false;
+};
 inline State attackEnd(bool target,bool inAttackRange){return target?(inAttackRange?Attack:Turn):TurnToHome;}
 inline State flickReturn(State previous,int requested=-1){return requested>=0?State(requested):previous;}
 } // namespace p2catfishsource
