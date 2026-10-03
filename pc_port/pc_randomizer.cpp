@@ -158,6 +158,7 @@ std::string originalCatalogRoot;
 p2original::SourceCalendar originalCalendar;
 p2originalsession::Bundle originalInputs;
 bool originalStandalone=false;
+std::uint64_t originalSelectionRevision=0;
 p2treasure::Catalog verifiedTreasureCatalog;
 std::unordered_map<unsigned, unsigned> p2CheckIndices;
 std::unordered_map<unsigned, std::set<std::pair<unsigned, int>>> p2CheckSources;
@@ -832,7 +833,9 @@ bool pc_randomizer_init(int argc, char** argv) {
         directory=std::filesystem::absolute(bootstrap).parent_path();campaignDirectory=directory.parent_path().parent_path()/"campaign";saveRoot=(campaignDirectory/"card").generic_string();
         if(std::filesystem::exists(directory/"hello.txt")||std::filesystem::exists(directory/"checks.txt"))fail("original run directory already used");
         originalInputs=std::move(bundle);
-        originalStandalone=true;schema=1;checkCount=0;loadCampaignCheckpoint();enabled=true;pc_randomizer_update();
+        originalStandalone=true;schema=1;checkCount=0;loadCampaignCheckpoint();
+        if(originalSelectionRevision==UINT64_MAX)fail("original session selection revision exhausted");
+        ++originalSelectionRevision;enabled=true;pc_randomizer_update();
         std::ofstream hello(directory/"hello.txt");hello<<"ORIGINAL_P2_HELLO 1 "<<token<<' '<<fingerprint<<" original-campaign-state-v1 p2-second-captain-v1";
         if(!treasureSource.empty())hello<<" source-treasure-state-v1";hello<<" END\n";hello.close();if(!hello)fail("cannot publish original native handshake");
         return true;
@@ -2463,6 +2466,9 @@ bool pc_randomizer_second_captain() { return enabled && secondCaptain; }
 bool pc_randomizer_resumed() { return enabled && campaignResumed; }
 std::string pc_randomizer_original_campaign(){return originalCampaign;}
 bool pc_randomizer_original_session(){return originalStandalone;}
+std::uint64_t pc_randomizer_original_selection_revision() noexcept {
+    return enabled&&originalStandalone?originalSelectionRevision:0;
+}
 const char* pc_randomizer_original_catalog_root(){return originalStandalone?originalCatalogRoot.c_str():nullptr;}
 bool pc_randomizer_original_calendar_plan(const std::string& course,const p2original::CalendarState& flags,std::vector<p2original::CalendarLoad>& out,std::string& error){
     if(!originalStandalone||!p2original::originalProgress().context().story){error="original story calendar is inactive";return false;}
