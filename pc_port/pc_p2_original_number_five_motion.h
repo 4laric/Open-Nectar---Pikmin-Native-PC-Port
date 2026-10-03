@@ -28,12 +28,12 @@ enum class BouncePhase { FirstSimpleFloor, AcceptedParticleContact };
 class Events {
 public:
  virtual ~Events()=default;
- // Called at the literal source phase. State is the pending motion snapshot,
+ // Called at the literal source phase. State is the mutable pending motion snapshot,
  // not committed native state. Return false after any lifetime/error refusal.
  // Particle bounce follows resolveCollision and PRECEDES touching/hasCollided
  // assignment and solver sphere correction; simple bounce precedes floor
  // assignment/floor forces. Provider owns the actual triangle association.
- virtual bool bounce(const State&,BouncePhase,std::string& error)=0;
+ virtual bool bounce(State&,BouncePhase,std::string& error)=0;
 };
 struct Options {
  // Supplied by actual source camera/section adapter, not computed here.

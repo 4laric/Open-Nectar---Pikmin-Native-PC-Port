@@ -44,13 +44,14 @@ struct ControlTraces:fiveMotion::TraceProvider {
  unsigned probes()const{unsigned n=0;for(const auto& c:calls)if(!c.platform&&!c.receiver&&c.request.restitution==0)++n;return n;}
 };
 struct ControlEvents:fiveMotion::Events {
- bool seen=false,refuse=false,particleBeforeFlags=false,simpleBeforeFloorForce=false;
+ bool seen=false,refuse=false,particleBeforeFlags=false,simpleBeforeFloorForce=false,mutateVelocity=false;
  unsigned calls=0;
- bool bounce(const fiveMotion::State& s,fiveMotion::BouncePhase phase,std::string& error)override{
+ bool bounce(fiveMotion::State& s,fiveMotion::BouncePhase phase,std::string& error)override{
   seen=true;++calls;
   if(phase==fiveMotion::BouncePhase::AcceptedParticleContact)
    particleBeforeFlags=!s.body.hasCollided&&!s.body.particles[0].touching&&s.body.current.velocity.y>-10;
   else simpleBeforeFloorForce=!s.previousFloor&&s.body.current.velocity.x==10&&s.body.current.position.y==0;
+  if(mutateVelocity)s.body.current.velocity={20,12,-8};
   if(refuse){error="control event lifetime refusal";return false;}return true;
  }
 };
@@ -138,6 +139,9 @@ int main(){
  ControlEvents simpleEvents;fiveMotion::Options simpleEventsOptions=simple;simpleEventsOptions.events=&simpleEvents;simpleEventsOptions.requireGameplayEvents=true;
  auto simpleEventState=state();simpleEventState.body.current.velocity={10,0,0};ControlTraces simpleEventTrace;simpleEventTrace.simpleFloor=true;
  check(fiveMotion::update(simpleEventState,.1f,params,simpleEventsOptions,&simpleEventTrace,report,error)&&simpleEvents.simpleBeforeFloorForce&&report.executedBounceEvents==1&&simpleEventState.body.current.velocity.x==0,"simple actual bounce before floor assignment/forces with live traced velocity");
+ simpleEvents.mutateVelocity=true;simpleEventState=state();simpleEventState.body.current.velocity={10,0,0};simpleEventTrace=ControlTraces{};simpleEventTrace.simpleFloor=true;
+ check(fiveMotion::update(simpleEventState,.05f,params,simpleEventsOptions,&simpleEventTrace,report,error)&&simpleEvents.simpleBeforeFloorForce&&simpleEventState.body.current.velocity.x==10&&simpleEventState.body.current.velocity.y==12&&simpleEventState.body.current.velocity.z==-4,"first-floor bounce velocity mutation feeds source floor forces and survives commit");
+ simpleEvents.mutateVelocity=false;
  auto eventRefusal=state();eventRefusal.body.current.velocity={0,-10,0};ControlEvents badEvent;badEvent.refuse=true;eventOptions.events=&badEvent;ControlTraces failedEventTrace;failedEventTrace.particleContact=true;report.mapCalls=999;
  check(!fiveMotion::update(eventRefusal,.01f,params,eventOptions,&failedEventTrace,report,error)&&eventRefusal.body.current.velocity.y==-10&&!eventRefusal.body.hasCollided&&report.mapCalls==999,"particle lifetime event refusal preserves state/report");
  failedEventTrace=ControlTraces{};failedEventTrace.particleContact=true;failedEventTrace.ignoreReceiverFailure=true;
