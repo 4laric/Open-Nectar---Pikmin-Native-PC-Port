@@ -792,12 +792,17 @@ public:
    if(nearLayout()){
     const float range=C_NAVI_PARM(n,mPluckDistanceOutsideOnyon);
     require(std::isfinite(range)&&range>2&&range<30,"loaded native outside-Onion pluck range");
+    if(age%30==0){
+     std::printf("P2_PURPLE_KOCHAPPY_PLUCK_OBSERVE age=%d elapsed=%d captain_state=%d captain=%.4f,%.4f,%.4f head=%.4f,%.4f,%.4f head_state=%d pullable=%d distance=%.4f range=%.4f height=%.4f rough_culled=%d actual_A=%d velocity=%.4f,%.4f,%.4f actor_writes=0\n",age,age-start,n->getCurrState()->getID(),n->mSRT.t.x,n->mSRT.t.y,n->mSRT.t.z,head->mSRT.t.x,head->mSRT.t.y,head->mSRT.t.z,head->getCurrState()->getID(),int(head->canPullout()),distance(n->mSRT.t,head->mSRT.t),range,std::fabs(n->mSRT.t.y-head->mSRT.t.y),int(roughCull(n,head,range)),int(SDL_JoystickGetButton(pad,SDL_CONTROLLER_BUTTON_A)),n->mVelocity.x,n->mVelocity.y,n->mVelocity.z);std::fflush(nullptr);
+    }
     if(distance(n->mSRT.t,head->mSRT.t)>=range-.25f){
      const float dx=head->mSRT.t.x-violet->mSRT.t.x,dz=head->mSRT.t.z-violet->mSRT.t.z;
      const float span=std::sqrt(dx*dx+dz*dz);require(span>1&&std::isfinite(span),"actual natural sprout separation");
      const Vector3f goal(head->mSRT.t.x+dx/span*(range-1),head->mSRT.t.y,head->mSRT.t.z+dz/span*(range-1));
      near.clearance(n,goal);point(n,goal,true,0,.5f);
-    }else input(head->canPullout()?KeyConfig::_instance->mExtractKey.mBind:0);
+    // Native Walk handles Extract through keyClick; release between real
+    // attempts so eligibility/state transitions cannot consume the only edge.
+    }else input(head->canPullout()&&(age-start)%24<12?KeyConfig::_instance->mExtractKey.mBind:0);
    }else{
     if(distance(n->mSRT.t,head->mSRT.t)>20)point(n,head->mSRT.t,true);
     else input(head->canPullout()?KeyConfig::_instance->mExtractKey.mBind:0);
