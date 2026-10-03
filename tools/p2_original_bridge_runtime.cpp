@@ -42,6 +42,8 @@ void require(bool good,const char* why){++checks;if(!good){std::printf("FAIL ORI
 void checked(bool good,const std::string& e){if(!good)std::fprintf(stderr,"ORIGINAL_BRIDGE_ERROR %s\n",e.c_str());require(good,"native source adapter operation");}
 struct WorkProbe:ActBridge {explicit WorkProbe(Piki* p):ActBridge(p){}void work(Bridge* b,int stage){mBridge=b;mStageID=stage;doWork(1);}};
 void run(){
+ // idle runs outside a heap; fixture allocation/preflight uses the stage App heap.
+ gsys->setHeap(SYSHEAP_App);
  pc_p2_original_bridge_register();std::string e;std::vector<BridgeRecord> rows;checked(readBridges(manifestPath,rows,e),e);require(rows.size()==2,"literal day5 bridge rows long and sloped");checked(pc_p2_original_bridge_install(rows,e),e);
  std::vector<std::unique_ptr<Generator>> owned;std::vector<std::unique_ptr<GenObjectOriginalBridge>> objects;std::vector<Generator*> inventory;
  for(const auto& r:rows){auto g=std::make_unique<Generator>();auto* product=GenObjectFactory::getProduct(0x70326272u);auto o=std::unique_ptr<GenObjectOriginalBridge>(dynamic_cast<GenObjectOriginalBridge*>(product));require(o&&o->getLatestVersion()==0x42523031u,"real typed factory");o->uid=r.uid;g->mGenObject=o.get();g->mGenType=nullptr;g->mCarryOverFlags=r.reserved;g->mRespawnInterval=r.resurrectionDays;g->mDayLimit=r.dayLimit;inventory.push_back(g.get());objects.push_back(std::move(o));owned.push_back(std::move(g));}
@@ -80,12 +82,14 @@ public:int idle()override{
  require(std::chrono::steady_clock::now()-start<std::chrono::seconds(55),"bounded fixture startup");int result=PlugPikiApp::idle();auto* guarded=naviMgr?naviMgr->getNavi():nullptr;require(!captainSeen||guarded,"captain did not disappear");
  if(guarded&&guarded->getCurrState()){captainSeen=true;if(forceDown)p2_fixture_require_captain(false,false,0,0);p2_fixture_require_captain(GameStat::orimaDead,guarded->getCurrState()->getID()==NAVISTATE_Dead,guarded->mHealth,0);}
  if(gameflow.mMoviePlayer&&gameflow.mMoviePlayer->mIsActive){gameflow.mMoviePlayer->requestSkip();return result;}
- if(!pc_randomizer_ready()||!guarded||!pikiMgr||!itemMgr||!workObjectMgr||gameflow.mPauseAll||gameflow.mIsUIOverlayActive)return result;
+ const bool surface=pc_pikipelago_surface_course()!=nullptr;
+ if((!surface&&!pc_randomizer_ready())||!guarded||!pikiMgr||!itemMgr||!workObjectMgr||gameflow.mPauseAll||gameflow.mIsUIOverlayActive)return result;
  int count=0;Iterator it(pikiMgr);for(it.first();!it.isDone();it.next())++count;if(count!=20)return result;std::puts("ORIGINAL_BRIDGE_BASELINE pikmin=20 window=960x540");run();return result;
  }
 };
 }
 int main(int argc,char** argv){
  for(int i=1;i<argc;++i){if(!std::strncmp(argv[i],"--bridge-manifest=",18))manifestPath=argv[i]+18;else if(!std::strcmp(argv[i],"--force-captain-down"))forceDown=true;}
- require(manifestPath,"literal source bridge manifest supplied");SDL_setenv("PIKMIN_RANDOMIZER_TEST_BACKGROUND","1",1);SDL_setenv("SDL_AUDIODRIVER","dummy",1);SDL_SetMainReady();pc_sim_rng_note_main_thread();std::string e;checked(pc_sim_rng_begin_offline(0x148,0x248,e),e);pc_gpu_preference_apply();pc_bbft_init(argc,argv);require(pc_randomizer_enabled(),"real generated fixture assets");if(!pc_window_init("Original source bridge factory fixture",960,540))return 3;pc_settings_init();pc_window_set_display_mode(0);pc_window_set_window_size(960,540);pc_window_center();int w=0,h=0;SDL_GetWindowSize(SDL_GL_GetCurrentWindow(),&w,&h);require(w==960&&h==540,"centered 960x540");pc_coop_set_pending(false);gsys->Initialise();pc_settings_p2d_init();nodeMgr=new NodeMgr();gsys->run(new TestApp());return 0;
+ require(manifestPath,"literal source bridge manifest supplied");SDL_setenv("PIKMIN_RANDOMIZER_TEST_BACKGROUND","1",1);SDL_setenv("SDL_AUDIODRIVER","dummy",1);SDL_SetMainReady();pc_sim_rng_note_main_thread();std::string e;checked(pc_sim_rng_begin_offline(0x148,0x248,e),e);pc_gpu_preference_apply();pc_bbft_init(argc,argv);require(pc_randomizer_enabled()||pc_pikipelago_surface_course()!=nullptr,"selected generated fixture or authored surface assets");if(!pc_window_init("Original source bridge factory fixture",960,540))return 3;pc_settings_init();pc_window_set_display_mode(0);pc_window_set_window_size(960,540);pc_window_center();int w=0,h=0;SDL_GetWindowSize(SDL_GL_GetCurrentWindow(),&w,&h);require(w==960&&h==540,"centered 960x540");pc_coop_set_pending(false);gsys->Initialise();pc_settings_p2d_init();nodeMgr=new NodeMgr();gsys->run(new TestApp());return 0;
 }
+

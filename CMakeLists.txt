@@ -374,6 +374,7 @@ set(PC_PORT_SOURCES
     pc_port/pc_p2_purple_impact.cpp
     pc_port/pc_p2_purple_direct.cpp
     pc_port/pc_whistle_pluck.cpp
+    pc_port/pc_p2_equipment.cpp
     pc_port/pc_route_planner.cpp
     pc_port/pc_p2_purple_flight.cpp
     pc_port/pc_p2_purple_feedback.cpp
@@ -3326,6 +3327,10 @@ add_executable(pc_p2_original_corpse_profile_test tools/pc_p2_original_corpse_pr
     pc_port/pc_p2_original_corpse_profile.cpp)
 target_include_directories(pc_p2_original_corpse_profile_test PRIVATE pc_port)
 add_test(NAME p2_original_corpse_profile COMMAND pc_p2_original_corpse_profile_test)
+add_executable(pc_p2_original_corpse_death_policy_test tools/pc_p2_original_corpse_death_policy_test.cpp
+    pc_port/pc_p2_original_corpse_ledger.cpp)
+target_include_directories(pc_p2_original_corpse_death_policy_test PRIVATE pc_port)
+add_test(NAME p2_original_corpse_death_policy COMMAND pc_p2_original_corpse_death_policy_test)
 add_executable(pc_midday_audio_fence_test tools/pc_midday_audio_fence_test.cpp pc_port/pc_midday_audio_fence.cpp)
 target_include_directories(pc_midday_audio_fence_test PRIVATE pc_port)
 target_link_libraries(pc_midday_audio_fence_test PRIVATE ${SDL2_LIBRARIES})
@@ -3709,3 +3714,18 @@ add_executable(pc_p2_original_barrel_test tools/test_p2_original_barrel.cpp
 target_include_directories(pc_p2_original_barrel_test PRIVATE pc_port)
 target_compile_options(pc_p2_original_barrel_test PRIVATE -UNDEBUG)
 add_test(NAME p2_original_barrel COMMAND pc_p2_original_barrel_test)
+
+add_executable(p2_equipment_policy_test tools/pc_p2_equipment_test.cpp)
+target_include_directories(p2_equipment_policy_test PRIVATE pc_port)
+target_compile_options(p2_equipment_policy_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_equipment_policy_test COMMAND p2_equipment_policy_test)
+add_executable(p2_equipment_projection_test tools/pc_p2_equipment_projection_test.cpp pc_port/pc_p2_equipment.cpp)
+target_include_directories(p2_equipment_projection_test BEFORE PRIVATE tools/equipment_stubs pc_port)
+target_compile_options(p2_equipment_projection_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_equipment_projection_test COMMAND p2_equipment_projection_test)
+
+# Ordinary White adult ingestion uses real native mouth callbacks and a genuine saved squad.
+pikmin_add_ci_fixture(white_adult_ingestion tools/p2_white_campaign_ingestion_runtime.cpp)
+if(TARGET pikmin_ci_fixture_white_adult_ingestion)
+    target_include_directories(pikmin_ci_fixture_white_adult_ingestion PRIVATE ${P2_CHALLENGE_GUARD_INCLUDE_DIR})
+endif()
