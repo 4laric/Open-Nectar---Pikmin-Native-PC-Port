@@ -56,15 +56,18 @@ int main(int argc,char** argv){
  assert(tank::decode(original,e));assert(original.sourceKey=="tutorial/initgen.txt#29");
  std::ostringstream bank;bank<<"P2_ORIGINAL_TANK_BANK_1\n";
  for(unsigned kind=0;kind<2;++kind){bank<<(kind?"Wtank 25":"Tank 24")<<"\n";
+  const int durations[]={90,55,95,95,35,50,40};unsigned index=0;
   for(const char* name:{"dead","move1","flick","attack","waitact1","waitact2","type5"}){
    if(std::string(name)=="attack")bank<<"attack 3 95 0 55 94\n";
-   else bank<<name<<" 2 30 0 29\n";
+   else bank<<name<<" 2 "<<durations[index]<<" 0 "<<durations[index]-1<<"\n";
+   ++index;
   }
  }
  tank::Banks parsed;std::istringstream valid(bank.str());assert(tank::parseBank(valid,parsed,e)&&parsed[0].size()==7&&parsed[1].size()==7);
  const auto fingerprint=parsed[0][3].frames;
  std::string badBank=bank.str();badBank.replace(badBank.find("Tank 24"),7,"Tank 15");std::istringstream wrongSpecies(badBank);assert(!tank::parseBank(wrongSpecies,parsed,e)&&parsed[0][3].frames==fingerprint);
  badBank=bank.str();badBank.replace(badBank.find("0 55 94"),7,"0 54 94");std::istringstream wrongEvent(badBank);assert(!tank::parseBank(wrongEvent,parsed,e));
+ badBank=bank.str();badBank.replace(badBank.find("dead 2 90 0 89"),14,"dead 2 80 0 79");std::istringstream wrongDuration(badBank);assert(!tank::parseBank(wrongDuration,parsed,e));
  std::istringstream trailing(bank.str()+"AP_ACTOR 123");assert(!tank::parseBank(trailing,parsed,e));
  std::istringstream truncated(bank.str().substr(0,bank.str().size()/2));assert(!tank::parseBank(truncated,parsed,e));
  if(argc==2){std::ifstream actual(argv[1]);assert(tank::parseBank(actual,parsed,e));assert(parsed[0][3].duration==95&&parsed[1][3].duration==95);}

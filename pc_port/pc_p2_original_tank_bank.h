@@ -15,9 +15,13 @@ inline bool parseBank(std::istream& in,Banks& out,std::string& error){
  Banks next;
  for(unsigned kind=0;kind<2;++kind){unsigned source=0;
   if(!(in>>word>>source)||word!=(kind?"Wtank":"Tank")||source!=24+kind)return fail("original Tank bank literal species/source mismatch");
+  // Retail Tank animation archive is shared by both species. Durations
+  // verified from each actual BCA, not from actor/seed metadata.
+  const int sourceDuration[]={90,55,95,95,35,50,40};unsigned index=0;
   for(const char* name:{"dead","move1","flick","attack","waitact1","waitact2","type5"}){
    p2animation::Clip clip;
    if(!(in>>clip.name>>clip.count>>clip.duration)||clip.name!=name||clip.count<2||clip.count>64||clip.duration<2||clip.duration>10000)return fail("original Tank authored clip invalid");
+   if(clip.duration!=sourceDuration[index++])return fail("original Tank clip duration differs from source BCA");
    for(int i=0;i<clip.count;++i){int frame=0;if(!(in>>frame)||frame<0||frame>=clip.duration||(i&&frame<=clip.frames.back()))return fail("original Tank sampled frames invalid");clip.frames.push_back(frame);}
    if(clip.frames.front()!=0||clip.frames.back()!=clip.duration-1)return fail("original Tank sampled endpoints invalid");
    if(clip.name=="attack"){
