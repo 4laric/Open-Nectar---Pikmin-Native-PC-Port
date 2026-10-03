@@ -74,13 +74,14 @@ class CorpseApp:public PlugPikiApp {
  void birth(Navi* n){
   onion=itemMgr->getContainer(Red);
   require(onion,"actual Red Onion");std::string e;checked(pc_p2_original_corpse_resources(2,e),e);
-  const int old=gsys->setHeap(SYSHEAP_App);auto* t=tekiMgr->newTeki(TEKI_Swallow);require(t,"actual chassis birth");
+  const int old=gsys->setHeap(SYSHEAP_App);checked(pc_p2_chappy_prepare_original({2},e),e);
+  auto* t=tekiMgr->newTeki(TEKI_Swallow);require(t,"actual chassis birth");
   // Audited flat camp used by the actual native five-pellet carry diagnostic.
   t->mPersonality->reset();Vector3f pos(-600,n->mSRT.t.y,2155);pos.y=mapMgr->getMinY(pos.x,pos.z,true);
   t->mPersonality->mPosition=pos;t->mPersonality->mNestPosition=pos;t->mPersonality->mFaceDirection=0;t->reset();t->startAI(0);actor=t;
   generator=new Generator;checked(originalActors().generator(generator,row().enemy.uid,generatorHandle,e),e);
   unsigned token=0;checked(originalActors().actorActivation(actor,row().enemy.uid,0,1,1,token,handle,e),e);
-  require(pc_p2_chappy_bind_dynamic(actor,token,2),"genuine staged P2 Chappy bank/FSM bind");gsys->setHeap(old);
+  require(pc_p2_chappy_bind_original(actor,token,2),"genuine staged original P2 Chappy bank/FSM bind");gsys->setHeap(old);
   baseline=population();std::printf("P2_ORIGINAL_CORPSE_CONTROL source=2 uid=%u fixture_registry_binding=1 fixture_placement=1 initial_damage_control=%d population=%d\n",row().enemy.uid,int(!manual),baseline);
   if(!manual)actor->mHealth=0;phase=1;age=0;
  }
