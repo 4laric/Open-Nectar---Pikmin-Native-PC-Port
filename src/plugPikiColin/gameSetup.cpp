@@ -1,4 +1,5 @@
 #include "pc_p2_surface_save.h"
+#include "pc_p2_original_progress.h"
 #include "GameSetupSection.h"
 #include "pc_bbft.h"
 #include "pc_randomizer.h"
@@ -305,7 +306,7 @@ void GameSetupSection::update()
                 if(reserved!=1) {std::fprintf(stderr,"Missing P2 campaign reserved native save slot\n");std::exit(2);}
                 for(int id=0;id<4;++id) {
                     if(counts[id]!=1) {std::fprintf(stderr,"Missing P2 campaign surface stage\n");std::exit(2);}
-                    gameflow.mPlayState.openStage(id);
+                    if(!pc_randomizer_original_session()||id==0)gameflow.mPlayState.openStage(id);
                 }
             }
         } else if (pc_pikipelago_challenge_level() >= 0) {
@@ -321,7 +322,7 @@ void GameSetupSection::update()
         std::sprintf(flowCont.mDoorStageFilePath, "%s", stage->mFileName);
         gameflow.mWorldClock.mCurrentDay = 1;
         gameflow.mWorldClock.setTime(TUTORIAL_TIME_OF_DAY);
-        if (pc_bbft_skip_tutorial()) {
+        if (pc_bbft_skip_tutorial() && !pc_randomizer_original_session()) {
             playerState->mIsTutorialMode = false;
             const int initialColor = pc_randomizer_enabled() ? pc_randomizer_start_color() : Red;
             playerState->setContainer(initialColor);
@@ -367,6 +368,11 @@ void GameSetupSection::update()
             playerState->mTotalBornPikiNum=60; playerState->mLivingPikiNum=60;
             std::printf("[Pikipelago] CHALLENGE_LAYOUT_READY id=challenge-%d stage_index=%d file=%s story=1\n",
                 pc_pikipelago_challenge_level(),stage->mStageIndex,stage->mFileName); std::fflush(stdout);
+        }
+        if(pc_randomizer_original_session()){
+            playerState->mIsTutorialMode=false;
+            gameflow.mWorldClock.mCurrentDay=int(p2original::originalProgress().context().day)+1;
+            gameflow.mWorldClock.setTime(gameflow.mParameters->mStartHour());
         }
         if (pc_pikipelago_room_preview() || pc_pikipelago_surface_course()) {
             for (int color=0;color<3;++color)
