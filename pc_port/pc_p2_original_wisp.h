@@ -60,6 +60,7 @@ public:
  bool birth(const CatalogRow&,Generator*,unsigned,const Position&,float,Creature*&,std::string&) override;
  bool bind(const CatalogRow&,Creature*,unsigned,std::string&) override;
  bool release(Creature*,unsigned,std::string&) override;
+ void retiredNative(Creature*);
  bool tick(Creature*,float,Event,std::string&);
  // Only an actual flying-Pikmin collision in Move triggers Drop.
  bool flyingCollision(Creature*,bool isPikmin,std::string&);

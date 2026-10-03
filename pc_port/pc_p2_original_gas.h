@@ -16,7 +16,7 @@ struct Parameters {
 };
 struct Resources {
  Parameters parameters;
- bool parametersLoaded=false,model=false,collider=false,effects=false;
+ bool parametersLoaded=false,model=false,collider=false,effects=false; // effects is presentation evidence, not mechanic admission
  std::array<bool,2> clips{};
 };
 struct Flags {

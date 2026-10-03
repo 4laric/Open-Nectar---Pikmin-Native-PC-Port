@@ -77,6 +77,7 @@ bool Provider::bind(const CatalogRow& row,Creature* actor,unsigned token,std::st
  h->token=token;e.clear();return true;
 }
 Host* Provider::lookup(Creature* actor){auto i=mHosts.find(actor);return i==mHosts.end()?nullptr:i->second.get();}
+void Provider::retiredNative(Creature* actor){mHosts.erase(actor);}
 bool Provider::release(Creature* actor,unsigned token,std::string& e){
  auto i=mHosts.find(actor);if(i==mHosts.end())return fail(e,"Honeywisp release outside owned source");
  if(i->second->token!=token)return fail(e,"Honeywisp release token mismatch");
