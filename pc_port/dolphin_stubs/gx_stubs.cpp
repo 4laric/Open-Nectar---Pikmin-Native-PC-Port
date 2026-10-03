@@ -356,7 +356,9 @@ void GXSetVtxDescv(GXVtxDescList* attrList) {
 		pc_gfx_set_vtx_desc(attrList->attr, attrList->type);
 	}
 }
-void GXBeginDisplayList(void* list, u32 size) { (void)list; (void)size; }
-u32 GXEndDisplayList(void) { return 0; }
+// The transport still does not implement recording. Retain the actual called
+// recording boundary so a halo scope cannot capture an unfinished owner phase.
+void GXBeginDisplayList(void* list, u32 size) { (void)list; (void)size; pc_gfx_note_display_list_recording(true); }
+u32 GXEndDisplayList(void) { pc_gfx_note_display_list_recording(false); return 0; }
 
 } // extern "C"
