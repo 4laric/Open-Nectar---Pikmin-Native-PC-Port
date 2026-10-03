@@ -63,6 +63,13 @@
 #include "Kontroller.h"
 #if defined(PIKI_PC_PORT)
 #include "pc_coop.h"
+#include "NaviState.h"
+#include "ItemMgr.h"
+#include "GoalItem.h"
+#include "Collision.h"
+#include "CPlate.h"
+#include <cstdio>
+#include <cstdlib>
 #include "pc_coop_menu_layout.h"
 #include "timing/pc_render_phase.h"
 #if defined(PIKI_PC_PORT)
@@ -201,6 +208,58 @@ bool pc_coop_right_map_menu_open(void)
 {
 	return sGamecoreLive && pc_coop_active() && menuWindow2 != nullptr;
 }
+
+// Opt-in observation only (#1182). Called after world/AI update, never from
+// a presentation pass; no actor, menu, input, GameStat or clock writes.
+static void pcCoopUxObserve()
+{
+	static const bool enabled = [] {
+		const char* value = std::getenv("PIKMIN_COOP_UX_TRACE");
+		return value && value[0] == '1' && value[1] == '\0';
+	}();
+	if (!enabled || !sGamecoreLive || !pc_coop_active() || !naviMgr || !itemMgr) return;
+	static unsigned long long sample = 0;
+	if (++sample % 5 != 0) return;
+	for (int id = 0; id < 2; ++id) {
+		Navi* navi = naviMgr->getNavi(id);
+		if (!navi || !navi->getCurrState()) continue;
+		GoalItem* onion = itemMgr->pcGetContainer(Red, id);
+		CollPart* sphere = onion && onion->mCollInfo ? onion->mCollInfo->getSphere('cont') : nullptr;
+		if (!sphere) {
+			std::printf("[coop-ux] sample=%llu navi=%d onion=0\n", sample, id);
+			continue;
+		}
+		const Vector3f centre = navi->getCentre();
+		const Vector3f diff = sphere->mCentre - centre;
+		const float distance = diff.length();
+		const float reach = navi->getSize() + sphere->mRadius;
+		Navi* other = naviMgr->getNavi(1 - id);
+		const bool busy = other && other->getCurrState()
+		    && other->getCurrState()->getID() == NAVISTATE_Container && other->mGoalItem == onion;
+		int squadRaw = 0;
+		if (navi->mPlateMgr) {
+			Iterator squad(navi->mPlateMgr);
+			CI_LOOP(squad) { ++squadRaw; }
+		}
+		zen::DrawContainer* menu = id == 1 ? containerWindow2 : containerWindow;
+		const bool inMenu = navi->getCurrState()->getID() == NAVISTATE_Container && navi->mGoalItem == onion && menu;
+		int stored = -1, squad = -1, field = -1, limit = -1, delta = 0;
+		if (inMenu) menu->observeCounts(stored, squad, field, limit, delta);
+		std::printf("[coop-ux] sample=%llu navi=%d onion=1 state=%d "
+		            "x=%.6f y=%.6f z=%.6f vx=%.6f vz=%.6f ox=%.6f oy=%.6f oz=%.6f "
+		            "distance=%.6f reach=%.6f inside=%d busy=%d squad_raw=%d "
+		            "map=%d exit_pending=%d onion_stored=%d menu=%d phase=%d "
+		            "stored=%d squad=%d field=%d limit=%d delta=%d\n",
+		    sample, id, navi->getCurrState()->getID(), centre.x, centre.y, centre.z,
+		    navi->mTargetVelocity.x, navi->mTargetVelocity.z,
+		    sphere->mCentre.x, sphere->mCentre.y, sphere->mCentre.z,
+		    distance, reach, distance <= reach, busy, squadRaw, int(GameStat::mapPikis),
+		    itemMgr->getContainerExitCount(), onion->getTotalStorePikis(), inMenu,
+		    inMenu ? int(menu->getStatus()) : -1, stored, squad, field, limit, delta);
+	}
+	std::fflush(stdout);
+}
+
 #endif
 
 /// Text ("tutorial") pop-ups/overlays.
@@ -2645,6 +2704,9 @@ public:
 					// update enemy/boss/pikmin/etc AI
 					gamecore->updateAI();
 				}
+#if defined(PIKI_PC_PORT)
+				pcCoopUxObserve();
+#endif
 				if (profiling) {
 					pc_tick_profiler_record(
 					    kPcTickWorldSim,

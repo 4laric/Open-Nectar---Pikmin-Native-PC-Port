@@ -66,6 +66,15 @@ public:
 #if defined(PIKI_PC_PORT)
 	void refreshCounts(int stored, int containerCapacity, int squad, int squadCapacity, int field, int fieldLimit);
 	int revalidateTransfer(int requested) const;
+	/// Read-only diagnostic snapshot; never refreshes or revalidates the menu.
+	void observeCounts(int& stored, int& squad, int& field, int& limit, int& delta) const
+	{
+		stored = mInitialContainerCount;
+		squad = mInitialSquadCount;
+		field = mSquadTotalCount;
+		limit = mSquadTotalLimit;
+		delta = mTransferDelta;
+	}
 #endif
 
 	// unused/inlined:
