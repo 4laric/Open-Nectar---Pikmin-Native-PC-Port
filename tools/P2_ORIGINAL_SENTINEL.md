@@ -62,6 +62,15 @@ and `IP2_stardust1_i` from GPVE01 game.jpc into private output. This does not
 reuse the Watage PID484 renderer. The native continuous chase emitter and
 billboard rendering remain unqualified.
 
+The source77 geometry importer `tools/p2_original_shijimi_resources.py`
+authenticates all three original archives, literal three-joint rig, collider
+and exact carry/dead/move BCA identities before writing the native bank.
+The native `SourceBank` consumes 28 sampled render poses and all109 original
+joint0 frames. Mechanical collision uses the integer BCA sample and actual
+source key clock independently of visibility. Native bodies must own distinct
+flattened geometry. SourceBank compilation does not prove body ownership or
+Pikmin attachment; both remain native acceptance requirements.
+
 The private composition entry is `tools/original_sentinel_build/`. It consumes
 the real resource owner's build harness and adds Sentinel Honey/state sources
 and strict controls. Only the coordinated GitHub runner may qualify the heavy
