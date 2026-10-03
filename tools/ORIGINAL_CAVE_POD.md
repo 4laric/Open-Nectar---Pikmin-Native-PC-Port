@@ -14,6 +14,13 @@ authority. It never creates an economy ledger, seeds, or P1 ship repairs.
 Preflight verifies exact source archive, raw model, collision text and converted
 model bytes against the fixed SHA-256 pins in `pc_p2_original_pod.h`. Resources
 stay in private output; no game bytes are distributed in source. The known
+converted model path is engine-relative (`courses/pikmin2room/pod.mod` by
+default). Preflight hashes the exact file reached by System's active directory
+and data root plus DVDOpen's `assets/` prefix, then loads a fresh shape without
+cache reuse. The model staged at the manifest's native destination must contain
+those verified bytes; a same-named file at the working-directory root is not
+the engine resource. Raw provenance files use their explicit filesystem paths.
+The known
 conversion is the existing `pod.mod` generated from `user/Kando/pod/arc.szs`
 `pot.bmd`. The four spheres are original `user/Kando/pod/texts.szs` `coll.txt`,
 transformed by the model's original bind-pose joint matrices 2/3. Their radii

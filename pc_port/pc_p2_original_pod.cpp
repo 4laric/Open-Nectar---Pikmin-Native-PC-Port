@@ -1,5 +1,6 @@
 #include "pc_p2_original_pod.h"
 #include "pc_p2_original_pod_registry.h"
+#include "pc_p2_original_pod_paths.h"
 #include "Suckable.h"
 #include "Pellet.h"
 #include "PelletState.h"
@@ -143,11 +144,13 @@ bool pc_p2_original_pod_preflight(const p2originalpod::Config& c,ContextProvider
  p2retail::Snapshot actual;if(!provider(c.floor.scene,actual)||!same(actual,c.floor))return reject(e,"pod_unverified_scene");
  auto* wp=routeMgr->findNearestWayPoint('test',Vector3f(c.x,c.y,c.z),false);
  if(!wp||!routeMgr->getWayPoint('test',wp->mIndex))return reject(e,"pod_route_missing");
- std::string sha;if(!digestFile(c.model,sha)||sha!=convertedModelSha256)return reject(e,"pod_original_model_hash");
+ std::string sha,modelFile;
+ if(!engineModelPath(gsys->mActiveDir,gsys->mDataRoot,c.model,modelFile)
+  ||!digestFile(modelFile,sha)||sha!=convertedModelSha256)return reject(e,"pod_original_model_hash");
  if(!digestFile(c.sourceArchive,sha)||sha!=archiveSha256
   ||!digestFile(c.sourceModel,sha)||sha!=originalModelSha256
   ||!digestFile(c.sourceCollision,sha)||sha!=originalCollisionSha256)return reject(e,"pod_original_source_provenance");
- HeapScope heap;Shape* loaded=gsys->loadShape(c.model.c_str(),true);
+ HeapScope heap;Shape* loaded=gsys->loadShape(c.model.c_str(),false); // The verified file, never an older cached shape.
  if(!loaded||loaded->mJointCount!=1)return reject(e,"pod_converted_model_missing");
  for(int i=0;i<loaded->mTexAttrCount;++i)if(loaded->mTexAttrList[i].mTexture)loaded->mTexAttrList[i].mTexture->attach();
  config=c;contextProvider=std::move(provider);shape=loaded;prepared=true;e.clear();return true;
