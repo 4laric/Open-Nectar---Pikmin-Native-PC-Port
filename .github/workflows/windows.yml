@@ -50,7 +50,7 @@ jobs:
       # For pull_request events github.sha is the synthetic merge commit; name
       # the artifact after the requested commit; BUILD_INFO separately binds the
       # actual checked-out commit/tree (including any PR synthetic merge).
-      HEAD_SHA: 7d3c21e5cd5561b82e864314bfbadbc730ccddd5
+      HEAD_SHA: 9de51a89af546d2a96eef74951992515ee468a29
       NETPLAY_BUILD: ${{ inputs.netplay && 'ON' || 'OFF' }}
       NETPLAY_SUFFIX: ${{ inputs.netplay && '-netplay' || '' }}
       CCACHE_DIR: ${{ github.workspace }}/.ccache
@@ -65,7 +65,7 @@ jobs:
 
       - uses: actions/checkout@v4
         with:
-          ref: 7d3c21e5cd5561b82e864314bfbadbc730ccddd5
+          ref: 9de51a89af546d2a96eef74951992515ee468a29
 
       - name: Fetch pinned canonical fixture guard (source only)
         uses: actions/checkout@v4
