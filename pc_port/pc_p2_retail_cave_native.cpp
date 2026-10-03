@@ -256,7 +256,12 @@ bool NativeFloor::retired(Creature* pointer,std::string& error){
  }
  error.clear();return true;
 }
+bool NativeFloor::canRelease(std::string& error)const{
+ if(m->scenePreparationOwned||m->begun)return m->scene.canRelease(error);
+ error.clear();return true;
+}
 bool NativeFloor::release(std::string& error){
+ if(!canRelease(error))return false;
  m->releasing=true; // Read-only source authority revokes before any native teardown.
  // Cargo/Pod reject an observable incomplete suction transaction. No actor is
  // destroyed until that owner agrees the scene can release or roll back.
