@@ -26,7 +26,8 @@ struct Native::Impl final:Engine {
   if(!tekiMgr->hasModel(type)||!shape||!shape->mShape||!shape->mAnimMgr||!tekiMgr->getTekiParameters(type)||!tekiMgr->getStrategy(type))return refuse(e,"Tank chassis model/animation/parameters/strategy not preloaded");
   Heap heap;
   const u32 corpse=TekiMgr::getTypeId(type);
-  if(!pelletMgr||!pelletMgr->getConfig(corpse)||!pelletMgr->pcEnsureShape(corpse)||tekiMgr->getTekiParameters(type)->getI(TPI_CorpseType)!=TEKICORPSE_LeaveCorpse)return refuse(e,"original Tank physical corpse config/shape unavailable");
+  // View-backed corpses use the enemy's dead visual, not a standalone pellet shape.
+  if(!pelletMgr||!pelletMgr->getConfig(corpse)||tekiMgr->getTekiParameters(type)->getI(TPI_CorpseType)!=TEKICORPSE_LeaveCorpse)return refuse(e,"original Tank physical corpse config unavailable");
   return pc_p2_original_drop_resources(row,e)&&pc_p2_tank_original_resources(row.enemy.source,e);
  }
  bool reserve(const std::vector<CatalogRow>& rows,unsigned count,std::string& e)override{
