@@ -14,6 +14,8 @@ public:
  Native(const Native&)=delete;
  Native& operator=(const Native&)=delete;
  Provider& provider();
+ // Stopped-engine actual-bank ownership control; never births game actors.
+ bool geometryOwnershipControl(std::string&);
  bool owns(const Creature*)const;
  bool tick(BTeki*,float,std::string&);
  bool draw(BTeki*,Graphics&,const Matrix4f&);
