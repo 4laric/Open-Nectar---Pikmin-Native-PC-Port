@@ -12,4 +12,7 @@ bool pc_p2_original_captain_scene_activate(std::string& error);
 // before this bank is detached or the native roster is destroyed.
 bool pc_p2_original_captain_scene_owned(const p2retail::SceneContext&) noexcept;
 bool pc_p2_original_captain_scene_can_retire(const p2retail::SceneContext&,std::string& error);
+// Revoke canonical World and control borrows first; keep the geometry/collision
+// bank owned until actual held Pikmin/Party/plate cleanup has completed.
+bool pc_p2_original_captain_scene_revoke(const p2retail::SceneContext&,std::string& error);
 bool pc_p2_original_captain_scene_retire(const p2retail::SceneContext&,std::string& error);

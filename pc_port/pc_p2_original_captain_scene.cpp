@@ -87,7 +87,8 @@ bool pc_p2_original_captain_scene_reset(std::string& error){
                    base[2]+float(p2retail::SourceStart::captainZ[slot]));
   actor->mLastPosition=actor->mDayEndPosition=actor->mSRT.t;
   actor->mFaceDirection=scene->mapYaw();actor->mSRT.r.set(0,actor->mFaceDirection,0);
-  actor->reset();actor->mIsCursorVisible=TRUE;
+  actor->mNaviCamera=first->mNaviCamera;
+  actor->init(actor->mSRT.t);actor->reset();actor->mIsCursorVisible=TRUE;
  }
  if(!owner->rosterCurrent()||pc_p2_retail_scene_prepared()!=scene)
   return fail(error,"source stage/roster changed during actual captain resets");
@@ -114,13 +115,19 @@ bool pc_p2_original_captain_scene_can_retire(const p2retail::SceneContext& scene
   return fail(error,"source captain retirement must precede scene or native roster reuse");
  error.clear();return true;
 }
-bool pc_p2_original_captain_scene_retire(const p2retail::SceneContext& scene,std::string& error){
+bool pc_p2_original_captain_scene_revoke(const p2retail::SceneContext& scene,std::string& error){
  if(!pc_p2_original_captain_scene_can_retire(scene,error))return false;
  if(!owner)return true;
  pc_p2_original_captain_main_game_left();
  owner->published=false;
  // Force the actual lifecycle owner to observe canonical revocation now.
  (void)pc_p2_original_captain_world();
- for(auto* actor:owner->actors){nativecontrol::forget(actor);owner->bank->forget(actor);}
+ for(auto* actor:owner->actors)nativecontrol::forget(actor);
+ error.clear();return true;
+}
+bool pc_p2_original_captain_scene_retire(const p2retail::SceneContext& scene,std::string& error){
+ if(!pc_p2_original_captain_scene_revoke(scene,error))return false;
+ if(!owner)return true;
+ for(auto* actor:owner->actors)owner->bank->forget(actor);
  delete owner;owner=nullptr;error.clear();return true;
 }
