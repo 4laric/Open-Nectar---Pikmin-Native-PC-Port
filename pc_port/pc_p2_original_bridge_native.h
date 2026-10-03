@@ -11,9 +11,11 @@ struct PcOriginalBridgeLink {
 };
 std::vector<PcOriginalBridgeLink> pc_p2_original_bridge_links();
 bool pc_p2_original_bridge_stage(const std::string&,int&);
+bool pc_p2_original_bridge_snapshot(const Creature*,p2original::BridgeState&,std::string& identity);
 bool pc_p2_original_bridge_owned(const Creature*);
 float pc_p2_original_bridge_work_damage(Piki*);
 bool pc_p2_original_bridge_stage_position(const Bridge*,int,Vector3f&);
+bool pc_p2_original_bridge_stage_finished(const Bridge*,int,bool&);
 bool pc_p2_original_bridge_install(const std::vector<p2original::BridgeRecord>&,std::string&);
 void pc_p2_original_bridge_unload(); // only after physical stage heap teardown
 void pc_p2_original_bridge_register();

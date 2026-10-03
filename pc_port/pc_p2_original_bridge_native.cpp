@@ -49,7 +49,7 @@ public:
   bool complete=state.stage==mStageCount;
   mBuildShape->mJointVisibility[2]=complete; // final leaf
   for(int i=0;i<mStageCount*2;++i)mBuildShape->mJointVisibility[mStageJoints[i]->mIndex]=!complete&&i<=state.stage*2&&(i%2==1||i==state.stage*2);
-  if(mStartWaypoint&&mEndWaypoint){mStartWaypoint->setFlag(complete);mEndWaypoint->setFlag(complete);auto p=bridgeStagePosition(r,state.stage);Vector3f z=getBridgeZVec();mStartWaypoint->mPosition.set(p[0]-5*z.x,p[1],p[2]-5*z.z);}
+  if(mStartWaypoint&&mEndWaypoint){mStartWaypoint->setFlag(complete);mEndWaypoint->setFlag(complete);mStartWaypoint->mFlags&=~WayPointFlags::InWater;mEndWaypoint->mFlags&=~WayPointFlags::InWater;auto p=bridgeStagePosition(r,state.stage);Vector3f z=getBridgeZVec();mStartWaypoint->mPosition.set(p[0]-5*z.x,p[1],p[2]-5*z.z);}
  }
  void startAI(int)override{
   _424=3;mBridgeShape->makeInstance(mAnimatedMaterials,0);
@@ -147,5 +147,7 @@ float pc_p2_original_bridge_work_damage(Piki* p){
  auto& parms=pikiMgr->mPikiParms->mPikiParms;return p->mColor==Red?parms.mRedAttackPower():p->mColor==Blue?parms.mBlueAttackPower():parms.mYellowAttackPower();
 }
 bool pc_p2_original_bridge_stage_position(const Bridge* b,int stage,Vector3f& out){for(auto* body:bodies)if(body==b){auto p=p2original::bridgeStagePosition(row(body->uid),stage);out.set(p[0],p[1],p[2]);return true;}return false;}
+bool pc_p2_original_bridge_stage_finished(const Bridge* b,int stage,bool& out){for(auto* body:bodies)if(body==b){out=stage<0||stage>=body->mStageCount||stage<body->state.stage;return true;}return false;}
 std::vector<PcOriginalBridgeLink> pc_p2_original_bridge_links(){std::vector<PcOriginalBridgeLink> out;for(auto* b:bodies){const auto& r=row(b->uid);out.push_back({r.sourceSha+":"+r.sourceKey,{b->mSRT.t.x,b->mSRT.t.y,b->mSRT.t.z},b->state.stage});}return out;}
 bool pc_p2_original_bridge_stage(const std::string& id,int& stage){for(auto* b:bodies){const auto& r=row(b->uid);if(id==r.sourceSha+":"+r.sourceKey){stage=b->state.stage;return true;}}return false;}
+bool pc_p2_original_bridge_snapshot(const Creature* c,p2original::BridgeState& s,std::string& id){for(auto* b:bodies)if(b==c){s=b->state;const auto& r=row(b->uid);id=r.sourceSha+":"+r.sourceKey;return true;}return false;}
