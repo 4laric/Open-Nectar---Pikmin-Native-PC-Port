@@ -138,3 +138,9 @@ bool pc_p2_original_corpse_snapshot(p2original::CorpseSnapshot& out,std::string&
  if(!ledger)return fail(e,"original corpse ledger has no explicit catalog session");
  out=ledger->snapshot();e.clear();return true;
 }
+bool pc_p2_original_corpse_unload(std::string& e){
+ if(!bindings.empty())return fail(e,"original corpse physical graph is pending; course unload is unsupported");
+ // Remaining configs/descriptors live on SYSHEAP_Sys and contain only literal
+ // values. The ledger contains identities/receipts, never App-heap addresses.
+ e.clear();return true;
+}
