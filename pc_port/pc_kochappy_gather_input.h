@@ -81,3 +81,16 @@ struct PcKochappyCrowdObservation {
     }
     bool settled() const { return valid() && state==1 && neutral && !tripping && !route; }
 };
+
+// One ordinary right-stick edge can unlock native plate direction; zero input
+// alone need not do so. Readiness still requires subsequent native observations.
+inline int pc_kochappy_neutral_edge(bool sent,bool locked,bool neutral,bool safeFormed,
+    int band,float rightLength,float previousLength,float targetSpeed,int deadZone) {
+    if(band<0 || band>2 || !std::isfinite(rightLength) || rightLength<0
+        || !std::isfinite(previousLength) || previousLength<0
+        || !std::isfinite(targetSpeed) || targetSpeed<0 || deadZone<0 || deadZone>127)return -1;
+    if(sent || !locked || neutral || !safeFormed || rightLength>.05f
+        || previousLength>.05f || targetSpeed>=50.f)return 0;
+    const int axis=deadZone>=22?deadZone+1:22;
+    return axis<=74?axis:-1;
+}

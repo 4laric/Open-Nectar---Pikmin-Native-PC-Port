@@ -5,6 +5,19 @@
 #include <limits>
 #define CHECK(x) do {if(!(x)){std::fprintf(stderr,"FSM observation check failed: %s line%d\n",#x,__LINE__);return 1;}}while(false)
 int main(){
+ CHECK(pc_kochappy_neutral_edge(false,true,false,true,0,0,0,0,8)==22);
+ CHECK(pc_kochappy_neutral_edge(false,true,false,true,1,0,0,0,30)==31);
+ CHECK(pc_kochappy_neutral_edge(false,true,false,true,2,0,0,0,73)==74);
+ CHECK(pc_kochappy_neutral_edge(false,true,false,true,0,0,0,0,74)==-1);
+ CHECK(pc_kochappy_neutral_edge(true,true,false,true,0,0,0,0,8)==0);
+ CHECK(pc_kochappy_neutral_edge(false,false,false,true,0,0,0,0,8)==0);
+ CHECK(pc_kochappy_neutral_edge(false,true,true,true,0,0,0,0,8)==0);
+ CHECK(pc_kochappy_neutral_edge(false,true,false,false,0,0,0,0,8)==0);
+ CHECK(pc_kochappy_neutral_edge(false,true,false,true,0,.1f,0,0,8)==0);
+ CHECK(pc_kochappy_neutral_edge(false,true,false,true,0,0,.1f,0,8)==0);
+ CHECK(pc_kochappy_neutral_edge(false,true,false,true,0,0,0,50,8)==0);
+ CHECK(pc_kochappy_neutral_edge(false,true,false,true,3,0,0,0,8)==-1);
+ CHECK(pc_kochappy_neutral_edge(false,true,false,true,0,std::numeric_limits<float>::quiet_NaN(),0,0,8)==-1);
  using G=PcKochappyGatherInput;
  CHECK(pc_kochappy_gather_input(240,100,90,.1f,.65f)==G::Walk); // actual stalled target outside coverage
  CHECK(pc_kochappy_gather_input(145,100,90,.1f,.65f)==G::Cursor);

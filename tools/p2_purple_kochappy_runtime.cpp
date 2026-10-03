@@ -497,6 +497,8 @@ class PurpleKochappyApp:public PlugPikiApp {
  bool gatherDiverted=false;
  PcKochappyReentryProgress reentryProgress;
  PcKochappyRouteCatchup routeCatchup;
+ int neutralEdgeGuide=-1,neutralEdgeAge=-1;
+ bool neutralEdgeVerified=false;
  bool seenCaptain=false,wasActive=false,sawFit=false,sawPause=false,recovered=false,deathDuringStun=false;
  Teki* enemy=nullptr;Pom* violet=nullptr;Piki* purple=nullptr;
  PcKochappyFsmSnapshot pausedFsm;
@@ -548,7 +550,7 @@ class PurpleKochappyApp:public PlugPikiApp {
  }
  bool catchupRoute(Navi* n,float radius) {
   require(routeCatchup.active,"catchup requires an actually visited guide");
-  bool present[20]={};int count=0;float lag=0,targetError=0;bool allSettled=true;
+  bool present[20]={};int count=0;float lag=0,targetError=0;bool allSettled=true,allSafeFormed=true;
   Iterator bodies(pikiMgr);CI_LOOP(bodies){Piki* p=static_cast<Piki*>(*bodies);
    if(!p)continue;
    int slot=-1;for(int i=0;i<initialBodyCount;++i)if(initialBodies[i]==p){slot=i;break;}
@@ -586,6 +588,7 @@ class PurpleKochappyApp:public PlugPikiApp {
    const float span=distance(n->mSRT.t,target),error=distance(p->mSRT.t,target);
    require(std::isfinite(span)&&span<512.f&&std::isfinite(error),"catchup Crowd target outside verified route clearance");
    targetError=std::max(targetError,error);allSettled=allSettled&&observation.settled();
+   allSafeFormed=allSafeFormed&&observation.state==1&&!observation.tripping&&!observation.route;
    if(routeCatchup.elapsed==0||routeCatchup.elapsed%30==0)
     std::printf("P2_PURPLE_KOCHAPPY_CROWD_TARGET age=%d generator=%u body_span=%.4f target_span=%.4f target_error=%.4f target_xyz=%.4f,%.4f,%.4f body_xyz=%.4f,%.4f,%.4f read_only=1\n",
      age,unsigned(p->mGenerator->_70),d,span,error,target.x,target.y,target.z,p->mSRT.t.x,p->mSRT.t.y,p->mSRT.t.z);
@@ -597,6 +600,23 @@ class PurpleKochappyApp:public PlugPikiApp {
     C_NAVI_PARM(n,mCursorMoveStickThreshold))==PcKochappyGatherInput::Cursor,
     "catchup cursor input must be movement-neutral under loaded bands");
   const float speed=std::sqrt(n->mVelocity.x*n->mVelocity.x+n->mVelocity.z*n->mVelocity.z);
+  require(n->mKontroller,"catchup actual controller missing");
+  const float rightX=n->mKontroller->getSubStickX(),rightY=n->mKontroller->getSubStickY();
+  const float rightLength=std::sqrt(rightX*rightX+rightY*rightY),previousLength=n->mPrevCStick.length();
+  const float targetSpeed=n->mTargetVelocity.length();
+  const bool edgeSent=neutralEdgeGuide==routeCatchup.guide;
+  const int edge=pc_kochappy_neutral_edge(edgeSent,n->mPlateDirLocked,n->mIsCStickNeutral,
+   roster&&allSafeFormed&&targetError<60.f,n->mFormationBand,rightLength,previousLength,targetSpeed,pc_window_get_stick_dead_zone());
+  require(edge>=0,"catchup unsupported native neutral edge inputs");
+  if(edgeSent&&!neutralEdgeVerified&&age>neutralEdgeAge){
+   std::printf("P2_PURPLE_KOCHAPPY_NEUTRAL_EDGE_OBSERVED age=%d guide=%d locked=%d neutral=%d band=%d right=%.6f previous=%.6f target_speed=%.6f actor_writes=0\n",
+    age,routeCatchup.guide,int(n->mPlateDirLocked),int(n->mIsCStickNeutral),n->mFormationBand,rightLength,previousLength,targetSpeed);
+   require(rightLength>.05f&&previousLength>.05f&&!n->mPlateDirLocked,"ordinary right-stick unlock not observed");
+   neutralEdgeVerified=true;
+  }
+  if(routeCatchup.elapsed==0||routeCatchup.elapsed%30==0||edge>0)
+   std::printf("P2_PURPLE_KOCHAPPY_NEUTRAL_STATE age=%d guide=%d locked=%d neutral=%d band=%d right=%.6f previous=%.6f target_speed=%.6f dead_zone=%d edge=%d actor_writes=0\n",
+    age,routeCatchup.guide,int(n->mPlateDirLocked),int(n->mIsCStickNeutral),n->mFormationBand,rightLength,previousLength,targetSpeed,pc_window_get_stick_dead_zone(),edge);
   // Modern ActCrowd neutral rest requires a Formed party, no trip/route,
   // and strict flat slot error <60. Unk0 can settle under ordinary input.
   const float restLimit=std::nextafter(60.f,0.f);
@@ -609,7 +629,10 @@ class PurpleKochappyApp:public PlugPikiApp {
   // All20 remain actual owned Formation members. Release the whistle and
   // both sticks so native CStickNeutral can be observed on the next idle.
   // Cursor aiming here would itself prevent the Formed neutral rest gate.
-  input();
+  if(edge>0){
+   neutralEdgeGuide=routeCatchup.guide;neutralEdgeAge=age;neutralEdgeVerified=false;
+   input(0,0,0,edge,0);
+  }else input();
   return command!=PcKochappyCatchupInput::Continue;
  }
  float pausedCounter=0,lastCounter=0,activeSeconds=0;
