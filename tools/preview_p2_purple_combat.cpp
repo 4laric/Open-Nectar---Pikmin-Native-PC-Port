@@ -1377,6 +1377,48 @@ class PurpleCombatApp : public PlugPikiApp {
             refreshPluckObstacles(n,violet);
             pluckTrace("motion_snapshot",n,head,violet);
             require(pluckSegmentClear(n->mSRT.t,n->mSRT.t),"SDL pluck captain starts inside live collision bounds");
+            const char* observed=std::getenv("P2_PURPLE_SDL_OBSERVED_REPLAN");
+            if(observed && std::strcmp(observed,"1")==0) {
+                // The native controller resolves map contacts and fixed-position
+                // springs. Steer from the measured pose rather than requiring
+                // equality to the fixture's integration or a motionless anchor.
+                if(!head->canPullout()) {acquisitionInput();return false;}
+                if(distance<pluckRange-.25f) {
+                    require(std::isfinite(head->mSRT.t.y)&&std::fabs(head->mSRT.t.y-n->mSRT.t.y)<25.f,
+                        "native pluck height gate");
+                    acquisitionInput(KBBTN_A);++pluckAttempts;
+                    milestone("native_sprout_pluck_requested",ticks);
+                    std::printf("P2_PURPLE_PLUCK_ATTEMPT attempt=%d captain_position_staged=0 native_input=1 forced_pluck_state=0 distance=%.3f observed_controller=1\n",pluckAttempts,distance);
+                    return true;
+                }
+                if(sdlPoseProbeActive) {
+                    sdlPoseProbeClear(n,violet);
+                    acquisitionInput();sdlPoseProbeActive=false;sdlPoseProbeYawObserved=false;
+                    pluckRoute.clear();return false;
+                }
+                if(pluckRoute.empty() || routedHead!=head || planarDistance(routedHeadPosition,head->mSRT.t)>2.f
+                    || !pluckSegmentClear(n->mSRT.t,pluckRoute[pluckRouteIndex])) {
+                    if(!planPluckRoute(n,head,violet,pluckRange)) {
+                        acquisitionInput();sdlProbePose(n,head,violet,pluckTau);return false;
+                    }
+                }
+                while(pluckRouteIndex+1<pluckRoute.size() && planarDistance(n->mSRT.t,pluckRoute[pluckRouteIndex])<4.f
+                    && pluckSegmentClear(n->mSRT.t,pluckRoute[pluckRouteIndex+1]))++pluckRouteIndex;
+                const Vector3f& target=pluckRoute[pluckRouteIndex];
+                const float tx=target.x-n->mSRT.t.x,tz=target.z-n->mSRT.t.z,d=std::hypot(tx,tz);
+                if(d<.5f) {acquisitionInput();pluckRoute.clear();return false;}
+                require(n->controlCamera()!=nullptr,"observed approach camera missing");
+                require(sdlPulseTerrainClear(sdlPoint(n->mSRT.t),sdlPoint(target),n->mSRT.t.y,.05f),
+                    "observed approach live terrain changed");
+                const Vector3f& axis=n->controlCamera()->mViewXAxis;
+                const float minimum=std::ceil(74.f*(cursorBand+.05f));
+                const float power=std::max(minimum,std::min(40.f,d*2.f));
+                acquisitionInput(0,int(std::lround(power*(tx*axis.x+tz*axis.z)/d)),
+                    int(std::lround(power*(tx*axis.z-tz*axis.x)/d)));
+                std::printf("P2_PURPLE_PLUCK_OBSERVED_STEER tick=%d distance=%.6f waypoint_distance=%.6f speed=%.6f power=%.6f collision=%u changed_velocity=%u actor_writes=0\n",
+                    ticks,distance,d,pluckSpeed,power,unsigned(n->mCollisionOccurred),unsigned(n->mHasCollChangedVelocity));
+                return false;
+            }
             if(sdlPoseProbeActive) {
                 sdlPoseProbeClear(n,violet);
                 if(sdlCancelOwnedCollision(n,pluckTau)) {
