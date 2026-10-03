@@ -15,6 +15,7 @@ public:
  virtual bool preflight(std::string&)=0;
  virtual bool bind(Pom*,const InstanceIdentity&,unsigned token,std::string&)=0;
  virtual bool start(Pom*,std::string&)=0;
+ // Drop mechanic references only; Native/floor manager owns physical kill.
  virtual bool release(Pom*,std::string&)=0;
  // Actual mechanic motion/frame, independent of camera and render sampling.
  virtual bool pose(const Pom*,unsigned& motion,float& frame)const=0;
@@ -31,6 +32,11 @@ public:
  // Floor owner has already installed exact registry UID/ordinal/epoch/activation.
  bool bind(Pom*,unsigned,std::string&);
  bool release(Pom*,std::string&);
+ // Actual native death callback only, after the registry owner retired its
+ // handle and before BossMgr returns this root to its free pool. Does not kill.
+ bool nativeRetired(Pom*,std::string&);
+ // Abort unused reservations after the floor owner releases every partial root.
+ bool cancel(std::string&);
  bool draw(Pom*,Graphics&);
  bool owns(const Creature*)const;
 private:

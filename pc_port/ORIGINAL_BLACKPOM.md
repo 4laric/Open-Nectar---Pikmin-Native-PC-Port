@@ -31,7 +31,9 @@ a suppressed null birth without incrementing death or consumption.
 Lifecycle order: create root; bind exact registry identity; call leaf `bind`;
 run owner's ordinary mechanic; release mechanic references; retire exact
 registry handle; release actual manager root. Native completed death needs the
-owning provider's coordinated callback before manager-slot reuse. The current
+owning provider's coordinated `nativeRetired` callback after exact registry
+retirement and before manager-slot reuse; this callback never kills a root.
+`cancel` releases unused reservations only after partial roots are cleaned. The current
 leaf is not yet wired into Pom update/collision/native-death dispatch. Never use
 an unbound root in ordinary gameplay or free a reused address.
 

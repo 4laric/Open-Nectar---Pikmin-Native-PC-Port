@@ -86,7 +86,19 @@ bool Native::release(Pom* body,std::string& e){
  if(it->second){if(!m->mechanic.release(body,e))return false;it->second=0;}
  // Floor owner retires its original registry handle before freeing manager slot.
  unsigned source=0,token=0;if(originalActors().query(body,source,token))return refuse(e,"BlackPom registry authority must retire before pool reuse");
- body->kill(false);m->actors.erase(it);e.clear();return true;
+ // Revoke leaf dispatch before kill enters native retirement hooks.
+ m->actors.erase(it);body->kill(false);e.clear();return true;
+}
+bool Native::nativeRetired(Pom* body,std::string& e){
+ auto it=m->actors.find(body);if(it==m->actors.end())return refuse(e,"BlackPom native retirement does not own root");
+ unsigned source=0,token=0;
+ if(originalActors().query(body,source,token))return refuse(e,"BlackPom native retirement still has original registry authority");
+ if(it->second&&!m->mechanic.release(body,e))return false;
+ m->actors.erase(it);e.clear();return true;
+}
+bool Native::cancel(std::string& e){
+ if(!m->actors.empty())return refuse(e,"BlackPom cancel requires partial roots released");
+ m->reserved=0;e.clear();return true;
 }
 bool Native::owns(const Creature* body)const{return m->actors.count(const_cast<Pom*>(dynamic_cast<const Pom*>(body)))!=0;}
 bool Native::draw(Pom* body,Graphics& gfx){
