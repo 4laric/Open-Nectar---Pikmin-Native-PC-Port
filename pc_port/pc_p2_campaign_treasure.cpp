@@ -71,6 +71,15 @@ void validate(const Bound& actor) {
        ||actor.actor->mConfig->mCarryMaxPikis()!=actor.entry->slots)reject("physical source/receiver/profile changed");
 }
 }
+bool pc_p2_campaign_treasure_seen(const char* retailId) {
+    if(!retailId||!p2treasure::safe_id(retailId))return false;
+    if(std::string(retailId)=="dia_a_red"&&pc_randomizer_white_treasure_campaign()&&p2whitetreasure::ledger.delivered)return true;
+    if(!p2treasurestate::state.active()||pc_randomizer_campaign_treasure_source()!=p2treasurestate::state.source())return false;
+    static p2treasure::Catalog verified;
+    static const bool loaded=[](){const char* path=std::getenv("PIKMIN_P2_TREASURE_CATALOG");
+        return verified.load_retail(path&&path[0]?path:"p2-treasure-catalog.txt");}();
+    return loaded&&p2treasurestate::state.seen(verified,retailId);
+}
 void pc_p2_campaign_treasure_setup() {
     ready=false;stage=-1;actors.clear();podShape=nullptr;
     // Only the campaign/card owner may activate and restore this source identity.
