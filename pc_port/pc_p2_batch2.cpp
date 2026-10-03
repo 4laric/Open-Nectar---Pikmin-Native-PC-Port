@@ -14,6 +14,7 @@
 #include "pc_p2_dweevil_clip.h"
 #include "pc_p2_sokkuri.h"
 #include "pc_p2_uji.h"
+#include "pc_p2_original_uji_native.h"
 #include "pc_p2_armor.h"
 #include "pc_p2_batch2_clock.h"
 #include "pc_p2_elecbug.h"
@@ -790,6 +791,7 @@ static void logBindings() {
 }
 
 void pc_p2_batch2_setup() {
+    if(pc_p2_original_uji_admitted())return;
     pc_p2_batch2_reset();
     interpolation = readBatch2InterpolationFlag();
     if (interpolation) std::printf("P2_BATCH2_INTERPOLATION_READY interpolation=1 gameplay_clock=P1\n");
@@ -805,6 +807,7 @@ void pc_p2_batch2_setup() {
 }
 
 void pc_p2_batch2_rebind() {
+    if(pc_p2_original_uji_admitted())return;
     // Rebind within this scene without reallocating the immutable model banks.
     actors.clear();
     if (!(pc_pikipelago_room_preview() || pc_randomizer_p2_bridge()) || !tekiMgr) {

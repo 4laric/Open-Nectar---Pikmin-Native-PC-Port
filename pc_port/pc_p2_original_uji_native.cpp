@@ -76,3 +76,4 @@ Provider& Native::provider(){return m->provider;}
 void Native::retired(Creature* actor){m->provider.retired(actor);}
 } }
 void pc_p2_original_uji_forget(BTeki* actor){for(auto* n:p2original::uji::natives())n->retired(actor);}
+bool pc_p2_original_uji_admitted(){for(auto* n:p2original::uji::natives())if(n->provider().prepared())return true;return false;}

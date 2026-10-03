@@ -453,6 +453,9 @@ const char* pc_p2_uji_state_name(const BTeki* actor) {
 }
 
 void pc_p2_uji_setup() {
+    // Original-course provider already admitted these resources/births. The
+    // legacy roster scan must not reset them after GeneratorMgr initializes.
+    if(pc_p2_original_uji_admitted())return;
     pc_p2_uji_reset();
     {
         int live = 0;
