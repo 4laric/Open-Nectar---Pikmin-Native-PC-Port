@@ -37,6 +37,7 @@
 // Actual common captain owner can retain an unpublished Loading bank before
 // the complete source body roster is admitted. It still pins this map context.
 bool pc_p2_original_captain_scene_owned(const p2retail::SceneContext&) noexcept;
+bool pc_p2_original_captain_scene_revoke(const p2retail::SceneContext&,std::string&);
 
 namespace p2retail {namespace {
 std::uint64_t nextSerial=1;
@@ -302,13 +303,17 @@ public:
    if(cargoPrepared&&podCommitted&&!pc_p2_retail_treasure_cargo_can_release_collected(error))return false;
    if(!podCommitted&&pc_p2_original_pod_owned()&&!pc_p2_original_pod_can_abort_prepared(context.mSnapshot.scene))return fail(error,"retail scene prepared receiver rollback unavailable");
    if(exitPrepared&&!pc_p2_retail_exit_can_release(context,error))return false;
-   if(consumersClaimed&&!pc_p2_retail_scene_bodies_can_retire(context,error))return false;
+   if((consumersClaimed||pc_p2_retail_scene_bodies_owned(context)||pc_p2_original_captain_scene_owned(context))&&!pc_p2_retail_scene_bodies_can_retire(context,error))return false;
   }
   error.clear();return true;
  }
  bool release(std::string& error)override{
   if(!canRelease(error))return false;
+  if(pc_p2_retail_scene_bodies_owned(context)||pc_p2_original_captain_scene_owned(context))consumersClaimed=true;
   context.mPhase=ScenePhase::Releasing;
+  // Revoke actual World/control authority first, while retaining its collision
+  // bank lease through party/body/path retirement. Pause is not revocation.
+  if(pc_p2_original_captain_scene_owned(context)&&!pc_p2_original_captain_scene_revoke(context,error))return false;
   if(cargoPrepared){
    auto teardown=[this](std::string& e){return pod.release(e);};
    const bool released=podCommitted?pc_p2_retail_treasure_cargo_release_collected(teardown,error):pc_p2_retail_treasure_cargo_abort_prepared(teardown,error);
@@ -353,9 +358,9 @@ public:
   // Unsupported/preflight-refused floors can own baseline bodies without the
   // NativeFloor ever reaching SceneOps::preflight. Retire those real consumers
   // through their strong owner even when FloorSession already rolled back.
-  if((pod.prepared()||exitPrepared||cargoPrepared||(consumersClaimed&&!pc_p2_retail_scene_bodies_retired(context)))&&!release(error))return false;
+  if((pod.prepared()||exitPrepared||cargoPrepared||pc_p2_retail_scene_bodies_owned(context)||pc_p2_original_captain_scene_owned(context)||(consumersClaimed&&!pc_p2_retail_scene_bodies_retired(context)))&&!release(error))return false;
   if(pc_p2_retail_cave_native_scene_owned(context.mSnapshot.scene)||pc_p2_original_pod_owned()||
-     (consumersClaimed&&!pc_p2_retail_scene_bodies_retired(context)))return fail(error,"retail scene physical/body consumers remain owned");
+     pc_p2_retail_scene_bodies_owned(context)||pc_p2_original_captain_scene_owned(context)||(consumersClaimed&&!pc_p2_retail_scene_bodies_retired(context)))return fail(error,"retail scene physical/body consumers remain owned");
   context.mPhase=ScenePhase::Prepared;error.clear();return true;
  }
  bool releaseMap(std::string& error){
