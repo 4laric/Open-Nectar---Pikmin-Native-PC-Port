@@ -1856,7 +1856,7 @@ void testTitanSeedStandoff()
     CHECK(scale < 0.5f, "titan-seed/look_band_aim");
 }
 
-void testAftermathCursorAimCorpse()
+void testAftermathCursorAimCorpse(unsigned testedSource = 38)
 {
     // #898: a cursor-aim corpse (Breadbug 38) is never walked onto. Far: walk
     // in, no throws. Near: step back. In the band: look-band stick slides the
@@ -1870,7 +1870,7 @@ void testAftermathCursorAimCorpse()
     brain.update(0.05f, s);
     brain.update(0.05f, s); // -> select
     s.targetToken = 1945764764u;
-    s.targetSource = 38;
+    s.targetSource = testedSource;
     s.targetAlive = true;
     s.targetDist = 100.0f;
     s.naviX = 0.0f;
@@ -1907,9 +1907,10 @@ void testAftermathCursorAimCorpse()
     CHECK(brain.command().moveX < -0.9f, "cursor-aim/steps_back_near");
     CHECK(!(brain.command().buttons & unsigned(p2autoplay::PadA)), "cursor-aim/no_throw_near");
     // Band (d=55), cursor 30 u past the corpse: look-band slide, no release.
-    s.targetDist = 55.0f;
-    s.tgtX = 55.0f;
-    s.cursorX = 85.0f;
+    const float band = testedSource == 35 ? 95.0f : 55.0f;
+    s.targetDist = band;
+    s.tgtX = band;
+    s.cursorX = band + 30.0f;
     bool bandThrow = false;
     for (int i = 0; i < 10; ++i) {
         brain.update(0.05f, s);
@@ -1919,7 +1920,7 @@ void testAftermathCursorAimCorpse()
     }
     CHECK(!bandThrow, "cursor-aim/no_throw_off_target");
     // Cursor on the corpse: stand still (no walk stick) and throw.
-    s.cursorX = 58.0f;
+    s.cursorX = band + 3.0f;
     bool onThrow = false, walked = false;
     for (int i = 0; i < 10; ++i) {
         brain.update(0.05f, s);
@@ -4411,6 +4412,7 @@ int main()
     testGenericDeath();
     testNoDeliverAbandonsCorpse();
     testAftermathCursorAimCorpse();
+    testAftermathCursorAimCorpse(35);
     testDoneReengagesLateTarget();
     testWithdrawRepeat();
     testSaraiFlyer();

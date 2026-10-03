@@ -398,7 +398,7 @@ inline bool isPressOnly(unsigned source) { return source == 38 || source == 40; 
 // these corpses the bot stands off, slides the cursor onto the corpse with
 // the P1 look band (the captain stands still) and throws only when the
 // cursor is on it. Pad input only, like every other bot stance.
-inline bool aimsCorpseWithCursor(unsigned source) { return source == 38 || source == 40; }
+inline bool aimsCorpseWithCursor(unsigned source) { return source == 35 || source == 38 || source == 40; }
 
 // #884 round 4: KingChappy (53) keeps the captain OUT of the source
 // invisible range while attacking. Source searchTarget prefers a captain in
@@ -1207,6 +1207,10 @@ private:
     void cursorAimThrow(const Senses& in)
     {
         const float d = in.targetDist;
+        // #1221 the Bulbear corpse is pushed by contact steering. Hold near
+        // the live ~95-unit throw cursor, outside the body, and aim before release.
+        const float near = in.targetSource == 35 ? 80.0f : cfg.corpseAimNear;
+        const float far = in.targetSource == 35 ? 110.0f : cfg.corpseAimFar;
         // Regroup: throws need Pikmin at the captain. After the presses the
         // squad is spread over the kill site (y1: 53 on the field, fewer than
         // 5 near the captain, 2 carriers for 100 s, no throw ever landed).
@@ -1228,13 +1232,13 @@ private:
             pressPhase = 0.0f;
             return;
         }
-        if (d > cfg.corpseAimFar) {
+        if (d > far) {
             steer(in.naviX, in.naviZ, in.tgtX, in.tgtZ);
             pressOn = false; // no throws while walking: the cursor trails the stick
             pressPhase = 0.0f;
             return;
         }
-        if (d < cfg.corpseAimNear) {
+        if (d < near) {
             steerAway(in.naviX, in.naviZ, in.tgtX, in.tgtZ);
             pressOn = false;
             pressPhase = 0.0f;
