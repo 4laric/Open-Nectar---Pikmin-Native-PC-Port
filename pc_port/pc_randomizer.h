@@ -42,6 +42,9 @@ std::string pc_randomizer_session_fingerprint();
 // Reverify an explicitly selected immutable input at each actual native read.
 bool pc_randomizer_original_input(const std::string& relativeRole, std::string& bytes, std::string& error);
 bool pc_randomizer_enabled();
+// SAVE1229 supplies this verified ORIGINAL_P2_CAMPAIGN bootstrap boundary.
+// Terrain, typed engineering fixtures and AP seeds do not enable it.
+bool pc_randomizer_original_session();
 // Separate, versioned TheLynk AP contract. Physical checks and rewards differ.
 bool pc_randomizer_thelynk();
 bool pc_randomizer_thelynk_part(unsigned model, bool received);

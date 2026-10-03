@@ -3,6 +3,7 @@
 #include "pc_p2_original_actor.h"
 #include "pc_p2_campaign_treasure_held.h"
 #include "pc_p2_retail_cave_drop.h"
+#include "pc_p2_original_foliage.h"
 #include "Pellet.h"
 #include "teki.h"
 #include "netplay/pc_sim_rng.h"
@@ -34,6 +35,9 @@ bool pc_p2_original_drop_resources(const p2original::CatalogRow& row,std::string
   e.clear();return true; // No GenEnemy number-pellet parameters exist in TekiInfo.
  }
  if(!p2original::validateOriginalDrop(row.enemy,e))return false;
+ // Invulnerable source Plants never execute a death/drop path. Preserve
+ // literal common fields without demanding unused number-pellet assets.
+ if(p2original::foliage::supported(row.enemy.source)){e.clear();return true;}
  if(row.enemy.source==55&&!geometry.count(55)){e="source55 original item throw geometry unavailable";return false;}
  if(row.enemy.treasureCode&&!pc_p2_campaign_treasure_held_resources(row,e))return false;
  if(!pelletMgr){e="original number pellet manager unavailable";return false;}
@@ -49,6 +53,7 @@ bool pc_p2_original_spawn_items(BTeki* actor){
  if(!actor)return false;
  unsigned source=0,token=0;p2original::InstanceIdentity identity;
  if(!p2original::originalActors().query(static_cast<Creature*>(actor),source,token,&identity))return false;
+ if(p2original::foliage::supported(source))return true;
  if(droppedTokens.count(token))return true;
  const auto* row=p2original::originalActors().find(identity.generator);std::string e;
  if(row&&row->sourceForm==p2original::SourceForm::CaveTekiInfo){

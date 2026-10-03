@@ -15,8 +15,14 @@
 #if defined(PIKI_PC_PORT)
 #include "pc_randomizer.h"
 #include "pc_p2_original_group_engine.h"
+#include "pc_p2_original_course.h"
+#include "pc_p2_original_gate_native.h"
+#include "pc_p2_original_bridge_native.h"
+#include "pc_p2_original_barrel_native.h"
+#include "pc_p2_original_cave_native.h"
 #include "pc_p2_original_gen_object.h"
 #include "pc_p2_original_onyon_native.h"
+#include "pc_p2_original_piki_native.h"
 #include <cstdlib>
 #include "pc_p2_species_unit.h"
 #include <cmath>
@@ -237,6 +243,11 @@ void GenObjectFactory::createInstance()
 #if defined(PIKI_PC_PORT)
 		pc_p2_original_gen_object_register();
 		pc_p2_original_onyon_register();
+		pc_p2_original_piki_register();
+        pc_p2_original_gate_register();
+        pc_p2_original_bridge_register();
+        pc_p2_original_barrel_register();
+        pc_p2_original_cave_register();
 #endif
 	}
 }
@@ -545,6 +556,9 @@ void Generator::updateUseList()
  */
 bool Generator::isExpired()
 {
+#if defined(PIKI_PC_PORT)
+ bool sourceExpired=false;if(pc_p2_original_course_item_expired(this,sourceExpired))return sourceExpired;
+#endif
 	if (mDayLimit == -1) {
 		return false;
 	}
@@ -563,6 +577,20 @@ bool Generator::isExpired()
  */
 void Generator::loadCreature(RandomAccessStream& input)
 {
+#if defined(PIKI_PC_PORT)
+    bool gateHandled=false;std::string gateError;
+    if(!pc_p2_original_gate_generator_load(this,input,gateHandled,gateError)){std::fprintf(stderr,"P2_ORIGINAL_GATE_LOAD_FAIL %s\n",gateError.c_str());std::abort();}
+    if(gateHandled)return;
+    bool bridgeHandled=false;std::string bridgeError;
+    if(!pc_p2_original_bridge_generator_load(this,input,bridgeHandled,bridgeError)){std::fprintf(stderr,"P2_ORIGINAL_BRIDGE_LOAD_FAIL %s\n",bridgeError.c_str());std::abort();}
+    if(bridgeHandled)return;
+    bool barrelHandled=false;std::string barrelError;
+    if(!pc_p2_original_barrel_generator_load(this,input,barrelHandled,barrelError)){std::fprintf(stderr,"P2_ORIGINAL_BARREL_LOAD_FAIL %s\n",barrelError.c_str());std::abort();}
+    if(barrelHandled)return;
+    bool caveHandled=false;std::string caveError;
+    if(!pc_p2_original_cave_generator_load(this,input,caveHandled,caveError)){std::fprintf(stderr,"P2_ORIGINAL_CAVE_LOAD_FAIL %s\n",caveError.c_str());std::abort();}
+    if(caveHandled)return;
+#endif
 	if (mGenObject) {
 		BirthInfo info;
 		if (mGenType) {
@@ -618,9 +646,21 @@ void Generator::init()
         std::fprintf(stderr,"P2_ORIGINAL_GENERATOR_INIT_FAIL %s\n",originalError.c_str());std::abort();
     }
     if(originalHandled)return;
+    if(!pc_p2_original_piki_generator_init(this,originalHandled,originalError)) {
+        std::fprintf(stderr,"P2_ORIGINAL_PIKI_INIT_FAIL %s\n",originalError.c_str());std::abort();
+    }
+    if(originalHandled)return;
     if(!pc_p2_original_onyon_generator_init(this,originalHandled,originalError)) {
         std::fprintf(stderr,"P2_ORIGINAL_ONYON_INIT_FAIL %s\n",originalError.c_str());std::abort();
     }
+    if(originalHandled)return;
+    if(!pc_p2_original_gate_generator_init(this,originalHandled,originalError)){std::fprintf(stderr,"P2_ORIGINAL_GATE_INIT_FAIL %s\n",originalError.c_str());std::abort();}
+    if(originalHandled)return;
+    if(!pc_p2_original_bridge_generator_init(this,originalHandled,originalError)){std::fprintf(stderr,"P2_ORIGINAL_BRIDGE_INIT_FAIL %s\n",originalError.c_str());std::abort();}
+    if(originalHandled)return;
+    if(!pc_p2_original_barrel_generator_init(this,originalHandled,originalError)){std::fprintf(stderr,"P2_ORIGINAL_BARREL_INIT_FAIL %s\n",originalError.c_str());std::abort();}
+    if(originalHandled)return;
+    if(!pc_p2_original_cave_generator_init(this,originalHandled,originalError)){std::fprintf(stderr,"P2_ORIGINAL_CAVE_INIT_FAIL %s\n",originalError.c_str());std::abort();}
     if(originalHandled)return;
 #endif
 	// we're past our day limit, do nothing.
@@ -923,7 +963,7 @@ void Generator::write(RandomAccessStream& output)
 		output.writeShort(mLatestSpawnDay);
 #if defined(PIKI_PC_PORT)
         // Original objects own literal respawn metadata without a P1 GenType.
-        const int cacheRebirthDay = dynamic_cast<GenObjectOriginalEnemy*>(mGenObject)
+        const int cacheRebirthDay = (dynamic_cast<GenObjectOriginalEnemy*>(mGenObject) || dynamic_cast<GenObjectOriginalGate*>(mGenObject))
             ? mRespawnInterval : getRebirthDay();
 #else
         const int cacheRebirthDay = getRebirthDay();

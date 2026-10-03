@@ -24,7 +24,7 @@ public:
  GroupCourse& operator=(const GroupCourse&)=delete;
  // The caller owns provider/resource lifetime until unload succeeds. All
  // bindings must be actual source generators, not surrogate host/AP slots.
- bool install(const std::vector<GroupBinding>&,GroupProvider&,std::string&);
+ bool install(const std::vector<GroupBinding>&,GroupProvider&,std::string&,bool selectedInventory=false);
  bool owns(const Generator*)const;
  bool initialize(Generator*,unsigned day,bool disc,const Math&,const std::function<bool(const Position&,float&,std::string&)>& floor,std::string&);
  bool death(Generator*,Creature*,std::string&);

@@ -146,3 +146,5 @@ bool pc_p2_original_piki_saved_color_held(const Piki* p,int color) noexcept {
   return true;
  } catch(...) {return false;}
 }
+
+const std::string& pc_p2_original_piki_catalog_fingerprint() noexcept {return fingerprint;}

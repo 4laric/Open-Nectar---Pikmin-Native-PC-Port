@@ -20,6 +20,7 @@
 #include "pc_randomizer.h"
 #include "pc_p2_purple_flight.h"
 #include "pc_p2_purple_impact.h"
+#include "pc_p2_cave_campaign_party_engine.h"
 
 /**
  * @todo: Documentation

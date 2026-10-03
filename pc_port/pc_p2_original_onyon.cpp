@@ -1,3 +1,4 @@
+#include <sstream>
 #include "pc_p2_original_onyon.h"
 #include "netplay/pc_netplay_sha256.h"
 #include <cmath>
@@ -59,4 +60,8 @@ bool readOnyons(const std::string& path,std::vector<OnyonRecord>& out,std::strin
  if(!in.eof())return fail(e,"original onyn manifest read failed");
  return readOnyonsFromBytes(bytes,out,e);
 }
+}
+
+namespace p2original {
+bool parseOnyons(const std::string& bytes,std::vector<OnyonRecord>& out,std::string& e){return readOnyonsFromBytes(bytes,out,e);}
 }

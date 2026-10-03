@@ -26,7 +26,7 @@ Result pc_p2_original_piki_physical_birth(const OriginalPikiBody& source,
  const int population=GameStat::mapPikis;
  if(population<0){error="invalid native Piki population";return Result::Failed;}
  if(population>=100){error.clear();return Result::CapacitySkipped;}
- auto* body=static_cast<Piki*>(pikiMgr->birth());
+ auto* body=static_cast<Piki*>(pikiMgr->birthOriginalP2());
  if(!body){error.clear();return Result::CapacitySkipped;}
  if(body->mGenerator){
   // Original genPiki returns null from generate and owns no native Generator.

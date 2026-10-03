@@ -4,6 +4,7 @@
 #include <cmath>
 #include <cstring>
 #include <set>
+#include <regex>
 namespace p2original {namespace {
 bool fail(std::string& e,const char* s){e=s;return false;}
 bool fp(const std::string& s){if(s.size()!=64)return false;for(char c:s)if(!((c>='0'&&c<='9')||(c>='a'&&c<='f')))return false;return true;}
@@ -29,9 +30,16 @@ bool encodeRows(const std::vector<PikiSourceRecord>& rows,std::string& b,std::st
  }
  return true;
 }
+
 }
 bool validatePikiSource(const PikiSourceRecord& row,std::string& e){
  const auto& key=row.sourceKey;auto hashAt=key.rfind('#');
+ if(key.find("/nonloop/")!=std::string::npos){
+  static const std::regex calendar("^[a-z]+/nonloop/([0-9]+)-([0-9]+)\\.txt#[0-9]+$");std::smatch match;
+  if(!std::regex_match(key,match,calendar))return fail(e,"original Piki calendar path invalid");unsigned begin=0,end=0;
+  for(unsigned part=1;part<=2;++part){unsigned n=0;for(char c:match[part].str()){if(n>3276||(n==3276&&c>'7'))return fail(e,"original Piki calendar day outside bound");n=n*10+unsigned(c-'0');}if(part==1)begin=n;else end=n;}
+  if(begin>end)return fail(e,"original Piki calendar range reversed");
+ }
  if(key.empty()||key.size()>256||hashAt==std::string::npos||hashAt+1==key.size()||!fp(row.sourceSha))return fail(e,"original Piki source identity invalid");
  unsigned index=0;for(size_t i=hashAt+1;i<key.size();++i){if(key[i]<'0'||key[i]>'9')return fail(e,"original Piki source index invalid");index=index*10+unsigned(key[i]-'0');if(index>65535)return fail(e,"original Piki source index exceeds bound");}
  if(key.substr(hashAt+1)!=std::to_string(index))return fail(e,"original Piki source index not canonical");
@@ -59,5 +67,23 @@ bool readPikiManifest(const std::string& b,PikiManifest& out,std::string& e){
  }
  if(!r.ok||r.p!=payload.size())return fail(e,"original Piki manifest truncated/trailing bytes");
  std::string checked;if(!writePikiManifest(next,checked,e)||checked!=b)return fail(e,"original Piki manifest catalog binding invalid");out=std::move(next);e.clear();return true;
+}
+bool writePikiActive(const PikiManifest& m,const std::string& course,unsigned day,const std::vector<unsigned>& active,std::string& out,std::string& e){
+ std::string atlas;if(!writePikiManifest(m,atlas,e)||!fp(m.catalog)||course.empty()||course.size()>32)return fail(e,"original active Piki authority invalid");
+ for(char c:course)if(c<'a'||c>'z')return fail(e,"original active Piki course invalid");
+ if(active.size()>m.rows.size())return fail(e,"original active Piki count invalid");
+ std::string b="P2PA1";b+=m.campaign;b+=m.catalog;text(b,course);put(b,day);put(b,unsigned(active.size()));unsigned previous=0;
+ for(unsigned uid:active){const PikiSourceRecord* found=nullptr;for(const auto& r:m.rows)if(r.spawn.uid==uid){found=&r;break;}
+  if(!found||uid<=previous||found->sourceKey.compare(0,course.size()+1,course+"/"))return fail(e,"original active Piki source/order/course invalid");previous=uid;put(b,uid);
+ }
+ b+=hash(b);out.swap(b);e.clear();return true;
+}
+bool readPikiActive(const std::string& b,const PikiManifest& m,const std::string& course,unsigned day,std::vector<unsigned>& out,std::string& e){
+ if(b.size()<177||b.size()>300000||b.substr(0,5)!="P2PA1"||hash(b.substr(0,b.size()-32))!=b.substr(b.size()-32))return fail(e,"original active Piki envelope invalid");
+ std::string payload=b.substr(0,b.size()-32);Reader r{payload};r.p=5;
+ if(r.fixed(64)!=m.campaign||r.fixed(64)!=m.catalog||r.string(32)!=course||r.integer()!=day)return fail(e,"original active Piki selected authority mismatch");
+ unsigned count=r.integer();if(!r.ok||count>m.rows.size())return fail(e,"original active Piki count invalid");std::vector<unsigned> next;for(unsigned i=0;i<count&&r.ok;++i)next.push_back(r.integer());
+ if(!r.ok||r.p!=payload.size())return fail(e,"original active Piki truncated/trailing data");std::string checked;
+ if(!writePikiActive(m,course,day,next,checked,e)||checked!=b)return false;out.swap(next);e.clear();return true;
 }
 }

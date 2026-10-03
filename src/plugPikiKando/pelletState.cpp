@@ -2,6 +2,7 @@
 #include "pc_p2_preview.h"
 #include "pc_p2_campaign_treasure_held.h"
 #include "pc_p2_original_pod.h"
+#include "pc_p2_original_corpse_native.h"
 #include "DebugLog.h"
 #include "FlowController.h"
 #include "GoalItem.h"
@@ -362,6 +363,10 @@ void PelletGoalState::exec(Pellet* pelt)
 	if (mSuckProgress >= 1.0f) {
 		if (P2OriginalPodNativeSeam::done(pelt,*this)) {
 			// Original cave receiver emits the canonical callback only here.
+		} else if (pc_p2_original_corpse_profile(pelt)) {
+			// Actual source corpse completion belongs to ordinary Onion stock;
+			// it cannot enter a preview/treasure economy receipt path.
+			pelt->mTargetGoal->suckMe(pelt);
 		} else if (pc_p2_preview_deliver(pelt)) {
 			// Private treasure receipt; no Onion seeds or ship repair side effects.
 		} else if (pelt->mConfig->mPelletType() == PELTYPE_UfoPart) {

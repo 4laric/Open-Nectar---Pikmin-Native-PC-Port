@@ -81,3 +81,6 @@ bool pc_p2_original_piki_saved_color_held(const Piki*,int baseColor) noexcept;
 // Reapply only the existing source body's canonical base color (e.g. ending
 // mushroom tint). Caller additionally requires color==native current mColor.
 bool pc_p2_original_piki_body_color_access(const Piki*,int baseColor) noexcept;
+
+// Bootstrap-only read view of the successfully installed immutable catalog.
+const std::string& pc_p2_original_piki_catalog_fingerprint() noexcept;

@@ -1,3 +1,4 @@
+#include "pc_p2_hanachirashi_receiver.h"
 #if defined(PIKI_PC_PORT)
 #include "pc_p2_captive_navi_policy.h"
 #include "pc_blue_rescue.h"
@@ -13,6 +14,7 @@
 #include "pc_p2_white.h"
 #include "pc_p2_breadbug_teki.h"
 #include "PikiState.h"
+#include "pc_p2_sprays.h"
 #include "AIConstant.h"
 #include "BombItem.h"
 #include "CPlate.h"
@@ -157,8 +159,10 @@ void PikiStateMachine::init(Piki* piki)
 {
 	memStat->start("pikistate");
 	create(PIKISTATE_Count);
+	registerState(pc_p2_hanachirashi_piki_state_create());
 
 	registerState(new PikiNormalState());
+	registerState(pc_p2_spicy_state());
 	registerState(new PikiFlickState());
 	registerState(new PikiFlownState());
 	registerState(new PikiEmitState());
