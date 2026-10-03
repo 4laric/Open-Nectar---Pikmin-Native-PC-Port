@@ -3468,3 +3468,9 @@ add_executable(pc_p2_original_catfish_test tools/test_p2_original_catfish.cpp
 target_include_directories(pc_p2_original_catfish_test PRIVATE pc_port)
 target_compile_options(pc_p2_original_catfish_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
 add_test(NAME pc_p2_original_catfish_test COMMAND pc_p2_original_catfish_test)
+
+pikmin_add_ci_fixture(original_catfish tools/p2_original_catfish_runtime.cpp)
+
+add_executable(pc_p2_original_catfish_captain_guard_test tools/test_p2_original_catfish_captain_guard.cpp)
+target_compile_options(pc_p2_original_catfish_captain_guard_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME pc_p2_original_catfish_captain_guard_test COMMAND pc_p2_original_catfish_captain_guard_test)
