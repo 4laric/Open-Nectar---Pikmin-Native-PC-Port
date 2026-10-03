@@ -112,6 +112,8 @@ bool update(State& out,float dt,const rigid::Parameters& params,const Options& o
   if(contacts.floor){
    report.firstSimpleBounce=!s.previousFloor;
    if(report.firstSimpleBounce&&!bounce(s,options,BouncePhase::FirstSimpleFloor,report,e))return false;
+   // Retail re-reads *velocityPtr after bounceCallback, before floor forces.
+   request.velocity=c.velocity;
    if(!motion::finishSimple(request.velocity,contacts.floorNormal,dt,options.picked,options.alwaysCarried,request.velocity))return fail(e,"Five simple floor force produced invalid state");
   }
   s.previousFloor=contacts.floor;
