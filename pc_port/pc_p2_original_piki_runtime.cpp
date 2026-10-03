@@ -2,6 +2,7 @@
 #include "pc_p2_original_piki_brain.h"
 #include "pc_p2_original_captain_damage.h"
 #include "pc_p2_original_piki_recruit.h"
+#include "pc_p2_original_progress.h"
 #include "Piki.h"
 #include "Navi.h"
 #include "MapCode.h"
@@ -16,6 +17,7 @@ struct Entry {
  Handle handle; RuntimeState runtime; Parameters params;
  std::uint64_t scene=0;
  std::string pikiBytes,naviBytes;
+ bool committed=false;
 };
 Services* services=nullptr;
 std::unordered_map<const Piki*,Entry> actors;
@@ -47,13 +49,20 @@ bool body(const Piki* p,PcP2SourceBody& out,std::string& e){
  }
  if(kind==PcP2SourceBodyKind::None||kind==PcP2SourceBodyKind::Unavailable||!out.nativeLifetime)
  return fail(e,"SourcePiki lacks current canonical native lifetime");
- return pc_p2_source_body_admitted(out,services->scene().selectedCampaign(),services->scene().sourceCatalog(),e);
+ // SceneCatalog and GenPikiCatalog are distinct authorities. Never infer the
+ // Piki catalog from LoadedScene::sourceCatalog or from a source actor label.
+ const auto& catalog=pc_p2_original_piki_catalog_fingerprint();
+ const auto& progress=originalProgress();
+ if(catalog.empty()||!pc_p2_original_piki_recruit_pair_ready()||!progress.ready()
+  ||progress.snapshot().campaign!=services->scene().selectedCampaign())
+  return fail(e,"SourcePiki campaign/PikiCatalog pairing unavailable or mismatched");
+ return pc_p2_source_body_admitted(out,services->scene().selectedCampaign(),catalog,e);
 }
 Entry* current(Handle h,std::string& e){
  PcP2SourceBody b;
  if(!h.body||!h.lifetime||!body(h.body,b,e)||b.nativeLifetime!=h.lifetime)return fail(e,"stale SourcePiki handle"),nullptr;
  auto i=actors.find(h.body);
- if(i==actors.end()||i->second.handle.lifetime!=h.lifetime||i->second.scene!=services->scene().incarnation())
+ if(i==actors.end()||!i->second.committed||i->second.handle.lifetime!=h.lifetime||i->second.scene!=services->scene().incarnation())
  return fail(e,"SourcePiki FSM not initialized in this lifetime/scene"),nullptr;
  if(i->second.pikiBytes!=services->pikiParameterBytes()||i->second.naviBytes!=services->naviParameterBytes())
  return fail(e,"SourcePiki selected parameter bytes changed"),nullptr;
@@ -117,8 +126,18 @@ bool initialize(Piki* p,std::string& e){
  x.pikiBytes=services->pikiParameterBytes();x.naviBytes=services->naviParameterBytes();
  float g=0;if(!services->gravity(g,e)||!parseParameters(x.pikiBytes,x.naviBytes,g,x.params,e))return false;
  for(auto m:{Motion::Wait,Motion::Walk,Motion::Run2,Motion::Hang,Motion::RollJump,Motion::Notice})if(!services->supports(x.handle,m,e))return false;
- if(!services->motion(x.handle,Motion::Wait,e)||!brainFree(x.handle,x.runtime,*services,e))return false;
- actors.emplace(p,std::move(x));return true;
+ // Allocate/register a pending owner BEFORE any animation/effect callback.
+ // Failure leaves an owned cleanup record; an uncommitted entry is never a
+ // callable runtime handle. emplace cannot fail after body fields were written.
+ auto inserted=actors.emplace(p,std::move(x));auto& pending=inserted.first->second;
+ try{
+  if(services->motion(pending.handle,Motion::Wait,e)&&brainFree(pending.handle,pending.runtime,*services,e)){
+   pending.committed=true;return true;
+  }
+ }catch(...){e="source initialization callback threw; pending ownership retained";}
+ std::string cleanupError;
+ if(!retire(p,cleanupError))e+="; pending cleanup refused: "+cleanupError;
+ return false;
 }
 bool handle(const Piki* p,Handle& out){std::string e;auto i=actors.find(p);if(i==actors.end()||!current(i->second.handle,e))return false;out=i->second.handle;return true;}
 bool snapshot(Handle h,RuntimeState& out){std::string e;auto* x=current(h,e);if(!x)return false;out=x->runtime;return true;}
@@ -307,13 +326,26 @@ bool collision(Handle h,const CollEvent& event,std::string& e){
  }
  return true;
 }
-void forget(Piki* p)noexcept{
- auto i=actors.find(p);if(i==actors.end())return;
- // Root calls before origin/body lifetime retirement and before CPlate release.
- // A reused native address must never receive cleanup from the old lifetime.
- try{std::string error;if(current(i->second.handle,error)){
-  cleanup(i->second,error);brainCleanup(i->second.handle,i->second.runtime,*services,error);
- }}catch(...){ } actors.erase(i);
+bool retire(Piki* p,std::string& e){
+ auto i=actors.find(p);if(i==actors.end())return true;
+ OriginalPikiBodyHandle live;
+ // Teardown is authorized by actual native lifetime, not GameWorldActive.
+ // A stale/reused physical address receives no cleanup or field mutations.
+ if(!services||services->scene().incarnation()!=i->second.scene||!pc_p2_original_piki_body_handle(p,live)||live.nativeLifetime!=i->second.handle.lifetime)
+  return fail(e,"SourcePiki retirement requires original exact live native lifetime");
+ bool stateClean=cleanup(i->second,e);
+ std::string brainError;bool brainClean=brainCleanupAll(i->second.handle,i->second.runtime,*services,brainError);
+ if(!brainClean){if(stateClean)e=brainError;else e+="; "+brainError;}
+ if(!stateClean||!brainClean)return false; // Explicit owner remains for retry.
+ actors.erase(i);return true;
 }
-void sceneExit()noexcept{while(!actors.empty())forget(const_cast<Piki*>(actors.begin()->first));}
+bool retireScene(std::string& e){
+ bool complete=true;
+ for(auto i=actors.begin();i!=actors.end();){auto* p=const_cast<Piki*>(i->first);++i;
+  std::string actorError;if(!retire(p,actorError)){if(complete)e=actorError;complete=false;}
+ }
+ return complete;
+}
+void forget(Piki* p)noexcept{try{std::string error;retire(p,error);}catch(...){ }}
+void sceneExit()noexcept{try{std::string error;retireScene(error);}catch(...){ }}
 } }
