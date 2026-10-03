@@ -7,7 +7,7 @@ namespace p2retail {
 struct FamilyOps {
  // Each leaf verifies real resources and whole-family actor/corpse capacity.
  std::function<bool(const std::vector<p2original::CatalogRow>&,std::string&)> prepare;
- std::function<bool(const p2original::CatalogRow&,Generator*,unsigned,const Vector3f&,float,Creature*&,bool& suppressed,std::string&)> birth;
+ std::function<bool(const p2original::CatalogRow&,const Snapshot&,Generator*,unsigned,const Vector3f&,float,Creature*&,bool& suppressed,std::string&)> birth;
  std::function<bool(const p2original::CatalogRow&,Creature*,unsigned,std::string&)> bind;
  std::function<bool(Creature*,unsigned,std::string&)> release;
  std::function<bool(std::string&)> cancel;

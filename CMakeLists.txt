@@ -371,6 +371,7 @@ set(PC_PORT_SOURCES
     pc_port/pc_p2_original_snow_native.cpp
     pc_port/pc_p2_retail_cave_native.cpp
     pc_port/pc_p2_retail_cave_foliage.cpp
+    pc_port/pc_p2_retail_cave_blackpom.cpp
     pc_port/pc_p2_original_red.cpp
     pc_port/pc_p2_original_red_native.cpp
     pc_port/pc_p2_kochappy.cpp

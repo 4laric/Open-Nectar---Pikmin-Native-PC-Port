@@ -25,7 +25,7 @@ struct NativeFloor::Impl {
 NativeFloor::NativeFloor(FloorPlan plan,SceneOps& scene):m(new Impl(std::move(plan),scene)){
  FamilyOps snow;
  snow.prepare=[](const std::vector<p2original::CatalogRow>& rows,std::string& e){unsigned count=0;for(const auto& row:rows)count+=row.enemy.count;return pc_p2_snow_prepare_cave(e)&&pc_p2_snow_reserve_cave(count,e);};
- snow.birth=[](const p2original::CatalogRow&,Generator* gen,unsigned,const Vector3f& p,float yaw,Creature*& out,bool& suppressed,std::string& e){suppressed=false;return pc_p2_snow_birth_cave(gen,p,yaw,out,e);};
+ snow.birth=[](const p2original::CatalogRow&,const Snapshot&,Generator* gen,unsigned,const Vector3f& p,float yaw,Creature*& out,bool& suppressed,std::string& e){suppressed=false;return pc_p2_snow_birth_cave(gen,p,yaw,out,e);};
  snow.bind=[](const p2original::CatalogRow&,Creature* actor,unsigned token,std::string& e){return pc_p2_snow_bind_cave(actor,token,e);};snow.release=pc_p2_snow_release_cave;
  snow.retired=[](Creature*,std::string&){return true;}; // Snow native forget clears its own leaf ownership.
  snow.cancel=[](std::string&){pc_p2_original_snow_resources_reset();return true;};
@@ -125,7 +125,7 @@ bool NativeFloor::install(const CaveDescriptor& cave,const FloorDefinition& floo
    Impl::Actor actor;actor.source=unsigned(row.sourceId);actor.origin=*origin;bool suppressed=false;
    const float yaw=p.yawDegrees*0.01745329251994329577f;
    auto& family=*m->families.at(actor.source);
-   bool born=family.birth(source->row,source->generator.get(),origin->ordinal,position,yaw,actor.actor,suppressed,error);
+   bool born=family.birth(source->row,m->context,source->generator.get(),origin->ordinal,position,yaw,actor.actor,suppressed,error);
    // Preserve every partial native allocation for bounded rollback.
    if(actor.actor)m->actors.push_back(actor);
    if(!born)return false;

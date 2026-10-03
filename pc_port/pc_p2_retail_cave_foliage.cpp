@@ -7,7 +7,7 @@ bool bindFoliage(NativeFloor& floor,p2original::foliage::Native& native,std::str
  ops.prepare=[leaf](const std::vector<p2original::CatalogRow>& rows,std::string& e){
   return leaf->cavePrepare(rows,e)&&leaf->caveReserve(rows,e);
  };
- ops.birth=[leaf](const p2original::CatalogRow& row,Generator* generator,unsigned ordinal,
+ ops.birth=[leaf](const p2original::CatalogRow& row,const Snapshot&,Generator* generator,unsigned ordinal,
                   const Vector3f& position,float yaw,Creature*& actor,bool& suppressed,std::string& e){
   suppressed=false;return leaf->caveBirth(row,generator,ordinal,{position.x,position.y,position.z},yaw,actor,e);
  };
