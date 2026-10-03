@@ -565,7 +565,7 @@ bool pc_p2_elecbug_pressed(BTeki* teki, Creature* presser) {
     return true;
 }
 
-bool pc_p2_elecbug_flying_press(BTeki* actor, Piki* piki) {
+static bool flyingPress(BTeki* actor, Piki* piki, const char* callback) {
     if (!ready || !actor || !piki || !piki->isAlive() || piki->getState() != PIKISTATE_Flying
         || !std::isfinite(piki->mVelocity.y) || piki->mVelocity.y >= -0.01f) return false;
     ElecBug* s = lookup(actor);
@@ -576,10 +576,32 @@ bool pc_p2_elecbug_flying_press(BTeki* actor, Piki* piki) {
     if (!actor->stimulate(InteractPress(piki, 0))) return false;
     // This dispatch originates in the real collision event, not proximity.
     std::printf("P2_ELECBUG_CONTACT_DISPATCH generator=%u piki=%p species=%d vy=%.6f "
-                "contact=1 enemy_before=%s enemy_after=%s callback=flying\n",
-                genOf(actor), static_cast<void*>(piki), species, velocityY, before, stateName(s->state));
+                "contact=1 enemy_before=%s enemy_after=%s callback=%s\n",
+                genOf(actor), static_cast<void*>(piki), species, velocityY, before, stateName(s->state), callback);
     std::fflush(stdout);
     return true;
+}
+
+bool pc_p2_elecbug_flying_press(BTeki* actor, Piki* piki) {
+    return flyingPress(actor, piki, "flying");
+}
+
+bool pc_p2_elecbug_ground_press(Piki* piki) {
+    if (!ready || !piki || !piki->isAlive() || piki->getState() != PIKISTATE_Flying
+        || !std::isfinite(piki->mVelocity.y) || piki->mVelocity.y >= -0.01f) return false;
+    // The P1 movement phase sends ground bounce before creature collisions.
+    // Resolve an actual simultaneous beetle intersection before losing Flying;
+    // terrain contact alone cannot press an enemy.
+    for (auto& entry : actors) {
+        BTeki* actor = entry.second.self;
+        if (!actor || !actor->isAlive() || entry.second.state < ELEC_WAIT
+            || entry.second.state > ELEC_CHILDISCHARGE || !actor->mCollInfo
+            || !actor->mCollInfo->hasInfo()) continue;
+        Vector3f ignored;
+        if (actor->mCollInfo->checkCollision(piki, ignored)
+            && flyingPress(actor, piki, "ground_bounce")) return true;
+    }
+    return false;
 }
 
 bool pc_p2_elecbug_clip(const BTeki* actor, const char*& name, float& phase) {
@@ -604,8 +626,8 @@ const char* pc_p2_elecbug_state_name(const BTeki* actor) {
 // Natural press adaptation (#165, inst-bugs #871): the source
 // ElecBug::pressCallBack fires when a thrown Pikmin lands on the beetle
 // (PikiFlyingState/PikiHipDropState collision, velocity.y<0), for ANY Pikmin
-// color - the P1 host routes no Pikmin->enemy InteractPress, so this
-// family-local probe detects a descending Pikmin colliding with a registered
+// color. Flying collision/ground-bounce hooks now dispatch before grounding;
+// this inherited fallback detects a descending Pikmin colliding with a registered
 // ElecBug once per flip (REVERSE/DEAD short-circuit) and delegates to
 // pc_p2_elecbug_pressed. Purple hipdrops satisfy the same probe; the color is
 // logged for evidence. Use the engine collision-part query, not an XZ radius:

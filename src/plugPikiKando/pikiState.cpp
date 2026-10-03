@@ -2387,6 +2387,12 @@ void PikiFlyingState::procBounceMsg(Piki* piki, MsgBounce*)
 	if (flight.phase != PcP2PurpleFlightPhase::Ascent) {
 		pc_p2_purple_impact_emit(piki, "ground_bounce");
 	}
+#if defined(PIKI_PC_PORT)
+    if (pc_p2_elecbug_ground_press(piki) && piki->getState() != PIKISTATE_Flying) {
+        // A real Red press selects DenkiDying; never replace it with Normal.
+        return;
+    }
+#endif
 	if (mHasBounced) {
 		piki->restartAI();
 		transit(piki, PIKISTATE_Normal);
