@@ -20,17 +20,22 @@ struct FamilyOps {
 class SceneOps {
 public:
  virtual ~SceneOps()=default;
+ // Actual selected session/revision + installed stage/native serial; no allocation.
+ virtual bool owns(const SceneIdentity&)const noexcept=0;
  virtual bool mode(const SceneIdentity&,bool& story,bool& inCave,std::string&)const=0;
  virtual bool preflight(const FloorPlan&,const Snapshot&,std::string&)=0;
  virtual bool begin(const FloorPlan&,const Snapshot&,std::string&)=0;
  // Verify selected live/terminal disposition before any native enemy allocation.
  virtual bool prior(const ContentRow&,const BirthIdentity&,const Snapshot&,LiveBinding&,bool& absent,std::string&)=0;
  virtual bool cargo(const Placement&,const ContentRow&,const BirthIdentity&,const Snapshot&,LiveBinding&,std::string&)=0;
+ // Called only after the real leaf returns its population-gated null birth.
+ virtual bool suppressed(const ContentRow&,const BirthIdentity&,const Snapshot&,LiveBinding&,std::string&)=0;
  virtual bool absent(const ContentRow&,const BirthIdentity&,const Snapshot&,const LiveBinding&)const=0;
  virtual bool commit(const Snapshot&,std::string&)=0;
  virtual bool release(std::string&)=0;
  virtual bool retired(const BirthIdentity&,const Snapshot&,std::string&)=0;
 };
+enum class FloorPhase {Empty,Preparing,Installing,Committed,Releasing};
 class NativeFloor final:public FloorProvider {
 public:
  NativeFloor(FloorPlan,SceneOps&);~NativeFloor();
@@ -44,6 +49,18 @@ public:
                    const BirthIdentity&,const LiveBinding&)const override;
  bool commit(const Snapshot&,std::string&)override;
  // Trusted installation lookup for cargo/Pod adapters; raw plan remains rechecked.
+ // Read-only actual installed census; revokes before any release/teardown.
+ FloorPhase phase()const noexcept;
+ bool bindingFacts(Snapshot&,std::uint64_t& floorEpoch,FloorPhase&,std::string&)const;
+ bool bindingCurrent(const SceneIdentity&,std::uint64_t floorEpoch)const noexcept;
+ bool installed(Snapshot&,std::uint64_t& floorEpoch,std::string&)const;
+ bool current(const SceneIdentity&,std::uint64_t floorEpoch)const noexcept;
+ bool boundSourceBirth(const Creature*,unsigned token,const p2original::InstanceIdentity&,
+                       BirthIdentity&,Snapshot&,FloorPhase&,std::string&)const;
+ bool expectedSourceBirth(const Creature*,unsigned token,const p2original::InstanceIdentity&,
+                          BirthIdentity&,Snapshot&,std::string&)const;
+ // Retained actual parent incarnation after natural death, never an output receipt.
+ bool knownSourceBirth(const p2original::InstanceIdentity&,BirthIdentity&,Snapshot&,std::string&)const;
  bool placement(const SceneIdentity&,unsigned row,unsigned ordinal,Placement&,std::string&)const;
  bool release(std::string&)override;
  // Actual native forget event, before manager address reuse; not a death poll.
