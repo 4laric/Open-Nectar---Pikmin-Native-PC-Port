@@ -1,3 +1,4 @@
+#include "pc_p2_hanachirashi_receiver.h"
 #if defined(PIKI_PC_PORT)
 #include "pc_p2_captive_navi_policy.h"
 #include "pc_blue_rescue.h"
@@ -156,6 +157,7 @@ void PikiStateMachine::init(Piki* piki)
 {
 	memStat->start("pikistate");
 	create(PIKISTATE_Count);
+	registerState(pc_p2_hanachirashi_piki_state_create());
 
 	registerState(new PikiNormalState());
 	registerState(new PikiFlickState());
