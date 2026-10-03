@@ -434,6 +434,9 @@ set(PC_PORT_SOURCES
     pc_port/pc_p2_retail_geometry.cpp
     pc_port/pc_p2_retail_rooms.cpp
     pc_port/pc_p2_original_number_room.cpp
+    pc_port/pc_p2_original_room_inverse.cpp
+    pc_port/pc_p2_original_room_height.cpp
+    pc_port/pc_p2_retail_height.cpp
     pc_port/pc_p2_original_number_triangle.cpp
     pc_port/pc_p2_retail_scene_map.cpp
     pc_port/pc_p2_retail_exit.cpp
@@ -3730,7 +3733,7 @@ add_executable(pc_p2_retail_scene_input_test tools/p2_retail_scene_input_test.cp
 target_include_directories(pc_p2_retail_scene_input_test PRIVATE pc_port)
 target_compile_options(pc_p2_retail_scene_input_test PRIVATE -UNDEBUG)
 add_test(NAME p2_retail_scene_input COMMAND pc_p2_retail_scene_input_test)
-add_executable(pc_p2_retail_rooms_test tools/p2_retail_rooms_test.cpp pc_port/pc_p2_retail_rooms.cpp pc_port/pc_p2_original_number_room.cpp pc_port/pc_p2_original_number_triangle.cpp)
+add_executable(pc_p2_retail_rooms_test tools/p2_retail_rooms_test.cpp pc_port/pc_p2_retail_rooms.cpp pc_port/pc_p2_original_number_room.cpp pc_port/pc_p2_original_number_triangle.cpp pc_port/pc_p2_retail_height.cpp pc_port/pc_p2_original_room_height.cpp pc_port/pc_p2_original_room_inverse.cpp pc_port/pc_p2_retail_start.cpp)
 target_include_directories(pc_p2_retail_rooms_test PRIVATE pc_port)
 target_compile_options(pc_p2_retail_rooms_test PRIVATE -UNDEBUG)
 target_link_libraries(pc_p2_retail_rooms_test PRIVATE p2_retail_cave_catalog)
@@ -3742,7 +3745,15 @@ add_executable(pc_p2_original_number_triangle_test tools/p2_original_number_tria
 target_include_directories(pc_p2_original_number_triangle_test PRIVATE pc_port)
 target_compile_options(pc_p2_original_number_triangle_test PRIVATE -UNDEBUG)
 add_test(NAME p2_original_number_triangle COMMAND pc_p2_original_number_triangle_test)
-set_source_files_properties(pc_port/pc_p2_original_number_room.cpp pc_port/pc_p2_original_number_triangle.cpp pc_port/pc_p2_retail_rooms.cpp pc_port/pc_p2_retail_scene_map.cpp
+add_executable(p2_original_room_inverse_test tools/p2_original_room_inverse_test.cpp pc_port/pc_p2_original_room_inverse.cpp pc_port/pc_p2_original_number_triangle.cpp)
+target_include_directories(p2_original_room_inverse_test PRIVATE pc_port)
+target_compile_options(p2_original_room_inverse_test PRIVATE -Wall -Wextra -Werror -UNDEBUG -ffp-contract=off)
+add_test(NAME p2_original_room_inverse COMMAND p2_original_room_inverse_test)
+add_executable(p2_original_room_height_test tools/p2_original_room_height_test.cpp pc_port/pc_p2_original_room_height.cpp pc_port/pc_p2_original_room_inverse.cpp pc_port/pc_p2_original_number_room.cpp pc_port/pc_p2_original_number_triangle.cpp)
+target_include_directories(p2_original_room_height_test PRIVATE pc_port)
+target_compile_options(p2_original_room_height_test PRIVATE -Wall -Wextra -Werror -UNDEBUG -ffp-contract=off)
+add_test(NAME p2_original_room_height COMMAND p2_original_room_height_test)
+set_source_files_properties(pc_port/pc_p2_original_number_room.cpp pc_port/pc_p2_original_number_triangle.cpp pc_port/pc_p2_original_room_inverse.cpp pc_port/pc_p2_original_room_height.cpp pc_port/pc_p2_retail_height.cpp pc_port/pc_p2_retail_rooms.cpp pc_port/pc_p2_retail_scene_map.cpp
     PROPERTIES COMPILE_OPTIONS "-ffp-contract=off;-fno-fast-math")
 add_executable(pc_p2_retail_exit_test tools/p2_retail_exit_test.cpp)
 target_include_directories(pc_p2_retail_exit_test PRIVATE pc_port)

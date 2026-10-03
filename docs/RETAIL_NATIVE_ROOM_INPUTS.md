@@ -105,3 +105,30 @@ ordering. Receiver callbacks read that cache; they must not recompute position.
 The scene query grants no actor phase, movement/contact, World activity,
 original RNG or SAVE authority. Actual native query/retirement runtime
 acceptance and full production linking remain pending.
+
+Source height adoption uses the frozen Numeric bb4d7fe1 helpers (independently
+reviewed pure arithmetic), the actual original four-plane/cell fields, source
+PSMTXInverse, transformed serialized unit bounding box and its Y-zeroed _190
+sphere. SceneRuntime privately owns the derived ordered query grids/rooms and
+guards every query borrow with its actual installed map, context, native thread,
+selected campaign/session/revision/serial and non-retiring phase. Original local
+triangle identity points into the owned raw plane record. The fresh highest-floor
+query preserves a genuine no-hit as null triangle/heights0; unavailable ownership
+is an atomic refusal. Hidden-floor true is unsupported until its real sentinel
+exists. On version3/4 source starts and captain offsets use this original query,
+rather than P1 ground. Earlier inputs provide no source-height owner.
+
+`pc_p2_retail_scene_prebirth_support` is declared in `pc_p2_retail_height.h`.
+It takes the genuine SceneContext, captured native serial/revision, absolute
+authored position, a SourcePrebirthSupport output and error. It requires actual
+Prepared Stage ownership, a non-null original supporting triangle at/below the
+authored Y and registered source-empty KnownDry. The result retains height owner,
+raw census, serial/revision, original triangle/index/room, min/maxY/normal and the
+typed actual SourceWaterResult. Missing water/support never becomes dry, and the
+position is not relocated. Body factory must query every authored slot before
+its first Pool birth; an unborn actor needs no BodyBorrowerGuard. Runtime bodies
+still require their own lifetime/phase contracts. Queries revoke before body
+teardown; original storage survives until checked map release. The real Stage
+query path is implemented and compiles, but has not been executed in a full
+native Stage fixture. Both authentic inputs prove all20 authored positions with
+a pure fixture input owner, not a fake SceneContext/runtime admission.

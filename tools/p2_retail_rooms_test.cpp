@@ -1,4 +1,6 @@
 #include "pc_p2_retail_rooms.h"
+#include "pc_p2_retail_height.h"
+#include "pc_p2_retail_start.h"
 #include <cassert>
 #include <fstream>
 #include <iostream>
@@ -40,6 +42,24 @@ int main(int argc,char** argv){
     assert(actual.roomIndex==i&&actual.mapcode==unit.mapcodes[t]);for(unsigned k=0;k<3;++k)assert(actual.abc[k]==unit.triangles[t][k]+offset);}
    offset+=unit.vertexBits.size();triangleOffset+=unit.triangles.size();}
   if(floor==1)assert(geometry.rooms[2].matrix[2]>0&&geometry.rooms[2].matrix[2]<1e-6f);
+  std::unique_ptr<SourceHeightInputs> heightInputs;assert(adoptSourceHeightInputs(census,geometry,heightInputs,error));
+  struct InputOwner final:p2originalnumber::roomHeight::Owner {
+   const SourceHeightInputs* input;bool available=true;
+   explicit InputOwner(const SourceHeightInputs& actual):input(&actual){}
+   bool current(const std::vector<p2originalnumber::roomHeight::Room>& rooms,std::string& e)override{
+    if(!available||&rooms!=&input->rooms){e="pure fixture input owner unavailable";return false;}return true;
+   }
+   bool hidden(p2originalnumber::roomHeight::Hidden& out,std::string&)override{out={};return true;}
+  } heightOwner(*heightInputs);
+  SourceStart sourceStart;assert(parseSourceStart(input,sourceStart,error));
+  for(unsigned slot=0;slot<20;++slot){p2originalnumber::roomHeight::Query support;support.updateOnNewMaxY=false;
+   support.position={float(sourceStart.mapStart[0]-36.0+double(slot%10)*8),float(sourceStart.slotPosition[1]+30),float(sourceStart.mapStart[2]+32.0+double(slot/10)*8)};
+   assert(p2originalnumber::roomHeight::query(heightInputs->rooms,heightOwner,support,error)&&support.triangle.original&&support.triangle.roomIndex>=0);
+   assert(support.minY<=support.position.y&&std::isfinite(support.minY));
+  }
+  heightOwner.available=false;p2originalnumber::roomHeight::Query retainedQuery;retainedQuery.minY=123;
+  assert(!p2originalnumber::roomHeight::query(heightInputs->rooms,heightOwner,retainedQuery,error)&&retainedQuery.minY==123);
+  std::cout<<"floor="<<floor<<" original unit height geometry PASS all20 authored positions; pure input owner, no native Stage/body grant\n";
   auto alteredCensus=census;alteredCensus.rooms[0].roomIndex=999;auto retainedGeometry=geometry;
   assert(!adoptSourceRoomGeometry(alteredCensus,retainedGeometry,error)&&retainedGeometry.vertices==geometry.vertices&&retainedGeometry.triangles.size()==geometry.triangles.size());
   unsigned negatives=0;auto refuse=[&](const SelectedSceneInputs& bad){auto retained=census;

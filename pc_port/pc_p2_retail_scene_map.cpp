@@ -2,6 +2,7 @@
 #include "pc_p2_retail_start.h"
 #include "pc_p2_retail_geometry.h"
 #include "pc_p2_retail_rooms.h"
+#include "pc_p2_retail_height.h"
 #include "pc_randomizer.h"
 #include "pc_p2_original_pod.h"
 #include "pc_p2_retail_cave_native.h"
@@ -97,7 +98,7 @@ bool dryGround(MapMgr& map,float x,float z,float ceiling,float& y){
 }
 // Actual owner of the selected scene's stage/map/route resources. The separate
 // NativeFloor transaction must complete before any committed/activity lookup.
-class SceneRuntime final:public FloorIdentityAuthority,public SceneOps {
+class SceneRuntime final:public FloorIdentityAuthority,public SceneOps,public p2originalnumber::roomHeight::Owner,public p2originalnumber::roomHeight::HeightProvider {
  SceneContext context;
  SelectedSceneInputs selected;
  SourceStart start;
@@ -106,6 +107,10 @@ class SceneRuntime final:public FloorIdentityAuthority,public SceneOps {
  SourceRoomGeometry sourceGeometry;
  SourceFloorParameters floorParameters;
  SourceRouteInputs sourceRoutes;
+ std::unique_ptr<SourceHeightInputs> heightInputs;
+ enum class HeightPhase { Absent,Registering,Registered,Retiring,Retired };
+ HeightPhase heightPhase=HeightPhase::Absent;
+ std::uint64_t heightSerial=0;
  enum class SeaPhase { Absent,Registered,Retiring,Retired };
  SeaPhase seaPhase=SeaPhase::Absent;
  std::vector<SourceRoomMatrix> seaRooms;
@@ -146,6 +151,7 @@ public:
   }
   if(!selectedCurrent()){error="retail scene selection changed before map installation";return false;}
   ownedMap=map;
+  if(selected.selection.version>=3&&!adoptSourceHeightInputs(roomCensus,sourceGeometry,heightInputs,error))return false;
   HeapScope heap;
   const auto modelRole=sceneInputRole(selected.selection,SceneInput::Geometry);
   auto& cached=modelCache[selected.selection.floor-1];
@@ -175,18 +181,18 @@ public:
   }
   map->initShape(shape,true);
   float ground=0;
-  if(!dryGround(*map,float(start.mapStart[0]),float(start.mapStart[2]),float(start.mapStart[1]),ground)){
+  if(selected.selection.version<3&&!dryGround(*map,float(start.mapStart[0]),float(start.mapStart[2]),float(start.mapStart[1]),ground)){
    error="retail scene original map-start lacks actual dry ground";return false;
   }
   context.mStartBase={float(start.mapStart[0]),ground+float(SourceStart::groundOffset),float(start.mapStart[2])};
-  for(unsigned i=0;i<2;++i){float offsetGround=0;
+  for(unsigned i=0;selected.selection.version<3&&i<2;++i){float offsetGround=0;
    if(!dryGround(*map,context.mStartBase[0]+float(SourceStart::captainX[i]),context.mStartBase[2]+float(SourceStart::captainZ[i]),context.mStartBase[1],offsetGround)||offsetGround>context.mStartBase[1]){
     error="retail scene original captain offset lacks actual dry footing";return false;
    }
   }
   // Original RoomMapMgr has no CourseInfo/demo matrix: getMapRotation returns
   // zero. The authored Pod angle is unrelated to captain facing.
-  context.mMapYaw=0;context.mStartsGrounded=true;
+  context.mMapYaw=0;context.mStartsGrounded=selected.selection.version<3;
   const auto* cave=descriptor(selected.plan.cave);
   const auto* definitionRow=cave?definition(*cave,selected.plan.floor):nullptr;
   if(!definitionRow||flowCont.mIsVersusMode||!selectedCurrent()){
@@ -235,6 +241,20 @@ public:
    seaRooms=sourceGeometry.rooms;seaSerial=context.nativeSerial();seaPhase=SeaPhase::Registered;
   }
   flowCont.mCurrentStage=&stage;routeMgr=routes;installed=true;
+  if(selected.selection.version>=3){
+   heightSerial=context.nativeSerial();heightPhase=HeightPhase::Registering;
+   p2originalnumber::roomHeight::Query query;query.position={float(start.mapStart[0]),float(start.mapStart[1]),float(start.mapStart[2])};query.updateOnNewMaxY=false;
+   if(!heightInputs||!p2originalnumber::roomHeight::query(heightInputs->rooms,*this,query,error)||!query.triangle.original)
+    return fail(error,"retail source map-start lacks original local supporting triangle");
+   ground=query.minY;context.mStartBase={float(start.mapStart[0]),ground+float(SourceStart::groundOffset),float(start.mapStart[2])};
+   for(unsigned i=0;i<2;++i){p2originalnumber::roomHeight::Query footing;footing.position={context.mStartBase[0]+float(SourceStart::captainX[i]),context.mStartBase[1],context.mStartBase[2]+float(SourceStart::captainZ[i])};footing.updateOnNewMaxY=false;
+    SourceWaterResult water;
+    if(!p2originalnumber::roomHeight::query(heightInputs->rooms,*this,footing,error)||!footing.triangle.original||footing.minY>context.mStartBase[1]||
+       !findWater(context,context.nativeSerial(),context.selectionRevision(),{footing.position.x,footing.position.y,footing.position.z},water,error)||water.state!=SourceWaterState::KnownDry)
+     return fail(error,"retail source captain offset lacks original dry footing");
+   }
+   heightPhase=HeightPhase::Registered;context.mStartsGrounded=true;
+  }
   std::printf("P2_RETAIL_MAP_INSTALLED cave=%s floor=%u native_serial=%llu revision=%llu actual_ground=%.6f captain_base_y=%.6f map_yaw=%.6f world_active=0\n",
    cave->cave.c_str(),selected.plan.floor,(unsigned long long)identity.serial,(unsigned long long)selected.revision,ground,context.mStartBase[1],context.mMapYaw);
   error.clear();return true;
@@ -282,6 +302,45 @@ public:
  const SourceRouteInputs* routeInputs(const SceneContext& owner,std::uint64_t serial,std::uint64_t revision)const noexcept{
   return parameters(owner,serial,revision)&&selected.selection.version==4&&sourceRoutes.roomCensusSha256==roomCensus.sha256&&
    sourceRoutes.waterCensusSha256==waterInputs.sha256&&sourceRoutes.parametersSha256==floorParameters.sha256&&!sourceRoutes.points.empty()?&sourceRoutes:nullptr;
+ }
+ bool current(const std::vector<p2originalnumber::roomHeight::Room>& rooms,std::string& error)override{
+  if(!heightInputs||&rooms!=&heightInputs->rooms||(heightPhase!=HeightPhase::Registered&&heightPhase!=HeightPhase::Registering)||heightSerial!=context.nativeSerial()||
+     !heightSerial||!parameters(context,heightSerial,context.selectionRevision())||!ownedMap||ownedMap!=context.mMap||ownedMap!=mapMgr||
+     ownedMap->mMapModel!=shape)return fail(error,"retail source height installed-map owner unavailable");
+  error.clear();return true;
+ }
+ bool hidden(p2originalnumber::roomHeight::Hidden& out,std::string& error)override{
+  if(!heightInputs||!current(heightInputs->rooms,error))return false;
+  const auto* flags=parameters(context,heightSerial,context.selectionRevision());
+  if(!flags||flags->hasHiddenCollision)return fail(error,"retail source height hidden sentinel unavailable");
+  out={};error.clear();return true;
+ }
+ bool minY(p2originalnumber::roomHeight::Vec3 position,float& out,std::string& error)override{
+  if(!heightInputs||!current(heightInputs->rooms,error))return false;
+  return p2originalnumber::roomHeight::minY(heightInputs->rooms,*this,position,out,error);
+ }
+ bool sourceHeight(const SceneContext& owner,std::uint64_t serial,std::uint64_t revision,const std::array<float,3>& position,SourceHeightResult& out,std::string& error){
+  if(&owner!=&context||heightPhase!=HeightPhase::Registered||serial!=heightSerial||!parameters(owner,serial,revision)||!heightInputs||!current(heightInputs->rooms,error))
+   return fail(error,"retail source height captured owner unavailable");
+  p2originalnumber::roomHeight::Query query;query.position={position[0],position[1],position[2]};query.updateOnNewMaxY=false;
+  if(!p2originalnumber::roomHeight::query(heightInputs->rooms,*this,query,error))return false;
+  SourceHeightResult next;next.owner=&context;next.inputs=&roomCensus;next.nativeSerial=serial;next.selectionRevision=revision;
+  next.position=position;next.minY=query.minY;next.maxY=query.maxY;next.normal={query.normal.x,query.normal.y,query.normal.z};
+  next.originalTriangle=query.triangle.original;next.triangleIndex=query.triangle.index;next.roomIndex=query.triangle.roomIndex;
+  if(!current(heightInputs->rooms,error)||!parameters(owner,serial,revision))return false;
+  out=next;error.clear();return true;
+ }
+ bool prebirthSupport(const SceneContext& owner,std::uint64_t serial,std::uint64_t revision,const std::array<float,3>& position,SourcePrebirthSupport& out,std::string& error){
+  if(&owner!=&context||!parameters(owner,serial,revision)||context.mPhase!=ScenePhase::Prepared)
+   return fail(error,"retail source support requires actual Stage Prepared ownership");
+  SourcePrebirthSupport next;SourceWaterResult water;
+  if(!sourceHeight(owner,serial,revision,position,next.height,error))return false;
+  if(!next.height.originalTriangle||next.height.roomIndex<0||next.height.minY>position[1])return fail(error,"retail source support has no original supporting triangle below authored position");
+  if(!findWater(owner,serial,revision,position,water,error)||water.state!=SourceWaterState::KnownDry)
+   return fail(error,"retail source support water unavailable");
+  next.water=water;
+  if(!parameters(owner,serial,revision)||context.mPhase!=ScenePhase::Prepared||!current(heightInputs->rooms,error))return false;
+  out=next;error.clear();return true;
  }
  bool findWater(const SceneContext& owner,std::uint64_t serial,std::uint64_t revision,const std::array<float,3>& position,SourceWaterResult& out,std::string& error)const{
   if(!geometry(owner,serial,revision)||!water(owner,serial,revision)||seaPhase!=SeaPhase::Registered||seaSerial!=serial||
@@ -380,6 +439,7 @@ public:
   if(pc_p2_retail_scene_bodies_owned(context)||pc_p2_original_captain_scene_owned(context))consumersClaimed=true;
   context.mPhase=ScenePhase::Releasing;
   if(seaPhase==SeaPhase::Registered)seaPhase=SeaPhase::Retiring;
+  if(heightPhase==HeightPhase::Registered)heightPhase=HeightPhase::Retiring;
   // Revoke actual World/control authority first, while retaining its collision
   // bank lease through party/body/path retirement. Pause is not revocation.
   if(pc_p2_original_captain_scene_owned(context)&&!pc_p2_original_captain_scene_revoke(context,error))return false;
@@ -444,6 +504,8 @@ public:
   if((pod.prepared()||exitPrepared||cargoPrepared||pc_p2_retail_scene_bodies_owned(context)||pc_p2_original_captain_scene_owned(context)||(consumersClaimed&&!pc_p2_retail_scene_bodies_retired(context)))&&!release(error))return false;
   if(pc_p2_retail_cave_native_scene_owned(context.mSnapshot.scene)||pc_p2_original_pod_owned()||
      pc_p2_retail_scene_bodies_owned(context)||pc_p2_original_captain_scene_owned(context)||(consumersClaimed&&!pc_p2_retail_scene_bodies_retired(context)))return fail(error,"retail scene physical/body consumers remain owned");
+  if(heightPhase==HeightPhase::Registered||heightPhase==HeightPhase::Registering)heightPhase=HeightPhase::Retiring;
+  if(seaPhase==SeaPhase::Registered)seaPhase=SeaPhase::Retiring;
   context.mPhase=ScenePhase::Prepared;error.clear();return true;
  }
  bool releaseMap(std::string& error){
@@ -457,6 +519,7 @@ public:
   }
   installed=false;context.mStartsGrounded=false;context.mSnapshot.scene.serial=0;
   seaPhase=SeaPhase::Retired;seaSerial=0;seaRooms.clear();
+  heightPhase=HeightPhase::Retired;heightSerial=0;heightInputs.reset();
   if(flowCont.mCurrentStage==&stage)flowCont.mCurrentStage=previousStage;
   if(routeMgr==ownedRoutes)routeMgr=nullptr;
   if(ownedMap&&mapMgr==ownedMap&&ownedMap->mMapModel==shape)ownedMap->mMapModel=nullptr;
@@ -479,6 +542,12 @@ const SourceFloorParameters* sourceSceneParameters(const SceneContext& owner,std
 const SourceRouteInputs* sourceSceneRouteInputs(const SceneContext& owner,std::uint64_t serial,std::uint64_t revision)noexcept{return runtime?runtime->routeInputs(owner,serial,revision):nullptr;}
 bool sourceSceneFindWater(const SceneContext& owner,std::uint64_t serial,std::uint64_t revision,const std::array<float,3>& position,SourceWaterResult& out,std::string& error){
  if(!runtime){error="retail source SeaMgr owner absent";return false;}return runtime->findWater(owner,serial,revision,position,out,error);
+}
+bool sourceSceneHeight(const SceneContext& owner,std::uint64_t serial,std::uint64_t revision,const std::array<float,3>& position,SourceHeightResult& out,std::string& error){
+ if(!runtime){error="retail source height owner absent";return false;}return runtime->sourceHeight(owner,serial,revision,position,out,error);
+}
+bool sourceScenePrebirthSupport(const SceneContext& owner,std::uint64_t serial,std::uint64_t revision,const std::array<float,3>& position,SourcePrebirthSupport& out,std::string& error){
+ if(!runtime){error="retail source support owner absent";return false;}return runtime->prebirthSupport(owner,serial,revision,position,out,error);
 }
 bool knownSceneSourceBirth(const p2original::InstanceIdentity& identity,BirthIdentity& out,Snapshot& floor,std::string& error){
  if(!runtime){error="retail retained parent has no actual scene owner";return false;}
@@ -515,6 +584,8 @@ const p2retail::SourceRoomGeometry* pc_p2_retail_scene_source_geometry(const p2r
 const p2retail::SourceFloorParameters* pc_p2_retail_scene_floor_parameters(const p2retail::SceneContext& owner,std::uint64_t serial,std::uint64_t revision)noexcept{return p2retail::sourceSceneParameters(owner,serial,revision);}
 const p2retail::SourceRouteInputs* pc_p2_retail_scene_source_route_inputs(const p2retail::SceneContext& owner,std::uint64_t serial,std::uint64_t revision)noexcept{return p2retail::sourceSceneRouteInputs(owner,serial,revision);}
 bool pc_p2_retail_scene_find_water(const p2retail::SceneContext& owner,std::uint64_t serial,std::uint64_t revision,const std::array<float,3>& position,p2retail::SourceWaterResult& out,std::string& error){return p2retail::sourceSceneFindWater(owner,serial,revision,position,out,error);}
+bool pc_p2_retail_scene_source_height(const p2retail::SceneContext& owner,std::uint64_t serial,std::uint64_t revision,const std::array<float,3>& position,p2retail::SourceHeightResult& out,std::string& error){return p2retail::sourceSceneHeight(owner,serial,revision,position,out,error);}
+bool pc_p2_retail_scene_prebirth_support(const p2retail::SceneContext& owner,std::uint64_t serial,std::uint64_t revision,const std::array<float,3>& position,p2retail::SourcePrebirthSupport& out,std::string& error){return p2retail::sourceScenePrebirthSupport(owner,serial,revision,position,out,error);}
 bool pc_p2_retail_scene_known_source_birth(const p2original::InstanceIdentity& identity,p2retail::BirthIdentity& out,p2retail::Snapshot& floor,std::string& error){
  return p2retail::knownSceneSourceBirth(identity,out,floor,error);
 }
