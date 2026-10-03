@@ -137,6 +137,7 @@
 #include "MoviePlayer.h"
 #if defined(PIKI_PC_PORT)
 #include "pc_p2_original_captain_damage.h"
+#include "pc_p2_original_captain_render_policy.h"
 #endif
 #include "NaviMgr.h"
 #include "NaviState.h"
@@ -5453,6 +5454,10 @@ void GameCoreSection::endViews(Graphics& gfx, Camera* mainCamera)
  */
 void GameCoreSection::draw(Graphics& gfx)
 {
+#if defined(PIKI_PC_PORT)
+ // The native draw boundary owns the viewport; cameras are transform inputs.
+ p2original::captain::NativeViewScope captainView(gfx,mViewRectActive?unsigned(mActiveViewIndex):0u);
+#endif
 #if defined(PIKI_PC_PORT)
 	// Day-end teardown (slice lane, issue #880): the results screen exits to
 	// the quitter, whose postUpdate runs exitStage() and softReset(). A stale

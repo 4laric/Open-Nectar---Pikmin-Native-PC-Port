@@ -300,6 +300,8 @@ set(PC_PORT_SOURCES
     pc_port/pc_p2_original_captain_pressed.cpp
     pc_port/pc_p2_original_captain_stuck_bomb.cpp
     pc_port/pc_p2_original_captain_whistle.cpp
+    pc_port/pc_p2_original_captain_cstick.cpp
+    pc_port/pc_p2_original_captain_rappa.cpp
     pc_port/pc_p2_original_chappy.cpp
     pc_port/pc_p2_original_chappy_native.cpp
     pc_port/pc_p2_original_group_engine.cpp
@@ -3754,3 +3756,8 @@ add_executable(pc_p2_source_captain_receiver_test tools/test_p2_source_captain_r
 target_include_directories(pc_p2_source_captain_receiver_test BEFORE PRIVATE tools/source_captain_receiver_stubs pc_port)
 target_compile_options(pc_p2_source_captain_receiver_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
 add_test(NAME pc_p2_source_captain_receiver_test COMMAND pc_p2_source_captain_receiver_test)
+
+add_executable(p2_original_captain_normals_test tools/pc_p2_original_captain_normals_test.cpp)
+target_include_directories(p2_original_captain_normals_test PRIVATE pc_port)
+target_compile_options(p2_original_captain_normals_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_original_captain_normals_test COMMAND p2_original_captain_normals_test)
