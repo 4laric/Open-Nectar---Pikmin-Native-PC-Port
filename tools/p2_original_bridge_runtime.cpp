@@ -41,6 +41,8 @@ void require(bool good,const char* why){++checks;if(!good){std::printf("FAIL ORI
 void checked(bool good,const std::string& e){if(!good)std::fprintf(stderr,"ORIGINAL_BRIDGE_ERROR %s\n",e.c_str());require(good,"native source adapter operation");}
 struct WorkProbe:ActBridge {explicit WorkProbe(Piki* p):ActBridge(p){}void work(Bridge* b,int stage){mBridge=b;mStageID=stage;doWork(1);}};
 void run(){
+ // idle runs outside a heap; fixture allocation/preflight uses the stage App heap.
+ gsys->setHeap(SYSHEAP_App);
  pc_p2_original_bridge_register();std::string e;std::vector<BridgeRecord> rows;checked(readBridges(manifestPath,rows,e),e);require(rows.size()==2,"literal day5 bridge rows long and sloped");checked(pc_p2_original_bridge_install(rows,e),e);
  std::vector<std::unique_ptr<Generator>> owned;std::vector<std::unique_ptr<GenObjectOriginalBridge>> objects;std::vector<Generator*> inventory;
  for(const auto& r:rows){auto g=std::make_unique<Generator>();auto* product=GenObjectFactory::getProduct(0x70326272u);auto o=std::unique_ptr<GenObjectOriginalBridge>(dynamic_cast<GenObjectOriginalBridge*>(product));require(o&&o->getLatestVersion()==0x42523031u,"real typed factory");o->uid=r.uid;g->mGenObject=o.get();g->mGenType=nullptr;g->mCarryOverFlags=r.reserved;g->mRespawnInterval=r.resurrectionDays;g->mDayLimit=r.dayLimit;inventory.push_back(g.get());objects.push_back(std::move(o));owned.push_back(std::move(g));}
