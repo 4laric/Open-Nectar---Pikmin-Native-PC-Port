@@ -100,6 +100,8 @@ if a.batch == 'cave':
                    refusal='PASS ORIGINAL_CAVE_FOLIAGE_RESOURCE_REFUSAL sources=91,92,47 ')
 expected_code = 86 if a.mode=='captain-down' else 0
 passed = not timed_out and code == expected_code and markers[a.mode] in log
+if a.batch=='watage' and a.mode=='diagnostic':
+    passed = passed and 'PASS P2_WATAGE_CAMERA' in log and 'P2_WATAGE_DRAIN' in log
 if a.mode=='captain-down':
     passed = passed and 'PASS ORIGINAL_FOLIAGE' not in log and 'PASS ORIGINAL_CAVE_FOLIAGE' not in log
 result = dict(passed=passed, returncode=code, timed_out=timed_out, marker=markers[a.mode],

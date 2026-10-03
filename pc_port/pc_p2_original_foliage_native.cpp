@@ -49,7 +49,7 @@ struct Track {
 struct Native::Impl final:Engine {
  Provider provider;std::map<unsigned,std::unique_ptr<Bank>> banks;
  std::map<Creature*,std::unique_ptr<Track>> tracks;bool loaded=false;
- std::unique_ptr<p2watage::NativeEffect> watage;
+ std::unique_ptr<p2watage::NativeEffect> watage;bool watageCameraControl=false;
  Impl():provider(*this){}
  bool load(std::string& e){
   if(loaded)return true; banks.clear();
@@ -223,6 +223,7 @@ Native::~Native(){if(m->provider.size())fail("foliage provider destroyed with li
 Provider& Native::provider(){return m->provider;}
 std::size_t Native::watageParticles()const{return m->watage?m->watage->particles():0;}
 unsigned Native::watageEmissions()const{return m->watage?m->watage->emissions():0;}
+void Native::requestWatageCameraControl(){m->watageCameraControl=true;}
 unsigned Native::watageDrawQuads()const{return m->watage?m->watage->draws().quads:0;}
 bool Native::owns(const Creature* c)const{return m->tracks.count(const_cast<Creature*>(c))&&m->provider.lookup(c)!=nullptr;}
 bool Native::tick(BTeki* actor,float dt,std::string& e){
@@ -251,7 +252,10 @@ void Native::postShadow(Graphics& gfx){
   Matrix4f root,view;root.makeSRT(actor->mSRT.s,Vector3f(0,actor->mFaceDirection,0),actor->mSRT.t);
   gfx.mCamera->mLookAtMtx.multiplyTo(root,view);draw(actor,gfx,view,true);
  }
- if(m->watage)m->watage->draw(gfx);
+ if(m->watage){
+  if(m->watageCameraControl&&m->watage->particles()){std::string e;if(!m->watage->cameraControl(gfx,e))fail(e);m->watageCameraControl=false;}
+  m->watage->draw(gfx);
+ }
 }bool Native::collision(BTeki* actor,Creature* collider,std::string& e){
  auto* h=m->provider.lookup(actor);if(!h)return false;auto& t=*m->tracks.at(actor);
  m->simulationVisibility(actor,t);
