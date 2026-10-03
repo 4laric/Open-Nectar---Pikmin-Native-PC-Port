@@ -37,6 +37,7 @@
 #include "GameCoreSection.h"
 #if defined(PIKI_PC_PORT)
 #include "pc_p2_original_piki_origin.h"
+#include "pc_p2_original_piki_recruit.h"
 #endif
 #include "pc_bbft.h"
 #include "pc_p2_preview.h"
@@ -1023,6 +1024,7 @@ void GameCoreSection::prepareBadEnd()
 void GameCoreSection::exitStage()
 {
 #if defined(PIKI_PC_PORT)
+<<<<<<< HEAD
  // Normal day-end/cache writes precede scene exit. Release original groups
  // while their actual generators, actor pools and family resources are alive.
  std::string originalError;
@@ -1033,6 +1035,11 @@ void GameCoreSection::exitStage()
     pc_p2_original_piki_origin_scene_exit();
 #endif
 #if defined(PIKI_PC_PORT)
+=======
+	pc_p2_cave_campaign_scene_exit();
+	pc_p2_original_piki_recruit_unbind();
+	pc_p2_original_piki_origin_scene_exit(); // Retire canonical pointers before actor heap teardown.
+>>>>>>> 499111f60 (Bind original Piki recruitment to paired campaign authorities)
 	pc_demon_drop_scene_exit();
 	pc_demon_scene_exit();
 #endif

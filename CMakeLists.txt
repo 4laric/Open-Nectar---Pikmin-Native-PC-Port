@@ -370,6 +370,12 @@ set(PC_PORT_SOURCES
     pc_port/pc_p2_cave_campaign_party_engine.cpp
     pc_port/pc_p2_surface_save.cpp
     pc_port/pc_p2_original_piki_physical.cpp
+<<<<<<< HEAD
+=======
+    pc_port/pc_p2_original_piki_recruit.cpp
+    pc_port/pc_p2_original_progress.cpp
+    pc_port/pc_p2_cave_campaign.cpp
+>>>>>>> 499111f60 (Bind original Piki recruitment to paired campaign authorities)
     pc_port/pc_p2_cave_dialog_window.cpp
     pc_port/pc_p2_cave_generate.cpp
     pc_port/pc_p2_cave_generator.cpp
@@ -3414,3 +3420,9 @@ add_test(NAME p2_original_piki_origin COMMAND p2_original_piki_origin_test)
 pikmin_add_ci_fixture(surface_campaign_sdl tools/p2_surface_campaign_sdl_fixture.cpp)
 
 pikmin_add_ci_fixture(original_piki_physical tools/p2_original_piki_physical_runtime.cpp)
+
+add_executable(pc_p2_original_piki_recruit_test tools/pc_p2_original_piki_recruit_test.cpp
+    pc_port/pc_p2_original_piki_recruit.cpp pc_port/pc_p2_original_piki_origin.cpp pc_port/pc_p2_original_progress.cpp)
+target_include_directories(pc_p2_original_piki_recruit_test PRIVATE pc_port)
+target_link_libraries(pc_p2_original_piki_recruit_test PRIVATE Threads::Threads)
+add_test(NAME p2_original_piki_recruit COMMAND pc_p2_original_piki_recruit_test)
