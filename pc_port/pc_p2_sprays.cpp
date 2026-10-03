@@ -12,6 +12,7 @@
 #include "PlayerState.h"
 #include "gameflow.h"
 #include "sysNew.h"
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <string>
@@ -78,6 +79,15 @@ bool pc_p2_sprays_bind(p2originalresource::ResourceState* state,
     growup = *source; inventory = state; error.clear(); return true;
 }
 bool pc_p2_spicy_active(const Piki* p) { return p && p->mP2Spicy.active(); }
+bool pc_p2_spicy_save_observation(const Piki* p, float& remaining, bool& pendingDope) noexcept {
+    if (!p || !p->mCurrentState) return false;
+    const float seconds = p->mP2Spicy.remaining;
+    if (!std::isfinite(seconds) || seconds < 0 || seconds > p2sprays::Duration) return false;
+    const bool pending = p->mCurrentState->getID() == PIKISTATE_P2Dope;
+    remaining = seconds;
+    pendingDope = pending;
+    return true;
+}
 void pc_p2_spicy_tick(Piki* p) {
     if (!p->isAlive()) { p->mP2Spicy.clear(); return; }
     if (gameplay() && p->getState() == PIKISTATE_P2Dope)
