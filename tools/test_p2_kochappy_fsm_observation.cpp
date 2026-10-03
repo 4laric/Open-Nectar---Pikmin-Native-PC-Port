@@ -194,7 +194,15 @@ int main(){
     CHECK(!swarm.update(35,30,true,true,82,2,10));
     CHECK(!swarm.update(35,30,true,true,82,.3,512));
     CHECK(!swarm.update(35,30,true,true,82,.3,std::numeric_limits<float>::quiet_NaN()));
-    std::puts("P2_KOCHAPPY_FSM_OBSERVATION_POLICY_PASS actual_FSM_runtime=unexecuted");
+    CHECK(pc_kochappy_guide_input(40,100,100)==PcKochappyGuideInput::Walk);
+ CHECK(pc_kochappy_guide_input(5,.1,.1)==PcKochappyGuideInput::Walk);
+ CHECK(pc_kochappy_guide_input(5,10,0)==PcKochappyGuideInput::Neutral);
+ CHECK(pc_kochappy_guide_input(5,0,10)==PcKochappyGuideInput::Neutral);
+ CHECK(pc_kochappy_guide_input(5,.5,0)==PcKochappyGuideInput::Neutral);
+ CHECK(pc_kochappy_guide_input(12,10,10)==PcKochappyGuideInput::Walk);
+ CHECK(pc_kochappy_guide_input(512,0,0)==PcKochappyGuideInput::Refuse);
+ CHECK(pc_kochappy_guide_input(5,std::numeric_limits<float>::quiet_NaN(),0)==PcKochappyGuideInput::Refuse);
+ std::puts("P2_KOCHAPPY_FSM_OBSERVATION_POLICY_PASS actual_FSM_runtime=unexecuted");
  PcKochappyPrefixNeutralGate neutralSetup;
  for(int i=0;i<89;++i)CHECK(neutralSetup.observe(false)==0);
  CHECK(neutralSetup.observe(true)==1);

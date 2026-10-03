@@ -177,3 +177,12 @@ struct PcKochappySwarmRecovery {
   return false;
  }
 };
+
+enum class PcKochappyGuideInput { Walk, Neutral, Refuse };
+inline PcKochappyGuideInput pc_kochappy_guide_input(float remaining,float speed,float targetSpeed){
+ using I=PcKochappyGuideInput;
+ if(!std::isfinite(remaining)||remaining<0||remaining>=512||!std::isfinite(speed)||speed<0||!std::isfinite(targetSpeed)||targetSpeed<0)return I::Refuse;
+ // A near guide gets one ordinary walk tick only from observed native rest.
+ // Subsequent ticks release input until its natural velocity/target settle.
+ return remaining<12.f&&(speed>=.5f||targetSpeed>=.5f)?I::Neutral:I::Walk;
+}

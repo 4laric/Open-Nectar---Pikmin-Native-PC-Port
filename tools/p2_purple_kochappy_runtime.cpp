@@ -5,6 +5,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <chrono>
 #include <fstream>
 #include <string>
 #include "system.h"
@@ -506,6 +507,7 @@ double receiverGuideSpan(Navi* n,int target){
 // INCLINE_OBSERVER90_END
 class PurpleKochappyApp:public PlugPikiApp {
  int frame=0,age=0,phase=0,start=0,settled=0,throwCount=0;
+ const std::chrono::steady_clock::time_point diagnosticStart=std::chrono::steady_clock::now();
  int receiverWaypoint=0;
  bool gatherDiverted=false;
  PcKochappyReentryProgress reentryProgress;
@@ -795,7 +797,13 @@ public:
   if(seenCaptain&&!initialized){std::puts("P2_FIXTURE_CAPTAIN_MISSING outcome=BLOCKED");p2_fixture_require_captain(true,true,0,frame);}
   if(initialized)p2_fixture_require_captain(GameStat::orimaDead||forced||paused,
    naviMgr->isNaviDead(n)||n->getCurrState()->getID()==NAVISTATE_Dead,n->mHealth,frame);
-  ++frame;require(frame<3600,"frame bound; supervisor additionally caps60wallseconds");
+  const char* longRoute=std::getenv("P2_PURPLE_KOCHAPPY_ROUTE180");
+  require(!longRoute||std::strcmp(longRoute,"1")==0,"unsupported engineering route profile");
+  require(!longRoute||(!forced&&!paused&&!std::getenv("P2_PURPLE_KOCHAPPY_READY_ONLY")),"long route is positive-only");
+  const int wallLimit=longRoute?180:60,frameLimit=longRoute?10800:3600;
+  require(std::chrono::duration<double>(std::chrono::steady_clock::now()-diagnosticStart).count()<wallLimit,"native steady-clock diagnostic bound");
+  ++frame;require(frame<frameLimit,"finite diagnostic frame backstop");
+  if(frame==1)std::printf("P2_PURPLE_KOCHAPPY_DIAGNOSTIC_BOUND wall_seconds=%d frame_backstop=%d gameplay_clock_writes=0\n",wallLimit,frameLimit);
   if(gameflow.mMoviePlayer&&gameflow.mMoviePlayer->mIsActive){gameflow.mMoviePlayer->requestSkip();return result;}
   if(!initialized||!pikiMgr||!tekiMgr||!itemMgr||!bossMgr)return result;
   if(gameflow.mPauseAll||gameflow.mIsUIOverlayActive)return result;
@@ -898,7 +906,12 @@ public:
      const auto& w=ReceiverRoute[receiverWaypoint];const Vector3f goal(w.x,0.f,w.z);
      if(age%30==0)std::printf("P2_PURPLE_KOCHAPPY_ROUTE_TARGET age=%d waypoint=%d total=%d target_xz=%.4f,%.4f distance=%.4f reach=%.4f followers=%d live=%d SDL_walk=1 actor_writes=0\n",age,receiverWaypoint,ReceiverRouteCount,w.x,w.z,distance(n->mSRT.t,goal),ReceiverRouteReach,n->getPlatePikis(),live);
      receiverObservedClearance(n,receiverWaypoint,age);
-     point(n,goal,true,KeyConfig::_instance->mSetCursorKey.mBind,ReceiverRouteReach);return result;
+     const float guideDistance=distance(n->mSRT.t,goal);
+     const float guideSpeed=std::hypot(n->mVelocity.x,n->mVelocity.z),guideTarget=std::hypot(n->mTargetVelocity.x,n->mTargetVelocity.z);
+     const auto command=pc_kochappy_guide_input(guideDistance,guideSpeed,guideTarget);
+     require(command!=PcKochappyGuideInput::Refuse,"guide braking geometry invalid");
+     if(guideDistance<12.f)std::printf("P2_PURPLE_KOCHAPPY_GUIDE_BRAKE age=%d waypoint=%d distance=%.6f speed=%.6f target=%.6f neutral=%d ordinary_input=1 actor_writes=0\n",age,receiverWaypoint,guideDistance,guideSpeed,guideTarget,int(command==PcKochappyGuideInput::Neutral));
+     if(command==PcKochappyGuideInput::Neutral)input();else point(n,goal,true,KeyConfig::_instance->mSetCursorKey.mBind,ReceiverRouteReach);return result;
     }
     if(distance(n->mSRT.t,violet->mSRT.t)>approach){point(n,violet->mSRT.t,true,KeyConfig::_instance->mSetCursorKey.mBind);return result;}
     std::printf("P2_PURPLE_KOCHAPPY_APPROACH loaded_cursor_radius=%.4f captain_bud_xz=%.4f target_distance=%.4f SDL_walk=1\n",radius,distance(n->mSRT.t,violet->mSRT.t),approach);
