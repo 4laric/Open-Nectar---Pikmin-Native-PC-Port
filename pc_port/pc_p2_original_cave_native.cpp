@@ -5,6 +5,7 @@
 #include "MapMgr.h"
 #include "Stream.h"
 #include "sysNew.h"
+#include "Dolphin/gx.h"
 #include <map>
 #include <set>
 #include <cmath>
@@ -39,10 +40,15 @@ public:
     void refresh(Graphics& gfx)override {
         const auto& p=mSRT.t;
         const auto old=gfx.mPrimaryColour,aux=gfx.mAuxiliaryColour;
-        const int blend=gfx.setCBlending(BLEND_Alpha),cull=gfx.setCullFront(2);
+        const int blend=gfx.setCBlending(BLEND_Alpha),cull=gfx.mCullMode;
         const bool depth=gfx.setDepth(true),light=gfx.setLighting(false,nullptr);
         auto* texture=gfx.mActiveTexture[0];gfx.useMaterial(nullptr);gfx.useTexture(nullptr,0);
         gfx.useMatrix(gfx.mCamera->mLookAtMtx,0);
+        // Default DGX material resets culling; establish actor state after it.
+        gfx.setCullFront(2);
+#if PIKI_USE_DGX
+        GXSetChanCtrl(GX_COLOR0A0,GX_FALSE,GX_SRC_REG,GX_SRC_VTX,0,GX_DF_NONE,GX_AF_NONE);
+#endif
         auto point=[&](float t,float radius,float h){return Vector3f(p.x+std::cos(t)*radius,p.y+h,p.z+std::sin(t)*radius);};
         auto tri=[&](Vector3f a,Vector3f b,Vector3f c,Colour color){const Vector3f v[]={a,b,c};const Vector2f uv[]={Vector2f(0,0),Vector2f(0,0),Vector2f(0,0)};gfx.setColour(color,true);gfx.drawOneTri(v,nullptr,uv,3);};
         for(int i=0;i<24;++i){const float t=mFaceDirection+i*6.28318530718f/24,u=mFaceDirection+(i+1)*6.28318530718f/24;
