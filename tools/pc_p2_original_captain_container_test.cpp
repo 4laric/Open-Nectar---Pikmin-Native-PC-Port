@@ -131,7 +131,7 @@ int main(){
  auto beginAbsorb=[&](unsigned i=0){assert(items::beginAbsorb(&navis[i],absorb.f.handle,e));};
  auto key=[&](int k){auto* state=dynamic_cast<NativeState*>(navis[0].current);assert(state);return state->sourceAnimationKey(&navis[0],k,e);};
  assert(!pc_p2_original_captain_container_absorb_preflight(&navis[0],StateId::Container,e));container.uiMissing=true;assert(!items::beginContainer(&navis[0],container.f.handle,e));container.uiMissing=false;
- beginContainer();assert(container.boundPad==1&&container.frozen&&container.paused&&navis[0].current->invincible(&navis[0]));assert(container.menu.color==1&&container.menu.inOnyon==10&&container.menu.currField==128000&&container.menu.inSquad==3&&container.menu.maxOnField==100&&container.menu.inParty==5&&container.menu.onMap==70&&container.menu.maxPikis==95);
+ beginContainer();auto* containerFlags=dynamic_cast<NativeState*>(navis[0].current);assert(containerFlags&&containerFlags->sourcePressable()&&containerFlags->sourceVsUsableY());assert(container.boundPad==1&&container.frozen&&container.paused&&navis[0].current->invincible(&navis[0]));assert(container.menu.color==1&&container.menu.inOnyon==10&&container.menu.currField==128000&&container.menu.inSquad==3&&container.menu.maxOnField==100&&container.menu.inParty==5&&container.menu.onMap==70&&container.menu.maxPikis==95);
  navis[0].current->exec(&navis[0]);assert(container.zeroVelocity==1);
  container.status=items::MenuCheck::Confirmed;container.a=3;navis[0].current->exec(&navis[0]);assert(container.entered.size()==3&&container.entered[0].actor==&pikis[0]&&container.entered[1].actor==&pikis[1]&&container.entered[2].actor==&pikis[3]);assert(fsms[0].last==nativeId(StateId::Walk)&&!container.frozen&&!container.paused);
  beginContainer();container.a=-2;navis[0].current->exec(&navis[0]);assert(container.exited==2&&container.exitColor==1);
@@ -142,7 +142,7 @@ int main(){
  container.f.type=1;container.opens=false;beginContainer();navis[0].current->exec(&navis[0]);assert(fsms[0].last==nativeId(StateId::Walk)&&!container.frozen);container.opens=true;
  beginContainer();container.status=items::MenuCheck::Cancel;navis[0].current->exec(&navis[0]);assert(fsms[0].last==nativeId(StateId::Walk)&&!container.paused);
  absorb.missingCamera=true;assert(!items::beginAbsorb(&navis[0],absorb.f.handle,e));absorb.missingCamera=false;missingClip=true;assert(!items::beginAbsorb(&navis[0],absorb.f.handle,e));missingClip=false;
- assert(!items::beginAbsorb(&navis[0],{},e));beginAbsorb();assert(absorb.retained==1&&absorb.locked&&absorb.drinks==1&&absorb.nearLow==1&&navis[0].current->invincible(&navis[0]));
+ assert(!items::beginAbsorb(&navis[0],{},e));beginAbsorb();auto* absorbFlags=dynamic_cast<NativeState*>(navis[0].current);assert(absorbFlags&&!absorbFlags->sourcePressable()&&!absorbFlags->sourceVsUsableY());assert(absorb.retained==1&&absorb.locked&&absorb.drinks==1&&absorb.nearLow==1&&navis[0].current->invincible(&navis[0]));
  navis[0].current->exec(&navis[0]);assert(absorb.interactions==0&&absorb.actualVelocity.x==0&&absorb.actualVelocity.y==7&&absorb.actualVelocity.z==0);
  unsigned before=allAdvances;assert(key(0));assert(allAdvances==before);navis[0].current->exec(&navis[0]);navis[0].current->exec(&navis[0]);assert(absorb.interactions==1); // rejected source interaction still marks the Navi absorbed
  absorb.f.shrinking=true;assert(key(1));MotionState motion;assert(bank.state(&navis[0],motion,e)&&!motion.finishing);

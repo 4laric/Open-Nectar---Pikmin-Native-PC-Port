@@ -106,6 +106,8 @@ class AbsorbState final:public ItemState {
  bool frame(HoneyFrame& f){return require(source->honey(honey,f,error)&&((same(f.handle,honey)&&f.honey)||fail(error,"stale retained source Honey metadata")));}
 public:
  AbsorbState():ItemState(StateId::Absorb){}
+ bool sourcePressable()const override{return false;}
+ bool sourceVsUsableY()const override{return false;}
  bool animationPreflight(Navi* n,std::string& e)override{bool valid=live(n);e=valid?std::string():error;return valid;}
  void init(Navi* n)override{
   enabled=bound=retained=false;substate=0;absorbed=false;auto it=absorbArgs.find(n);if(it==absorbArgs.end()){error="Absorb requires actual scoped NaviAbsorbArg";require(false);return;}
