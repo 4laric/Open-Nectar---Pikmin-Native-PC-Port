@@ -1,4 +1,6 @@
 #include "pc_p2_chappy.h"
+#include "pc_p2_hanachirashi_receiver.h"
+#include "pc_p2_fire_flick.h"
 #include "pc_p2_original_chappy_native.h"
 #include "pc_p2_chappy_policy.h"
 #include "pc_p2_chappy_fsm.h"
@@ -1023,6 +1025,52 @@ void doBite(BTeki* actor, ChappyFsm& s, unsigned gen, int frame)
 
 void doFlick(BTeki* actor, const ChappyFsm& s, unsigned gen, int frame)
 {
+    unsigned originalSource = 0, originalToken = 0;
+    if (s.spec->source == 33
+        && p2original::originalActors().query(static_cast<Creature*>(actor), originalSource, originalToken)
+        && originalSource == 33 && originalToken == gen) {
+        const Vector3f pos = actor->getPosition();
+        const float face = actor->getDirection();
+        int stuckHit = 0, nearHit = 0, naviHit = 0;
+        // Retail enemyAction::flickStickPikmin draws chance before its
+        // flickCreature sticker/mouth admission, including rejected mouths.
+        // Snapshot before stimulation unlinks accepted stickers.
+        std::vector<Piki*> stuckPikis;
+        Stickers stickers(actor);
+        Iterator stuckIt(&stickers);
+        CI_LOOP(stuckIt) {
+            Creature* c = *stuckIt;
+            if (c && c->isPiki()) stuckPikis.push_back(static_cast<Piki*>(c));
+        }
+        for (Piki* p : stuckPikis) {
+            if (p2fireflick::Chance > gsys->getRand(1.0f)
+                && p->getStickObject() == actor && !p->isStickToMouth()
+                && pc_p2_source_flick_piki(actor, p, p2fireflick::Knockback, roundAng(face + PI_F)))
+                ++stuckHit;
+        }
+        // Source re-queries nearby candidates after the sticker receiver pass.
+        // Accepted former stickers may receive another Flick (Blow accepts it).
+        if (pikiMgr) {
+            Iterator it(pikiMgr);
+            CI_LOOP(it) {
+                Piki* p = static_cast<Piki*>(*it);
+                if (!p || p->getStickObject() == actor) continue;
+                const Vector3f at = p->getPosition();
+                if (p2fireflick::nearby(at.x-pos.x, at.y-pos.y, at.z-pos.z)
+                    && pc_p2_source_flick_piki(actor, p, p2fireflick::Knockback, face + PI_F)) ++nearHit;
+            }
+        }
+        for (Navi* n : pc_p2_navis()) {
+            const Vector3f at = n->getPosition();
+            if (p2fireflick::nearby(at.x-pos.x, at.y-pos.y, at.z-pos.z)
+                && pc_p2_source_flick_navi(actor, n, p2fireflick::Knockback,
+                                         p2fireflick::Damage, face + PI_F)) ++naviHit;
+        }
+        std::printf("P2_CHAPPY_SOURCE_FLICK generator=%u source_id=33 frame=%d stuck=%d nearby=%d navi=%d\n",
+                    gen, frame, stuckHit, nearHit, naviHit);
+        std::fflush(stdout);
+        return;
+    }
     const Vector3f pos = actor->getPosition();
     int hit = 0;
     if (pikiMgr) {

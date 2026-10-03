@@ -435,6 +435,7 @@ set(PC_PORT_SOURCES
     pc_port/pc_p2_mar.cpp
     pc_port/pc_p2_mar_receipt.cpp
     pc_port/pc_p2_catfish.cpp
+    pc_port/pc_p2_hanachirashi_receiver.cpp
     pc_port/pc_p2_hanachirashi.cpp
     pc_port/pc_p2_dangomushi.cpp
     pc_port/pc_p2_snakejoint.cpp
@@ -3156,6 +3157,10 @@ add_executable(pc_p2_original_chappy_test tools/pc_p2_original_chappy_test.cpp
 target_include_directories(pc_p2_original_chappy_test PRIVATE pc_port)
 target_compile_options(pc_p2_original_chappy_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
 add_test(NAME pc_p2_original_chappy_test COMMAND pc_p2_original_chappy_test)
+add_executable(pc_p2_fire_flick_test tools/test_p2_fire_flick.cpp)
+target_include_directories(pc_p2_fire_flick_test PRIVATE pc_port)
+target_compile_options(pc_p2_fire_flick_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME pc_p2_fire_flick_test COMMAND pc_p2_fire_flick_test)
 add_executable(pc_p2_original_tank_test tools/test_p2_original_tank.cpp
     pc_port/pc_p2_original_tank.cpp pc_port/pc_p2_original_spawn_plan.cpp
     pc_port/pc_p2_original_drop.cpp pc_port/pc_p2_original_catalog.cpp)
@@ -3379,3 +3384,9 @@ target_compile_options(pc_p2_original_armor_test PRIVATE ${NATIVE_COMPILE_OPTION
 add_test(NAME pc_p2_original_armor_test COMMAND pc_p2_original_armor_test)
 
 pikmin_add_ci_fixture(original_armor tools/p2_original_armor_runtime.cpp)
+
+# Actual shared receiver compiled with small observable engine doubles.
+add_executable(pc_p2_source_flick_receiver_test tools/test_p2_source_flick_receiver.cpp pc_port/pc_p2_hanachirashi_receiver.cpp)
+target_include_directories(pc_p2_source_flick_receiver_test BEFORE PRIVATE tools/source_flick_stubs pc_port)
+target_compile_options(pc_p2_source_flick_receiver_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME pc_p2_source_flick_receiver_test COMMAND pc_p2_source_flick_receiver_test)
