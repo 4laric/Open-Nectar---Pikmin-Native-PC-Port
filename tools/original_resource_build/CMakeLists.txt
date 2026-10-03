@@ -21,7 +21,8 @@ target_sources(pikmin_pc PRIVATE
  "${RESOURCE_SOURCE}/pc_port/pc_p2_original_honey_save.cpp"
  "${RESOURCE_SOURCE}/pc_port/pc_p2_original_wisp.cpp"
  "${RESOURCE_SOURCE}/pc_port/pc_p2_original_wisp_native.cpp"
- "${RESOURCE_SOURCE}/pc_port/pc_p2_original_resource_contents.cpp")
+ "${RESOURCE_SOURCE}/pc_port/pc_p2_original_resource_contents.cpp"
+ "${RESOURCE_SOURCE}/pc_port/pc_p2_original_egg_number_journal.cpp")
 target_sources(pikmin_pc PRIVATE "${RESOURCE_SOURCE}/pc_port/pc_p2_original_resource_state.cpp")
 target_sources(pikmin_pc PRIVATE "${RESOURCE_SOURCE}/pc_port/pc_p2_original_resource_save.cpp")
 add_executable(p2_original_gas_policy
@@ -72,7 +73,8 @@ add_executable(p2_original_honey_save_policy "${RESOURCE_SOURCE}/pc_port/pc_p2_o
 add_executable(p2_original_honey_identity_policy "${RESOURCE_SOURCE}/pc_port/pc_p2_original_honey_identity_test.cpp" "${RESOURCE_SOURCE}/pc_port/pc_p2_original_resource_contents.cpp")
 add_executable(p2_original_restore_stage_policy "${RESOURCE_SOURCE}/tools/p2_original_restore_stage_test.cpp" "${RESOURCE_SOURCE}/pc_port/pc_p2_original_gas.cpp" "${RESOURCE_SOURCE}/pc_port/pc_p2_original_egg.cpp" "${RESOURCE_SOURCE}/pc_port/pc_p2_original_spawn_plan.cpp")
 add_executable(p2_original_wisp_cold_policy "${RESOURCE_SOURCE}/tools/p2_original_wisp_cold_test.cpp" "${RESOURCE_SOURCE}/pc_port/pc_p2_original_wisp.cpp" "${RESOURCE_SOURCE}/pc_port/pc_p2_original_spawn_plan.cpp")
-foreach(target p2_original_gas_policy p2_original_wisp_policy p2_original_egg_contents_policy p2_original_egg_policy p2_original_gas_links_policy p2_original_gas_save_policy p2_original_resource_state_policy p2_original_resource_save_policy p2_original_wisp_clock_policy p2_original_egg_snapshot_policy p2_original_wisp_snapshot_policy p2_original_honey_policy p2_original_honey_bank_policy p2_original_contents_save_policy p2_original_egg_save_policy p2_original_wisp_save_policy p2_original_honey_save_policy p2_original_honey_identity_policy p2_original_restore_stage_policy p2_original_wisp_cold_policy)
+add_executable(p2_original_egg_number_authority_policy "${RESOURCE_SOURCE}/tools/p2_original_egg_number_authority_test.cpp" "${RESOURCE_SOURCE}/pc_port/pc_p2_original_egg_number_journal.cpp" "${RESOURCE_SOURCE}/pc_port/pc_p2_original_resource_contents.cpp")
+foreach(target p2_original_gas_policy p2_original_wisp_policy p2_original_egg_contents_policy p2_original_egg_policy p2_original_gas_links_policy p2_original_gas_save_policy p2_original_resource_state_policy p2_original_resource_save_policy p2_original_wisp_clock_policy p2_original_egg_snapshot_policy p2_original_wisp_snapshot_policy p2_original_honey_policy p2_original_honey_bank_policy p2_original_contents_save_policy p2_original_egg_save_policy p2_original_wisp_save_policy p2_original_honey_save_policy p2_original_honey_identity_policy p2_original_restore_stage_policy p2_original_wisp_cold_policy p2_original_egg_number_authority_policy)
  target_include_directories(${target} PRIVATE "${RESOURCE_SOURCE}/pc_port")
  target_compile_options(${target} PRIVATE -Wall -Wextra -Werror -UNDEBUG)
 endforeach()
@@ -97,3 +99,5 @@ add_test(NAME original_honey_save_policy COMMAND p2_original_honey_save_policy)
 add_test(NAME original_honey_identity_policy COMMAND p2_original_honey_identity_policy)
 add_test(NAME original_restore_stage_policy COMMAND p2_original_restore_stage_policy)
 add_test(NAME original_wisp_cold_policy COMMAND p2_original_wisp_cold_policy)
+
+add_test(NAME original_egg_number_authority_policy COMMAND p2_original_egg_number_authority_policy)

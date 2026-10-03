@@ -56,7 +56,8 @@ Additional targets are `p2_original_resource_state_policy`,
 `p2_original_contents_save_policy`, `p2_original_egg_save_policy`,
 `p2_original_wisp_save_policy`, and `p2_original_honey_save_policy`
 and `p2_original_honey_identity_policy`, `p2_original_restore_stage_policy`,
-`p2_original_wisp_cold_policy` (20 policy targets total).
+`p2_original_wisp_cold_policy`, and
+`p2_original_egg_number_authority_policy` (21 policy targets total).
 Record exact source pin, output directory,
 executable SHA256, build log and a no-work Ninja dry run.
 
@@ -184,3 +185,44 @@ needs complete/born provenance and its own once-only physical receipt; consume's
 idempotent true result is not a new reward grant. Scope policy logs are
 original-resources-1252-scope-build17.log, scope-build18.log, scope-ctest18.log
 and scope-no-work18.log (20 policies PASS, changed native Egg object compiled).
+
+## Uninstalled numeric authority adapter
+
+EggNumberAuthority implements the numeric owner's PcOriginalNumberAuthority
+(reviewed PR199 header pin2481621). Construct it with the actual egg::Native and
+an explicit NumberRootAuthority, then forward actual Services beginContents and
+endContents. Native begin checks the actual owned provider Host/dying body, full
+native identity, root37/16, physical origin and same Native.contents journal.
+Its journal helper preflights resources/retained limits before RNG, verifies the
+exact pending attempted outcome, and supports completed reads after scope end.
+Rejected consume leaves state unchanged; accepted consume publishes the actual
+existing producer journal's consumed row synchronously. No births are installed.
+
+The independent root resolver must prove the selected catalog fingerprint/UID,
+row source16/37 and exact authorized ordinal/epoch/activation from retained scene
+incarnation authority. It survives parent death; a captured Egg retains Wisp16
+identity after release. Live-body/active-registry-only lookup is insufficient.
+Cold restoration supplies authenticated selected scene/GroupCourse history;
+the adapter cannot invent it. Own roots, Services, Native, then authority in the
+scene. Attach the stable authority after construction and before admission.
+All numeric bodies/receipts/queries must retire and the owner's read-only idle
+and teardown guards must pass before reverse destruction. endContents clears
+only pending scope. Active-scope or live-borrower destruction aborts; Native,
+journal and root context outlive the authority. Clean Honey receivers before
+shared service teardown.
+
+The private harness compiles the pure journal helper and its assertion-enabled
+policy. Concrete native adapter object compile uses three exact reviewed
+numeric-owner headers staged privately under ignored output. These dependency
+headers and implementation are not copied into this lane. Canonical composition
+adds egg_number_journal.cpp and egg_number_authority.cpp once with the numeric
+owner implementation and actual selected-scene resolver. Object compile is not
+production link. One's gravity/trace/floor-force/bounce and Five's LOD/rigid
+physics remain explicit pre-RNG holds. Authority logs: native24, build24,
+ctest24 and no-work24 (prefix original-resources-1252-authority-).
+
+Independent numeric-owner review tightened the adapter: payload and physical
+origin comparison is bitwise32 (including signed zero), and pending callbacks
+must stay inside the reachable numeric outcome closure admitted before RNG.
+Controls reject signed-zero tampering and a beginOne/generateFive mismatch;
+these are journal callback policies, not synthetic physical gameplay evidence.
