@@ -370,12 +370,7 @@ set(PC_PORT_SOURCES
     pc_port/pc_p2_cave_campaign_party_engine.cpp
     pc_port/pc_p2_surface_save.cpp
     pc_port/pc_p2_original_piki_physical.cpp
-<<<<<<< HEAD
-=======
     pc_port/pc_p2_original_piki_recruit.cpp
-    pc_port/pc_p2_original_progress.cpp
-    pc_port/pc_p2_cave_campaign.cpp
->>>>>>> 499111f60 (Bind original Piki recruitment to paired campaign authorities)
     pc_port/pc_p2_cave_dialog_window.cpp
     pc_port/pc_p2_cave_generate.cpp
     pc_port/pc_p2_cave_generator.cpp
