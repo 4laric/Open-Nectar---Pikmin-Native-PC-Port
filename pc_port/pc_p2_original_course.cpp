@@ -12,6 +12,7 @@
 #include "pc_p2_original_onyon_native.h"
 #include "pc_p2_original_manifest.h"
 #include "pc_p2_original_progress.h"
+#include "pc_p2_original_piki_native.h"
 #include "Creature.h"
 #include "teki.h"
 #include "Pellet.h"
@@ -36,6 +37,7 @@ struct Course {
  std::set<const Generator*> shadows;
  bool started=false;
  bool onyons=false;
+ bool pikis=false;
 };
 std::unique_ptr<Course> current;
 bool fail(std::string& e,const char* text){e=text;return false;}
@@ -85,10 +87,12 @@ bool pc_p2_original_course_start(GeneratorList* list,std::string& e){
  if(!current||current->started||!list||!list->mGenListHead)return fail(e,"original course start requires prepared native generator list");
  std::vector<GroupBinding> bindings;std::map<unsigned,std::vector<Generator*>> inventory;
  std::vector<Generator*> onyonInventory;
+ std::vector<Generator*> pikiInventory;
  // Validate the entire list before collect mutates compatibility observations.
  for(auto* node=list->mGenListHead->mChild;node;node=node->mNext){
   auto* g=static_cast<Generator*>(node);auto* object=dynamic_cast<GenObjectOriginalEnemy*>(g->mGenObject);
   if(dynamic_cast<GenObjectOriginalOnyon*>(g->mGenObject))onyonInventory.push_back(g);
+  if(dynamic_cast<GenObjectOriginalPiki*>(g->mGenObject))pikiInventory.push_back(g);
   if(!object)continue;
   auto found=current->literal.find(object->mState.uid);
   if(found==current->literal.end())return fail(e,"original native list has unknown source object");
@@ -120,12 +124,15 @@ bool pc_p2_original_course_start(GeneratorList* list,std::string& e){
   ||pelletMgr->getMax()-pelletMgr->getSize()<int(pellets))return fail(e,"original whole-course native actor/corpse/drop capacity insufficient");
  if(current->onyons){if(!pc_p2_original_onyon_preflight(onyonInventory,e))return false;}
  else if(!onyonInventory.empty())return fail(e,"original source Onyons lack admitted typed manifest");
+ if(current->pikis){if(!pc_p2_original_piki_preflight(pikiInventory,e))return false;}
+ else if(!pikiInventory.empty())return fail(e,"original source Pikmin lack admitted full atlas/calendar census");
  if(!pc_p2_original_course_install(bindings,current->dispatch,e))return false;
  current->shadows=std::move(shadows);current->started=true;e.clear();return true;
 }
 bool pc_p2_original_course_finish(std::string& e){
  if(!current){e.clear();return true;}
  if(current->started&&!pc_p2_original_course_unload(e))return false;
+ if(current->pikis)pc_p2_original_piki_unload();
  current.reset();e.clear();return true;
 }
 bool pc_p2_original_course_prepared(){return bool(current);}
@@ -145,6 +152,22 @@ bool pc_p2_original_course_load(const char* directory,const char* course,std::fu
  if(!readSourceManifest(bytes,selected,manifest,e))return false;
  if(!originalProgress().initialize(manifest.fingerprint,e))return false;
  if(!pc_p2_original_incarnation_initialize(manifest.fingerprint,e))return false;
+ // P2PK1 is all-calendar authority; P2PA1 names the exact selected native
+ // calendar inventory and binds its zero-based source day independently.
+ const auto loadBytes=[&](const std::string& path,std::string& out){
+  std::ifstream in(path,std::ios::binary|std::ios::ate);if(!in)return fail(e,"original typed source file missing");
+  auto n=in.tellg();if(n<=0||n>4*1024*1024)return fail(e,"original typed source size invalid");
+  std::string b(size_t(n),'\0');in.seekg(0);if(!in.read(b.data(),n))return fail(e,"original typed source read failed");out.swap(b);return true;
+ };
+ p2original::PikiManifest pikiAtlas;std::vector<unsigned> pikiActive;
+ std::error_code pikiStatus;const std::string pikiPath=std::string(directory)+"/campaign.p2pk";
+ const bool hasPikis=std::filesystem::exists(pikiPath,pikiStatus);if(pikiStatus)return fail(e,"original Pikmin atlas status failed");
+ if(hasPikis){std::string b;
+  if(!loadBytes(pikiPath,b)||!p2original::readPikiManifest(b,pikiAtlas,e))return false;
+  if(pikiAtlas.campaign!=manifest.fingerprint)return fail(e,"original Pikmin atlas selected campaign mismatch");
+  if(!loadBytes(std::string(directory)+"/"+selected+".p2pa",b)
+   ||!p2original::readPikiActive(b,pikiAtlas,selected,originalProgress().context().day,pikiActive,e))return false;
+ }
  const std::string onyonPath=std::string(directory)+"/"+selected+".p2on";
  std::error_code statusError;
  const bool hasOnyons=std::filesystem::exists(onyonPath,statusError);
@@ -158,10 +181,14 @@ bool pc_p2_original_course_load(const char* directory,const char* course,std::fu
   }
  }
  if(!pc_p2_original_course_prepare(manifest.fingerprint,manifest.rows,manifest.literal,std::move(metColor),e))return false;
+ if(hasPikis){
+  if(!pc_p2_original_piki_install(pikiAtlas,pikiActive,e)){current.reset();return false;}
+  current->pikis=true;
+ }
  if(hasOnyons){
   auto progress=[](){const auto& s=originalProgress().snapshot();return PcOriginalOnyonProgress{std::uint8_t(s.container&7),std::uint8_t(s.boot&7)};};
   auto boot=[](int species){std::string e;if(!originalProgress().boot(unsigned(species),e)){std::fprintf(stderr,"P2_ORIGINAL_ONYON_BOOT_FAIL %s\n",e.c_str());std::abort();}};
-  if(!pc_p2_original_onyon_install(onyons,progress,boot,e)){current.reset();return false;}
+  if(!pc_p2_original_onyon_install(onyons,progress,boot,e)){if(current->pikis)pc_p2_original_piki_unload();current.reset();return false;}
   current->onyons=true;
  }
  e.clear();return true;

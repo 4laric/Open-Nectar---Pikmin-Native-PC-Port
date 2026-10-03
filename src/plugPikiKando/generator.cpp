@@ -17,6 +17,7 @@
 #include "pc_p2_original_group_engine.h"
 #include "pc_p2_original_gen_object.h"
 #include "pc_p2_original_onyon_native.h"
+#include "pc_p2_original_piki_native.h"
 #include <cstdlib>
 #include "pc_p2_species_unit.h"
 #include <cmath>
@@ -237,6 +238,7 @@ void GenObjectFactory::createInstance()
 #if defined(PIKI_PC_PORT)
 		pc_p2_original_gen_object_register();
 		pc_p2_original_onyon_register();
+		pc_p2_original_piki_register();
 #endif
 	}
 }
@@ -616,6 +618,10 @@ void Generator::init()
     bool originalHandled=false;std::string originalError;
     if(!pc_p2_original_generator_init(this,originalHandled,originalError)) {
         std::fprintf(stderr,"P2_ORIGINAL_GENERATOR_INIT_FAIL %s\n",originalError.c_str());std::abort();
+    }
+    if(originalHandled)return;
+    if(!pc_p2_original_piki_generator_init(this,originalHandled,originalError)) {
+        std::fprintf(stderr,"P2_ORIGINAL_PIKI_INIT_FAIL %s\n",originalError.c_str());std::abort();
     }
     if(originalHandled)return;
     if(!pc_p2_original_onyon_generator_init(this,originalHandled,originalError)) {
