@@ -33,11 +33,11 @@ bool pc_p2_authored_cave_route_validate(const P2AuthoredCaveRoute& selected,
         ||end!="END"||(in>>extra))return refuse("malformed authored route input");
     actual.present=true;actual.routeSha=selected.routeSha;
     if(!actual.valid()||!(actual==selected))return refuse("authored route fields differ from selected contract");
-    // DVDOpen resolves these same native paths relative to the process's assets
-    // directory. The host supplies runRoot only for the selected sidecar.
+    // System::openFile prepends gameflow.mGameDataPath (dataDir); DVDOpen then
+    // prepends assets. The host supplies runRoot only for the selected sidecar.
     for(const auto* stage:{&selected.surface,&selected.floor}){
         std::string ini;
-        if(!bytes(std::filesystem::path("assets")/stage->file,ini,16*1024*1024)
+        if(!bytes(std::filesystem::path("assets")/"dataDir"/stage->file,ini,16*1024*1024)
             ||P2AuthoredCaveSession::hash(ini)!=stage->mapSha)
             return refuse("authored stage INI bytes differ from selected digest");
     }
