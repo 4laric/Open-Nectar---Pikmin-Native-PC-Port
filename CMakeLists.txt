@@ -881,6 +881,7 @@ set(PIKMIN_PIKI_JPA_TEST_ASSETS "" CACHE PATH "Private exact selected JPA roles 
 if(PIKMIN_PIKI_JPA_COMPONENT)
     list(APPEND PC_PORT_SOURCES
         pc_port/pc_p2_piki_jpa_bank.cpp
+        pc_port/pc_p2_piki_jpa_manager.cpp
         pc_port/pc_p2_piki_halo.cpp
         pc_port/pc_p2_piki_jpa_native.cpp)
 endif()
@@ -3823,6 +3824,13 @@ if(PIKMIN_PIKI_JPA_COMPONENT)
     add_test(NAME p2_piki_jpa_retired_guard COMMAND pc_p2_piki_jpa_test --guard-retired)
     if(PIKMIN_PIKI_JPA_TEST_ASSETS)
         add_test(NAME p2_piki_jpa_selected_policy COMMAND pc_p2_piki_jpa_test "${PIKMIN_PIKI_JPA_TEST_ASSETS}")
+    endif()
+    add_executable(pc_p2_piki_jpa_manager_test tools/p2_piki_jpa_manager_test.cpp
+        pc_port/pc_p2_piki_jpa_manager.cpp pc_port/pc_p2_piki_jpa_bank.cpp)
+    target_include_directories(pc_p2_piki_jpa_manager_test PRIVATE pc_port)
+    target_compile_options(pc_p2_piki_jpa_manager_test PRIVATE -Wall -Wextra -Werror -UNDEBUG)
+    if(PIKMIN_PIKI_JPA_TEST_ASSETS)
+        add_test(NAME p2_piki_jpa_manager COMMAND pc_p2_piki_jpa_manager_test "${PIKMIN_PIKI_JPA_TEST_ASSETS}")
     endif()
     if(NOT ANDROID)
         # Compile the actual transport and dependencies; no fake GL/context.
