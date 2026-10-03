@@ -3358,7 +3358,6 @@ target_include_directories(p2_campaign_economy_test PRIVATE pc_port)
 target_compile_options(p2_campaign_economy_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
 add_test(NAME p2_campaign_economy_test COMMAND p2_campaign_economy_test)
 
-<<<<<<< HEAD
 add_executable(pc_p2_original_frog_test tools/test_p2_original_frog.cpp
     pc_port/pc_p2_original_frog.cpp pc_port/pc_p2_original_spawn_plan.cpp
     pc_port/pc_p2_original_drop.cpp pc_port/pc_p2_original_catalog.cpp)
@@ -3381,7 +3380,7 @@ target_compile_options(pc_p2_original_armor_test PRIVATE ${NATIVE_COMPILE_OPTION
 add_test(NAME pc_p2_original_armor_test COMMAND pc_p2_original_armor_test)
 
 pikmin_add_ci_fixture(original_armor tools/p2_original_armor_runtime.cpp)
-=======
+
 add_executable(p2_equipment_policy_test tools/pc_p2_equipment_test.cpp)
 target_include_directories(p2_equipment_policy_test PRIVATE pc_port)
 target_compile_options(p2_equipment_policy_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
@@ -3390,4 +3389,3 @@ add_executable(p2_equipment_projection_test tools/pc_p2_equipment_projection_tes
 target_include_directories(p2_equipment_projection_test BEFORE PRIVATE tools/equipment_stubs pc_port)
 target_compile_options(p2_equipment_projection_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
 add_test(NAME p2_equipment_projection_test COMMAND p2_equipment_projection_test)
->>>>>>> e7379fefa (Derive original campaign equipment effects from authenticated treasury receipts)
