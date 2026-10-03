@@ -12,6 +12,7 @@ extern bool pc_p2_original_captain_throw_preflight(Navi*,p2original::captain::St
 extern bool pc_p2_original_captain_pluck_preflight(Navi*,p2original::captain::StateId,std::string&) __attribute__((weak));
 extern bool pc_p2_original_captain_punch_preflight(Navi*,std::string&) __attribute__((weak));
 extern bool pc_p2_original_captain_party_preflight(Navi*,p2original::captain::StateId,std::string&) __attribute__((weak));
+extern bool pc_p2_source_navi_reaction_animation_key(Navi*,int,std::string&) __attribute__((weak));
 using namespace p2original::captain;
 namespace {
 struct Backup {const LoadedScene* scene=nullptr;std::uint64_t epoch=0;StateId state=StateId::Walk;};
@@ -96,6 +97,7 @@ public:
    if(!apply(n,*env,out,e)){report(e);return;}}
   previousError.clear();
  }
+ bool sourceAnimationKey(Navi* n,int event,std::string& e)override{return key(n,event,e);}
  bool key(Navi* n,int event,std::string& e){
   auto* env=environment(n,e);if(!env)return false;walk::Output out;
   if(event==1000){if(!walk::keyEventEnd(walkState,out,e))return false;}
@@ -107,11 +109,12 @@ class DamagedState final:public CoreState {
 public:
  DamagedState():CoreState(StateId::Damaged){}
  bool sourceInvincible()const override{return false;}
- void init(Navi* n)override{std::string e;auto* bank=bankFor(n,e);if(!bank||!bank->start(n,Motion::Damage,e))report(e);}
+ void init(Navi* n)override{std::string e;auto* bank=bankFor(n,e);if(!bank||(!bank->start(n,Motion::Damage,e)||!bank->enableMotionBlend(n,e)))report(e);}
  void exec(Navi* n)override{std::string e;auto* bank=bankFor(n,e);MotionState motion;
   if(!bank||!bank->state(n,motion,e)){report(e);return;}if(motion.motion!=Motion::Damage)recover(n);}
  void cleanup(Navi* n)override{if(!pc_p2_original_captain_damaged_cleanup(n))report("missing genuine Damaged cleanup authority");}
  void key(Navi* n,int event){if(event==1000)recover(n);}
+ bool sourceAnimationKey(Navi* n,int event,std::string& e)override{e.clear();key(n,event);return n->getCurrState()==this;}
 };
 class DeadState final:public CoreState {
 public:
@@ -140,7 +143,7 @@ bool pc_p2_original_captain_core_preflight(Navi* n,StateId id,std::string& e){
  if(!bankFor(n,e)||!registered(n,id)){e="missing registered source captain state/bank";return false;}
  if(id==StateId::Dead)return pc_p2_original_captain_down_preflight(n,e);
  if(id==StateId::Walk){auto* env=environment(n,e);walk::Frame frame;return env&&nativecontrol::sceneAnimationTimer(n)&&env->capture(*n,frame,e)&&frame.actor.has_value();}
- if(id==StateId::Damaged)return true;
+ if(id==StateId::Damaged){auto* bank=bankFor(n,e);return bank&&bank->supports(n,Motion::Damage,e)&&bank->supports(n,Motion::Nigeru,e);}
  if(id==StateId::Nuku||id==StateId::NukuAdjust)return pc_p2_original_captain_pluck_preflight&&pc_p2_original_captain_pluck_preflight(n,id,e);
  if(id==StateId::Punch)return pc_p2_original_captain_punch_preflight&&pc_p2_original_captain_punch_preflight(n,e);
  if(id==StateId::Gather||id==StateId::Throw||id==StateId::ThrowWait)return pc_p2_original_captain_throw_preflight&&pc_p2_original_captain_throw_preflight(n,id,e);
@@ -189,4 +192,22 @@ bool pc_p2_original_captain_core_advance_animation(Navi* n,float frames,std::str
  if(auto* walk=dynamic_cast<WalkState*>(n->getCurrState()))return bank->advance(n,frames,[&](int key){return walk->key(n,key,e);},e);
  // Dead's movie BCK advances under the genuine Studio owner, not this clock.
  return state->sourceStateId()==StateId::Dead;
+}
+
+bool pc_p2_original_captain_animation_key(Navi* n,int key,std::string& e){
+ e.clear();if(!actor(n,e))return false;auto* current=n->getCurrState();auto* typed=dynamic_cast<State*>(current);
+ if(!typed||typed->nativeState()!=current){e="missing exact current source animation state";return false;}
+ if(auto* state=dynamic_cast<NativeState*>(current))return state->sourceAnimationKey(n,key,e);
+ if((typed->sourceStateId()==StateId::Flick||typed->sourceStateId()==StateId::KokeDamage)
+  &&pc_p2_source_navi_reaction_animation_key)return pc_p2_source_navi_reaction_animation_key(n,key,e);
+ e="actual source receiver key handler is unavailable";return false;
+}
+
+bool pc_p2_original_captain_actor_animation_key(Navi* n,int key,std::string& e){
+ e.clear();if(!actor(n,e))return false;auto* current=n->getCurrState();auto* typed=dynamic_cast<State*>(current);
+ if(!typed||typed->nativeState()!=current){e="missing exact current source actor key state";return false;}
+ if(auto* state=dynamic_cast<NativeState*>(current))return state->sourceActorAnimationKey(n,key,e);
+ if((typed->sourceStateId()==StateId::Flick||typed->sourceStateId()==StateId::KokeDamage)
+  &&pc_p2_source_navi_reaction_animation_key)return pc_p2_source_navi_reaction_animation_key(n,key,e);
+ e="actual source receiver actor key handler is unavailable";return false;
 }

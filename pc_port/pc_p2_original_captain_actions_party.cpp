@@ -136,7 +136,7 @@ class Follow final:public NativeState {
  FollowMode mode_=FollowMode::Normal;unsigned idle_=0,seek_=0,idleMotion_=31;
  Navi* entering_=nullptr;bool newToParty_=false;
  party::EnemyHandle enemy_;
- bool motion(Navi* n,unsigned id){std::string e;auto* b=pc_p2_original_captain_source_bank();return b&&b->start(n,static_cast<Motion>(id),e);}
+ bool motion(Navi* n,unsigned id){std::string e;auto* b=pc_p2_original_captain_source_bank();return b&&b->startMotion(n,static_cast<Motion>(id),static_cast<Motion>(id),(id==30||id==31)?Listener::None:Listener::SourceActor,Listener::None,e);}
 public:
  Follow():NativeState(StateId::Follow){}
  bool sourceInvincible()const final{return false;}
@@ -149,6 +149,7 @@ public:
   if(p){auto* source=const_cast<party::PartySource*>(p);if(isNew)source->followFeedback(*n,party::FollowFeedback::Alert,e);source->moveRotation(*n,true,e);}
  }
  bool assist(party::EnemyHandle enemy){if(mode_!=FollowMode::Normal&&mode_!=FollowMode::Idle)return false;enemy_=enemy;mode_=FollowMode::Punch;seek_=idle_=0;return true;}
+ bool sourceAnimationKey(Navi* n,int key,std::string& e)override{return sourceKey(n,key,e);}
  bool sourceKey(Navi* n,int key,std::string& e){
   auto* p=pc_p2_original_captain_party_source(n);party::FollowFrame f;
   if(key==1000){if(mode_==FollowMode::Alert){mode_=FollowMode::Normal;if(!motion(n,30))return false;}else if(mode_==FollowMode::Idle){idle_=0;mode_=FollowMode::Normal;if(!motion(n,31))return false;}}
@@ -209,7 +210,8 @@ public:
   n->mTargetVelocity.set(0,0,0);
   if(finished_)pc_p2_original_captain_transit(n,StateId::Walk,e);
  }
- bool sourceKey(Navi* n,int key,std::string& e){if(key==1000){finished_=true;auto* b=pc_p2_original_captain_source_bank();return b&&b->start(n,Motion::Walk,e);}return true;}
+ bool sourceAnimationKey(Navi* n,int key,std::string& e)override{return sourceKey(n,key,e);}
+ bool sourceKey(Navi* n,int key,std::string& e){if(key==1000){finished_=true;auto* b=pc_p2_original_captain_source_bank();return b&&b->startMotion(n,Motion::Walk,Motion::Walk,Listener::None,Listener::None,e);}return true;}
 };
 }
 namespace party {

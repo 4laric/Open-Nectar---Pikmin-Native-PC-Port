@@ -281,6 +281,7 @@ set(PC_PORT_SOURCES
     pc_port/pc_p2_original_dispatch.cpp
     pc_port/pc_p2_original_course.cpp
     pc_port/pc_p2_original_captain_motion.cpp
+    pc_port/pc_p2_equipment.cpp
     pc_port/pc_p2_original_captain_damage.cpp
     pc_port/pc_p2_original_captain_runtime.cpp
     pc_port/pc_p2_original_captain_control.cpp

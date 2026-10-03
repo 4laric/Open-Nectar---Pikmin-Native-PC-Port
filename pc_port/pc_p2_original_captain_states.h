@@ -23,6 +23,9 @@ public:
  bool canEnterSourceDamaged(const Navi&)const final;
  void enterSourceDamaged(Navi&,float) final;
  bool invincible(Navi*) final{return sourceInvincible();}
+ // Called only by the common actual animator phase; never advances a clock.
+ virtual bool sourceAnimationKey(Navi*,int,std::string& error){error="source state key handler unavailable";return false;}
+ virtual bool sourceActorAnimationKey(Navi* n,int key,std::string& error){return sourceAnimationKey(n,key,error);}
 protected:
  StateId id_;
 };
@@ -55,3 +58,7 @@ PcOriginalCaptainRoute pc_p2_original_captain_route_transition(Navi*,int nativeR
 bool pc_p2_original_captain_core_preflight(Navi*,p2original::captain::StateId,std::string&);
 bool pc_p2_original_captain_core_advance_animation(Navi*,float sourceFrames,std::string&);
 void pc_p2_original_captain_before_transition(Navi*);
+
+bool pc_p2_original_captain_animation_key(Navi*,int,std::string&);
+
+bool pc_p2_original_captain_actor_animation_key(Navi*,int,std::string&);
