@@ -26,14 +26,16 @@ bool adoptSourceRouteState(const SourceRoomCensus& census,const SourceRoomGeomet
    if(room.unit>=input.units.size()||geometry.rooms[record.createdRoom].unit!=room.unit||geometry.rooms[record.createdRoom].roomIndex!=record.createdRoom||
       record.createdWaypoint>=input.units[room.unit].waypoints.size()||record.fromCount>8)throw std::runtime_error("source route first-created waypoint bound");
    const auto local=input.units[room.unit].waypoints[record.createdWaypoint].positionRadius;
+   if(!map.beginRoomPrefix(record.createdRoom,error)||!map.current(error))return false;
    p2originalnumber::room::Vec3 position;
    if(!p2originalnumber::room::transformVertex(geometry.rooms[record.createdRoom].matrix,{local[0],local[1],local[2]},position,error))return false;
-   position.y=0;
-   if(!record.door&&!map.minY(position,position.y,error))return false;
+   if(record.door)position.y=0;
+   else if(!map.minY(position,position.y,error))return false;
    if(!map.current(error))return false;
    SourceWayPoint point;point.position={position.x,position.y,position.z};point.radius=record.radius;
    point.fromCount=record.fromCount;point.from=record.fromLinks;point.rooms=record.rooms;next->points.push_back(std::move(point));
   }
+  if(!map.finishRoomConstruction(error)||!map.current(error))return false;
   // Original makeInvertLinks calls linkable BEFORE reverse From lookup and
   // checks To capacity even when a reverse From would avoid an append.
   for(unsigned index=0;index<next->points.size();++index){const auto& point=next->points[index];

@@ -135,8 +135,13 @@ a pure fixture input owner, not a fake SceneContext/runtime admission.
 
 Version4 now also builds the actual Scene-owned source route state during map
 installation. First-created local points use their actual source room matrix;
-door Y is0 and other points query the owned original height provider. Radius
-and memberships remain first-created/source ordered. makeInvertLinks performs
+door Y is0 and other points query the owned original height provider.
+During first-created point construction the actual provider uses the original
+room birth-prefix roster, then restores the complete owned roster before
+makeInvertLinks. Non-door Y remains source-transformed until getMinY replaces
+it; only doors force Y0. Qualified profiles also had bit-identical prefix/full
+heights, but that narrow observation is not used as a general equivalence rule.
+Radius and memberships remain first-created/source ordered. makeInvertLinks performs
 real source linkable height samples before reverse-From lookup, retains full
 eight slots/counts and refuses To overflow. Fresh flags0 are then setCloseAll
 to Unvisited0x80; fresh room visited flags are false. Failed construction

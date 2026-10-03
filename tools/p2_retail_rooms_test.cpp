@@ -47,9 +47,10 @@ int main(int argc,char** argv){
   std::unique_ptr<SourceHeightInputs> heightInputs;assert(adoptSourceHeightInputs(census,geometry,heightInputs,error));
   struct InputOwner final:p2originalnumber::roomHeight::Owner {
    const SourceHeightInputs* input;bool available=true;
+   const std::vector<p2originalnumber::roomHeight::Room>* prefix=nullptr;
    explicit InputOwner(const SourceHeightInputs& actual):input(&actual){}
    bool current(const std::vector<p2originalnumber::roomHeight::Room>& rooms,std::string& e)override{
-    if(!available||&rooms!=&input->rooms){e="pure fixture input owner unavailable";return false;}return true;
+    if(!available||(&rooms!=&input->rooms&& &rooms!=prefix)){e="pure fixture input owner unavailable";return false;}return true;
    }
    bool hidden(p2originalnumber::roomHeight::Hidden& out,std::string&)override{out={};return true;}
   } heightOwner(*heightInputs);
@@ -107,9 +108,12 @@ int main(int argc,char** argv){
    assert(routes.points.size()==(floor==1?6u:23u)&&routes.units.size()==census.units.size());
    struct InputMap final:SourceRouteMap {
     SourceHeightInputs& input;InputOwner& owner;
+    std::vector<p2originalnumber::roomHeight::Room> prefix;bool constructing=false;
     InputMap(SourceHeightInputs& actual,InputOwner& actualOwner):input(actual),owner(actualOwner){}
     bool current(std::string& e)override{return owner.current(input.rooms,e);}
-    bool minY(p2originalnumber::roomHeight::Vec3 point,float& out,std::string& e)override{return p2originalnumber::roomHeight::minY(input.rooms,owner,point,out,e);}
+    bool beginRoomPrefix(unsigned room,std::string&)override{assert(room<input.rooms.size());prefix.assign(input.rooms.begin(),input.rooms.begin()+room+1);owner.prefix=&prefix;constructing=true;return true;}
+    bool finishRoomConstruction(std::string&)override{constructing=false;owner.prefix=nullptr;prefix.clear();return true;}
+    bool minY(p2originalnumber::roomHeight::Vec3 point,float& out,std::string& e)override{return p2originalnumber::roomHeight::minY(constructing?prefix:input.rooms,owner,point,out,e);}
    } inputMap(*heightInputs,heightOwner);
    heightOwner.available=true;std::unique_ptr<SourceRouteState> graph;
    assert(adoptSourceRouteState(census,geometry,routes,inputMap,graph,error)&&graph->points.size()==routes.points.size());
@@ -131,6 +135,17 @@ int main(int argc,char** argv){
    auto* retainedGraph=graph.get();heightOwner.available=false;
    assert(!adoptSourceRouteState(census,geometry,routes,inputMap,graph,error)&&graph.get()==retainedGraph);
    heightOwner.available=true;
+   struct PrefixOrderControl final:SourceRouteMap {
+    unsigned count=0,complete=0;bool finished=false;
+    explicit PrefixOrderControl(unsigned rooms):complete(rooms){}
+    bool current(std::string&)override{return true;}
+    bool beginRoomPrefix(unsigned room,std::string&)override{assert(!finished&&room+1>=count);count=room+1;return true;}
+    bool finishRoomConstruction(std::string&)override{count=complete;finished=true;return true;}
+    bool minY(p2originalnumber::roomHeight::Vec3,float& out,std::string&)override{assert(count);out=float(count*10);return true;}
+   } prefixControl(unsigned(census.rooms.size()));
+   std::unique_ptr<SourceRouteState> prefixGraph;assert(adoptSourceRouteState(census,geometry,routes,prefixControl,prefixGraph,error)&&prefixControl.finished);
+   for(unsigned index=0;index<routes.points.size();++index)
+    assert(prefixGraph->points[index].position[1]==(routes.points[index].door?0:float((routes.points[index].createdRoom+1)*10)));
    unsigned inverseCount=0;for(const auto& point:graph->points)inverseCount+=point.toCount;
    std::cout<<"floor="<<floor<<" grounded source graph PASS points="<<graph->points.size()<<" inverse_links="<<inverseCount<<" room flags preserve Closed; pure input owner, no actual room-phase/runtime grant\n";
    if(floor==1){assert(routes.roomIndices==std::vector<std::vector<unsigned>>({{0,1,2},{0,3},{3,4,5}}));

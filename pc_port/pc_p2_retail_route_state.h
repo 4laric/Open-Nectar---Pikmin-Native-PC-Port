@@ -20,6 +20,8 @@ struct SourceRouteState {
 class SourceRouteMap:public p2originalnumber::roomHeight::HeightProvider {
 public:
  virtual bool current(std::string&)=0;
+ virtual bool beginRoomPrefix(unsigned roomIndex,std::string&)=0;
+ virtual bool finishRoomConstruction(std::string&)=0;
 };
 // Pure construction behavior: first-created positions/radii, source ground,
 // makeInvertLinks order and startup setCloseAll. Actual Scene owns the provider

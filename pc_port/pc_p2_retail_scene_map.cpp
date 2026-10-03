@@ -111,6 +111,8 @@ class SceneRuntime final:public FloorIdentityAuthority,public SceneOps,public p2
  std::unique_ptr<SourceHeightInputs> heightInputs;
  std::unique_ptr<SourceRouteState> sourceRouteState;
  bool roomVisitInFlight=false;
+ std::vector<p2originalnumber::roomHeight::Room> heightRoomPrefix;
+ bool sourceRouteBuilding=false;
  enum class HeightPhase { Absent,Registering,Registered,Retiring,Retired };
  HeightPhase heightPhase=HeightPhase::Absent;
  std::uint64_t heightSerial=0;
@@ -308,7 +310,9 @@ public:
    sourceRoutes.waterCensusSha256==waterInputs.sha256&&sourceRoutes.parametersSha256==floorParameters.sha256&&!sourceRoutes.points.empty()?&sourceRoutes:nullptr;
  }
  bool current(const std::vector<p2originalnumber::roomHeight::Room>& rooms,std::string& error)override{
-  if(!heightInputs||&rooms!=&heightInputs->rooms||(heightPhase!=HeightPhase::Registered&&heightPhase!=HeightPhase::Registering)||heightSerial!=context.nativeSerial()||
+  const bool ownedRooms=heightInputs&&(&rooms==&heightInputs->rooms||
+   (&rooms==&heightRoomPrefix&&sourceRouteBuilding&&heightPhase==HeightPhase::Registering&&!heightRoomPrefix.empty()&&heightRoomPrefix.size()<=heightInputs->rooms.size()));
+  if(!ownedRooms||(heightPhase!=HeightPhase::Registered&&heightPhase!=HeightPhase::Registering)||heightSerial!=context.nativeSerial()||
      !heightSerial||!parameters(context,heightSerial,context.selectionRevision())||!ownedMap||ownedMap!=context.mMap||ownedMap!=mapMgr||
      ownedMap->mMapModel!=shape)return fail(error,"retail source height installed-map owner unavailable");
   error.clear();return true;
@@ -321,7 +325,18 @@ public:
  }
  bool minY(p2originalnumber::roomHeight::Vec3 position,float& out,std::string& error)override{
   if(!heightInputs||!current(heightInputs->rooms,error))return false;
-  return p2originalnumber::roomHeight::minY(heightInputs->rooms,*this,position,out,error);
+  const auto& rooms=sourceRouteBuilding?heightRoomPrefix:heightInputs->rooms;
+  return p2originalnumber::roomHeight::minY(rooms,*this,position,out,error);
+ }
+ bool beginRoomPrefix(unsigned room,std::string& error)override{
+  if(heightPhase!=HeightPhase::Registering||!current(error)||room>=heightInputs->rooms.size()||
+     (sourceRouteBuilding&&room+1<heightRoomPrefix.size()))return fail(error,"retail source route birth-prefix order unavailable");
+  heightRoomPrefix.assign(heightInputs->rooms.begin(),heightInputs->rooms.begin()+room+1);sourceRouteBuilding=true;
+  error.clear();return true;
+ }
+ bool finishRoomConstruction(std::string& error)override{
+  if(heightPhase!=HeightPhase::Registering||!sourceRouteBuilding||!current(error))return fail(error,"retail source route construction roster unavailable");
+  sourceRouteBuilding=false;heightRoomPrefix.clear();error.clear();return true;
  }
  bool current(std::string& error)override{
   if((heightPhase!=HeightPhase::Registered&&heightPhase!=HeightPhase::Registering)||selected.selection.version!=4||!heightInputs)return fail(error,"retail source routes map owner unavailable");
@@ -553,6 +568,7 @@ public:
   seaPhase=SeaPhase::Retired;seaSerial=0;seaRooms.clear();
   heightPhase=HeightPhase::Retired;heightSerial=0;heightInputs.reset();
   sourceRouteState.reset();
+  sourceRouteBuilding=false;heightRoomPrefix.clear();
   if(flowCont.mCurrentStage==&stage)flowCont.mCurrentStage=previousStage;
   if(routeMgr==ownedRoutes)routeMgr=nullptr;
   if(ownedMap&&mapMgr==ownedMap&&ownedMap->mMapModel==shape)ownedMap->mMapModel=nullptr;
