@@ -4,6 +4,7 @@
 #include "pc_p2_original_piki_init.h"
 #include <optional>
 #include "pc_p2_original_corpse_native.h"
+#include "pc_p2_original_number_native.h"
 #include "pc_p2_ship.h"
 #include "pc_randomizer.h"
 #include "pc_p2_campaign_actor.h"
@@ -374,8 +375,32 @@ void GoalItem::suckMe(Pellet* item)
     const bool sourceReceiver=pc_p2_original_onyon_campaign_owned(this);
     p2originalonyon::RewardPlan sourceReward;
     p2original::CorpseRecord sourceReceipt;
+    p2originalnumber::Receipt numberReceipt;
+    const bool originalNumber=pc_p2_original_number_tag(item);
+    unsigned numberYield=0;
     bool sourceRewardPending=false;
-    if(sourceReceiver){
+    if(originalNumber){
+        std::string error;
+        p2originalonyon::Root root;
+        if(!sourceReceiver || pc_p2_original_number_query(item,numberReceipt,error)!=p2originalnumber::QueryResult::Present
+           || !pc_p2_original_onyon_root(this,root,error)
+           || !p2originalnumber::yield(p2originalnumber::Size::One,p2originalnumber::Color(numberReceipt.birthPayload.pelletColor),
+                                      p2originalnumber::Color(root.species),numberYield)) {
+            std::fprintf(stderr,"P2_ORIGINAL_NUMBER_FAIL receiver/receipt %s\n",error.c_str());std::abort();
+        }
+        if(!numberReceipt.consumed){
+            const auto& id=numberReceipt.birthPayload.identity;
+            p2originalonyon::SeedCause cause;
+            cause.kind=p2originalonyon::CauseKind::Number;cause.catalogFingerprint=id.source.fingerprint;
+            cause.sourceUid=id.source.uid;cause.sourceType=numberReceipt.rootSourceType;
+            cause.ordinal=id.source.ordinal;cause.epoch=id.source.epoch;cause.activation=id.source.activation;
+            cause.numericChildSlot=id.slot;
+            if(!pc_p2_original_sprout_reward_prepare(this,cause,numberYield,sourceReward,error)){
+                std::fprintf(stderr,"P2_ORIGINAL_NUMBER_FAIL reward %s\n",error.c_str());std::abort();
+            }
+            sourceRewardPending=true;
+        }
+    } else if(sourceReceiver){
         if(!pc_p2_original_corpse_query(item,sourceReceipt)){
             std::fprintf(stderr,"P2_ORIGINAL_SPROUT_FAIL reward parent is not an admitted corpse or typed numeric child\n");std::abort();
         }
@@ -392,9 +417,15 @@ void GoalItem::suckMe(Pellet* item)
         }
     }
     unsigned originalCorpseGrant=0;
-    const bool originalCorpse=pc_p2_original_corpse_onion(item,this,originalCorpseGrant);
+    bool originalCorpse=false;
+    if(originalNumber){std::string error;
+        if(!pc_p2_original_number_consume(item,this,originalCorpseGrant,error)){
+            std::fprintf(stderr,"P2_ORIGINAL_NUMBER_FAIL consume %s\n",error.c_str());std::abort();
+        }
+        originalCorpse=true;
+    }else originalCorpse=pc_p2_original_corpse_onion(item,this,originalCorpseGrant);
     if(sourceRewardPending){
-        if(!originalCorpse||originalCorpseGrant!=sourceReceipt.yield){std::fprintf(stderr,"P2_ORIGINAL_SPROUT_FAIL reward receipt changed\n");std::abort();}
+        if(!originalCorpse||originalCorpseGrant!=(originalNumber?numberYield:sourceReceipt.yield)){std::fprintf(stderr,"P2_ORIGINAL_SPROUT_FAIL reward receipt changed\n");std::abort();}
         pc_p2_original_sprout_reward_commit(this,sourceReward);
     }
     // Non-ship pellets reach this callback after their absorption finishes.

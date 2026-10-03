@@ -1,6 +1,10 @@
 #include "pc_p2_cave_campaign_party_engine.h"
 #include "pc_p2_species.h"
 #include "pc_p2_original_piki_origin.h"
+#if __has_include("pc_p2_original_number_native.h")
+#include "pc_p2_original_number_native.h"
+#define PC_P2_PARTY_SOURCE_NUMBER_PROVIDER 1
+#endif
 #if __has_include("pc_p2_original_sprout_native.h")
 #include "pc_p2_original_sprout_native.h"
 #define PC_P2_PARTY_SOURCE_SPROUT_PROVIDER 1
@@ -41,6 +45,10 @@ bool sameSource(const P2CavePartyBody& a,const P2CavePartyBody& b){
 }
 bool pc_p2_cave_campaign_party_capture(P2CaveCampaignParty& party,bool inside){
     auto held=[](const char* why){std::printf("P2_CAMPAIGN_PARTY_CAPTURE_HELD reason=%s\n",why);return false;};
+#if defined(PC_P2_PARTY_SOURCE_NUMBER_PROVIDER)
+    std::string numericHold;
+    if(!pc_p2_original_number_preflight_teardown(numericHold))return held("typed_source_number_requires_graph");
+#endif
     if(!pikiMgr||!naviMgr||!itemMgr||!itemMgr->getPikiHeadMgr())return held("missing_managers");
     auto captured=party;captured.present=true;captured.inside=inside;
     captured.resumeLiving=true;

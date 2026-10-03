@@ -288,6 +288,22 @@ set(PC_PORT_SOURCES
     pc_port/pc_p2_original_sprout_reader.cpp
     pc_port/pc_p2_original_onyon_lineage.cpp
     pc_port/pc_p2_original_number_profile.cpp
+    pc_port/pc_p2_original_number_geometry.cpp
+    pc_port/pc_p2_original_number_animation.cpp
+    pc_port/pc_p2_original_number_ledger.cpp
+    pc_port/pc_p2_original_number_native.cpp
+    pc_port/pc_p2_original_number_motion.cpp
+    pc_port/pc_p2_original_number_grid.cpp
+    pc_port/pc_p2_original_number_room.cpp
+    pc_port/pc_p2_original_number_triangle.cpp
+    pc_port/pc_p2_original_number_lod.cpp
+    pc_port/pc_p2_original_number_lod_native.cpp
+    pc_port/pc_p2_original_number_rigid.cpp
+    pc_port/pc_p2_original_number_five_motion.cpp
+    pc_port/pc_p2_original_room_trace.cpp
+    pc_port/pc_p2_original_number_trace_native.cpp
+    pc_port/pc_p2_original_egg_number_journal.cpp
+    pc_port/pc_p2_original_resource_contents.cpp
     pc_port/pc_p2_original_piki_spawn.cpp
     pc_port/pc_p2_original_drop.cpp
     pc_port/pc_p2_original_drop_engine.cpp
@@ -3486,6 +3502,73 @@ add_test(NAME p2_original_onyon_lineage COMMAND p2_original_onyon_lineage_test)
 add_executable(p2_original_number_profile_test tools/p2_original_number_profile_test.cpp pc_port/pc_p2_original_number_profile.cpp)
 target_include_directories(p2_original_number_profile_test PRIVATE pc_port)
 add_test(NAME p2_original_number_profile COMMAND p2_original_number_profile_test)
+add_executable(p2_original_resource_contents_test pc_port/pc_p2_original_resource_contents_test.cpp pc_port/pc_p2_original_resource_contents.cpp)
+target_include_directories(p2_original_resource_contents_test PRIVATE pc_port)
+target_compile_options(p2_original_resource_contents_test PRIVATE -Wall -Wextra -Werror -UNDEBUG)
+add_test(NAME p2_original_resource_contents COMMAND p2_original_resource_contents_test)
+add_executable(p2_original_egg_number_authority_test tools/p2_original_egg_number_authority_test.cpp pc_port/pc_p2_original_egg_number_journal.cpp pc_port/pc_p2_original_resource_contents.cpp)
+target_include_directories(p2_original_egg_number_authority_test PRIVATE pc_port)
+target_compile_options(p2_original_egg_number_authority_test PRIVATE -Wall -Wextra -Werror -UNDEBUG)
+add_test(NAME p2_original_egg_number_authority COMMAND p2_original_egg_number_authority_test)
+add_executable(p2_original_number_ledger_test tools/p2_original_number_ledger_test.cpp pc_port/pc_p2_original_number_ledger.cpp pc_port/pc_p2_original_resource_contents.cpp)
+target_include_directories(p2_original_number_ledger_test PRIVATE pc_port)
+target_compile_options(p2_original_number_ledger_test PRIVATE -Wall -Wextra -Werror -UNDEBUG)
+add_test(NAME p2_original_number_ledger COMMAND p2_original_number_ledger_test)
+add_executable(p2_original_number_geometry_test tools/p2_original_number_geometry_test.cpp pc_port/pc_p2_original_number_geometry.cpp pc_port/pc_p2_original_number_profile.cpp)
+target_include_directories(p2_original_number_geometry_test PRIVATE pc_port)
+target_compile_options(p2_original_number_geometry_test PRIVATE -Wall -Wextra -Werror -UNDEBUG)
+add_test(NAME p2_original_number_geometry COMMAND p2_original_number_geometry_test)
+add_executable(p2_original_number_animation_test tools/p2_original_number_animation_native_test.cpp pc_port/pc_p2_original_number_animation.cpp)
+target_include_directories(p2_original_number_animation_test PRIVATE pc_port)
+target_compile_options(p2_original_number_animation_test PRIVATE -Wall -Wextra -Werror -UNDEBUG)
+add_test(NAME p2_original_number_animation COMMAND p2_original_number_animation_test)
+add_executable(p2_original_number_motion_test tools/p2_original_number_motion_test.cpp pc_port/pc_p2_original_number_motion.cpp)
+target_include_directories(p2_original_number_motion_test PRIVATE pc_port)
+target_compile_options(p2_original_number_motion_test PRIVATE -Wall -Wextra -Werror -UNDEBUG -ffp-contract=off)
+add_test(NAME p2_original_number_motion COMMAND p2_original_number_motion_test)
+add_executable(p2_original_number_rigid_test tools/p2_original_number_rigid_test.cpp pc_port/pc_p2_original_number_rigid.cpp pc_port/pc_p2_original_number_triangle.cpp)
+target_include_directories(p2_original_number_rigid_test PRIVATE pc_port)
+target_compile_options(p2_original_number_rigid_test PRIVATE -Wall -Wextra -Werror -UNDEBUG -ffp-contract=off)
+add_test(NAME p2_original_number_rigid COMMAND p2_original_number_rigid_test)
+add_executable(p2_original_number_grid_test tools/p2_original_number_grid_test.cpp pc_port/pc_p2_original_number_grid.cpp)
+target_include_directories(p2_original_number_grid_test PRIVATE pc_port)
+target_compile_options(p2_original_number_grid_test PRIVATE -Wall -Wextra -Werror -UNDEBUG -ffp-contract=off)
+add_test(NAME p2_original_number_grid COMMAND p2_original_number_grid_test)
+add_executable(p2_original_number_lod_test tools/p2_original_number_lod_test.cpp pc_port/pc_p2_original_number_lod.cpp)
+target_include_directories(p2_original_number_lod_test PRIVATE pc_port)
+target_compile_options(p2_original_number_lod_test PRIVATE -Wall -Wextra -Werror -UNDEBUG -ffp-contract=off)
+add_test(NAME p2_original_number_lod COMMAND p2_original_number_lod_test)
+add_executable(p2_original_number_room_test tools/p2_original_number_room_test.cpp pc_port/pc_p2_original_number_room.cpp pc_port/pc_p2_original_number_triangle.cpp)
+target_include_directories(p2_original_number_room_test PRIVATE pc_port)
+target_compile_options(p2_original_number_room_test PRIVATE -Wall -Wextra -Werror -UNDEBUG -ffp-contract=off)
+add_test(NAME p2_original_number_room COMMAND p2_original_number_room_test)
+add_executable(p2_original_number_triangle_test tools/p2_original_number_triangle_test.cpp pc_port/pc_p2_original_number_triangle.cpp)
+target_include_directories(p2_original_number_triangle_test PRIVATE pc_port)
+target_compile_options(p2_original_number_triangle_test PRIVATE -Wall -Wextra -Werror -UNDEBUG -ffp-contract=off)
+add_test(NAME p2_original_number_triangle COMMAND p2_original_number_triangle_test)
+add_executable(p2_original_number_five_motion_test tools/p2_original_number_five_motion_test.cpp
+    pc_port/pc_p2_original_number_five_motion.cpp pc_port/pc_p2_original_number_rigid.cpp
+    pc_port/pc_p2_original_number_motion.cpp pc_port/pc_p2_original_number_lod.cpp pc_port/pc_p2_original_number_triangle.cpp)
+target_include_directories(p2_original_number_five_motion_test PRIVATE pc_port)
+target_compile_options(p2_original_number_five_motion_test PRIVATE -Wall -Wextra -Werror -UNDEBUG -ffp-contract=off)
+add_test(NAME p2_original_number_five_motion COMMAND p2_original_number_five_motion_test)
+add_executable(p2_original_room_trace_test tools/p2_original_room_trace_test.cpp
+    pc_port/pc_p2_original_room_trace.cpp pc_port/pc_p2_original_number_triangle.cpp pc_port/pc_p2_original_number_grid.cpp)
+target_include_directories(p2_original_room_trace_test PRIVATE pc_port)
+target_compile_options(p2_original_room_trace_test PRIVATE -Wall -Wextra -Werror -UNDEBUG -ffp-contract=off)
+add_test(NAME p2_original_room_trace COMMAND p2_original_room_trace_test)
+# Explicit f32 operation boundaries and finite admission checks survive optional
+# target optimization; only written std::fma operations may fuse in these ports.
+set_source_files_properties(
+    pc_port/pc_p2_original_number_motion.cpp
+    pc_port/pc_p2_original_number_rigid.cpp
+    pc_port/pc_p2_original_number_grid.cpp
+    pc_port/pc_p2_original_number_lod.cpp
+    pc_port/pc_p2_original_number_room.cpp
+    pc_port/pc_p2_original_number_triangle.cpp
+    pc_port/pc_p2_original_number_five_motion.cpp
+    pc_port/pc_p2_original_room_trace.cpp
+    PROPERTIES COMPILE_OPTIONS "-ffp-contract=off;-fno-fast-math")
 
 pikmin_add_ci_fixture(surface_campaign_sdl tools/p2_surface_campaign_sdl_fixture.cpp)
 

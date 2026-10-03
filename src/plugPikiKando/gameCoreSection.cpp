@@ -3,6 +3,7 @@
 #include "pc_p2_original_foliage_native.h"
 #include "pc_p2_ship.h"
 #include "pc_p2_original_course.h"
+#include "pc_p2_original_number_lod_native.h"
 #include "pc_p2_original_onyon_native.h"
 #include "pc_p2_white_poison.h"
 #include "pc_dev_console.h"
@@ -1029,6 +1030,7 @@ void GameCoreSection::prepareBadEnd()
 void GameCoreSection::exitStage()
 {
 #if defined(PIKI_PC_PORT)
+ pc_p2_original_number_lod_release_views(this);
  // Normal day-end/cache writes precede scene exit. Release original groups
  // while their actual generators, actor pools and family resources are alive.
  std::string originalError;

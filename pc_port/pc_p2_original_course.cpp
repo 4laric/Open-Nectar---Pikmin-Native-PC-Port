@@ -1,4 +1,5 @@
 #include "pc_p2_original_course.h"
+#include "pc_p2_original_number_native.h"
 #include "pc_p2_original_dispatch.h"
 #include "pc_p2_original_gen_object.h"
 #include "pc_p2_original_group_engine.h"
@@ -165,6 +166,7 @@ bool pc_p2_original_course_start(GeneratorList* list,std::string& e){
  current->shadows=std::move(shadows);current->started=true;e.clear();return true;
 }
 bool pc_p2_original_course_finish(std::string& e){
+ if(!pc_p2_original_number_preflight_teardown(e))return false;
  // Preserve unresolved source HEAD/pending graphs before any provider is
  // disposed. BODY retirement intentionally stays after the Party observer in
  // GameCoreSection::exitStage; this read-only guard must not retire BODYs.
@@ -174,6 +176,7 @@ bool pc_p2_original_course_finish(std::string& e){
  // A collected receipt cannot replace a pending physical cargo graph.
  if(!pc_p2_campaign_treasure_held_unload(e))return false;
  if(!pc_p2_original_corpse_unload(e))return false;
+ if(!pc_p2_original_number_unload(e))return false;
  if(current->started&&!pc_p2_original_course_unload(e))return false;
  if(current->pikis)pc_p2_original_piki_unload();
  current.reset();e.clear();return true;
