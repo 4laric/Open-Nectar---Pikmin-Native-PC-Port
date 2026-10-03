@@ -36,7 +36,6 @@ DEFINE_PRINT("pikidoKill");
 void Piki::doKill()
 {
 	pc_p2_purple_flight_cancel(this);
-    pc_p2_cave_campaign_party_forget(this);
 	pc_p2_purple_impact_forget(this);
 	pc_p2_gas_cloud_end(this, true);
 	if (mRouteHandle) {
@@ -125,6 +124,8 @@ void Piki::doKill()
 	mFSM->transit(this, PIKISTATE_Dead);
 	_500.reset();
 	pikiMgr->mDeadPikis++;
+    // Source death observers above retain identity until actual pool retirement.
+    pc_p2_cave_campaign_party_forget(this);
 	pikiMgr->kill(this);
 
 	STACK_PAD_VAR(10);
