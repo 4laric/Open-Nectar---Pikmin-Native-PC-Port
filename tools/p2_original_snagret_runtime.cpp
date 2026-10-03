@@ -57,7 +57,7 @@ class SnagretApp:public PlugPikiApp {
    if(originalActors().query(t,source,found)&&source==34){require(!actor,"one literal source birth");actor=t;token=found;}}
   require(actor&&token&&native->provider().lookup(actor)!=nullptr,"physical actor registered");
   auto* t=static_cast<BTeki*>(actor);const char* fsm="stay",*clip=nullptr;float phase=0;
-  require(pc_p2_snakejoint_clip(t,clip,phase)&&pc_p2_snakejoint_suppress_ai(t)&&pc_p2_snakejoint_model_hidden(t)&&t->mHealth==1500&&t->mTekiType==TEKI_Chappy,"actual P2 family health/FSM/chassis");
+  require(pc_p2_snakejoint_clip(t,clip,phase)&&pc_p2_snakejoint_suppress_ai(t)&&pc_p2_snakejoint_model_hidden(t)&&t->mHealth==1500&&t->mMaxHealth==1500&&t->mTekiType==TEKI_Chappy,"actual P2 family health/FSM/chassis");
   InstanceIdentity id;unsigned source=0,found=0;require(originalActors().query(actor,source,found,&id)&&id.generator==retail().enemy.uid&&id.ordinal==0&&id.activation==unsigned(entries+1),"complete original registry identity");
   require(t->mSRT.t.x==retail().enemy.position.x&&t->mSRT.t.z==retail().enemy.position.z,"authored source XZ preserved");
   std::printf("P2_ORIGINAL_SNAGRET_RUNTIME_BIRTH uid=%u token=%u activation=%llu state=%s clip=%s health=%.1f x=%.3f y=%.3f z=%.3f\n",id.generator,token,(unsigned long long)id.activation,fsm,clip,t->mHealth,t->mSRT.t.x,t->mSRT.t.y,t->mSRT.t.z);
