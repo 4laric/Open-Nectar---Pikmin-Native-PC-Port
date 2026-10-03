@@ -3541,3 +3541,7 @@ add_executable(pc_p2_original_gate_test tools/test_p2_original_gate.cpp pc_port/
 target_include_directories(pc_p2_original_gate_test PRIVATE "${PROJECT_SOURCE_DIR}/pc_port")
 
 pikmin_add_ci_fixture(original_gate tools/p2_original_gate_runtime.cpp)
+add_executable(pc_p2_surface_water_drain_test tools/test_p2_surface_water_drain.cpp)
+target_include_directories(pc_p2_surface_water_drain_test PRIVATE pc_port)
+target_compile_options(pc_p2_surface_water_drain_test PRIVATE -UNDEBUG)
+add_test(NAME p2_surface_water_drain COMMAND pc_p2_surface_water_drain_test)
