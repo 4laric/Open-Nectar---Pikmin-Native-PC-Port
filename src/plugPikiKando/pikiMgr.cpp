@@ -4,6 +4,7 @@
 #include "pc_vs.h"
 #include "GoalItem.h"
 #include "PikiHeadItem.h"
+#include "pc_randomizer.h"
 #endif
 #include "AIConstant.h"
 #include "DebugLog.h"
@@ -44,6 +45,23 @@ DEFINE_PRINT("pikiMgr");
  */
 Creature* PikiMgr::birth()
 {
+    return birthWithFieldLimit(AICONST.mMaxPikisOnField(), meBirthMode);
+}
+#if defined(PIKI_PC_PORT)
+Creature* PikiMgr::birthOriginalP2Container()
+{
+    if (!pc_randomizer_original_session() || !containerExitMode || meBirthMode
+        || !itemMgr || itemMgr->getContainerExitCount() <= 0) return nullptr;
+    return birthWithFieldLimit(100, false);
+}
+Creature* PikiMgr::birthOriginalP2Sprout()
+{
+    if (!pc_randomizer_original_session() || !meBirthMode || containerExitMode) return nullptr;
+    return birthWithFieldLimit(100, true);
+}
+#endif
+Creature* PikiMgr::birthWithFieldLimit(int fieldLimit, bool allowSproutExtra)
+{
 	int totalPikis = GameStat::mapPikis;
 	if (itemMgr) {
 		totalPikis += itemMgr->getContainerExitCount();
@@ -53,11 +71,11 @@ Creature* PikiMgr::birth()
 		totalPikis--;
 	}
 
-	if (meBirthMode) {
-		if (totalPikis >= AICONST.mMaxPikisOnField() + 1) {
+	if (allowSproutExtra) {
+		if (totalPikis >= fieldLimit + 1) {
 			return nullptr;
 		}
-	} else if (totalPikis >= AICONST.mMaxPikisOnField()) {
+	} else if (totalPikis >= fieldLimit) {
 		return nullptr;
 	}
 
