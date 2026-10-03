@@ -1013,6 +1013,7 @@ void GameCoreSection::exitStage()
 {
 #if defined(PIKI_PC_PORT)
     pc_p2_surface_save_scene_exit();
+    pc_p2_original_piki_origin_scene_exit();
 #endif
 #if defined(PIKI_PC_PORT)
 	pc_demon_drop_scene_exit();
@@ -1778,10 +1779,12 @@ void GameCoreSection::initStage()
 		PRINT("*** GEN1\n");
 		generatorMgr->init();
 	}
+    pc_p2_surface_save_sources_preinit();
 	generatorList->createRamGenerators();
 
 	memStat->start("genCache");
 	generatorCache->load(genCacheStage);
+    pc_p2_surface_save_sources_loaded();
 	memStat->end("genCache");
 
 	if (useDay) {

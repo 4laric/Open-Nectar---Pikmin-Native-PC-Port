@@ -3313,3 +3313,5 @@ add_executable(p2_original_piki_origin_test tools/pc_p2_original_piki_origin_tes
 target_include_directories(p2_original_piki_origin_test PRIVATE pc_port)
 target_compile_options(p2_original_piki_origin_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
 add_test(NAME p2_original_piki_origin COMMAND p2_original_piki_origin_test)
+
+pikmin_add_ci_fixture(surface_campaign_sdl tools/p2_surface_campaign_sdl_fixture.cpp)

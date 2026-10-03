@@ -1333,7 +1333,8 @@ void Piki::initColor(int color)
     mP2Purple=false;mP2White=false;mP2Bulbmin=false;mP2AnimationTime=0;
 #if defined(PIKI_PC_PORT)
     const bool originalSourceColor = color >= Blue && color <= Yellow && pc_p2_original_piki_init_held(this);
-    if (!originalSourceColor && !pc_bbft_color_access(color)) color = Red;
+    if (!originalSourceColor && !pc_bbft_color_access(color)
+        && !pc_p2_original_piki_saved_color_held(this,color)) color = Red;
 #else
     if (!pc_bbft_color_access(color) && !pc_p2_original_piki_saved_color_held(this,color)) color = Red;
 #endif
