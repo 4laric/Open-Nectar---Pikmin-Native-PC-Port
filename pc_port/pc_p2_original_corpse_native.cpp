@@ -13,7 +13,7 @@
 #include <memory>
 #include <map>
 namespace {
-struct Binding {std::uint64_t handle;const p2original::CorpseProfile* profile;CollPart* sphere=nullptr;};
+struct Binding {std::uint64_t handle;const p2original::CorpseProfile* profile;CollPart* sphere=nullptr;bool updateActive=true,stickEnabled=true;};
 std::map<const Pellet*,Binding> bindings;
 // Profiles contain only persistent literal values: no App-heap model/config links.
 std::map<unsigned,PelletConfig*> configs;
@@ -78,8 +78,9 @@ void pc_p2_original_corpse_born(Pellet* pellet,PelletView* view){
  // App-heap tree for every corpse; source descriptors are bounded and static.
  auto* tree=pellet->mPelletCollInfo;tree->initInfoTree(node);
  CollPart* sphere=tree->getSphere('cent');if(!sphere)fault("original corpse collision allocation failed");
+ const bool updateActive=sphere->mIsUpdateActive,stickEnabled=sphere->mIsStickEnabled;
  sphere->mIsUpdateActive=false;sphere->mIsStickEnabled=false;
- pellet->mCollInfo=tree;bindings.emplace(pellet,Binding{h,p,sphere});
+ pellet->mCollInfo=tree;bindings.emplace(pellet,Binding{h,p,sphere,updateActive,stickEnabled});
  std::printf("P2_ORIGINAL_CORPSE_BIRTH source=%u uid=%u ordinal=%u epoch=%llu activation=%llu min=%u max=%u seeds=%u\n",
  source,id.generator,id.ordinal,(unsigned long long)id.epoch,(unsigned long long)id.activation,p->minimum,p->maximum,p->seeds);
 }
@@ -87,6 +88,10 @@ const p2original::CorpseProfile* pc_p2_original_corpse_profile(const Pellet* pel
 void pc_p2_original_corpse_forget(Pellet* pellet){
  auto i=bindings.find(pellet);if(i==bindings.end())return;
  if(!ledger||!ledger->forgetPellet(pellet,i->second.handle))fault("corpse retirement lost its receipt binding");
+ // CollInfo::initInfo does not reinitialize these flags on pool reuse.
+ // Restore the borrowed native part before a P1/number pellet can reuse it.
+ i->second.sphere->mIsUpdateActive=i->second.updateActive;
+ i->second.sphere->mIsStickEnabled=i->second.stickEnabled;
  bindings.erase(i);
 }
 bool pc_p2_original_corpse_onion(Pellet* pellet,GoalItem* onion,unsigned& grant){
