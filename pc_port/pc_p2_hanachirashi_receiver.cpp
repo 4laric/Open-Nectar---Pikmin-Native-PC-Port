@@ -18,7 +18,7 @@ struct WindPikiState : PikiState {
     WindPikiState():PikiState(PIKISTATE_HanachirashiBlow,"P2_HANA_BLOW"){}
     void init(Piki* p) override {
         auto arg=pikiPending.at(p);direction=arg.direction;wither=arg.wither;pikiPending.erase(p); phase=Hit;timer=1;
-        p->endStickObject();if(wither)p->mActiveAction->abandon(nullptr);else p->mActiveAction->resume();p->mIsBeingDamaged=true;
+        p->endStickObject();p->mActiveAction->resume();p->mIsBeingDamaged=true;
         p->startMotion(PaniMotionInfo(PIKIANIM_JHit,p),PaniMotionInfo(PIKIANIM_JHit));
         p->mVelocity.y=direction.y*(1+.1f*gsys->getRand(1.f));
         p->mFaceDirection=roundAng(std::atan2(direction.x,direction.z)+PI);
@@ -45,7 +45,8 @@ struct WindPikiState : PikiState {
     }
     void cleanup(Piki* p) override {
         p->mIsBeingDamaged=false;
-        if(!p->isAlive())return;
+        if(!p->isAlive()||pikiPending.count(p))return;
+        if(phase<Koke){if(p->mActiveAction->resumable())p->mActiveAction->restart();return;}
         if(p->mIsWhistlePending){p->changeMode(PikiMode::FormationMode,p->mNavi);p->mIsWhistlePending=false;}
         else if(wither)p->changeMode(PikiMode::FreeMode,nullptr);
         else if(p->mActiveAction->resumable())p->mActiveAction->restart();
