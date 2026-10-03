@@ -38,7 +38,9 @@ struct TestWorld:World {
 std::vector<std::string> order;int transitions=0,controls=0,downBegins=0,deadEvents=0,cleanupEvents=0,findQueries=0,actionRequests=0,dismissRequests=0;
 const LoadedScene* loaded=&scene;const World* active=&world;SourceBank* bankProvider=nullptr;WalkEnvironment* envProvider=nullptr;
 bool alive[2]={true,true},framesAvailable=true,timerAvailable=true,controlAvailable=true,downAvailable=true,bankReady=true,bankBound=true,partyAvailable=true;
-std::uint8_t frames[2]={0,0};std::string resourceBytes;std::map<const Navi*,MotionState> motions;bool emitEnd=false;
+std::uint8_t frames[2]={0,0};std::string resourceBytes;std::map<const Navi*,MotionState> motions,boundMotions;
+std::map<const Navi*,int> blendLocks;std::map<const Navi*,Listener> boundListeners;
+bool damageSupported=true,nigeruSupported=true,emitEnd=false;unsigned long long motionGeneration=0;int bankAdvances=0;
 walk::Frame observed;
 int slot(const Navi* n){return n==&a?0:n==&b?1:-1;}
 walk::Frame ordinary(){walk::Frame f;f.actor=walk::Actor{};f.actor->alive=true;f.actor->hasController=true;f.world=walk::World{};f.world->demoInactive=true;f.buttons=walk::Buttons{};f.stickCount=0;f.onionQueryComplete=true;f.deltaTime=.1f;f.cellCandidates=std::vector<walk::Candidate>{};return f;}
@@ -55,6 +57,10 @@ struct Environment:WalkEnvironment {
 } env;
 class TypedState:public NativeState {
 public:explicit TypedState(StateId id):NativeState(id){}bool sourceInvincible()const override{return false;}
+};
+class KeyState:public TypedState {
+public:int calls=0,lastKey=0;KeyState():TypedState(StateId::Follow){}
+ bool sourceAnimationKey(Navi*,int key,std::string& e)override{++calls;lastKey=key;e.clear();return true;}
 };
 class ReceiverState:public NaviState,public State {
  StateId source;bool forged;
@@ -87,10 +93,12 @@ bool pc_p2_original_captain_throw_preflight(Navi*,StateId,std::string& e){e="tes
 namespace p2original { namespace captain {
 struct SourceBank::Impl{};SourceBank::SourceBank():m(new Impl){}SourceBank::~SourceBank()=default;
 bool SourceBank::ready()const{return bankReady;}
+bool SourceBank::supports(Navi* n,Motion motion,std::string& e)const{order.push_back("supports"+std::to_string(unsigned(motion)));if(!bankReady||!bankBound||slot(n)<0||(motion==Motion::Damage&&!damageSupported)||(motion==Motion::Nigeru&&!nigeruSupported)){e="test authored motion unavailable";return false;}return true;}
+bool SourceBank::enableMotionBlend(Navi* n,std::string&){order.push_back("enable-blend");blendLocks[n]=int(boundMotions[n].motion);boundMotions[n]={Motion::Nigeru,10,++motionGeneration,false,false};boundListeners[n]=Listener::SourceActor;return true;}
 bool SourceBank::state(const Navi* n,MotionState& out,std::string& e)const{if(!bankBound||slot(n)<0){e="test bank actor missing";return false;}out=motions[n];return true;}
 bool SourceBank::sourceBytes(SourceResource r,std::string& out,std::string& e)const{if(r!=SourceResource::Parameters){e="test source resource unavailable";return false;}out=resourceBytes;return true;}
-bool SourceBank::start(Navi* n,Motion m,std::string&){order.push_back("motion"+std::to_string(unsigned(m)));motions[n].motion=m;return true;}
-bool SourceBank::advance(Navi*,float,const std::function<bool(int)>& emit,std::string&){if(emitEnd){emitEnd=false;return emit(1000);}return true;}
+bool SourceBank::start(Navi* n,Motion m,std::string&){order.push_back("motion"+std::to_string(unsigned(m)));motions[n]={m,0,++motionGeneration,false,false};boundMotions[n]={m,0,++motionGeneration,false,false};blendLocks[n]=-1;boundListeners[n]=Listener::None;return true;}
+bool SourceBank::advance(Navi*,float,const std::function<bool(int)>& emit,std::string&){++bankAdvances;if(emitEnd){emitEnd=false;return emit(1000);}return true;}
 namespace nativecontrol {
 std::optional<float> sceneAnimationTimer(const Navi*){if(!timerAvailable)return {};return 0;}
 bool control(Navi*,std::string& e){++controls;order.push_back("control");if(!controlAvailable)e="test control provider unavailable";return controlAvailable;}
@@ -110,6 +118,7 @@ int main(int argc,char** argv){try{
  ++world.epoch;check(!pc_p2_original_captain_core_preflight(&a,StateId::Damaged,error),"world stale incarnation refuses");world.epoch=scene.epoch;
  bankProvider=nullptr;check(!pc_p2_original_captain_transit(&a,StateId::Damaged,error)&&transitions==0,"missing bank refuses before source state");bankProvider=&bank;
  bankReady=false;check(!pc_p2_original_captain_core_preflight(&a,StateId::Damaged,error),"unprepared actual motion bank refuses");bankReady=true;bankBound=false;check(!pc_p2_original_captain_core_preflight(&a,StateId::Damaged,error),"bank doesnot bind exact actor");bankBound=true;
+ damageSupported=false;clearCounts();check(!pc_p2_original_captain_transit(&a,StateId::Damaged,error)&&transitions==0&&a.mHealth==50,"missing genuineDamage clip refuses beforemutation");damageSupported=true;nigeruSupported=false;clearCounts();check(!pc_p2_original_captain_transit(&a,StateId::Damaged,error)&&transitions==0&&a.mHealth==50,"missing genuineNigeru blend clip refuses beforemutation");nigeruSupported=true;
  envProvider=nullptr;check(!pc_p2_original_captain_transit(&a,StateId::Walk,error)&&transitions==0,"missing Walk environment refuses");envProvider=&env;
  env.identity=&wrongScene;check(!pc_p2_original_captain_core_preflight(&a,StateId::Walk,error),"wrong Walk environment scene refuses");env.identity=&scene;
  env.captureAvailable=false;check(!pc_p2_original_captain_transit(&a,StateId::Walk,error)&&transitions==0,"missing completed Walk capture refuses beforetransition");env.captureAvailable=true;
@@ -122,7 +131,8 @@ int main(int argc,char** argv){try{
  fsm.registerState(new ReceiverState(41,StateId::Flick,true));mapped=777;check(pc_p2_original_captain_route_transition(&a,41,mapped)==PcOriginalCaptainRoute::Refused&&mapped==777,"forged typed receiver pointer mustrefuse");
  world.game=Phase::Inactive;mapped=777;check(pc_p2_original_captain_route_transition(&a,39,mapped)==PcOriginalCaptainRoute::Refused&&mapped==777,"inactive typed receiver refuses");world.game=Phase::GameWorldActive;
  fsm.registerState(new TypedState(StateId::Follow));check(pc_p2_original_captain_transit(&a,StateId::Walk,error),error);check(dynamic_cast<State*>(a.current)->sourceStateId()==StateId::Walk,"real factory Walk init active");
- check(pc_p2_original_captain_transit(&a,StateId::Damaged,error),error);auto* actual=dynamic_cast<State*>(a.current);frames[0]=23;check(actual->actorInvincibleFrames(a)==23,"sourceState readonlyframes comes from actualactorprovider");framesAvailable=false;check(!actual->actorInvincibleFrames(a),"sourceState absentactorframes preserves missing ratherzero");framesAvailable=true;check(motions[&a].motion==Motion::Damage,"actual Damaged init authoredDamage");emitEnd=true;check(pc_p2_original_captain_core_advance_animation(&a,1,error)&&dynamic_cast<State*>(a.current)->sourceStateId()==StateId::Walk,"actual source Damaged END restores Walk backup");check(cleanupEvents==1&&frames[0]==60,"source Damaged cleanup iframe60 event before oldstate removed");
+ check(pc_p2_original_captain_transit(&a,StateId::Damaged,error),error);auto* actual=dynamic_cast<State*>(a.current);frames[0]=23;check(actual->actorInvincibleFrames(a)==23,"sourceState readonlyframes comes from actualactorprovider");framesAvailable=false;check(!actual->actorInvincibleFrames(a),"sourceState absentactorframes preserves missing ratherzero");framesAvailable=true;check(motions[&a].motion==Motion::Damage&&boundMotions[&a].motion==Motion::Nigeru&&boundMotions[&a].frame==10&&blendLocks[&a]==int(Motion::Damage)&&boundListeners[&a]==Listener::SourceActor,"actual Damaged init DamageSelf then sourceblend BoundNigeru frame10 lockDamage");
+ auto damageStart=std::find(order.begin(),order.end(),"motion4"),blendStart=std::find(order.begin(),order.end(),"enable-blend");check(damageStart!=order.end()&&blendStart!=order.end()&&damageStart<blendStart,"actual Damage motion starts before source enableBlend");emitEnd=true;check(pc_p2_original_captain_core_advance_animation(&a,1,error)&&dynamic_cast<State*>(a.current)->sourceStateId()==StateId::Walk,"actual source Damaged END restores Walk backup");check(cleanupEvents==1&&frames[0]==60,"source Damaged cleanup iframe60 event before oldstate removed");
  check(pc_p2_original_captain_transit(&a,StateId::Follow,error),error);check(pc_p2_original_captain_transit(&a,StateId::Damaged,error),error);emitEnd=true;check(pc_p2_original_captain_core_advance_animation(&a,1,error)&&dynamic_cast<State*>(a.current)->sourceStateId()==StateId::Follow,"source Damaged END restores actual Follow backup");
  auto* typed=dynamic_cast<DamageTransitions*>(a.current);check(typed&&typed->canEnterSourceDamaged(a),"actual NativeState owns typed damage transition seam");a.mHealth=1;typed->enterSourceDamaged(a,.5f);check(dynamic_cast<State*>(a.current)->sourceStateId()==StateId::Damaged&&a.mHealth==1,"state transition callback never directly mutatesHP");
  check(pc_p2_original_captain_transit(&a,StateId::Walk,error),error);clearCounts();a.current->exec(&a);check(controls==1&&findQueries==1,"ordinary Walk control called once before exactposttimer policy");
@@ -130,6 +140,22 @@ int main(int argc,char** argv){try{
  observed=ordinary();observed.buttons->aDown=true;check(pc_p2_original_captain_transit(&a,StateId::Walk,error),error);clearCounts();a.current->exec(&a);check(controls==1&&findQueries==1&&actionRequests==1,"actual ActionButton continuation mustnot replay priorcontrol/query/request");
  observed=ordinary();observed.buttons->xDown=true;observed.buttons->xHeld=true;check(pc_p2_original_captain_transit(&a,StateId::Walk,error),error);clearCounts();a.current->exec(&a);check(controls==1&&findQueries==1&&dismissRequests==1,"actual Dismiss continuation mustnot replay sourceprefix");
  observed=ordinary();check(pc_p2_original_captain_transit(&a,StateId::Walk,error),error);controlAvailable=false;clearCounts();a.current->exec(&a);check(controls==1&&findQueries==0,"missing control provider blocks policyeffects");controlAvailable=true;
+ // The actual dispatcher authenticates current typed identity and emits a key;
+ // animator generation/callback guards belong to the common animator TU.
+ auto* savedCurrent=a.current;const auto savedSelf=motions[&a],savedBound=boundMotions[&a];const int savedAdvances=bankAdvances;
+ check(pc_p2_original_captain_animation_key(&a,17,error)&&error.empty(),"actual Walk dispatch delegates benign key to current policy");
+ check(bankAdvances==savedAdvances&&motions[&a].generation==savedSelf.generation&&boundMotions[&a].generation==savedBound.generation&&motions[&a].frame==savedSelf.frame&&boundMotions[&a].frame==savedBound.frame,"key dispatch never advances or replaces either animator clock");
+ loaded=nullptr;check(!pc_p2_original_captain_animation_key(&a,17,error)&&!error.empty(),"key dispatch missing canonical scene refuses");loaded=&scene;
+ ++world.epoch;check(!pc_p2_original_captain_animation_key(&a,17,error)&&!error.empty(),"key dispatch stale scene incarnation refuses");world.epoch=scene.epoch;
+ world.actors[1]=&outsider;check(!pc_p2_original_captain_animation_key(&a,17,error)&&!error.empty(),"key dispatch mismatched source roster refuses");world.actors[1]=&b;
+ NaviState untyped(91);a.current=&untyped;check(!pc_p2_original_captain_animation_key(&a,17,error)&&!error.empty(),"key dispatch refuses P1 current state");
+ ReceiverState forgedKey(92,StateId::Flick,true);a.current=&forgedKey;check(!pc_p2_original_captain_animation_key(&a,17,error)&&error=="missing exact current source animation state","key dispatch refuses forged source receiver identity before hook");
+ ReceiverState flickKey(93,StateId::Flick),kokeKey(94,StateId::KokeDamage);a.current=&flickKey;check(!pc_p2_original_captain_animation_key(&a,17,error)&&error=="actual source receiver key handler is unavailable","actual Flick receiver missing independent owner hook refuses");a.current=&kokeKey;check(!pc_p2_original_captain_animation_key(&a,17,error)&&!error.empty(),"actual Koke receiver missing owner hook refuses");
+ TypedState unavailableKey(StateId::Follow);a.current=&unavailableKey;check(!pc_p2_original_captain_animation_key(&a,17,error)&&error=="source state key handler unavailable","default NativeState key handler explicitly refuses");
+ KeyState firstKey,secondKey;a.current=&firstKey;check(pc_p2_original_captain_animation_key(&a,201,error)&&firstKey.calls==1&&firstKey.lastKey==201,"key dispatch invokes exact current NativeState virtual");a.current=&secondKey;check(pc_p2_original_captain_animation_key(&a,202,error)&&firstKey.calls==1&&secondKey.calls==1&&secondKey.lastKey==202,"changed current state receives key without reusing prior state handler");
+ check(bankAdvances==savedAdvances&&motions[&a].generation==savedSelf.generation&&boundMotions[&a].generation==savedBound.generation,"refused and custom key handlers leave authentic animator generations unchanged");a.current=savedCurrent;
+ check(pc_p2_original_captain_transit(&a,StateId::Damaged,error),error);auto* damageCurrent=a.current;check(pc_p2_original_captain_animation_key(&a,17,error)&&a.current==damageCurrent&&error.empty(),"actual Damaged nonEND key permits remaining current generation");
+ const int advancesBeforeEnd=bankAdvances,cleanupBeforeEnd=cleanupEvents;check(!pc_p2_original_captain_animation_key(&a,1000,error)&&error.empty()&&dynamic_cast<State*>(a.current)->sourceStateId()==StateId::Walk,"actual Damaged END restores Walk and signals successful statechange with false plus empty error");check(cleanupEvents==cleanupBeforeEnd+1&&frames[0]==60&&bankAdvances==advancesBeforeEnd,"direct END dispatch performs genuine cleanup without duplicate clock advance");
  clearCounts();alive[0]=true;check(pc_p2_original_captain_transit(&a,StateId::Dead,error),error);check(downBegins==1&&deadEvents==1&&order.size()>=3&&order[1]=="begin-down-alive1"&&order[2]=="clear-source-alive","actual Dead init beginsDown BEFORE sourceCFalive clear");check(a.current->invincible(&a),"actual Dead sourceState invincible");a.mTargetVelocity.set(1,2,3);a.mVelocity.set(4,5,6);a.current->exec(&a);check(a.mTargetVelocity.x==0&&a.mTargetVelocity.y==0&&a.mTargetVelocity.z==0&&a.mVelocity.x==0&&a.mVelocity.y==0&&a.mVelocity.z==0,"actual Dead zeroes both real velocity fields");
  std::cout<<"P2_ORIGINAL_CORE_STATES_ACTUAL_TU_CONTROLS_PASS checks="<<checks<<" gameplay=UNTESTED providers=DOUBLES\n";return 0;
 }catch(const std::exception& e){std::cerr<<"FAIL "<<e.what()<<'\n';return 1;}}
