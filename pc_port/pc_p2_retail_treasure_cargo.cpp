@@ -26,7 +26,7 @@ struct P2RetailTreasureNativeBody {
 namespace {
 using namespace p2retailtreasure;
 p2retailcargo::Config config;AssetBank bank;p2treasure::Catalog catalog;
-std::map<std::string,Shape*> shapes;bool ready=false,rollingBack=false;
+std::map<std::string,Shape*> shapes;bool ready=false,rollingBack=false,tearingDown=false;
 struct Record {p2retail::BirthIdentity birth;std::string id;Pellet* actor=nullptr;PelletConfig* profile=nullptr;};
 std::map<std::string,Record> records;
 bool fail(std::string& error,const char* message){error=message;return false;}
@@ -40,7 +40,8 @@ bool current(const p2retailcargo::Config& c){
     return c.context&&c.births&&c.placement&&pc_p2_retail_treasure_session_matches(c.floor.scene)
         &&c.context(c.floor.scene,actual)&&same(actual,c.floor);
 }
-bool current(){return ready&&!rollingBack&&current(config)&&p2treasurestate::state.source()==bank.identity;}
+bool current(){return ready&&!rollingBack&&!tearingDown&&current(config)&&p2treasurestate::state.source()==bank.identity;}
+struct TeardownScope {TeardownScope(){tearingDown=true;}~TeardownScope(){tearingDown=false;}};
 class ModelStream final:public RamStream {
 public:
     ModelStream(std::string& bytes):RamStream(bytes.data(),int(bytes.size())){}
@@ -95,6 +96,7 @@ bool completed(Pellet* actor,Suckable* receiver,std::string& error){
 void clear(){records.clear();shapes.clear();bank={};catalog={};config={};ready=false;}
 }
 bool pc_p2_retail_treasure_cargo_preflight(const p2retailcargo::Config& c,std::string& error){
+    if(tearingDown)return fail(error,"cargo preflight during receiver teardown");
     if(ready)return same(config.floor,c.floor)&&current()?true:fail(error,"cargo floor must retire before another preflight");
     if(rollingBack||!records.empty()||!current(c)||!gsys||!pelletMgr)return fail(error,"cargo preflight lacks exclusive authenticated floor/resources");
     std::string master;AssetBank next;p2treasure::Catalog nextCatalog;
@@ -140,6 +142,8 @@ bool pc_p2_retail_treasure_cargo_birth(const p2retail::BirthIdentity& birth,Pell
 bool pc_p2_retail_treasure_cargo_absent(const p2retail::BirthIdentity& birth,const std::string& receipt,std::string& error){
     const auto* entry=source(birth,error);
     if(!entry||entry->id!=receipt||!p2treasurestate::state.seen(catalog,receipt))return fail(error,"cargo consumed binding has no canonical source receipt");
+    const auto owned=records.find(birth.instance);
+    if(owned!=records.end()&&owned->second.actor)return fail(error,"consumed source still has a native cargo actor");
     error.clear();return true;
 }
 bool pc_p2_retail_treasure_cargo_carry_radius(Pellet* actor,float& radius){
@@ -151,15 +155,30 @@ bool pc_p2_retail_treasure_cargo_carry_radius(Pellet* actor,float& radius){
     return false;
 }
 bool pc_p2_retail_treasure_cargo_abort_prepared(std::string& error){
+    return pc_p2_retail_treasure_cargo_abort_prepared([](std::string& e){return pc_p2_original_pod_abort_prepared(config.floor.scene,e);},error);
+}
+bool pc_p2_retail_treasure_cargo_abort_prepared(p2retailcargo::PodTeardown teardown,std::string& error){
     if(!current())return fail(error,"cargo rollback has no selected floor");
-    if(!pc_p2_original_pod_abort_prepared(config.floor.scene,error))return false;
+    if(!teardown||!pc_p2_original_pod_can_abort_prepared(config.floor.scene))
+        return fail(error,"cargo rollback has no uncommitted matching receiver");
+    TeardownScope transaction;
+    if(!teardown(error))return false;
+    if(pc_p2_original_pod_owned())return fail(error,"receiver owner did not finish provisional teardown");
     rollingBack=true;for(auto& item:records)if(item.second.actor)item.second.actor->kill(false);rollingBack=false;
     clear();error.clear();return true;
 }
 bool pc_p2_retail_treasure_cargo_release_collected(std::string& error){
+    return pc_p2_retail_treasure_cargo_release_collected([](std::string& e){return pc_p2_original_pod_release(e);},error);
+}
+bool pc_p2_retail_treasure_cargo_release_collected(p2retailcargo::PodTeardown teardown,std::string& error){
     if(!current())return fail(error,"cargo release has no selected floor");
     for(const auto& item:records)if(!p2treasurestate::state.seen(catalog,item.second.id))return fail(error,"uncollected original cargo needs actual graph retention/restore");
-    if(!pc_p2_original_pod_release(error))return false;
+    p2originalpod::Snapshot receiver;
+    if(!teardown||!pc_p2_original_pod_snapshot(config.floor.scene,receiver)||!receiver.committed)
+        return fail(error,"cargo release has no committed matching receiver");
+    TeardownScope transaction;
+    if(!teardown(error))return false;
+    if(pc_p2_original_pod_owned())return fail(error,"receiver owner did not finish collected teardown");
     rollingBack=true;for(auto& item:records)if(item.second.actor)item.second.actor->kill(false);rollingBack=false;
     clear();error.clear();return true;
 }
