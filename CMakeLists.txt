@@ -3294,3 +3294,8 @@ endif()
 # Real native factory/cache transport fixture; synthetic zero-birth admission only.
 pikmin_add_ci_fixture(original_gen_object tools/p2_original_gen_object_runtime.cpp)
 pikmin_add_ci_fixture(original_piki_init tools/p2_original_piki_init_runtime.cpp)
+
+add_executable(pc_p2_surface_water_drain_test tools/test_p2_surface_water_drain.cpp)
+target_include_directories(pc_p2_surface_water_drain_test PRIVATE pc_port)
+target_compile_options(pc_p2_surface_water_drain_test PRIVATE -UNDEBUG)
+add_test(NAME p2_surface_water_drain COMMAND pc_p2_surface_water_drain_test)
