@@ -13,6 +13,8 @@ void check(bool value) {
 int main() {
     Piki first, second;
     check(!pc_p2_original_piki_init_consume(&first));
+    check(!pc_p2_original_piki_init_held(&first));
+    check(!pc_p2_original_piki_init_held(nullptr));
     check(!pc_p2_original_piki_free_init_consume(&first));
     check(!pc_p2_original_piki_bore_init_consume(&first));
     {
@@ -21,6 +23,7 @@ int main() {
         check(!pc_p2_original_piki_init_consume(nullptr));
         PcOriginalPikiInitScope scope(&first);
         check(scope.valid() && !scope.consumed());
+        check(!pc_p2_original_piki_init_held(&first));
         check(!pc_p2_original_piki_free_init_consume(&first));
         check(!pc_p2_original_piki_bore_init_consume(&first));
         {
@@ -31,6 +34,8 @@ int main() {
         check(!pc_p2_original_piki_init_consume(&second));
         check(pc_p2_original_piki_init_consume(&first));
         check(scope.consumed());
+        check(pc_p2_original_piki_init_held(&first));
+        check(!pc_p2_original_piki_init_held(&second));
         check(!pc_p2_original_piki_free_init_consume(&second));
         check(!pc_p2_original_piki_bore_init_consume(&first));
         check(pc_p2_original_piki_free_init_consume(&first));
@@ -52,6 +57,7 @@ int main() {
         check(!pc_p2_original_piki_init_consume(&second));
     }
     check(!pc_p2_original_piki_init_consume(&first));
+    check(!pc_p2_original_piki_init_held(&first));
     check(!pc_p2_original_piki_free_init_consume(&first));
     check(!pc_p2_original_piki_bore_init_consume(&first));
     try {

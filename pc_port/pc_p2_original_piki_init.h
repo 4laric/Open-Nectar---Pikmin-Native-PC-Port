@@ -15,6 +15,7 @@ private:
     friend bool pc_p2_original_piki_init_consume(Piki*) noexcept;
     friend bool pc_p2_original_piki_free_init_consume(Piki*) noexcept;
     friend bool pc_p2_original_piki_bore_init_consume(Piki*) noexcept;
+    friend bool pc_p2_original_piki_init_held(const Piki*) noexcept;
     Piki* mBody = nullptr;
     bool mActive = false;
     bool mConsumed = false;
@@ -26,3 +27,5 @@ bool pc_p2_original_piki_init_consume(Piki* body) noexcept;
 // require the preceding stage; later free transitions use the ordinary route.
 bool pc_p2_original_piki_free_init_consume(Piki* body) noexcept;
 bool pc_p2_original_piki_bore_init_consume(Piki* body) noexcept;
+// No consumption/mutation; only this already-initializing original source body.
+bool pc_p2_original_piki_init_held(const Piki* body) noexcept;
