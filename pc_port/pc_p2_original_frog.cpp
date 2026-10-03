@@ -20,7 +20,6 @@ bool capability(const CatalogRow& row,std::string& e){
  if(row.enemy.source!=17&&row.enemy.source!=18)return refuse(e,"not an original Frog/MaroFrog source");
  if(row.sourceKey.empty()||row.enemy.uid!=originalGeneratorUid(row.sourceKey))return refuse(e,"frog source-key UID mismatch");
  if(row.enemy.generatorVersion!="????"||!row.enemy.generatorTail.empty())return refuse(e,"frog requires inherited ???? version and empty literal tail");
- if(row.enemy.enemySize!=0)return refuse(e,"frog size override requires a typed chassis adapter");
  if(row.enemy.birthType!=0)return refuse(e,"frog nonzero birth type requires a typed birth adapter");
  if(row.enemy.treasureCode)return refuse(e,"frog treasure provider unavailable");
  e.clear();return true;
