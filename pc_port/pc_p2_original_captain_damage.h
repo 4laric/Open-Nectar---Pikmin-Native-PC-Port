@@ -104,6 +104,9 @@ bool pc_p2_original_captain_body_reset_loaded(std::string&);
 bool pc_p2_original_captain_activate_after_bootstrap(std::string&);
 void pc_p2_original_captain_main_game_entered();
 void pc_p2_original_captain_main_game_left();
+// Terminal for this exact retained incarnation. Keep canonical inactive World
+// readable until consumers retire; repeated reset/activation cannot resume it.
+void pc_p2_original_captain_begin_retirement();
 void pc_p2_original_captain_movie_started(MoviePlayer*);
 void pc_p2_original_captain_movie_ended(MoviePlayer*);
 void pc_p2_original_captain_actor_update(Navi*);
