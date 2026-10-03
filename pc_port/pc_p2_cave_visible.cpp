@@ -68,14 +68,6 @@ void mesh(Graphics& gfx,const P2CaveVisibleBoundary& a){
     // A recessed dark mouth with a solid irregular stone rim; the returning
     // actor adds a tall tapered water jet and a broad visible splash crown.
     constexpr int segments=24;constexpr float tau=6.28318530718f;
-    // This authored opening is a surface decal, not a cut in the legal map
-    // triangles. Draw its small stone/aperture surface above the map's depth;
-    // retain physical footing unchanged and restore normal depth for the jet.
-#if PIKI_USE_DGX
-    GXSetZMode(GX_FALSE,GX_LEQUAL,GX_FALSE);
-#else
-    gfx.setDepth(false);
-#endif
     for(int i=0;i<segments;++i){
         const float t=i*tau/segments,u=(i+1)*tau/segments;
         const float r=48.f+(i%3)*3.f,s=48.f+((i+1)%3)*3.f;
@@ -91,7 +83,6 @@ void mesh(Graphics& gfx,const P2CaveVisibleBoundary& a){
         const float t=i*tau/segments,u=(i+1)*tau/segments;
         tri(gfx,Vector3f(a.x,a.y+14,a.z),ring(a,u,36,15),ring(a,t,36,15),Colour(17,21,27,255));
     }
-    gfx.setDepth(true);
     if(a.returning){
         for(int i=0;i<segments;++i){
             const float t=i*tau/segments,u=(i+1)*tau/segments;
@@ -175,12 +166,14 @@ void pc_p2_cave_visible_draw(Graphics& gfx){
             actor.returning?"geyser":"hole",drawnScene,actor.x,actor.y,actor.z);probe(actor);}
     const Colour color=gfx.mPrimaryColour,aux=gfx.mAuxiliaryColour;
     const int blend=gfx.setCBlending(BLEND_Alpha),cull=gfx.mCullMode;
-    gfx.setCullFront(2);
     const bool depth=gfx.setDepth(true);
     Texture* texture=gfx.mActiveTexture[0];const bool light=gfx.setLighting(false,nullptr);
     gfx.setPerspective(gfx.mCamera->mPerspectiveMatrix.mMtx,gfx.mCamera->mFov,
         gfx.mCamera->mAspectRatio,gfx.mCamera->mNear,gfx.mCamera->mFar,1.f);
     gfx.useMaterial(nullptr);gfx.useTexture(nullptr,0);gfx.useMatrix(gfx.mCamera->mLookAtMtx,0);
+    // DGX's default material resets GX culling to BACK. Set two-sided fans
+    // after that initialization, or the upward rim/mouth faces disappear.
+    gfx.setCullFront(2);
 #if PIKI_USE_DGX
     // These submitted fans carry their own colors. Avoid inheriting the last
     // map material's register color for the stone rim and recessed mouth.
