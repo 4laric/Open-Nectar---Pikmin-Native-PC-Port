@@ -228,7 +228,7 @@ static void podTitle(const std::string& recent) {
         SDL_SetWindowTitle(window,title.c_str());
     }
 }
-Suckable* pc_p2_preview_goal(){if(auto* goal=pc_p2_cave_items_goal())return goal;return pc_pikipelago_room_preview()?podAnchor:nullptr;}
+Suckable* pc_p2_preview_goal(){return pc_pikipelago_room_preview()?podAnchor:nullptr;}
 bool pc_p2_preview_is_pod(GoalItem* goal){return pc_p2_cave_items_is_pod(goal) || pc_p2_white_treasure_is_pod(goal) || (pc_pikipelago_room_preview() && podAnchor && goal==podAnchor);}
 int pc_p2_preview_pokos(){return podAnchor?economy.total():-1;}
 bool pc_p2_preview_ready() { return pc_pikipelago_room_preview() && previewShape && previewTreasure; }

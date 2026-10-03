@@ -35,6 +35,7 @@ bool pc_p2_cave_items_deliver(Pellet* pellet);
 // Seed-owned production receiver, active only in its validated cave scene.
 // Historical standalone/preview receiver behavior remains separate.
 Suckable* pc_p2_cave_items_goal();
+Suckable* pc_p2_cave_items_goal_for(Pellet* pellet);
 bool pc_p2_cave_items_is_pod(GoalItem* goal);
 bool pc_p2_cave_items_draw_pod(GoalItem* goal, Graphics& gfx, Matrix4f& matrix);
 
