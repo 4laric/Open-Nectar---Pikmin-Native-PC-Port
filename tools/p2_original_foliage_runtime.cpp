@@ -16,6 +16,7 @@
 #include "Navi.h"
 #include "NaviMgr.h"
 #include "NaviState.h"
+#include "Camera.h"
 #include "Piki.h"
 #include "PikiMgr.h"
 #include "ItemMgr.h"
@@ -41,9 +42,20 @@
 namespace {
 using namespace p2original;
 using namespace p2original::foliage;
-bool human=false,refusal=false;
+bool human=false,refusal=false,naturalWalk=false;
+SDL_Joystick* pad=nullptr;
 void require(bool ok,const char* message){if(!ok){std::printf("FAIL ORIGINAL_FOLIAGE %s\n",message);std::fflush(nullptr);std::_Exit(1);}}
 void checked(bool ok,const std::string& e){if(!ok)std::fprintf(stderr,"ORIGINAL_FOLIAGE_ERROR %s\n",e.c_str());require(ok,"native foliage operation");}
+void input(int x=0,int y=0){
+ require(pad,"natural walking virtual controller");
+ pc_window_input_assign(0,PC_INPUT_DEV_GAMEPAD,SDL_JoystickInstanceID(pad));pc_window_input_assign(1,PC_INPUT_DEV_NONE,-1);
+ SDL_JoystickSetVirtualAxis(pad,SDL_CONTROLLER_AXIS_LEFTX,Sint16(x*32767/74));SDL_JoystickSetVirtualAxis(pad,SDL_CONTROLLER_AXIS_LEFTY,Sint16(-y*32767/74));SDL_JoystickUpdate();
+}
+void point(Navi* n,const Vector3f& goal){
+ float dx=goal.x-n->mSRT.t.x,dz=goal.z-n->mSRT.t.z,d=std::sqrt(dx*dx+dz*dz);int x=0,y=0;
+ if(d>5){const Vector3f& a=n->controlCamera()->mViewXAxis;const float power=55;x=int(std::lround(power*(dx*a.x+dz*a.z)/d));y=int(std::lround(power*(dx*a.z-dz*a.x)/d));}
+ input(x,y);
+}
 int heads(){int count=0;Iterator it(itemMgr->getPikiHeadMgr());CI_LOOP(it)if(static_cast<PikiHeadItem*>(*it)->isAlive())++count;return count;}
 struct HeapScope{int previous;HeapScope():previous(gsys->setHeap(SYSHEAP_App)){}~HeapScope(){gsys->setHeap(previous);}};
 class FoliageApp final:public PlugPikiApp {
@@ -58,6 +70,7 @@ class FoliageApp final:public PlugPikiApp {
  std::array<float,2> health{};
  int ready=0,phase=0,age=0,pelletBaseline=0,rewardBaseline=0,tekiBaseline=0;
  bool captainSeen=false;
+ unsigned walked=0;std::array<bool,2> naturalTouch{};
  const std::string fingerprint=std::string(64,'f');
  CatalogRow literal(unsigned source,unsigned index,unsigned uid,const Position& at,float facing){
   CatalogRow r;r.course="tutorial";r.member="plantsgen.txt";r.index=index;r.sourceKey="tutorial/plantsgen.txt#"+std::to_string(index);
@@ -104,7 +117,7 @@ class FoliageApp final:public PlugPikiApp {
   if(refusal){require(!physical&&native->provider().size()==0&&tekiMgr->getSize()==tekiBaseline&&pelletMgr->getSize()==pelletBaseline,"physical resource refusal before allocation");std::puts("PASS ORIGINAL_FOLIAGE_RESOURCE_REFUSAL births=0 direct_control=1 gameplay=0");std::fflush(nullptr);std::_Exit(0);}
   checked(physical,e);checked(native->geometryOwnershipControl(e),e);
   checked(originalActors().install(fingerprint,rows,[](const CatalogRow& r,std::string& err){return decode(r,err);},e),e);install(false);
-  std::puts("ORIGINAL_FOLIAGE_READY sources=91,88 zero_count=1 baseline=20 window=960x540 direct_control=1 original_positions=0 gameplay=0");std::fflush(nullptr);
+  std::printf("ORIGINAL_FOLIAGE_READY sources=91,88 zero_count=1 baseline=20 window=960x540 initialized_placement=1 original_positions=0 naturalinput=%d callbackcontrol=%d gameplay=0\n",int(naturalWalk),int(!naturalWalk&&!human));std::fflush(nullptr);
  }
  void stimulus(Navi* n){
   for(unsigned i=0;i<2;++i){auto* actor=static_cast<BTeki*>(actors[i]);auto* h=native->provider().lookup(actor);require(h,"retained live native host");
@@ -127,16 +140,26 @@ class FoliageApp final:public PlugPikiApp {
  void reenter(){std::string e;for(unsigned i=0;i<3;++i){checked(pc_p2_original_groups().cache(generators[i].get(),fingerprint,cache[i],e),e);GeneratorState s;unsigned live=0;require(pc_p2_original_groups().state(generators[i].get(),s,live)&&s.deathCount==0&&live==rows[i].enemy.count,"cache preserves literal count and no decorative deaths");}
   checked(pc_p2_original_course_unload(e),e);require(native->provider().size()==0&&tekiMgr->getSize()==tekiBaseline,"native unload cleans only owned foliage");checkEconomy();install(true);
  }
+ void walking(Navi* n){
+  if(phase==1){require(walked<2,"natural walking source index");auto* h=native->provider().lookup(actors[walked]);require(h,"naturally touched source remains owned");
+   if(h->active&&h->touched){naturalTouch[walked]=true;input();phase=2;age=0;
+    std::printf("ORIGINAL_FOLIAGE_NATURAL_TOUCH source=%u captain=%.3f,%.3f,%.3f plant=%.3f,%.3f,%.3f frame=%.3f naturalinput=1 callbackcontrol=0\n",h->row.enemy.source,n->mSRT.t.x,n->mSRT.t.y,n->mSRT.t.z,actors[walked]->mSRT.t.x,actors[walked]->mSRT.t.y,actors[walked]->mSRT.t.z,h->frame);std::fflush(nullptr);
+   }else {point(n,collisionCentre[walked]);require(age<1200,"SDL walking must reach real foliage touch");}
+  }else if(phase==2){input();auto* h=native->provider().lookup(actors[walked]);require(h,"natural animation host retained");
+   if(!h->active&&!h->touched){std::printf("ORIGINAL_FOLIAGE_NATURAL_END source=%u frame=%.3f naturalinput=1 callbackcontrol=0\n",h->row.enemy.source,h->frame);std::fflush(nullptr);++walked;age=0;if(walked==2){require(naturalTouch[0]&&naturalTouch[1],"actual captain naturally touched both original species");reenter();phase=3;}else phase=1;}
+   else require(age<900,"natural touched motion completes through normal engine clock");
+  }else if(phase==3&&age>=30){input();std::string e;checked(pc_p2_original_course_unload(e),e);require(native->provider().size()==0&&tekiMgr->getSize()==tekiBaseline,"natural fixture owned cleanup");checkEconomy();std::puts("PASS ORIGINAL_FOLIAGE_WALK sources=91,88 naturalinput=1 callbackcontrol=0 natural_touch=2 normal_animation=1 collider_static=1 no_rewards=1 initialized_placement=1 cache_disc_reentry=1 full_course=0");std::fflush(nullptr);std::_Exit(0);}
+ }
 public:
  int idle()override{
   const auto budget=std::chrono::seconds(human?600:90);
-  if(std::chrono::steady_clock::now()-started>=budget){std::puts("ORIGINAL_FOLIAGE_GUARD_EXIT exit=86 bounded=1");std::fflush(nullptr);std::_Exit(86);}
+  if(std::chrono::steady_clock::now()-started>=budget){if(native){std::string e;if(!pc_p2_original_course_unload(e))std::fprintf(stderr,"ORIGINAL_FOLIAGE_GUARD_CLEANUP %s\n",e.c_str());}std::puts("ORIGINAL_FOLIAGE_GUARD_EXIT exit=86 bounded=1");std::fflush(nullptr);std::_Exit(86);}
   int result=PlugPikiApp::idle();auto* n=naviMgr?naviMgr->getNavi():nullptr;const bool initialized=n&&n->getCurrState();if(initialized)captainSeen=true;
   require(!captainSeen||initialized,"initialized captain retained");if(initialized)require(!GameStat::orimaDead&&!naviMgr->isNaviDead(n)&&n->getCurrState()->getID()!=NAVISTATE_Dead&&std::isfinite(n->mHealth)&&n->mHealth>0,"captain guard");
   if(gameflow.mMoviePlayer&&gameflow.mMoviePlayer->mIsActive){gameflow.mMoviePlayer->requestSkip();return result;}
   if(!initialized||!pc_randomizer_ready()||!pikiMgr||!tekiMgr||!pelletMgr||!itemMgr||!mapMgr||gameflow.mPauseAll||gameflow.mIsUIOverlayActive)return result;
   if(!phase){if(n->getCurrState()->getID()!=NAVISTATE_Walk||++ready<45)return result;int live=0,red=0;Iterator it(pikiMgr);CI_LOOP(it){auto* p=static_cast<Piki*>(*it);if(p->isAlive()){++live;red+=p->mColor==Red;}}require(live==20&&red==20,"actual20 Red Pikmin baseline");setup(n);phase=1;return result;}
-  if(human)return result;checkStatic();++age;
+  if(human)return result;checkStatic();++age;if(naturalWalk){walking(n);return result;}
   if(phase==1&&age>=15){stimulus(n);phase=2;age=0;}
   else if(phase==2){bool finished=true;for(auto* actor:actors){auto* h=native->provider().lookup(actor);require(h,"active callback retains same family host");if(age==1)require(h->frame>0,"normal engine update advances motion");finished&=!h->active&&!h->touched;}
    if(finished){reenter();phase=3;age=0;}else require(age<900,"normal native animation eventually completes");}
@@ -146,12 +169,16 @@ public:
 };
 }
 int main(int argc,char** argv){
- human=std::getenv("P2_ORIGINAL_FOLIAGE_HUMAN")!=nullptr;refusal=std::getenv("P2_ORIGINAL_FOLIAGE_REFUSE_RESOURCES")!=nullptr;
- SDL_setenv("PIKMIN_RANDOMIZER_TEST_BACKGROUND","1",1);SDL_setenv("SDL_AUDIODRIVER","dummy",1);SDL_SetMainReady();
+ human=std::getenv("P2_ORIGINAL_FOLIAGE_HUMAN")!=nullptr;refusal=std::getenv("P2_ORIGINAL_FOLIAGE_REFUSE_RESOURCES")!=nullptr;naturalWalk=!human&&std::getenv("P2_ORIGINAL_FOLIAGE_WALK")!=nullptr;
+ SDL_setenv("PIKMIN_RANDOMIZER_TEST_BACKGROUND","1",1);SDL_setenv("SDL_AUDIODRIVER","dummy",1);SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS,"1");SDL_SetMainReady();
  pc_sim_rng_note_main_thread();std::string e;checked(pc_sim_rng_begin_offline(0x9188,0x8891,e),e);pc_gpu_preference_apply();pc_bbft_init(argc,argv);
  require(pc_randomizer_enabled()&&pc_pikipelago_surface_course()&&!std::strcmp(pc_pikipelago_surface_course(),"tutorial")&&!pc_pikipelago_room_preview(),"real tutorial course assets required");
  require(pc_window_init("Original foliage direct-control diagnostic",960,540),"native window");pc_settings_init();pc_window_set_control_mode(PC_CONTROL_CLASSIC);pc_window_set_display_mode(0);pc_window_set_window_size(960,540);pc_window_center();
  SDL_Window* window=SDL_GL_GetCurrentWindow();int width=0,height=0,x=0,y=0;SDL_GetWindowSize(window,&width,&height);SDL_GetWindowPosition(window,&x,&y);SDL_Rect bounds{};SDL_GetDisplayBounds(SDL_GetWindowDisplayIndex(window),&bounds);
  require(width==960&&height==540&&std::abs(x-(bounds.x+(bounds.w-width)/2))<=2&&std::abs(y-(bounds.y+(bounds.h-height)/2))<=2,"centered960x540 baseline");
+ if(naturalWalk){int device=SDL_JoystickAttachVirtual(SDL_JOYSTICK_TYPE_GAMECONTROLLER,SDL_CONTROLLER_AXIS_MAX,SDL_CONTROLLER_BUTTON_MAX,0);require(device>=0,"natural virtual pad attachment");char guid[64];SDL_JoystickGetGUIDString(SDL_JoystickGetDeviceGUID(device),guid,sizeof(guid));
+  std::string mapping=std::string(guid)+",Foliage walking fixture,a:b0,b:b1,x:b2,y:b3,back:b4,guide:b5,start:b6,leftstick:b7,rightstick:b8,leftshoulder:b9,rightshoulder:b10,dpup:b11,dpdown:b12,dpleft:b13,dpright:b14,leftx:a0,lefty:a1,rightx:a2,righty:a3,lefttrigger:a4,righttrigger:a5,";
+  require(SDL_GameControllerAddMapping(mapping.c_str())>=0,"natural controller mapping");pad=SDL_JoystickOpen(device);require(pad,"natural controller open");pc_window_set_stick_invert(0);pc_window_set_cstick_invert(0);input();
+ }
  pc_coop_set_pending(false);gsys->Initialise();pc_settings_p2d_init();nodeMgr=new NodeMgr();gsys->run(new FoliageApp());return 0;
 }
