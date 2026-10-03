@@ -133,7 +133,14 @@ template <typename T>
 struct Parm : public BaseParm {
 	Parm(Parameters* owner, T value, T min, T max, ayuID id, immut char* name)
 	    : BaseParm(owner, id)
+#if defined(PIKI_PC_PORT) && PIKI_PC_PORT
+	    , mValue(value)
+#ifdef WIN32
+	    , mDefaultValue(value), mMinValue(min), mMaxValue(max), mName(name)
+#endif
+#endif
 	{
+#if !defined(PIKI_PC_PORT) || !PIKI_PC_PORT
 #ifdef WIN32
 		mName         = name;
 		mValue        = value;
@@ -142,6 +149,7 @@ struct Parm : public BaseParm {
 		mMaxValue     = max;
 #else
 		mValue = value;
+#endif
 #endif
 	}
 
