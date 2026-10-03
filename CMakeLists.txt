@@ -429,6 +429,7 @@ set(PC_PORT_SOURCES
     pc_port/pc_p2_retail_scene_input.cpp
     pc_port/pc_p2_retail_start.cpp
     pc_port/pc_p2_retail_geometry.cpp
+    pc_port/pc_p2_retail_scene_map.cpp
     pc_port/pc_p2_retail_cave_foliage.cpp
     pc_port/pc_p2_retail_cave_blackpom.cpp
     pc_port/pc_p2_retail_cave_placement.cpp
