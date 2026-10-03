@@ -255,7 +255,14 @@ Creature* WorkObjectMgr::birth(int wObjType, int p2)
 
 void WorkObjectMgr::originalAdopt(WorkObject* object)
 {
-	mRootNode.add(new WorkObjectNode(object));
+	originalAdoptNode(object);
+}
+
+WorkObjectNode* WorkObjectMgr::originalAdoptNode(WorkObject* object)
+{
+	auto* node = new WorkObjectNode(object);
+	mRootNode.add(node);
+	return node;
 }
 
 bool WorkObjectMgr::originalForget(WorkObject* object)

@@ -9,6 +9,7 @@
 #include "pc_p2_purple_flight.h"
 #include "pc_p2_purple_impact.h"
 #include "pc_p2_white.h"
+#include "pc_p2_sprays.h"
 #include "pc_p2_breadbug_teki.h"
 #include "pc_p2_species.h"
 #include "pc_p2_purple.h"
@@ -206,6 +207,7 @@ void Piki::subCntCallback()
  */
 f32 Piki::getAttackPower()
 {
+    if(pc_p2_spicy_active(this))return p2sprays::Damage;
     if(pc_p2_is_white(this))return pc_p2_white_attack();
     if(pc_p2_is_purple(this))return pc_p2_purple_attack();
 	if (mColor == Blue) {
@@ -2450,7 +2452,7 @@ void Piki::setSpeed(f32 speedRatio)
 
 	f32 min = pikiMgr->mPikiParms->mPikiParms.mMinMoveSpeed() * scale;
 
-	mMoveSpeed = ((max - min) * speedRatio + min) * pc_randomizer_color_multiplier(mColor, PC_PIKI_MOVEMENT) * (pc_p2_is_white(this)?pc_p2_white_move_multiplier():pc_p2_move_multiplier(this));
+	mMoveSpeed = pc_p2_spicy_active(this) ? p2sprays::RunSpeed : (((max - min) * speedRatio + min) * pc_randomizer_color_multiplier(mColor, PC_PIKI_MOVEMENT) * (pc_p2_is_white(this)?pc_p2_white_move_multiplier():pc_p2_move_multiplier(this)));
 }
 
 /**
@@ -2468,7 +2470,7 @@ f32 Piki::getSpeed(f32 speedRatio)
 
 	f32 min = pikiMgr->mPikiParms->mPikiParms.mMinMoveSpeed() * scale;
 
-	return ((max - min) * speedRatio + min) * pc_randomizer_color_multiplier(mColor, PC_PIKI_MOVEMENT) * (pc_p2_is_white(this)?pc_p2_white_move_multiplier():pc_p2_move_multiplier(this));
+	return pc_p2_spicy_active(this) ? p2sprays::RunSpeed : (((max - min) * speedRatio + min) * pc_randomizer_color_multiplier(mColor, PC_PIKI_MOVEMENT) * (pc_p2_is_white(this)?pc_p2_white_move_multiplier():pc_p2_move_multiplier(this)));
 }
 
 /**
@@ -2485,7 +2487,7 @@ void Piki::setSpeed(f32 speedRatio, immut Vector3f& direction)
 		max = pikiMgr->mPikiParms->mPikiParms.mMaxBudMoveSpeed();
 	}
 
-	mMoveSpeed      = ((max - min) * speedRatio + min) * pc_randomizer_color_multiplier(mColor, PC_PIKI_MOVEMENT) * (pc_p2_is_white(this)?pc_p2_white_move_multiplier():pc_p2_move_multiplier(this));
+	mMoveSpeed      = pc_p2_spicy_active(this) ? p2sprays::RunSpeed : (((max - min) * speedRatio + min) * pc_randomizer_color_multiplier(mColor, PC_PIKI_MOVEMENT) * (pc_p2_is_white(this)?pc_p2_white_move_multiplier():pc_p2_move_multiplier(this)));
 	mTargetVelocity = mMoveSpeed * direction;
 }
 
@@ -2504,7 +2506,7 @@ void Piki::setSpeed(f32 speedRatio, f32 angle)
 
 	f32 min = pikiMgr->mPikiParms->mPikiParms.mMinMoveSpeed() * scale;
 
-	mMoveSpeed = ((max - min) * speedRatio + min) * pc_randomizer_color_multiplier(mColor, PC_PIKI_MOVEMENT) * (pc_p2_is_white(this)?pc_p2_white_move_multiplier():pc_p2_move_multiplier(this));
+	mMoveSpeed = pc_p2_spicy_active(this) ? p2sprays::RunSpeed : (((max - min) * speedRatio + min) * pc_randomizer_color_multiplier(mColor, PC_PIKI_MOVEMENT) * (pc_p2_is_white(this)?pc_p2_white_move_multiplier():pc_p2_move_multiplier(this)));
 	mTargetVelocity.set(mMoveSpeed * cosf(angle), 0.0f, mMoveSpeed * sinf(angle));
 }
 
@@ -2549,6 +2551,7 @@ void Piki::resetPosition(immut Vector3f& pos)
  */
 void Piki::init(Navi* navi)
 {
+    mP2Spicy.clear();
 	pc_p2_purple_flight_cancel(this);
 	pc_p2_purple_impact_forget(this);
     pc_p2_cave_campaign_party_forget(this);
@@ -2724,14 +2727,15 @@ void Piki::updateLookCreature()
  */
 void Piki::doAnimation()
 {
-    if(pc_p2_is_purple(this)||pc_p2_is_white(this))mP2AnimationTime+=gsys->getFrameTime();
+    pc_p2_spicy_tick(this);
+    if(pc_p2_is_purple(this)||pc_p2_is_white(this))mP2AnimationTime+=gsys->getFrameTime()*mP2Spicy.animationRate();
 	updateWalkAnimation();
 	mLastAnimPosition = mSRT.t;
 	// Change only attack loops, not walking, thrown arcs, plucking or cutscenes.
     const int motion = mPikiAnimMgr.getUpperAnimator().getCurrentMotionIndex();
     const bool attackLoop = motion == PIKIANIM_Attack || motion == PIKIANIM_Kuttuku
         || (motion == PIKIANIM_Job2 && mMode == PikiMode::BreakwallMode);
-    mPikiAnimMgr.updateAnimation(mMotionSpeed, attackLoop ? pc_randomizer_color_multiplier(mColor, PC_PIKI_ATTACK_RATE) : 1.0f);
+    mPikiAnimMgr.updateAnimation(mMotionSpeed, mP2Spicy.animationRate() * (attackLoop ? pc_randomizer_color_multiplier(mColor, PC_PIKI_ATTACK_RATE) : 1.0f));
 }
 
 /**

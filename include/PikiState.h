@@ -51,6 +51,7 @@ enum PikiStateID {
 	PIKISTATE_DenkiDying   = 35, // P2 electric-shock death reaction (#170/#408).
 	PIKISTATE_Panic        = 36, // P2 panic state, currently the gas reaction (#170/#408).
 	PIKISTATE_HanachirashiBlow = 37, // Source 55 vector blow and nonlethal recovery.
+	PIKISTATE_P2Dope,            // Source spicy reaction; separate from nectar growth.
 	PIKISTATE_Count,             // Total number of states.
 };
 

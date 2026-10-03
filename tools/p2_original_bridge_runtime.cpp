@@ -1,6 +1,7 @@
 // Actual source-bound physical factory, collision/work hook and cache controls.
 // Work assignment/state injection is labeled; this is not full-course gameplay.
 #include "system.h"
+#include "sysNew.h"
 #include "App.h"
 #include "Node.h"
 #include "MoviePlayer.h"
@@ -45,6 +46,7 @@ void run(){
  std::vector<std::unique_ptr<Generator>> owned;std::vector<std::unique_ptr<GenObjectOriginalBridge>> objects;std::vector<Generator*> inventory;
  for(const auto& r:rows){auto g=std::make_unique<Generator>();auto* product=GenObjectFactory::getProduct(0x70326272u);auto o=std::unique_ptr<GenObjectOriginalBridge>(dynamic_cast<GenObjectOriginalBridge*>(product));require(o&&o->getLatestVersion()==0x42523031u,"real typed factory");o->uid=r.uid;g->mGenObject=o.get();g->mGenType=nullptr;g->mCarryOverFlags=r.reserved;g->mRespawnInterval=r.resurrectionDays;g->mDayLimit=r.dayLimit;inventory.push_back(g.get());objects.push_back(std::move(o));owned.push_back(std::move(g));}
  auto incomplete=inventory;incomplete.pop_back();require(!pc_p2_original_bridge_preflight(incomplete,e),"whole inventory preflight rejects omissions");checked(pc_p2_original_bridge_preflight(inventory,e),e);
+ int nodeBaseline=workObjectMgr->getSize();
  for(auto* g:inventory){bool handled=false;checked(pc_p2_original_bridge_generator_init(g,handled,e),e);require(handled,"typed init handled");}
  auto links=pc_p2_original_bridge_links();require(links.size()==rows.size(),"all actual source links");for(unsigned i=0;i<rows.size();++i)require(links[i].identity==rows[i].sourceSha+":"+rows[i].sourceKey&&links[i].stage==0,"actual birth order initial stage");
  auto snapshot=[&](Bridge* b){BridgeState s;std::string id;require(pc_p2_original_bridge_snapshot(b,s,id),"physical snapshot");return s;};
@@ -56,9 +58,20 @@ void run(){
   RamStream input(bytes.data(),int(bytes.size()));bool handled=false;checked(pc_p2_original_bridge_generator_load(g,input,handled,e),e);b=dynamic_cast<Bridge*>(g->mLatestSpawnCreature);require(handled&&b&&snapshot(b).extensionTicks==23,"actual fresh physical cache restore pending extension");for(int tick=0;tick<22;++tick)b->update();require(snapshot(b).stage==0,"extension did not finish early");b->update();require(snapshot(b).stage==1&&b->isStageFinished(0),"actual stage collision switches once");
   auto actual=pc_p2_original_bridge_links();require(actual.back().identity==r.sourceSha+":"+r.sourceKey&&actual.back().stage==1,"recreated bridge moves to physical birth order end");
   for(int stage=1;stage<b->mStageCount;++stage){InteractBuild hit(worker,stage,r.stageLife);require(b->stimulate(hit),"explicit injected completion control");for(int tick=0;tick<40;++tick)b->update();}
-  require(b->isFinished()&&!b->isAlive()&&b->mStartWaypoint->mIsOpen&&b->mEndWaypoint->mIsOpen,"physical completed routes open");require(!(b->mStartWaypoint->mFlags&WayPointFlags::InWater)&&!(b->mEndWaypoint->mFlags&WayPointFlags::InWater),"completed routes permit nonBlue crossing");require(b->getFirstUnfinishedStage()==-1&&b->isStageFinished(b->mStageCount-1),"worker completion independent of disabled segment collision");require(b->mBuildShape->mJointVisibility[2],"retail final collision active");RamStream saved(bytes.data(),int(bytes.size()));b->doSave(saved);b->kill(false);g->mLatestSpawnCreature=nullptr;g->mAliveCount=0;RamStream replay(bytes.data(),int(bytes.size()));checked(pc_p2_original_bridge_generator_load(g,replay,handled,e),e);b=dynamic_cast<Bridge*>(g->mLatestSpawnCreature);require(b&&b->isFinished()&&b->mBuildShape->mJointVisibility[2],"completed geometry persists across actual recreation");b->kill(false);g->mLatestSpawnCreature=nullptr;g->mAliveCount=0;
+  require(b->isFinished()&&!b->isAlive()&&b->mStartWaypoint->mIsOpen&&b->mEndWaypoint->mIsOpen,"physical completed routes open");require(!(b->mStartWaypoint->mFlags&WayPointFlags::InWater)&&!(b->mEndWaypoint->mFlags&WayPointFlags::InWater),"completed routes permit nonBlue crossing");require(b->getFirstUnfinishedStage()==-1&&b->isStageFinished(b->mStageCount-1),"worker completion independent of disabled segment collision");require(b->mBuildShape->mJointVisibility[2],"retail final collision active");RamStream saved(bytes.data(),int(bytes.size()));b->doSave(saved);b->kill(false);g->mLatestSpawnCreature=nullptr;g->mAliveCount=0;RamStream replay(bytes.data(),int(bytes.size()));checked(pc_p2_original_bridge_generator_load(g,replay,handled,e),e);b=dynamic_cast<Bridge*>(g->mLatestSpawnCreature);require(b&&b->isFinished()&&b->mBuildShape->mJointVisibility[2],"completed geometry persists across actual recreation");
  }
- pc_p2_original_bridge_unload();for(auto& g:owned)g->mGenObject=nullptr;
+ // All completed bodies remain physical despite isAlive()==false. Course
+ // creature bytes have already been saved above; teardown runs before reset.
+ std::vector<int> completedDays;for(auto* g:inventory)completedDays.push_back(g->mLatestSpawnDay);
+ require(workObjectMgr->getSize()==nodeBaseline+int(rows.size()),"completed physical nodes retained until explicit teardown");
+ pc_p2_original_bridge_before_teardown();require(workObjectMgr->getSize()==nodeBaseline&&pc_p2_original_bridge_links().empty(),"completed teardown unlinks all owned nodes and preserves unrelated nodes");
+ for(size_t i=0;i<inventory.size();++i)require(!inventory[i]->mLatestSpawnCreature&&inventory[i]->mLatestSpawnDay==completedDays[i],"completed teardown clears latest pointer without calendar death replay");
+ auto* living=inventory.front();int livingDay=living->mLatestSpawnDay;bool handled=false;checked(pc_p2_original_bridge_generator_init(living,handled,e),e);
+ require(handled&&living->mLatestSpawnCreature&&living->mLatestSpawnCreature->isAlive()&&workObjectMgr->getSize()==nodeBaseline+1,"teardown control creates one actual living bridge");
+ std::array<unsigned char,168> livingBytes{};RamStream livingSave(livingBytes.data(),int(livingBytes.size()));living->mLatestSpawnCreature->doSave(livingSave);require(livingSave.getPosition()==168,"living course bytes saved before teardown");
+ pc_p2_original_bridge_before_teardown();require(workObjectMgr->getSize()==nodeBaseline&&!living->mLatestSpawnCreature&&living->mLatestSpawnDay==livingDay,"living teardown detaches node and preserves calendar");
+ pc_p2_original_bridge_before_teardown();auto allocationBefore=piki_pc_allocation_stats();pc_p2_original_bridge_unload();auto allocationAfter=piki_pc_allocation_stats();
+ require(allocationAfter.unknownFrees==allocationBefore.unknownFrees&&allocationAfter.liveBlocks<allocationBefore.liveBlocks,"owned concrete bridge allocations released through matching PC allocator");for(auto& g:owned)g->mGenObject=nullptr;
  std::printf("PASS ORIGINAL_BRIDGE_NATIVE checks=%u physical_factory=1 retail_geometry=1 actual_work_hook=1 physical_cache=1 injected_completion=1 natural_gameplay=0\n",checks);std::fflush(nullptr);std::_Exit(0);
 }
 class TestApp:public PlugPikiApp {

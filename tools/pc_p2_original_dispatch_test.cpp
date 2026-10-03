@@ -39,5 +39,10 @@ int main(){
  b.capacityOK=true;check(d.preflight(rows,e));check(d.reserve(rows,e));check(d.birth(y,nullptr,0,{},0,actor,e)==false);check(d.release(actor,0,e));
  const unsigned beforeA=a.preflights,beforeR=a.reserves;auto variant=row(1,2);
  check(d.preflight({variant,y,x},e));check(a.preflights==beforeA+1);check(d.reserve({x,y,variant},e));check(a.reserves==beforeR+1);
+ const unsigned emptyPreflights=a.preflights+b.preflights,emptyReserves=a.reserves+b.reserves;
+ check(d.preflight({},e));check(!d.reserve({x},e));check(d.reserve({},e));check(!d.reserve({},e));
+ check(!d.birth(x,nullptr,0,{},0,actor,e)&&actor==nullptr);
+ check(a.preflights+b.preflights==emptyPreflights&&a.reserves+b.reserves==emptyReserves);
+ check(d.preflight(rows,e)&&d.reserve(rows,e));
  std::cout<<"PASS original full-inventory dispatcher "<<checks<<" controls\n";
 }

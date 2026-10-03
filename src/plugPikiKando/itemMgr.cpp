@@ -1,7 +1,9 @@
 #include "ItemMgr.h"
 #if defined(PIKI_PC_PORT)
 #include "pc_coop.h"
+#include "pc_randomizer.h"
 #include "pc_p2_original_gate_native.h"
+#include "pc_p2_original_barrel_native.h"
 #endif
 #if defined(PIKI_PC_PORT)
 #include "netplay/pc_netplay_policy.h"
@@ -1393,6 +1395,9 @@ void ItemMgr::update()
 	}
 
 	mMeltingPotMgr->update();
+#if defined(PIKI_PC_PORT)
+	pc_p2_original_barrel_finish_updates();
+#endif
 }
 
 /**
@@ -1432,7 +1437,7 @@ PikiHeadMgr::PikiHeadMgr(ItemMgr* mgr)
 	mPikiHeadAI    = new PikiHeadAI();
 #if defined(PIKI_PC_PORT)
 	// Buried sprouts have their own pool, sized from the same limit.
-	create(pc_settings_get_piki_limit());
+	create(pc_randomizer_original_session() ? 100 : pc_settings_get_piki_limit());
 #else
 	create(MAX_PIKI_ON_FIELD);
 #endif

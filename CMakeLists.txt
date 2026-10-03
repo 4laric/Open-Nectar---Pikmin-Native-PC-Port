@@ -280,6 +280,7 @@ set(PC_PORT_SOURCES
     pc_port/pc_p2_original_group.cpp
     pc_port/pc_p2_original_dispatch.cpp
     pc_port/pc_p2_original_course.cpp
+    pc_port/pc_p2_original_captain_motion.cpp
     pc_port/pc_p2_original_chappy.cpp
     pc_port/pc_p2_original_chappy_native.cpp
     pc_port/pc_p2_original_group_engine.cpp
@@ -295,6 +296,8 @@ set(PC_PORT_SOURCES
     pc_port/pc_p2_original_gate_cache.cpp
     pc_port/pc_p2_original_gate_native.cpp
     pc_port/pc_p2_original_bridge.cpp
+    pc_port/pc_p2_original_barrel.cpp
+    pc_port/pc_p2_original_barrel_native.cpp
     pc_port/pc_p2_original_bridge_native.cpp
     pc_port/pc_p2_campaign_goal_probe.cpp
     pc_port/pc_bbft.cpp
@@ -376,8 +379,26 @@ set(PC_PORT_SOURCES
     pc_port/pc_p2_species.cpp
     pc_port/pc_p2_bulbmin.cpp
     pc_port/pc_p2_white.cpp
+    pc_port/pc_p2_sprays.cpp
+    pc_port/pc_p2_original_resource_state.cpp
+    pc_port/pc_p2_original_resource_contents.cpp
+    pc_port/pc_p2_original_gas.cpp
+    pc_port/pc_p2_original_gas_native.cpp
+    pc_port/pc_p2_original_gas_links.cpp
+    pc_port/pc_p2_original_gas_save.cpp
+    pc_port/pc_p2_original_egg.cpp
+    pc_port/pc_p2_original_egg_native.cpp
+    pc_port/pc_p2_original_egg_snapshot.cpp
+    pc_port/pc_p2_original_honey_native.cpp
+    pc_port/pc_p2_original_honey_bank.cpp
+    pc_port/pc_p2_original_contents_save.cpp
+    pc_port/pc_p2_original_wisp.cpp
+    pc_port/pc_p2_original_wisp_native.cpp
+    pc_port/pc_p2_original_resource_save.cpp
     pc_port/pc_p2_white_poison.cpp
     pc_port/pc_p2_cave.cpp
+    pc_port/pc_p2_original_cave.cpp
+    pc_port/pc_p2_original_cave_native.cpp
     pc_port/pc_p2_cave_campaign_cache_engine.cpp
     pc_port/pc_p2_campaign_flush.cpp
     pc_port/pc_p2_original_piki_origin.cpp
@@ -640,6 +661,9 @@ pc_port/pc_p2_projectile_host.cpp
     pc_port/dolphin_stubs/audio_stubs.cpp
     pc_port/dolphin_stubs/jaudio_hw_stubs.cpp
     pc_port/dolphin_stubs/misc_stubs.cpp
+    pc_port/pc_p2_original_egg_save.cpp
+    pc_port/pc_p2_original_honey_save.cpp
+    pc_port/pc_p2_original_wisp_save.cpp
 )
 if (ANDROID)
     list(APPEND PC_PORT_SOURCES
@@ -1450,6 +1474,12 @@ add_executable(p2_dweevil_death_clip_test
 target_include_directories(p2_dweevil_death_clip_test PRIVATE pc_port)
 target_compile_options(p2_dweevil_death_clip_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
 add_test(NAME p2_dweevil_death_clip_test COMMAND p2_dweevil_death_clip_test)
+
+# Lane 35 cave unit-pool partition + phased trunk growth (#474). Header-only
+add_executable(p2_original_cave_test tools/p2_original_cave_test.cpp pc_port/pc_p2_original_cave.cpp)
+target_include_directories(p2_original_cave_test PRIVATE pc_port)
+target_compile_options(p2_original_cave_test PRIVATE -UNDEBUG)
+add_test(NAME p2_original_cave_test COMMAND p2_original_cave_test)
 
 # Lane 35 cave unit-pool partition + phased trunk growth (#474). Header-only
 # engine-free policy; no shared generator source is claimed or ported here.
@@ -3191,6 +3221,9 @@ pikmin_add_ci_fixture(captain_campaign_resume tools/p2_captain_campaign_resume_r
 pikmin_add_ci_fixture(original_pelplant tools/p2_original_pelplant_runtime.cpp)
 pikmin_add_ci_fixture(original_chappy tools/p2_original_chappy_runtime.cpp)
 pikmin_add_ci_fixture(original_bridge tools/p2_original_bridge_runtime.cpp)
+if(DEFINED P2_CHALLENGE_GUARD_INCLUDE_DIR)
+    target_include_directories(pikmin_ci_fixture_original_bridge PRIVATE ${P2_CHALLENGE_GUARD_INCLUDE_DIR})
+endif()
 add_executable(pc_p2_original_bridge_test tools/test_p2_original_bridge.cpp pc_port/pc_p2_original_bridge.cpp)
 target_include_directories(pc_p2_original_bridge_test PRIVATE pc_port)
 target_compile_options(pc_p2_original_bridge_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
@@ -3612,3 +3645,22 @@ foreach(pikmin_component IN LISTS pikmin_component_targets)
         endif()
     endif()
 endforeach()
+
+add_executable(pc_p2_original_calendar_state_test tools/pc_p2_original_calendar_state_test.cpp)
+target_include_directories(pc_p2_original_calendar_state_test PRIVATE pc_port)
+target_compile_options(pc_p2_original_calendar_state_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME pc_p2_original_calendar_state COMMAND pc_p2_original_calendar_state_test)
+
+
+if(PIKMIN_BUILD_TESTS)
+    add_executable(pc_p2_spicy_policy_test tools/p2_spicy_policy_test.cpp pc_port/pc_p2_original_resource_state.cpp pc_port/pc_p2_original_resource_contents.cpp)
+    target_include_directories(pc_p2_spicy_policy_test PRIVATE "${PROJECT_SOURCE_DIR}/pc_port")
+    target_compile_options(pc_p2_spicy_policy_test PRIVATE -UNDEBUG)
+    add_test(NAME p2_spicy_policy COMMAND pc_p2_spicy_policy_test)
+endif()
+
+add_executable(pc_p2_original_barrel_test tools/test_p2_original_barrel.cpp
+    pc_port/pc_p2_original_barrel.cpp pc_port/pc_p2_original_bridge.cpp)
+target_include_directories(pc_p2_original_barrel_test PRIVATE pc_port)
+target_compile_options(pc_p2_original_barrel_test PRIVATE -UNDEBUG)
+add_test(NAME p2_original_barrel COMMAND pc_p2_original_barrel_test)

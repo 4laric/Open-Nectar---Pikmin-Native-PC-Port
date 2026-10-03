@@ -11,6 +11,7 @@
 #endif
 #include "pc_p2_purple.h"
 #include "pc_p2_white.h"
+#include "pc_p2_sprays.h"
 #include "pc_p2_breadbug_teki.h"
 #include "NaviState.h"
 #if defined(PIKI_PC_PORT)
@@ -747,6 +748,8 @@ void NaviWalkState::exec(Navi* navi)
 	}
 	STACK_PAD_VAR(1);
 	navi->makeVelocity(false);
+
+    if (pc_p2_sprays_input(navi)) return;
 
 	if (!playerState->isTutorial() && navi->mGroundTriangle && navi->mKontroller->keyClick(KBBTN_DPAD_DOWN)) {
 		navi->mStateMachine->transit(navi, NAVISTATE_Pellet);

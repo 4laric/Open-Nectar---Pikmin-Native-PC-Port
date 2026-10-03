@@ -11,6 +11,7 @@
 #include "pc_randomizer.h"
 #if defined(PIKI_PC_PORT)
 #include "pc_p2_original_gate_native.h"
+#include "pc_p2_original_barrel_native.h"
 #endif
 
 /**
@@ -203,11 +204,17 @@ int ActBreakWall::breakWall()
 		timeSinceLastAttack = 1;
 	}
 
-	if (mIsAttackReady && (pc_randomizer_enabled() ? pc_randomizer_ready() : timeSinceLastAttack > 0)) {
+	bool sourceBarrel=false,sourceGate=false;
+#if defined(PIKI_PC_PORT)
+	sourceBarrel=pc_p2_original_barrel_owned(mWall);
+    sourceGate=pc_p2_original_gate_owned(mWall);
+#endif
+	if (mIsAttackReady && (sourceGate || sourceBarrel || (pc_randomizer_enabled() ? pc_randomizer_ready() : timeSinceLastAttack > 0))) {
 		// Native wall health is measured in work units. A base-10 hit supplies 1/60 unit.
 		const f32 work =
 #if defined(PIKI_PC_PORT)
-            pc_p2_original_gate_owned(mWall) ? pc_p2_original_gate_work_damage(mPiki) :
+            sourceGate ? pc_p2_original_gate_work_damage(mPiki) :
+            sourceBarrel ? pc_p2_original_barrel_work_damage(mPiki) :
 #endif
             pc_randomizer_enabled() ? mPiki->getAttackPower() / 600.0f : timeSinceLastAttack / 60.0f;
 		InteractAttack attack(mPiki, nullptr, work, false);

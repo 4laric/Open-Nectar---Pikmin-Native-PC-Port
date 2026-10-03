@@ -23,11 +23,11 @@ void mirror(Generator* generator){
 }
 }
 const p2original::GroupCourse& pc_p2_original_groups(){return groupCourse();}
-bool pc_p2_original_course_install(const std::vector<p2original::GroupBinding>& bindings,p2original::GroupProvider& provider,std::string& error){
+bool pc_p2_original_course_install(const std::vector<p2original::GroupBinding>& bindings,p2original::GroupProvider& provider,std::string& error,bool selectedInventory){
  // Real engine entry cannot bypass common physical-drop admission. All rows
  // are checked before provider reservation, RNG, actor construction or bind.
- for(const auto& row:p2original::originalActors().rows())if(!pc_p2_original_drop_resources(row.second,error))return false;
- return groupCourse().install(bindings,provider,error);
+ for(const auto& binding:bindings){const auto* row=p2original::originalActors().find(binding.state.uid);if(!row||!pc_p2_original_drop_resources(*row,error))return false;}
+ return groupCourse().install(bindings,provider,error,selectedInventory);
 }
 bool pc_p2_original_course_unload(std::string& error){return groupCourse().unload(error);}
 bool pc_p2_original_incarnation_encode(std::string& bytes,std::string& error){return groupCourse().encodeFrontier(bytes,error);}
