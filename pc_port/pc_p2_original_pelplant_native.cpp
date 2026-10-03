@@ -323,6 +323,15 @@ Native* cargoOwner(const Pellet* p){for(Native* n:p2original::pelplant::natives(
 void require(bool ok,const std::string& e){if(!ok)p2original::pelplant::fail(e);}
 }
 bool pc_p2_original_pelplant_update(BTeki* actor){Native* n=owner(actor);if(!n)return false;std::string e;require(n->tick(actor,gsys->getFrameTime(),e),e);return true;}
+bool pc_p2_original_pelplant_refresh(BTeki* actor,Graphics& gfx){
+ Native* n=owner(actor);if(!n)return false;
+ if(!gfx.mCamera)return true;
+ // Route before TaiPalmStrategy::draw: that borrowed strategy writes its
+ // own mTargetPosition into the actor before drawTekiShape is reached.
+ Matrix4f root,view;root.makeSRT(actor->mSRT.s,Vector3f(0,actor->mFaceDirection,0),actor->mSRT.t);
+ gfx.mCamera->mLookAtMtx.multiplyTo(root,view);
+ n->draw(actor,gfx,view);return true;
+}
 bool pc_p2_original_pelplant_draw(BTeki* actor,Graphics& gfx,const Matrix4f& view){Native* n=owner(actor);return n&&n->draw(actor,gfx,view);}
 bool pc_p2_original_pelplant_damage(BTeki* actor,float damage,const char special[4]){Native* n=owner(actor);if(!n)return false;std::string e;require(n->provider().damage(actor,damage,special,e),e);return true;}
 bool pc_p2_original_pelplant_stick(BTeki* actor,const char special[4]){Native* n=owner(actor);if(!n)return false;std::string e;require(n->provider().stick(actor,special,e),e);return true;}

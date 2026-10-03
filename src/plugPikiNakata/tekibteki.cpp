@@ -2330,6 +2330,9 @@ void BTeki::updateLifeGauge()
  */
 void BTeki::refresh(Graphics& gfx)
 {
+#if defined(PIKI_PC_PORT) && PIKI_PC_PORT
+    if (pc_p2_original_pelplant_refresh(this, gfx)) return;
+#endif
 	if (mDeadState == 0) {
 		TekiStrategy* strat = getStrategy();
 		if (strat) {

@@ -40,6 +40,7 @@ private:
 // Shared hook dispatch searches only explicitly registered Native instances.
 // Return false means unrelated actor/cargo; malformed owned state fails closed.
 bool pc_p2_original_pelplant_update(BTeki*);
+bool pc_p2_original_pelplant_refresh(BTeki*,Graphics&);
 bool pc_p2_original_pelplant_draw(BTeki*,Graphics&,const Matrix4f&);
 bool pc_p2_original_pelplant_damage(BTeki*,float,const char special[4]);
 bool pc_p2_original_pelplant_stick(BTeki*,const char special[4]);
