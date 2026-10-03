@@ -1856,6 +1856,10 @@ add_executable(p2_tamago_policy_test
 target_include_directories(p2_tamago_policy_test PRIVATE pc_port)
 target_compile_options(p2_tamago_policy_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
 add_test(NAME p2_tamago_policy_test COMMAND p2_tamago_policy_test)
+add_executable(p2_tamago_egg_policy_test tools/p2_tamago_egg_policy_test.cpp)
+target_include_directories(p2_tamago_egg_policy_test PRIVATE pc_port)
+target_compile_options(p2_tamago_egg_policy_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_tamago_egg_policy_test COMMAND p2_tamago_egg_policy_test)
 
 # Smoke-seed slot bypass (#944): engine-free env-gated predicate contract.
 add_executable(p2_smoke_any_slot_test
