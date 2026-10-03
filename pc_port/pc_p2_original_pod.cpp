@@ -180,6 +180,9 @@ bool pc_p2_original_pod_context(Suckable* receiver,const p2retail::SceneIdentity
  return committed&&pod&&receiver==pod&&pod->live&&scene==config.floor.scene&&current(&out);
 }
 bool pc_p2_original_pod_owned(){return prepared;}
+bool pc_p2_original_pod_can_abort_prepared(const p2retail::SceneIdentity& scene){
+ return prepared&&scene==config.floor.scene&&!committed&&!everSucked&&!completing&&!retaining&&current();
+}
 Suckable* pc_p2_original_pod_goal(const p2retail::SceneIdentity& scene){p2retail::Snapshot out;return pc_p2_original_pod_context(pod,scene,out)?pod:nullptr;}
 bool pc_p2_original_pod_bind_cargo(Pellet* p,const p2retail::BirthIdentity& birth,const p2retail::SceneIdentity& scene,CompletedCallback callback,std::string& e){
  if(!pod||!current()||!(scene==config.floor.scene)||!p||!p->isAlive()||!p->mConfig||!birth.epoch||!birth.activation||birth.instance.empty()||!callback||cargo.count(p)||completing||retaining)return reject(e,"pod_cargo_identity");
