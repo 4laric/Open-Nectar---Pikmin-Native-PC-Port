@@ -4,6 +4,9 @@
 #include <cstddef>
 #include <cstdint>
 struct P2CaveCacheBanks;
+struct P2CaveCampaignParty;
+const P2CaveCampaignParty& pc_randomizer_generated_cave_party();
+void pc_randomizer_generated_cave_party_set(const P2CaveCampaignParty& party);
 const P2CaveCacheBanks& pc_randomizer_generated_cave_cache();
 void pc_randomizer_generated_cave_cache_set(const P2CaveCacheBanks& banks);
 

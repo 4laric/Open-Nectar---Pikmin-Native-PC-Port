@@ -7,6 +7,7 @@
 #include "pc_p2_proxy.h"
 #include "pc_p2_cave_seed_binding.h"
 #include "pc_p2_cave_campaign_cache.h"
+#include "pc_p2_cave_campaign_party.h"
 #include "pc_randomizer.h"
 #include "pc_randomizer_catalog.h"
 #include "pc_randomizer_spawn_catalog.h"
@@ -140,6 +141,7 @@ bool generatedCave = false;
 P2CaveSeedBinding generatedCaveBinding;
 P2CaveSeedBudget generatedCaveBudget;
 P2CaveCacheBanks generatedCaveCache;
+P2CaveCampaignParty generatedCaveParty;
 std::unordered_map<unsigned, unsigned> p2CheckIndices;
 std::unordered_map<unsigned, std::set<std::pair<unsigned, int>>> p2CheckSources;
 unsigned campaignAssignments[72] = {};
@@ -217,6 +219,7 @@ struct CkptScan {
     p2whitecampaign::Budget whiteBudget;
     P2CaveSeedBudget caveBudget;
     P2CaveCacheBanks caveCache;
+    P2CaveCampaignParty caveParty;
     p2whitetreasure::Ledger whiteTreasure;
     unsigned thelynkUsed[18] = {};
 };
@@ -247,9 +250,10 @@ CkptScanStatus scanCampaignCheckpoint(CkptScan& s) {
         p2whitetreasure::Config config;
         valid = valid && p2whitetreasure::read_config(config) && s.whiteTreasure.read(meta,config);
     }
-    if (generatedCave) valid = valid && s.caveBudget.read(meta) && s.caveCache.read(meta);
+    if (generatedCave) valid = valid && s.caveBudget.read(meta) && s.caveCache.read(meta)
+        && s.caveParty.read(meta) && (!s.caveParty.present || s.caveParty.inside==s.caveCache.inside);
     if (thelynk) for (int i = 0; i < 18; ++i) valid = valid && bool(meta >> s.thelynkUsed[i]) && s.thelynkUsed[i] <= 330;
-    if (!valid || !(meta >> hash) || magic != (thelynk ? "THELYNK_CAMPAIGN_1" : generatedCave ? "PIKMIN_CAMPAIGN_GENERATED_CAVE_2" : whiteTreasureCampaign ? "PIKMIN_CAMPAIGN_WHITE_TREASURE_1" : whiteCampaign ? "PIKMIN_CAMPAIGN_WHITE_1" : purpleCampaign ? "PIKMIN_CAMPAIGN_PURPLE_1" : prereleaseTraps ? "PIKMIN_CAMPAIGN_5" : proggTraps ? "PIKMIN_CAMPAIGN_4" : bombTraps ? "PIKMIN_CAMPAIGN_3" : bombDeliveries ? "PIKMIN_CAMPAIGN_2" : "PIKMIN_CAMPAIGN_1")
+    if (!valid || !(meta >> hash) || magic != (thelynk ? "THELYNK_CAMPAIGN_1" : generatedCave ? "PIKMIN_CAMPAIGN_GENERATED_CAVE_3" : whiteTreasureCampaign ? "PIKMIN_CAMPAIGN_WHITE_TREASURE_1" : whiteCampaign ? "PIKMIN_CAMPAIGN_WHITE_1" : purpleCampaign ? "PIKMIN_CAMPAIGN_PURPLE_1" : prereleaseTraps ? "PIKMIN_CAMPAIGN_5" : proggTraps ? "PIKMIN_CAMPAIGN_4" : bombTraps ? "PIKMIN_CAMPAIGN_3" : bombDeliveries ? "PIKMIN_CAMPAIGN_2" : "PIKMIN_CAMPAIGN_1")
         || savedFingerprint != fingerprint || generation != s.generation || (meta >> extra))
         return kCkptMismatch;
     s.block.resize(32768);
@@ -277,6 +281,7 @@ void loadCampaignCheckpoint() {
     p2whitecampaign::budget = s.whiteBudget;
     generatedCaveBudget = s.caveBudget;
     generatedCaveCache = s.caveCache;
+    generatedCaveParty = s.caveParty;
     p2whitetreasure::ledger = s.whiteTreasure;
     for (int i = 0; i < 18; ++i) thelynkUsed[i] = s.thelynkUsed[i];
     campaignResumed = true;
@@ -2147,6 +2152,16 @@ const P2CaveCacheBanks& pc_randomizer_generated_cave_cache() {
     if (!pc_randomizer_generated_cave()) fail("inactive generated cave cache");
     return generatedCaveCache;
 }
+const P2CaveCampaignParty& pc_randomizer_generated_cave_party() {
+    if (!pc_randomizer_generated_cave()) fail("inactive generated cave party");
+    return generatedCaveParty;
+}
+void pc_randomizer_generated_cave_party_set(const P2CaveCampaignParty& party) {
+    if (!pc_randomizer_generated_cave() || !party.valid()
+        || (party.present && party.inside != generatedCaveCache.inside))
+        fail("invalid generated cave party or cache phase");
+    generatedCaveParty = party;
+}
 void pc_randomizer_generated_cave_cache_set(const P2CaveCacheBanks& banks) {
     if (!pc_randomizer_generated_cave() || !banks.valid())
         fail("inactive or invalid generated cave cache image");
@@ -2358,7 +2373,7 @@ bool write_campaign_checkpoint(const void* source, unsigned long long generation
         if (ec) return false;
     }
     std::ostringstream meta;
-    meta << (thelynk ? "THELYNK_CAMPAIGN_1 " : generatedCave ? "PIKMIN_CAMPAIGN_GENERATED_CAVE_2 " : whiteTreasureCampaign ? "PIKMIN_CAMPAIGN_WHITE_TREASURE_1 " : whiteCampaign ? "PIKMIN_CAMPAIGN_WHITE_1 " : purpleCampaign ? "PIKMIN_CAMPAIGN_PURPLE_1 " : prereleaseTraps ? "PIKMIN_CAMPAIGN_5 " : proggTraps ? "PIKMIN_CAMPAIGN_4 " : bombTraps ? "PIKMIN_CAMPAIGN_3 " : bombDeliveries ? "PIKMIN_CAMPAIGN_2 " : "PIKMIN_CAMPAIGN_1 ") << fingerprint << ' ' << generation;
+    meta << (thelynk ? "THELYNK_CAMPAIGN_1 " : generatedCave ? "PIKMIN_CAMPAIGN_GENERATED_CAVE_3 " : whiteTreasureCampaign ? "PIKMIN_CAMPAIGN_WHITE_TREASURE_1 " : whiteCampaign ? "PIKMIN_CAMPAIGN_WHITE_1 " : purpleCampaign ? "PIKMIN_CAMPAIGN_PURPLE_1 " : prereleaseTraps ? "PIKMIN_CAMPAIGN_5 " : proggTraps ? "PIKMIN_CAMPAIGN_4 " : bombTraps ? "PIKMIN_CAMPAIGN_3 " : bombDeliveries ? "PIKMIN_CAMPAIGN_2 " : "PIKMIN_CAMPAIGN_1 ") << fingerprint << ' ' << generation;
     for (int i = 0; i < (prereleaseTraps ? 7 : proggTraps ? 6 : bombTraps ? 5 : bombDeliveries ? 4 : 3); ++i) meta << ' ' << consumedBenefits[i];
     if (purpleCampaign) p2ship::stock.write(meta);
     if (whiteCampaign) p2whitecampaign::budget.write(meta);
@@ -2370,6 +2385,7 @@ bool write_campaign_checkpoint(const void* source, unsigned long long generation
     if (generatedCave) {
         generatedCaveBudget.write(meta);
         generatedCaveCache.write(meta);
+        generatedCaveParty.write(meta);
     }
     if (thelynk) for (int i = 0; i < 18; ++i) meta << ' ' << thelynkUsed[i];
     std::string block(static_cast<const char*>(source), 32768);
@@ -2696,6 +2712,7 @@ bool pc_randomizer_adopt_checkpoint() {
     p2whitecampaign::budget = p2whitecampaign::Budget();
     generatedCaveBudget = P2CaveSeedBudget();
     generatedCaveCache = P2CaveCacheBanks();
+    generatedCaveParty = P2CaveCampaignParty();
     p2whitetreasure::ledger = p2whitetreasure::Ledger();
     loadCampaignCheckpoint();
     if (campaignResumed) {

@@ -1,4 +1,5 @@
 #include "pc_randomizer.h"
+#include "pc_p2_cave_campaign.h"
 #include "pc_bbft.h"
 #if defined(PIKI_PC_PORT)
 #include "netplay/pc_netplay_camlead.h"
@@ -986,6 +987,11 @@ ModeState* IntroGameModeState::update(u32& result)
 ModeState* RunningModeState::update(u32& result)
 {
 #if defined(PIKI_PC_PORT)
+	if(pc_p2_cave_campaign_commit_transition()){
+		result=UPDATE_NONE;
+		mParentSection->mPendingOnePlayerSectionID=ONEPLAYER_NewPikiGame;
+		return new QuittingGameModeState(mParentSection);
+	}
 	// VS: revancha o título, pedidos desde la pantalla final.
 	if (const int vsExit = pc_vs_take_exit_request()) {
 		gameflow.mPauseAll                         = FALSE;
@@ -996,6 +1002,9 @@ ModeState* RunningModeState::update(u32& result)
 #endif
 	result = UPDATE_ALL; // enable all update types to start, then disable any we don't want.
 #if defined(PIKI_PC_PORT)
+    // Actual P2 CaveState sets TIMEFLAG_Stopped. Hold only the native day
+    // clock/countdown; AI and cave mechanics continue at the normal rate.
+    if(pc_p2_cave_campaign_floor())result&=~(UPDATE_WORLD_CLOCK|UPDATE_COUNTDOWN);
 	// VS: nadie se mueve durante la cuenta atrás ni con la partida acabada.
 	// mPauseAll solo para el reloj y el mundo; la IA (capitanes incluidos) va aparte.
 	if (pc_vs_active() && (pc_vs_countdown_holding() || pc_vs_match_over())) {
@@ -1014,7 +1023,7 @@ ModeState* RunningModeState::update(u32& result)
 	}
 
 	// trigger day end when time expires
-	if (!gameflow.mIsDayEndActive && !gameflow.mMoviePlayer->mIsActive
+	if (!pc_p2_cave_campaign_floor() && !gameflow.mIsDayEndActive && !gameflow.mMoviePlayer->mIsActive
 	    && gameflow.mWorldClock.mTimeOfDay >= gameflow.mParameters->mEndHour()) {
 #if defined(VERSION_PIKIDEMO) || defined(VERSION_GPIJ01_01)
 #else
@@ -1178,6 +1187,11 @@ ModeState* RunningModeState::update(u32& result)
 		result &= ~UPDATE_AI;
 
 #if defined(PIKI_PC_PORT)
+	} else if(pc_p2_cave_campaign_floor()&&state==zen::ogScrPauseMgr::PAUSE_ExitToSunset){
+        // The surface day timer is stopped in a P2 cave. Sunset belongs to
+        // the surface after the player returns through the cave exit.
+        gameflow.mIsUIOverlayActive=mIsOverlayCached;
+        std::puts("P2_CAMPAIGN_SUNSET_HELD return_through_cave_exit=1");
 	} else if (pc_vs_active() && (state == zen::ogScrPauseMgr::PAUSE_ExitToSunset || state == zen::ogScrPauseMgr::PAUSE_ExitToTitle)) {
 		// VS: no hay atardecer ni selección de nivel. "Atardecer" es revancha
 		// y "salir", volver al título.

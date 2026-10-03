@@ -1,4 +1,5 @@
 #include "pc_p2_cave.h"
+#include "pc_p2_cave_campaign.h"
 #include "pc_p2_cave_generate.h"
 #include "pc_p2_cave_nav_diagnostics.h"
 #include "pc_p2_cave_anchor.h"
@@ -326,7 +327,7 @@ bool writeTransfer(const std::string& text){
     return ok && std::rename("p2-cave-transfer.tmp","p2-cave-transfer.txt")==0;
 }
 }
-int pc_p2_cave_floor(){return floorId;}
+int pc_p2_cave_floor(){return pc_randomizer_generated_cave()?pc_p2_cave_campaign_floor():floorId;}
 bool pc_p2_cave_surface_route_active(){return surfaceRouteLoaded && tutorialSurfaceStage() && pc_p2_scene_generation()==surfaceContextScene;}
 bool pc_p2_cave_route_species_requested(int species){
     if(completed || online() || !tutorialSurfaceStage()
@@ -346,7 +347,7 @@ bool pc_p2_cave_body_profile_context(unsigned long long seed,const std::string& 
         && pc_p2_purples_enabled() && pc_p2_whites_enabled();
 }
 bool pc_p2_cave_is_beasts(){return beasts;}
-std::string pc_p2_cave_boundary_token(){return token;}
+std::string pc_p2_cave_boundary_token(){return pc_randomizer_generated_cave()?pc_p2_cave_campaign_token():token;}
 std::string pc_p2_cave_receipt_prefix(){return floorId?"floor"+std::to_string(floorId)+":":"";}
 // Non-aborting entry-header validator (external linkage for the fixture;
 // defined at file scope outside the anonymous namespace). C stdio only
@@ -531,7 +532,10 @@ void pc_p2_cave_setup(){
     pc_p2_cave_generate_run(); // lane cave-generate-provider (#129): opt-in manifest sidecar only; reviewed hook, pending #186
     if(beasts && floor>=3){std::printf("P2_BEASTS_ENTRY_READY floor=%d token=%s descent=disabled\n",floor,token.c_str());std::fflush(stdout);}
 }
-void pc_p2_cave_request(){if(!online() && ((surfaceRouteLoaded && !completed) || (active() && !(beasts && floorId>=3))))requested=true;}
+void pc_p2_cave_request(){
+    if(pc_randomizer_generated_cave()){pc_p2_cave_campaign_request();return;}
+    if(!online() && ((surfaceRouteLoaded && !completed) || (active() && !(beasts && floorId>=3))))requested=true;
+}
 bool pc_p2_cave_interact(float x,float y,float z){
     if(beasts && floorId>=3)return false;
     if(!safeTime() || !anchor.contains(x,y,z))return false;
@@ -635,6 +639,7 @@ bool pc_p2_cave_exit_after_checkpoint(){
     std::fflush(nullptr);std::_Exit(42);
 }
 void pc_p2_cave_tick(){
+    if(pc_randomizer_generated_cave()){pc_p2_cave_campaign_tick();return;}
     loadSurfaceRoute();
     if(surfaceRouteLoaded){
         const bool attempt=requested;requested=false;

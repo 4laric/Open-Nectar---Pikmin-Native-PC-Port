@@ -343,6 +343,8 @@ set(PC_PORT_SOURCES
     pc_port/pc_p2_white_poison.cpp
     pc_port/pc_p2_cave.cpp
     pc_port/pc_p2_cave_campaign_cache_engine.cpp
+    pc_port/pc_p2_cave_campaign_party_engine.cpp
+    pc_port/pc_p2_cave_campaign.cpp
     pc_port/pc_p2_cave_dialog_window.cpp
     pc_port/pc_p2_cave_generate.cpp
     pc_port/pc_p2_cave_generator.cpp
@@ -2497,6 +2499,9 @@ target_compile_options(pc_randomizer_probe PRIVATE ${NATIVE_COMPILE_OPTIONS})
 add_executable(p2_cave_seed_binding_test tools/p2_cave_seed_binding_test.cpp)
 target_include_directories(p2_cave_seed_binding_test PRIVATE pc_port)
 add_test(NAME p2_cave_seed_binding_test COMMAND p2_cave_seed_binding_test)
+add_executable(p2_cave_campaign_party_test tools/test_p2_cave_campaign_party.cpp)
+target_include_directories(p2_cave_campaign_party_test PRIVATE pc_port)
+add_test(NAME p2_cave_campaign_party_test COMMAND p2_cave_campaign_party_test)
 
 # Netplay M4 lane A snapshot codec + reassembler test (issue #885).
 # Engine-free (no gekkonet/game/SDL link), registered in every build.

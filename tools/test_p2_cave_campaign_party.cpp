@@ -1,0 +1,67 @@
+#include "pc_p2_cave_campaign_party.h"
+#include <cstdlib>
+#include <fstream>
+#include <iostream>
+#include <sstream>
+
+namespace {
+unsigned checks=0;
+void check(bool value,const char* label){++checks;if(!value){std::cerr<<label<<'\n';std::exit(1);}}
+std::string wire(const P2CaveCampaignParty& party){std::ostringstream out;party.write(out);return out.str();}
+P2CaveCampaignParty fixture(){
+    P2CaveCampaignParty p;p.present=true;p.inside=true;p.nextKey=3;p.surfaceTime=11.625f;
+    p.captains.push_back({0,31.25f,50,.75f,{1.125f,2.25f,-3.5f}});
+    p.captains.push_back({1,17,50,-.25f,{5,2.25f,0}});
+    P2CavePartyBody b;b.species=4;b.growth=2;b.owner=1;b.mode=1;b.key=1;
+    b.health=.75f;b.maxHealth=1;b.face=1.5f;b.position={10.125f,2.5f,-11.75f};
+    b.originRealm=0;b.originPosition={21.5f,22.25f,23.125f};
+    b.sourceKey="source:forest:piki";b.sourceRecord=0;b.sourceAttempt=4;b.sourceActivation=97;
+    p.bodies.push_back(b);p.origins.push_back(b);
+    b.key=2;b.species=3;b.sourceAttempt=5;b.position.x+=.125f;
+    p.bodies.push_back(b);p.origins.push_back(b);
+    P2CavePartyHead h;h.species=4;h.growth=1;h.owner=0;h.timer=.125f;h.frame=7.75f;h.speed=30;
+    h.position={31.125f,32.25f,33.5f};p.surfaceHeads.push_back(h);p.floorHeads.push_back(h);
+    p.surfaceHomes={P2CavePartyPoint{1,2,3},P2CavePartyPoint{4,5,6}};return p;
+}
+}
+int main(int argc,char** argv){
+    auto p=fixture();check(p.valid(),"valid full typed fixture");
+    P2CaveCampaignParty parsed;std::istringstream input(wire(p));
+    check(parsed.read(input),"read typed fixture");check(wire(parsed)==wire(p),"exact float/species/provenance roundtrip");
+    auto bad=p;bad.origins[1].sourceAttempt=bad.origins[0].sourceAttempt;bad.origins[1].originPosition.x+=20;
+    check(!bad.valid(),"duplicate source at different position refused");
+    bad=p;bad.bodies[0].sourceActivation++;check(!bad.valid(),"changed survivor activation refused");
+    bad=p;bad.bodies[0].originPosition.z++;check(!bad.valid(),"changed survivor origin position refused");
+    bad=p;bad.origins.clear();check(!bad.valid(),"missing origin ledger refused");
+    bad=p;bad.origins[0].sourceKey="-";check(!bad.valid(),"wire sentinel cannot be source identity");
+    bad=p;bad.bodies.erase(bad.bodies.begin());check(bad.valid(),"lost source retained in ledger");
+    bad=p;bad.bodies.clear();check(bad.valid(),"all source deaths retain ledger");
+    bad=p;bad.bodies[1].key=bad.bodies[0].key;check(!bad.valid(),"duplicate living logical key refused");
+    bad=p;bad.nextKey=2;check(!bad.valid(),"next logical key must follow all records");
+    bad=p;bad.bodies[0].species=5;check(!bad.valid(),"unsupported Bulbmin refused");
+    bad=p;bad.bodies[0].growth=3;check(!bad.valid(),"invalid growth refused");
+    bad=p;bad.bodies[0].health=0;check(!bad.valid(),"dead living record refused");
+    bad=p;bad.bodies[0].health=2;check(!bad.valid(),"health exceeds actual maximum refused");
+    bad=p;bad.floorHeads[0].state=8;check(!bad.valid(),"transient head growth state refused");
+    bad=p;bad.floorHeads[0].timer=std::numeric_limits<float>::infinity();check(!bad.valid(),"nonfinite head timer refused");
+    bad=p;bad.captains[1].slot=0;check(!bad.valid(),"duplicate captain slot refused");
+    bad=p;bad.captains.resize(1);check(!bad.valid(),"missing actual formation owner refused");
+    bad=p;bad.resumeLiving=false;check(!bad.valid(),"floor cannot use surface sunset storage authority");
+    bad=p;bad.inside=false;bad.resumeLiving=false;bad.bodies.clear();
+    check(bad.valid(),"surface sunset retires living replay while retaining floor head bank");
+    bad=p;bad.surfaceTime=24;check(!bad.valid(),"outside clock range refused");
+    bad=p;bad.surfaceTime=std::numeric_limits<float>::quiet_NaN();check(!bad.valid(),"nonfinite surface clock refused");
+    bad=p;bad.captains.resize(1);
+    const auto before=wire(parsed);auto truncated=wire(p);truncated.resize(truncated.size()/2);
+    std::istringstream partial(truncated);check(!parsed.read(partial),"partial record refused");
+    check(wire(parsed)==before,"failed read leaves owned state intact");
+    std::istringstream invalidWire(wire(bad));check(!parsed.read(invalidWire),"semantic invalidity refused by parser");
+    check(wire(parsed)==before,"invalid read leaves owned state intact");
+    P2CaveCampaignParty empty;check(empty.valid(),"absent party valid");
+    std::istringstream absent(wire(empty));check(parsed.read(absent)&&!parsed.present,"absent party resets state");
+    std::cout<<"P2 cave campaign party: "<<checks<<" controls passed\n";
+    if(argc==3&&std::string(argv[1])=="--write-fixture"){
+        std::ofstream out(argv[2]);check(bool(out),"fixture output opened");out<<wire(p)<<'\n';
+        check(bool(out),"fixture output written");
+    }else check(argc==1,"unexpected arguments");
+}

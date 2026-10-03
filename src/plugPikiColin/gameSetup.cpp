@@ -1,6 +1,7 @@
 #include "GameSetupSection.h"
 #include "pc_bbft.h"
 #include "pc_randomizer.h"
+#include "pc_p2_cave_campaign.h"
 #include "pc_permadeath.h"
 #include "jaudio/piki_scene.h"
 #include "jaudio/verysimple.h"
@@ -199,6 +200,7 @@ GameSetupSection::GameSetupSection()
 	generatorCache = new GeneratorCache();
 	generatorCache->initGame();
 	memStat->end("genCache");
+	pc_p2_cave_campaign_prepare();
 
 	// set up player info, to track player-induced changes
 	memStat->start("playerInfo");

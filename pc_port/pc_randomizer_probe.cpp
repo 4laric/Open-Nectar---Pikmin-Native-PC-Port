@@ -2,6 +2,7 @@
 #include "pc_p2_ship_store.h"
 #include "pc_randomizer.h"
 #include "pc_p2_cave_campaign_cache.h"
+#include "pc_p2_cave_campaign_party.h"
 #include <fstream>
 #include <iterator>
 #include "pc_randomizer_catalog.h"
@@ -32,7 +33,15 @@ int main(int argc, char** argv) {
         unsigned char card[32768] = {};
         const bool resumed = pc_randomizer_load_campaign(card);
         for (int i = 1; i < argc; ++i) {
-            if (!std::strcmp(argv[i], "--cave-cache-enter") || !std::strcmp(argv[i], "--cave-cache-floor")
+            if(!std::strcmp(argv[i],"--cave-party-read")){
+                assert(i+1<argc);std::ifstream input(argv[++i]);P2CaveCampaignParty party;
+                if(!input||!party.read(input)){std::fputs("INVALID_CAVE_PARTY_CONTROL\n",stderr);return 2;}
+                std::string extra;if(input>>extra)return 2;
+                pc_randomizer_generated_cave_party_set(party);
+            }else if(!std::strcmp(argv[i],"--cave-party-state")){
+                std::ostringstream out;pc_randomizer_generated_cave_party().write(out);
+                std::printf("CAVE_PARTY_STATE%s\n",out.str().c_str());
+            }else if (!std::strcmp(argv[i], "--cave-cache-enter") || !std::strcmp(argv[i], "--cave-cache-floor")
                 || !std::strcmp(argv[i], "--cave-cache-return")) {
                 const std::string action=argv[i];
                 if(action!="--cave-cache-floor" && !pc_randomizer_ready()) return 2;

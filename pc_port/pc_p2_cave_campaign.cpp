@@ -1,0 +1,227 @@
+#include "pc_p2_cave_campaign.h"
+#include "pc_p2_cave_campaign_cache.h"
+#include "pc_p2_cave_campaign_cache_engine.h"
+#include "pc_p2_cave_campaign_party_engine.h"
+#include "pc_p2_cave_rooms_engine.h"
+#include "pc_p2_cave_geometry_engine.h"
+#include "pc_p2_cave_items_engine.h"
+#include "pc_p2_cave_bud_actor.h"
+#include "pc_p2_cave_carry_engine.h"
+#include "pc_p2_cave.h"
+#include "pc_randomizer.h"
+#include "FlowController.h"
+#include "OnePlayerSection.h"
+#include "Generator.h"
+#include "Pellet.h"
+#include "Navi.h"
+#include "NaviMgr.h"
+#include "NaviState.h"
+#include "Piki.h"
+#include "PikiMgr.h"
+#include "PlayerState.h"
+#include "MoviePlayer.h"
+#include "MapMgr.h"
+#include "gameflow.h"
+#include <fstream>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <cstdint>
+
+namespace {
+struct Config {std::uint64_t seed=0;std::string token,surface,floor;float entryX=0,entryZ=0,exitX=0,exitZ=0,spawnX=0,spawnZ=0;};
+Config config;
+StageInfo* surfaceStage=nullptr;
+StageInfo* floorStage=nullptr;
+bool prepared=false,sceneReady=false,restored=false,requested=false,pending=false;
+[[noreturn]] void invalid(const char* why){std::fprintf(stderr,"Invalid ordinary generated cave: %s\n",why);std::abort();}
+bool inside(){return pc_randomizer_generated_cave_cache().inside;}
+bool safe(){return sceneReady&&pc_randomizer_ready()&&naviMgr&&naviMgr->getActiveNavi()
+    &&naviMgr->getActiveNavi()->getCurrState()&&naviMgr->getActiveNavi()->getCurrState()->getID()==NAVISTATE_Walk
+    &&!gameflow.mPauseAll&&!gameflow.mIsUIOverlayActive&&!gameflow.mIsDayEndActive
+    &&gameflow.mMoviePlayer&&!gameflow.mMoviePlayer->mIsActive;}
+bool atBoundary(){auto* n=naviMgr?naviMgr->getActiveNavi():nullptr;if(!n)return false;
+    const float x=inside()?config.exitX:config.entryX,z=inside()?config.exitZ:config.entryZ;
+    return std::hypot(n->mSRT.t.x-x,n->mSRT.t.z-z)<=80.f;}
+void flush(){
+    if(!flowCont.mCurrentStage||!generatorCache||!generatorList||!generatorList->mGenListHead||!pelletMgr)
+        invalid("missing live generator flush context");
+    const unsigned stage=flowCont.mCurrentStage->mStageIndex;
+    if(stage>=STAGE_COUNT)invalid("foreign native cache directory key");
+    generatorCache->beginSave(stage);
+    Generator* gen;
+    FOREACH_NODE_REUSE(Generator,generatorList->mGenListHead->mChild,gen){
+        if(gen->mCarryOverFlags&GENCARRY_SaveGenerator)generatorCache->saveGenerator(gen);}
+    FOREACH_NODE_REUSE(Generator,generatorList->mGenListHead->mChild,gen){
+        if((gen->mCarryOverFlags&GENCARRY_SaveGenerator)&&(gen->mCarryOverFlags&GENCARRY_SaveCreature))
+            generatorCache->saveGeneratorCreature(gen);}
+    Iterator pellets(pelletMgr);CI_LOOP(pellets){auto* p=static_cast<Pellet*>(*pellets);
+        if(p->mConfig&&p->mConfig->mPelletType()==PELTYPE_UfoPart)generatorCache->saveUfoParts(p);}
+    generatorCache->endSave();
+    std::printf("P2_CAMPAIGN_LIVE_CACHE_FLUSH stage_key=%u floor=%d\n",stage,int(inside()));
+}
+void moveParty(P2CaveCampaignParty& party,bool entering){
+    std::array<P2CavePartyPoint,2> from{},to{};
+    for(auto& c:party.captains){from[c.slot]=c.position;
+        if(entering){party.surfaceHomes[c.slot]=c.position;to[c.slot]={config.spawnX+float(c.slot*30),c.position.y,config.spawnZ};}
+        else to[c.slot]=party.surfaceHomes[c.slot];}
+    for(auto& b:party.bodies){const int owner=b.owner>=0?b.owner:party.active;
+        b.position.x+=to[owner].x-from[owner].x;b.position.y+=to[owner].y-from[owner].y;b.position.z+=to[owner].z-from[owner].z;
+        // Keep provenance/key while retiring the old map's pointer binding.
+        b.generator=b.originRealm==int(entering)?b.originGenerator:0;}
+    for(auto& c:party.captains)c.position=to[c.slot];
+    party.inside=entering;
+    party.landing=true;
+}
+}
+void pc_p2_cave_campaign_prepare(){
+    prepared=false;surfaceStage=nullptr;floorStage=nullptr;
+    if(!pc_randomizer_generated_cave())return;
+    std::ifstream in("p2-cave-campaign.txt");std::string magic,version,extra;
+    if(!(in>>magic>>version>>config.seed>>config.token>>config.surface>>config.floor
+        >>config.entryX>>config.entryZ>>config.exitX>>config.exitZ>>config.spawnX>>config.spawnZ)
+        ||magic!="P2_CAVE_CAMPAIGN"||version!="1"||(in>>extra)
+        ||config.floor!="stages/generated-forest.ini"||config.surface.rfind("stages/",0)!=0
+        ||config.surface.find("..")!=std::string::npos
+        ||!pc_randomizer_generated_cave_matches(config.seed,"forest_1",1,"treasure_water",
+            "forest_1:f1:leaf:0","item:forest_1:f1:leaf:0:0",config.token.c_str()))invalid("seed-bound map provider config");
+    for(float value:{config.entryX,config.entryZ,config.exitX,config.exitZ,config.spawnX,config.spawnZ})
+        if(!std::isfinite(value)||std::fabs(value)>=1e7f)invalid("map boundary position");
+    FOREACH_NODE(StageInfo,flowCont.mStageList.mChild,stage){if(stage->mFileName
+        &&config.surface==stage->mFileName&&stage->mStageID==STAGE_Forest)surfaceStage=stage;}
+    if(!surfaceStage||surfaceStage->mStageIndex>=STAGE_COUNT)invalid("missing ordinary source surface");
+    // Allocated with the game setup heap; excluded from the fixed five-stage
+    // story list/card serialization. Its heads are in typed floor state.
+    floorStage=new StageInfo();floorStage->mStageInf.init();
+    floorStage->mStageName="Generated Forest Cave";floorStage->mFileName="stages/generated-forest.ini";
+    floorStage->mStageID=STAGE_Forest;floorStage->mStageIndex=surfaceStage->mStageIndex;
+    floorStage->mIsVisible=FALSE;
+    prepared=true;
+}
+void pc_p2_cave_campaign_select_stage(){
+    if(!pc_randomizer_generated_cave())return;
+    if(!prepared)invalid("provider not prepared");
+    if(inside()){
+        const auto& party=pc_randomizer_generated_cave_party();
+        if(!party.present||!party.inside)invalid("floor cache without typed party");
+        flowCont.mCurrentStage=floorStage;
+    }else if(pending)flowCont.mCurrentStage=surfaceStage;
+    auto* stage=flowCont.mCurrentStage;if(!stage||!stage->mFileName)invalid("missing stage selection");
+    std::snprintf(flowCont.mCurrStageFilePath,sizeof(flowCont.mCurrStageFilePath),"%s",stage->mFileName);
+    std::snprintf(flowCont.mDoorStageFilePath,sizeof(flowCont.mDoorStageFilePath),"%s",stage->mFileName);
+}
+void pc_p2_cave_campaign_before_preload(){
+    if(pc_randomizer_generated_cave()&&inside())pc_p2_cave_campaign_cache_restore_floor();
+}
+void pc_p2_cave_campaign_scene_setup(){
+    sceneReady=false;restored=false;requested=false;
+    if(!pc_randomizer_generated_cave()||!prepared)return;
+    auto party=pc_randomizer_generated_cave_party();
+    if(inside()){
+        pc_p2_cave_rooms_setup();const auto* layout=pc_p2_cave_rooms_layout();
+        if(!layout||layout->seed!=config.seed||layout->cave!="forest_1"||layout->floor!=1)invalid("foreign floor layout");
+        pc_p2_cave_geometry_setup();
+    }
+    if(inside()||pending||(party.present&&party.resumeLiving&&flowCont.mCurrentStage==surfaceStage)){
+        // P2 CaveState stops the day timer; loadMainMapSituation and the
+        // geyser return restore CaveSaveData.mTime. Preserve that exact time
+        // through the native card instead of resetting to the day's start.
+        gameflow.mWorldClock.setTime(party.surfaceTime);
+        // Boundary SAVE records a landing descriptor before the destination
+        // map exists. Resolve only that descriptor against actual destination
+        // collision; an already landed SAVE retains exact captured heights.
+        if(party.landing){
+            if(!mapMgr)invalid("landing without destination map");
+            for(auto& c:party.captains)c.position.y=mapMgr->getMinY(c.position.x,c.position.z,true);
+            for(auto& b:party.bodies)b.position.y=mapMgr->getMinY(b.position.x,b.position.z,true);
+            party.landing=false;
+            if(!party.valid())invalid("invalid destination landing geometry");
+            pc_randomizer_generated_cave_party_set(party);
+        }
+        pc_p2_cave_campaign_party_restore(party);restored=true;}
+    pending=false;
+    if(inside()){
+        pc_p2_cave_bud_setup();pc_p2_cave_items_setup();
+    }
+    sceneReady=true;
+    std::printf("P2_CAMPAIGN_SCENE_READY floor=%d restored_party=%d\n",int(inside()),int(restored));
+}
+void pc_p2_cave_campaign_scene_exit(){
+    if(!pc_randomizer_generated_cave())return;
+    sceneReady=false;pc_p2_cave_items_shutdown();pc_p2_cave_geometry_shutdown();pc_p2_cave_rooms_shutdown();
+    pc_p2_cave_campaign_party_scene_exit();
+}
+void pc_p2_cave_campaign_request(){if(pc_randomizer_generated_cave()&&safe()&&atBoundary())requested=true;}
+void pc_p2_cave_campaign_tick(){
+    if(!pc_randomizer_generated_cave()||!sceneReady)return;
+    if(inside()){pc_p2_cave_carry_tick();pc_p2_cave_geometry_tick();pc_p2_cave_bud_tick();}
+}
+bool pc_p2_cave_campaign_commit_transition(){
+    if(!pc_randomizer_generated_cave()||!requested)return false;
+    requested=false;if(!safe()||!atBoundary())return false;
+    const bool entering=!inside();auto party=pc_randomizer_generated_cave_party();
+    if(!pc_p2_cave_campaign_party_capture(party,!entering)){
+        std::puts("P2_CAMPAIGN_BOUNDARY_HELD unsettled_party_or_heads=1");return false;}
+    if(entering){int reds=0;for(const auto& body:party.bodies)reds+=body.species==1;
+        if(reds<2){std::puts("P2_CAMPAIGN_BOUNDARY_HELD living_red_supply=1");return false;}
+        party.surfaceTime=gameflow.mWorldClock.mTimeOfDay;
+        if(!party.valid()){std::puts("P2_CAMPAIGN_BOUNDARY_HELD invalid_surface_clock=1");return false;}}
+    // Use the native card slot the player selected. A direct boot without a
+    // usable backup slot cannot silently select/create a different save file.
+    if(gameflow.mGamePrefs.mSpareMemCardSaveIndex<1||gameflow.mGamePrefs.mSpareMemCardSaveIndex>4
+        ||gameflow.mGamePrefs.mMemCardSaveIndex>4
+        ||gameflow.mPlayState.mSaveSlot>3){
+        std::puts("P2_CAMPAIGN_BOUNDARY_HELD selected_native_save_slot=0");return false;}
+    flush();
+    const auto oldImage=pc_p2_cave_campaign_cache_image();
+    const auto oldBanks=pc_randomizer_generated_cave_cache();
+    const auto oldParty=pc_randomizer_generated_cave_party();
+    const auto oldPlayState=gameflow.mPlayState;
+    std::uint64_t oldGeneration=0;
+    pc_randomizer_checkpoint_info(&oldGeneration,nullptr);
+    if(entering)pc_p2_cave_campaign_cache_enter(STAGE_Forest);
+    else pc_p2_cave_campaign_cache_return();
+    moveParty(party,entering);pc_randomizer_generated_cave_party_set(party);
+    // Persist the destination realm and its party with the ordinary native
+    // card, without the sunset deposit/actor teardown. Only a completed native
+    // SAVE authorizes the section transition.
+    gameflow.mMemoryCard.saveCurrentGame();
+    std::uint64_t savedGeneration=0;
+    pc_randomizer_checkpoint_info(&savedGeneration,nullptr);
+    if(savedGeneration<=oldGeneration){
+        pc_p2_cave_campaign_cache_restore_image(oldImage);
+        pc_randomizer_generated_cave_cache_set(oldBanks);
+        pc_randomizer_generated_cave_party_set(oldParty);
+        gameflow.mPlayState=oldPlayState;
+        std::puts("P2_CAMPAIGN_BOUNDARY_HELD native_save_failed=1 rollback=1");return false;}
+    // saveOptions runs after the native campaign checkpoint. Its I/O failure
+    // cannot undo a committed destination card or authorize replaying the old
+    // realm; preserve the actual checkpoint as the boundary authority.
+    std::printf("P2_CAMPAIGN_BOUNDARY_SAVE generation=%llu options_failed=%d\n",
+        static_cast<unsigned long long>(savedGeneration),int(gameflow.mMemoryCard.didSaveFail()));
+    pending=true;sceneReady=false;
+    std::printf("P2_CAMPAIGN_BOUNDARY_COMMITTED floor=%d bodies=%zu surface_heads=%zu floor_heads=%zu\n",
+        int(entering),party.bodies.size(),party.surfaceHeads.size(),party.floorHeads.size());
+    return true;
+}
+bool pc_p2_cave_campaign_restored_party(){return pc_randomizer_generated_cave()&&restored;}
+bool pc_p2_cave_campaign_owns_heads(){
+    if(!pc_randomizer_generated_cave()||!prepared)return false;
+    const auto& party=pc_randomizer_generated_cave_party();
+    return party.present&&party.resumeLiving&&party.inside==inside()
+        &&flowCont.mCurrentStage==(inside()?floorStage:surfaceStage);
+}
+int pc_p2_cave_campaign_floor(){return pc_randomizer_generated_cave()&&prepared&&inside()?1:0;}
+std::string pc_p2_cave_campaign_token(){return pc_randomizer_generated_cave()&&prepared?config.token:std::string();}
+void pc_p2_cave_campaign_before_day_cleanup(){
+    if(!pc_randomizer_generated_cave()||!prepared)return;
+    if(!inside()){
+        auto party=pc_randomizer_generated_cave_party();
+        if(party.present){party.resumeLiving=false;party.bodies.clear();
+            pc_randomizer_generated_cave_party_set(party);}
+        return;
+    }
+    // A live floor must never enter P1's sunset survivor deposit. Its SAVE
+    // authority is the settled native boundary transaction above.
+    invalid("floor reached destructive surface day-end path");
+}

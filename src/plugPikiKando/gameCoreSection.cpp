@@ -38,6 +38,7 @@
 #include "pc_p2_demon_host.h"
 #include "pc_p2_sarai_manager.h"
 #include "pc_p2_cave.h"
+#include "pc_p2_cave_campaign.h"
 #include "pc_p2_cave_items_engine.h"
 #include "pc_p2_kurage_receiver.h"
 #include "pc_p2_captain.h"
@@ -677,6 +678,7 @@ void GameCoreSection::enterFreePikmins()
 void GameCoreSection::cleanupDayEnd()
 {
 #if defined(PIKI_PC_PORT)
+    pc_p2_cave_campaign_before_day_cleanup();
     if (bossMgr) bossMgr->endPrereleaseTrap();
 #endif
 	finishPause();
@@ -1008,6 +1010,7 @@ void GameCoreSection::prepareBadEnd()
 void GameCoreSection::exitStage()
 {
 #if defined(PIKI_PC_PORT)
+	pc_p2_cave_campaign_scene_exit();
 	pc_demon_drop_scene_exit();
 	pc_demon_scene_exit();
 #endif
@@ -1517,6 +1520,7 @@ void GameCoreSection::initStage()
 #else
 		flowCont.mCurrentStage->mStageIndex;
 #endif
+	pc_p2_cave_campaign_before_preload();
 	const bool hasAuthoritativeStageCache = generatorCache->preload(genCacheStage);
 #if defined(PIKMIN_RANDOMIZER_TEST_HOOKS)
 	if (pc_pikipelago_room_preview() && std::getenv("PIKMIN_P2_CACHE_RESUME")) {
@@ -1842,6 +1846,15 @@ void GameCoreSection::initStage()
 		PRINT("@@@@ FREE = %d ACTIVE = %d\n", inf->mBPikiInfMgr.getFreeNum(), inf->mBPikiInfMgr.getActiveNum());
 		BaseInf* a = (BaseInf*)inf->mBPikiInfMgr.mActiveList.mChild;
 		while (a) {
+#if defined(PIKI_PC_PORT)
+            // A generated boundary card owns exact typed head positions,
+            // species and animation state. Retire its legacy stage-list copy
+            // before any birth, rather than making duplicate/rounded heads.
+            if(pc_p2_cave_campaign_owns_heads()){
+                BaseInf* b=a;a=static_cast<BaseInf*>(a->mNext);
+                inf->mBPikiInfMgr.delInf(b);continue;
+            }
+#endif
 			PikiHeadItem* item = static_cast<PikiHeadItem*>(itemMgr->birth(OBJTYPE_Pikihead));
 			if (item) {
 				a->restore(item);
@@ -2047,6 +2060,7 @@ void GameCoreSection::finalSetup()
         std::printf("P2_SHIP_READY stored=%d controls=F10_withdraw_ShiftF10_deposit near_ship=180\n", p2ship::stock.total());
     }
 	pc_p2_snow_campaign_setup();
+	pc_p2_cave_campaign_scene_setup();
 	// Actor-lifetime (#397): mark the new scene ready for lifecycle fixtures.
 	pc_p2_scene_begin();
 	PRINT("====================== FINAL SETUP DONE ======================\n");
@@ -4163,8 +4177,10 @@ void GameCoreSection::updateAI()
             if (active && !playerState->mInDayEnd) {
                 randomizerApplyBenefits(mNavi, mMapMgr);
                 randomizerApplyDeathLink(nullptr, nullptr, nullptr);
-                randomizerObserveWorld();
-                randomizerObserveExploration(mNavi);
+                if(!pc_p2_cave_campaign_floor()){
+                    randomizerObserveWorld();
+                    randomizerObserveExploration(mNavi);
+                }
             }
         }
     }
@@ -4232,7 +4248,7 @@ void GameCoreSection::updateAI()
     }
     static bool bbftRedsQueued = false, bbftRedsReady = false;
     static int bbftInitialField = 20;
-    if (pc_bbft_skip_tutorial() && !pc_randomizer_resumed() && !gameflow.mMoviePlayer->mIsActive
+    if (pc_bbft_skip_tutorial() && !pc_randomizer_resumed() && !pc_p2_cave_campaign_restored_party() && !gameflow.mMoviePlayer->mIsActive
         && !gameflow.mPauseAll && !gameflow.mIsUIOverlayActive && itemMgr) {
         GoalItem* redOnion = itemMgr->getContainer(initialColor);
         // Real play keeps the 20 starting Pikmin in the Onion, as vanilla does:

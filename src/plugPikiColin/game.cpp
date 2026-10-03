@@ -1,4 +1,5 @@
 #include "OnePlayerSection.h"
+#include "pc_p2_cave_campaign.h"
 
 #include "CardSelectSection.h"
 #include "CmdStream.h"
@@ -432,6 +433,7 @@ void OnePlayerSection::init()
 			setBannerTex(flowCont.mCurrentStage->mStageID);
 #endif
 			PRINT("making new MAINGAME\n");
+			pc_p2_cave_campaign_select_stage();
 			currentSection = new NewPikiGameSection();
 			break;
 		}
