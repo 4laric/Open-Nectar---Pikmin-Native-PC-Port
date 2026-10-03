@@ -348,6 +348,20 @@ public:
  const SceneContext* committed()const noexcept{
   return prepared()&&context.mPhase==ScenePhase::Committed&&floorOwner&&floorOwner->current(context.mSnapshot.scene,context.nativeSerial())?&context:nullptr;
  }
+
+ bool knownSourceBirth(const p2original::InstanceIdentity& identity,BirthIdentity& out,Snapshot& floor,std::string& error)const{
+  const auto* selected=committed();
+  if(!selected||!floorOwner)return fail(error,"retail retained parent requires actual committed scene");
+  const auto serial=selected->nativeSerial(),revision=selected->selectionRevision();
+  BirthIdentity actual;Snapshot actualFloor;
+  if(!floorOwner->knownSourceBirth(identity,actual,actualFloor,error))return false;
+  // Recheck selected owner after the read, before publishing any output.
+  if(committed()!=selected||selected->nativeSerial()!=serial||selected->selectionRevision()!=revision||
+     !same(actualFloor)||identity.catalog!=actualFloor.scene.layoutSha256||
+     actual.ordinal!=identity.ordinal||actual.epoch!=identity.epoch||actual.activation!=identity.activation)
+   return fail(error,"retail retained parent selected context changed");
+  out=std::move(actual);floor=std::move(actualFloor);error.clear();return true;
+ }
  bool releaseFloor(std::string& error){
   if(!prepared())return fail(error,"retail scene floor release requires retained actual context");
   if(floorOwner){if(!floorSession.unload(error))return false;}
@@ -382,6 +396,10 @@ namespace {std::unique_ptr<SceneRuntime> runtime;}
 const SceneContext* preparedScene()noexcept{return runtime?runtime->prepared():nullptr;}
 const FloorIdentityAuthority* sceneBirths()noexcept{return runtime?runtime->births():nullptr;}
 const SceneContext* committedScene()noexcept{return runtime?runtime->committed():nullptr;}
+bool knownSceneSourceBirth(const p2original::InstanceIdentity& identity,BirthIdentity& out,Snapshot& floor,std::string& error){
+ if(!runtime){error="retail retained parent has no actual scene owner";return false;}
+ return runtime->knownSourceBirth(identity,out,floor,error);
+}
 bool bootScene(std::string& error){if(!runtime){error="retail scene boot without actual map owner";return false;}return runtime->boot(error);}
 bool canReleaseScene(std::string& error){if(!runtime){error.clear();return true;}return runtime->canRelease(error);}
 bool releaseScene(std::string& error){if(!runtime){error.clear();return true;}return runtime->releaseFloor(error);}
@@ -403,6 +421,9 @@ bool installSceneMap(MapMgr* map,bool& handled,std::string& error){
 const p2retail::SceneContext* pc_p2_retail_scene_prepared()noexcept{return p2retail::preparedScene();}
 bool pc_p2_retail_scene_install_map(MapMgr* map,bool& handled,std::string& error){return p2retail::installSceneMap(map,handled,error);}
 const p2retail::FloorIdentityAuthority* pc_p2_retail_scene_births()noexcept{return p2retail::sceneBirths();}
+bool pc_p2_retail_scene_known_source_birth(const p2original::InstanceIdentity& identity,p2retail::BirthIdentity& out,p2retail::Snapshot& floor,std::string& error){
+ return p2retail::knownSceneSourceBirth(identity,out,floor,error);
+}
 bool pc_p2_retail_scene_release_map(std::string& error){return p2retail::releaseSceneMap(error);}
 
 const p2retail::SceneContext* pc_p2_retail_scene_committed()noexcept{return p2retail::committedScene();}

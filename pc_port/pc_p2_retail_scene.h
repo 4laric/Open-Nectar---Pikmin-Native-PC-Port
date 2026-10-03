@@ -7,6 +7,7 @@
 class StageInfo;
 class MapMgr;
 class RouteMgr;
+namespace p2original {struct InstanceIdentity;}
 
 namespace p2retail {
 enum class ScenePhase { Prepared, Installing, Committed, Releasing };
@@ -78,6 +79,13 @@ bool pc_p2_retail_scene_install_map(MapMgr*,bool& handled,std::string& error);
 // Independently reserved from the actual selected source definition AFTER real
 // Stage/map installation, BEFORE native actor allocation. Not a SAVE/card proof.
 const p2retail::FloorIdentityAuthority* pc_p2_retail_scene_births() noexcept;
+// Read-only retained actual parent incarnation, including natural retirement.
+// Requires this committed selected scene; grants no activity or SAVE authority.
+// The full native binding fingerprint remains layoutSha256, while Snapshot
+// separately retains immutable definition/catalog hashes. Refusal changes no
+// output. No fabricated history or live-parent lookup is used.
+bool pc_p2_retail_scene_known_source_birth(const p2original::InstanceIdentity&,
+    p2retail::BirthIdentity&,p2retail::Snapshot&,std::string& error);
 // Before App heap or map reuse, after actual floor/Pod/body/World teardown.
 // Resource-only refusal leaves the owned context intact for cleanup retry.
 bool pc_p2_retail_scene_release_map(std::string& error);
