@@ -423,6 +423,7 @@ set(PC_PORT_SOURCES
     pc_port/pc_p2_mar_receipt.cpp
     pc_port/pc_p2_original_catfish.cpp
     pc_port/pc_p2_original_catfish_native.cpp
+    pc_port/pc_p2_catfish_mouth.cpp
     pc_port/pc_p2_catfish.cpp
     pc_port/pc_p2_hanachirashi.cpp
     pc_port/pc_p2_dangomushi.cpp
@@ -3327,3 +3328,8 @@ pikmin_add_ci_fixture(original_catfish tools/p2_original_catfish_runtime.cpp)
 add_executable(pc_p2_original_catfish_captain_guard_test tools/test_p2_original_catfish_captain_guard.cpp)
 target_compile_options(pc_p2_original_catfish_captain_guard_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
 add_test(NAME pc_p2_original_catfish_captain_guard_test COMMAND pc_p2_original_catfish_captain_guard_test)
+
+add_executable(pc_p2_catfish_mouth_test tools/test_p2_catfish_mouth.cpp)
+target_include_directories(pc_p2_catfish_mouth_test PRIVATE pc_port)
+target_compile_options(pc_p2_catfish_mouth_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME pc_p2_catfish_mouth_test COMMAND pc_p2_catfish_mouth_test)
