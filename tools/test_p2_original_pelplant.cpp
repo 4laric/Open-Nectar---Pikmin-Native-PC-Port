@@ -1,4 +1,5 @@
 #include "pc_p2_original_pelplant.h"
+#include "pc_p2_original_pelplant_blend.h"
 #include <cassert>
 #include <iostream>
 // Deliberately labelled bridge controls. These prove ownership/FSM contracts,
@@ -34,6 +35,16 @@ struct ControlledEngine final:Engine {
 CatalogRow row(unsigned uid,unsigned amount,unsigned stage,unsigned count=1){CatalogRow r;r.course="tutorial";r.member="nonloop/3-9.txt";r.sourceKey="original:"+std::to_string(uid);r.enemy.uid=uid;r.enemy.count=count;r.enemy.generatorVersion="0001";r.enemy.generatorTail={"3",std::to_string(amount),std::to_string(stage)};return r;}
 int main(){
  std::string error;Initial initial;auto one=row(1,1,2);
+ assert(witherWeight(0)==0&&witherWeight(1)==1&&witherWeight(2)==1&&witherWeight(-1)==0);
+ assert(witherWeight(.125f)==0&&witherWeight(.25f)>.62f&&witherWeight(.25f)<.63f);
+ std::array<float,12> jointA{},jointB{},jointOut{};jointA[7]=90;jointB[7]=0;
+ assert(blendJoint(jointA,jointB,witherWeight(.25f),jointOut)&&jointOut[7]>33&&jointOut[7]<35);
+ assert(blendJoint(jointA,jointB,0,jointOut)&&jointOut==jointA);
+ assert(blendJoint(jointA,jointB,1,jointOut)&&jointOut==jointB);
+ p2pose::Pose poseA{{{0,90,0}},{{1,0,0}}},poseB{{{0,0,0}},{{1,0,0}}},poseOut=poseA;
+ assert(samplePose({poseA,poseB},{0,29},14.5f,poseOut)&&poseOut.positions[0].y==45);
+ assert(p2pose::blendInto(poseA,poseB,witherWeight(.25f),poseOut)&&poseOut.positions[0].y>33&&poseOut.positions[0].y<35);
+ assert(blendJoint(jointA,jointB,witherWeight(.25f),jointOut)&&std::fabs(poseOut.positions[0].y-jointOut[7])<.0001f);
  assert(decode(one,initial,error)&&initial.color==3&&initial.amount==1&&initial.stage==2);
  auto old=one;old.enemy.generatorVersion="0000";old.enemy.generatorTail={"0","1"};assert(decode(old,initial,error)&&initial.amount==1);
  for(auto tail:std::vector<std::vector<std::string>>{{"3","1"},{"3","1","2","0"},{"4","1","2"},{"3","0","2"},{"3","2","2"},{"3","1","3"},{"-1","1","2"},{"3","1.0","2"}}){auto bad=one;bad.enemy.generatorTail=tail;assert(!decode(bad,initial,error));}
