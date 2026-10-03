@@ -3191,6 +3191,10 @@ pikmin_add_ci_fixture(captain_switch tools/p2_captain_switch_runtime.cpp)
 
 # #1154/#1161 ordinary natural WFG acquisition and cave party route; build only.
 pikmin_add_ci_fixture(cave_route tools/p2_cave_route_runtime.cpp)
+if(P2_CHALLENGE_GUARD_FOUND)
+    pikmin_add_ci_fixture(authored_cave tools/p2_authored_cave_runtime.cpp)
+    target_include_directories(pikmin_ci_fixture_authored_cave PRIVATE ${P2_CHALLENGE_GUARD_INCLUDE_DIR})
+endif()
 if(TARGET pikmin_ci_fixture_cave_route)
     target_include_directories(pikmin_ci_fixture_cave_route PRIVATE ${P2_CHALLENGE_GUARD_INCLUDE_DIR})
 endif()
