@@ -128,6 +128,7 @@ public:int idle()override {
             flying=true;peak=std::fmax(peak,yellow->mSRT.t.y);
         } else if(flying&&yellow->getState()!=PIKISTATE_Hanged&&yellow->getState()!=PIKISTATE_Drown
             &&yellow->isCreatureFlag(CF_IsOnGround)){
+            std::printf("ORIGINAL_YELLOW_THROW_LANDING tick=%d state=%d pos=%.3f,%.3f,%.3f velocity=%.3f,%.3f,%.3f peak_delta=%.3f captain=%.3f,%.3f,%.3f cursor=%.3f,%.3f,%.3f\n",tick,yellow->getState(),yellow->mSRT.t.x,yellow->mSRT.t.y,yellow->mSRT.t.z,yellow->mVelocity.x,yellow->mVelocity.y,yellow->mVelocity.z,peak-startY,captain->mSRT.t.x,captain->mSRT.t.y,captain->mSRT.t.z,captain->mCursorWorldPos.x,captain->mCursorWorldPos.y,captain->mCursorWorldPos.z);std::fflush(nullptr);
             require(held&&released&&peak-startY>100.0f,"actual high arc");
             require(std::fabs(peak-startY-expectedPeak)<expectedPeak*0.2f,"source apex band");
             std::printf("PASS ORIGINAL_YELLOW_THROW held=1 released=1 flying=1 landed=1 peak_delta=%.3f live=20 ordinary_input=1 staged_body=1 acquisition=0 campaign=0\n",peak-startY);
