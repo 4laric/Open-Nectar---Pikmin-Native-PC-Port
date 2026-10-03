@@ -5,6 +5,10 @@ get_filename_component(SENTINEL_SOURCE "${CMAKE_CURRENT_LIST_DIR}/../.." ABSOLUT
 # Private composition includes the real owner-pinned Honey factory. Production
 # course admission remains separate until actual source77 native gameplay passes.
 add_subdirectory("${SENTINEL_SOURCE}/tools/original_resource_build" resources)
+# The generic runner hashes selected targets at the graph root. The producer
+# target is declared in the nested engine entry; keep its actual binary here.
+set_target_properties(pc_p2_original_shijimi_group_test PROPERTIES
+ RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 target_sources(pikmin_pc PRIVATE
  "${SENTINEL_SOURCE}/pc_port/pc_p2_original_shijimi_state.cpp"
  "${SENTINEL_SOURCE}/pc_port/pc_p2_original_shijimi_honey.cpp"
