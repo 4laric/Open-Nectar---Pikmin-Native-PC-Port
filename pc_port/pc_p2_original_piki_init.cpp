@@ -17,3 +17,15 @@ bool pc_p2_original_piki_init_consume(Piki* body) noexcept {
     activeScope->mConsumed = true;
     return true;
 }
+bool pc_p2_original_piki_free_init_consume(Piki* body) noexcept {
+    if (!body || !activeScope || activeScope->mBody != body || !activeScope->mConsumed
+        || activeScope->mFreeConsumed) return false;
+    activeScope->mFreeConsumed = true;
+    return true;
+}
+bool pc_p2_original_piki_bore_init_consume(Piki* body) noexcept {
+    if (!body || !activeScope || activeScope->mBody != body || !activeScope->mFreeConsumed
+        || activeScope->mBoreConsumed) return false;
+    activeScope->mBoreConsumed = true;
+    return true;
+}
