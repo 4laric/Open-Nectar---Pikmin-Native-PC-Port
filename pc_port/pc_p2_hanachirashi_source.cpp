@@ -129,7 +129,7 @@ bool update(BTeki* a){
  if(a->mStoredDamage>0)a->makeDamaged();unsigned purple=0,count=stuck(a,purple);V pos=vec(a->getPosition());
  // The source FSM executes before updateFallTimer. The previous frame's
  // fall timer is used, then the current attachment count updates it below.
- if(a->mHealth<=0&&s.state!=Dead)enter(a,s,Dead);
+ if(a->mHealth<=0&&s.state!=Dead&&s.state!=Laugh)enter(a,s,Dead);
  Sample pose=sample(bank,s.motion,s.frame);Clock event=advanceClock(s.motion,s.frame,s.finished,s.event2,dt,unsigned(bank.at(s.motion).size()));
  switch(s.state){
  case Wait:{stop(a);height(a,s,dt);Creature* target=searched(a,count);if(!target)target=attackable(a);if(target){s.target=target;enter(a,s,Chase);}else if(s.time>3)enter(a,s,Move);break;}
@@ -148,7 +148,7 @@ bool update(BTeki* a){
  case Dead:stop(a);if(event.end){pc_p2_original_spawn_items(a);a->die();a->kill(false);return true;}break;
  }
  if(s.state==Wait||s.state==Move||s.state==Chase||s.state==ChaseInside){int next=flyingNext(a->mHealth,count,purple,s.fallTimer);if(next>=0)enter(a,s,State(next));}
- if(s.state==Dead?s.deadFlying:airborne(s.state,s.time))a->setCreatureFlag(CF_IsFlying);else a->resetCreatureFlag(CF_IsFlying);a->enableGravity();
+ if(s.state==Dead?s.deadFlying:(s.state==TakeOff?s.event2:airborne(s.state,s.time)))a->setCreatureFlag(CF_IsFlying);else a->resetCreatureFlag(CF_IsFlying);a->enableGravity();
  s.time+=dt;s.fallTimer=count?s.fallTimer+dt:0;s.coll.follow(a,sample(bank,s.motion,s.frame));return true;
 }
 } // p2hana
