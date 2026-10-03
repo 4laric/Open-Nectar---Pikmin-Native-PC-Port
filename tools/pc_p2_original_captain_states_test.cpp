@@ -175,6 +175,9 @@ int main(int argc,char** argv){try{
  env.executionAvailable=false;check(!pc_p2_original_captain_bootstrap_roster(error),"failed actual Walk init remains incomplete");check(!pc_p2_original_captain_bootstrap_complete(scene,error),"current typed Walk alone does not attest initialization");env.executionAvailable=true;
  const int priorCleanup=cleanupEvents;check(pc_p2_original_captain_bootstrap_roster(error),error);check(cleanupEvents==priorCleanup,"post-reset initial install never invokes old P1/source cleanup");
  check(a.current!=b.current&&pc_p2_original_captain_bootstrap_complete(scene,error),"both separate actual Walk init instances complete bootstrap");
+ walk::State actualWalk;check(pc_p2_original_captain_read_walk_state(&a,actualWalk,error)&&actualWalk.ai==walk::AI::Control&&actualWalk.idleTimer==3,"readonly view captures real initialized source Walk fields");
+ walk::State freshWalk;check(pc_p2_original_captain_read_walk_state(&b,freshWalk,error)&&!freshWalk.dismissTimer&&!freshWalk.animation&&!freshWalk.escapeCCW&&!freshWalk.escapeTimer,"fresh retail untouched optional Walk fields remain absent rather than invented values");
+ auto* currentWalk=a.current;a.current=fsm.mStates[2];actualWalk.idleTimer=123;check(!pc_p2_original_captain_read_walk_state(&a,actualWalk,error)&&actualWalk.idleTimer==123,"missing actual Walk refuses readonly view without output mutation");a.current=currentWalk;
  const auto commandsAfterBootstrap=order.size();check(pc_p2_original_captain_bootstrap_roster(error)&&order.size()==commandsAfterBootstrap,"duplicate bootstrap leaves initialized Walk state untouched");
  check(pc_p2_original_captain_continuation_valid(scene,error),"actual registered typed Walk and control banks validate continuation");
  auto* partnerWalk=b.current;NaviState unrelated(91);b.current=&unrelated;check(!pc_p2_original_captain_continuation_valid(scene,error),"P1 continuation state refuses");b.current=partnerWalk;

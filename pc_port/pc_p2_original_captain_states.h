@@ -72,3 +72,7 @@ bool pc_p2_original_captain_continuation_valid(const p2original::captain::Loaded
 // and requests recovery through the ordinary source transition preflight.
 std::optional<p2original::captain::StateId> pc_p2_original_captain_reaction_backup(Navi*,std::string&);
 bool pc_p2_original_captain_recover_reaction(Navi*,std::string&);
+// Read only actual current Walk instance fields. Optional fields left untouched
+// by retail init remain absent. This process-local view is not a durable SAVE:
+// checkpointValid and real target/motion rebinding are still required.
+bool pc_p2_original_captain_read_walk_state(const Navi*,p2original::captain::walk::State&,std::string&);

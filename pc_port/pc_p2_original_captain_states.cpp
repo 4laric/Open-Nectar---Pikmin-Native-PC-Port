@@ -85,6 +85,7 @@ public:
   initializedScene=pc_p2_original_captain_loaded_scene();initializedEpoch=initializedScene->incarnation();initializedActor=n;previousError.clear();
  }
  bool initialized(const Navi* n,const LoadedScene& scene)const{return initializedActor==n&&initializedScene==&scene&&initializedEpoch==scene.incarnation();}
+ const walk::State& fields()const{return walkState;}
  void exec(Navi* n)override{
   std::string e;auto* env=environment(n,e);auto* bank=bankFor(n,e);if(!env||!bank){report(e);return;}
   // Control precedes the source >9 idle decision. Never apply it again when
@@ -171,6 +172,12 @@ std::optional<StateId> pc_p2_original_captain_reaction_backup(Navi* n,std::strin
  return backup(n);
 }
 bool pc_p2_original_captain_recover_reaction(Navi* n,std::string& e){auto saved=pc_p2_original_captain_reaction_backup(n,e);return saved&&pc_p2_original_captain_transit(n,*saved,e);}
+bool pc_p2_original_captain_read_walk_state(const Navi* actorPointer,walk::State& out,std::string& e){
+ e.clear();auto* n=const_cast<Navi*>(actorPointer);if(!actor(n,e))return false;
+ auto* scene=pc_p2_original_captain_loaded_scene();auto* state=dynamic_cast<WalkState*>(n->getCurrState());
+ if(!state||!state->initialized(n,*scene)||!nativecontrol::sceneAnimationTimer(n)){e="actual current initialized source Walk/control instance is unavailable";return false;}
+ out=state->fields();return true;
+}
 bool pc_p2_original_captain_continuation_valid(const LoadedScene& scene,std::string& e){
  e.clear();if(pc_p2_original_captain_loaded_scene()!=&scene||!scene.incarnation()){e="source bootstrap scene is not canonical";return false;}
  for(unsigned slot=0;slot<2;++slot){auto* n=scene.captainAt(slot);if(!actor(n,e))return false;
