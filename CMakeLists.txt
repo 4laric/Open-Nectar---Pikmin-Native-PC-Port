@@ -280,6 +280,8 @@ set(PC_PORT_SOURCES
     pc_port/pc_p2_original_drop.cpp
     pc_port/pc_p2_original_drop_engine.cpp
     pc_port/pc_p2_original_gen_object.cpp
+    pc_port/pc_p2_original_onyon.cpp
+    pc_port/pc_p2_original_onyon_native.cpp
     pc_port/pc_p2_campaign_goal_probe.cpp
     pc_port/pc_bbft.cpp
     pc_port/pc_p2_surface_topology.cpp
@@ -3340,3 +3342,7 @@ add_executable(pc_p2_original_frog_test tools/test_p2_original_frog.cpp
 target_include_directories(pc_p2_original_frog_test PRIVATE pc_port)
 target_compile_options(pc_p2_original_frog_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
 add_test(NAME pc_p2_original_frog_test COMMAND pc_p2_original_frog_test)
+pikmin_add_ci_fixture(original_onyon tools/p2_original_onyon_runtime.cpp)
+
+add_executable(pc_p2_original_onyon_test tools/test_p2_original_onyon.cpp pc_port/pc_p2_original_onyon.cpp)
+target_include_directories(pc_p2_original_onyon_test PRIVATE "${PROJECT_SOURCE_DIR}/pc_port")
