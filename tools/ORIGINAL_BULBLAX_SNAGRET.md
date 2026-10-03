@@ -115,3 +115,29 @@ checks no early drop, exact131, crossed timestep delivery, no repeated emission
 throughEND and AP exclusion. A natural combat death run must observe the new
 P2_ORIGINAL_SNAKECROW_DROP marker and actual number pellets before accepting
 runtime death/drop timing; the controlled policy test alone is not that evidence.
+# Original34 flick dependency and qualification
+
+Original SnakeCrow Disappear KEY2 now calls nearby captains, nearby Pikmin,
+then stickers in retail order. The private retail `snakecrow/enemyparm.txt`
+SHA-256 is `45eda1abc2498859dc03d61dfb48f980d192f90bd928f7b23e949e973b5aff5b`:
+shake range40, knockback200, damage1, chance1. Nearby selection is strict3D,
+and the backward sentinel survives EnemyFunc's PI/single-round transform.
+Leaving Disappear runs the retail sticker-only chance1/knockback10 cleanup.
+Pikmin use the source receiver that ignores flick damage and reproduces its
+leaf/RNG/Blow behavior; captains use its delayed Koke-END damage path.
+
+Consumer must compose the complete reviewed PR162 receiver/factory base,
+including `a64a735c69e76cc44871ae06ad80eb222d390a4f` and repeat-Blow fix
+`0a3e9fb56232e19cde96c0e743ad660344666287`. The leaf/Blow and captain FSM
+factories in that dependency must be installed; copying its header is not
+sufficient for a build or gameplay qualification. This PR adds no shared
+receiver files or shared Piki/Navi registration changes. AP/P1 flicks retain
+their existing path.
+
+Focused policy checks cover call ordering, strict3D range boundaries,
+backward angle transform and cleanup values; native syntax is checked with
+the reviewed receiver header. Production and actual receiver gameplay need
+a coherent consumer build and ordinary play. Original34 still captures into
+the host Chappy `slot` children rather than authored SnakeCrow kamu joints;
+its spine/body collider is not a source physical hierarchy. This correction
+does not qualify those, original33 flicks, bitter behavior or SAVE.

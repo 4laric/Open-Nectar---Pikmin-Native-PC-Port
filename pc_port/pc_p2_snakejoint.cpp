@@ -49,7 +49,9 @@
 //     the joint/rotate/wait/dead effects are P2-only and are not reproduced.
 //   * Walk/leap uses the SnakeWhole source fp06=1000 leap clamped to a
 //     P1-host speed; SnakeCrow is stationary (fp06=0) and never walks.
-//   * View angle, turn rate, flick radius and shake values are P1-host values;
+//   * View angle, turn rate and flick radius remain host adaptations. Original34
+//     Disappear flick uses retail shake values and source receivers; AP/P1 shake
+//     behavior remains unchanged.
 //     when the installed p2-snagret-bank.txt is absent the audited retail event
 //     frames are used with 1 s fallback clip durations.
 // No other lane's module is modified; every hook is a no-op for unregistered
@@ -58,6 +60,8 @@
 #include "pc_p2_original_actor.h"
 #include "pc_p2_original_snagret_bank.h"
 #include "pc_p2_original_snagret_death.h"
+#include "pc_p2_original_snagret_flick.h"
+#include "pc_p2_hanachirashi_receiver.h"
 #include "pc_p2_original_drop_engine.h"
 #include "pc_p2_original_bulblax_snagret_native.h"
 #include "pc_p2_captor_host.h"
@@ -396,7 +400,39 @@ void turnAndMove(BTeki* a, Snake& s, const Vector3f& target, float speed) {
     a->mVelocity.z = drive.z;
 }
 
-void doFlick(BTeki* a, unsigned generator) {
+// Original source34 uses the source receiver/factory dependency from PR162.
+// Keep the imported AP/P1 path below intact.
+struct OriginalFlickHost {
+    BTeki* actor;
+    bool near(Creature* c) const {
+        const Vector3f q=c->getPosition(),p=actor->getPosition();
+        return p2original::snagret_flick::nearby(q.x-p.x,q.y-p.y,q.z-p.z);
+    }
+    void navis(float,float knock,float damage,float angle) {
+        for(Navi* n:pc_p2_navis()) if(n&&near(n))
+            pc_p2_source_flick_navi(actor,n,knock,damage,angle);
+    }
+    void pikmin(float,float knock,float angle) {
+        if(!pikiMgr)return;
+        Iterator it(pikiMgr);CI_LOOP(it) {
+            Piki* p=static_cast<Piki*>(*it);
+            if(p&&p->getStickObject()!=actor&&near(p))
+                pc_p2_source_flick_piki(actor,p,knock,angle);
+        }
+    }
+    void stickers(float chance,float knock,float angle) {
+        // Snapshot list order before receiver acceptance detaches a sticker.
+        std::vector<Piki*> list;
+        for(Creature* c=actor->mStickListHead;c;c=c->mNextSticker)
+            if(c->isPiki())list.push_back(static_cast<Piki*>(c));
+        for(Piki* p:list)if(chance>gsys->getRand(1.0f))
+            pc_p2_source_flick_piki(actor,p,knock,angle);
+    }
+};
+void doFlick(BTeki* a, unsigned generator, bool original) {
+    if(original) {
+        OriginalFlickHost h{a};p2original::snagret_flick::disappear(h);return;
+    }
     if (!pikiMgr) return;
     const Vector3f pos = a->getPosition();
     int hit = 0;
@@ -426,6 +462,9 @@ void enter(Snake& s, State state, const char* clip) {
 }
 void setState(BTeki* a, Snake& s, State state, const char* clip) {
     const unsigned generator = a->mGenerator ? a->mGenerator->_70 : 0u;
+    if(s.original&&s.state==SNAKE_DISAPPEAR) {
+        OriginalFlickHost h{a};p2original::snagret_flick::cleanup(h);
+    }
     // Only Attack -> Eat carries the mouth; every other transition (and
     // death) frees it without harm.
     if (state != SNAKE_EAT) {
@@ -979,7 +1018,7 @@ void pc_p2_snakejoint_update(BTeki* actor) {
         if (flick < 0) flick = FLICK_FALLBACK;
         if (!s.flickFired && s.stateTime * 30.0f >= float(flick)) {
             s.flickFired = true;
-            doFlick(actor, generator);
+            doFlick(actor, generator, s.original);
         }
         if (s.stateTime >= clipDuration(parms.name, "dive")) {
             setState(actor, s, SNAKE_STAY, "appear1");
