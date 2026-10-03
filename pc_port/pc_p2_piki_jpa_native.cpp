@@ -57,8 +57,12 @@ bool NativeEffects::sharedIdleHalo(const PcP2SourceBody& body,unsigned species,u
  e.clear();return true;
 }
 bool NativeEffects::canRemoveIdleHalo(const PcP2SourceBody& body,std::string& e)const{
- for(const auto& o:m->owners)if(same(o.body,body)){Position p;return m->resolve(o.body,p,e);}
- return reject(e,"Piki JPA removal requires actual retained context lifetime");
+ for(const auto& o:m->owners)if(same(o.body,body)){Position p;
+  if(m->resolve(o.body,p,e))return true;
+  m->lastCleanupRefusal=e;return false;
+ }
+ reject(e,"Piki JPA removal requires actual retained context lifetime");
+ m->lastCleanupRefusal=e;return false;
 }
 bool NativeEffects::removeIdleHalo(const PcP2SourceBody& body,std::string& e){
  if(!canRemoveIdleHalo(body,e)){m->lastCleanupRefusal=e;return false;}
