@@ -14,24 +14,36 @@
 #include <algorithm>
 #include <cstdio>
 #include <cstdlib>
+#include <cmath>
 namespace p2original { namespace hanachirashi {
 namespace {
 std::set<Native*>& natives(){static std::set<Native*> owners;return owners;}
 bool refuse(std::string& e,const char* s){e=s;return false;}
+bool& geometryRegistered(){static bool registered=false;return registered;}
+bool originalItemGeometry(BTeki* actor,Vector3f& position,Vector3f& treasureVelocity,std::string& error){
+ unsigned source=0;
+ if(!actor||!pc_p2_original_actor_source(actor,source)||source!=55)return refuse(error,"source55 item geometry actor identity mismatch");
+ // Hanachirashi::getThrowupItemPosition uses the real root, never getCentre.
+ position=actor->getPosition();position.y+=500.0f;
+ // Only the held treasure branch uses this velocity. Common number pellets
+ // retain throwOriginalItems' original 150/200/250 velocity RNG.
+ treasureVelocity.set(0.0f,0.0f,0.0f);
+ if(!std::isfinite(position.x)||!std::isfinite(position.y)||!std::isfinite(position.z))return refuse(error,"source55 item geometry root is nonfinite");
+ error.clear();return true;
+}
 struct Heap {int previous;Heap():previous(gsys->setHeap(SYSHEAP_App)){}~Heap(){gsys->setHeap(previous);}};
 }
 struct Native::Impl final:Engine {
  Provider provider;
  Impl():provider(*this){}
  bool resources(const CatalogRow& row,std::string& e)override{
+  if(!geometryRegistered())return refuse(e,"original Hanachirashi prebirth drop geometry registration failed");
   if(!gsys||!tekiMgr)return refuse(e,"original Hanachirashi native managers unavailable");
   const int type=nativeType(row.enemy.source);auto* shape=tekiMgr->getTekiShapeObject(type);
   if(!tekiMgr->hasModel(type)||!shape||!shape->mShape||!shape->mAnimMgr||!tekiMgr->getTekiParameters(type)||!tekiMgr->getStrategy(type))return refuse(e,"Hanachirashi chassis model/animation/parameters/strategy not preloaded");
   Heap heap;
   // Retail Hanachirashi::onInit disables EB_LeaveCarcass. Source55 has
   // no carryable corpse and must not require its borrowed Mar pellet config.
-  // This family owns a source-mesh body fit; actual latch mechanics still
-  // require gameplay qualification. Register before the visual bank fit.
   // Source55 binds its own nine authored joint colliders after visual birth.
   return pc_p2_original_drop_resources(row,e)&&pc_p2_batch3_original_resources(row.enemy.source,e)&&pc_p2_hanachirashi_original_resources(row.enemy.source,e);
  }
@@ -77,8 +89,15 @@ struct Native::Impl final:Engine {
   e.clear();return true;
  }
 };
-Native::Native():m(std::make_unique<Impl>()){natives().insert(this);}
-Native::~Native(){natives().erase(this);}
+Native::Native():m(std::make_unique<Impl>()){
+ // Install before the first provider preflight can call drop_resources.
+ if(natives().empty())geometryRegistered()=pc_p2_original_drop_register_geometry(55,originalItemGeometry);
+ natives().insert(this);
+}
+Native::~Native(){
+ natives().erase(this);
+ if(natives().empty()&&geometryRegistered()){pc_p2_original_drop_unregister_geometry(55);geometryRegistered()=false;}
+}
 Provider& Native::provider(){return m->provider;}
 void Native::retired(Creature* actor){m->provider.retired(actor);}
 } }
