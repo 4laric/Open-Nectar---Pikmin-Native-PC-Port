@@ -1,4 +1,5 @@
 #include "pc_p2_original_catfish.h"
+#include "pc_p2_original_catfish_bank.h"
 
 #include <sstream>
 #include <fstream>
@@ -49,11 +50,25 @@ int main(int argc,char** argv){
  engine.partialFailure=false;assert(p.birth(c,&gen,0,pos,1.25f,actor,e));p.retired(actor);assert(!p.birth(c,&gen,0,pos,1.25f,actor,e)); // address retirement never authorizes ordinal reuse
  assert(!p.reserve(rows,e));assert(!p.birth(c,&gen,0,pos,1.25f,actor,e)); // repeated reservation cannot reopen attempts
 
- // Actual day-5 corpus shape: Catfish24 rows29/30, Wcatfish25 row31, ???? tail,
- // count1, birthType0, pellet5 min1/max2 p0.5. Admission does not discard drops.
+ // Actual day-5 source26 rows25-28: ???? tail,
+ // birthType0, pellet1 min1/max2 p0.4. Admission does not discard drops.
  auto original=a;original.enemy.count=1;original.enemy.deathCount=0;
- original.enemy.pelletSize=5;original.enemy.pelletMinimum=1;original.enemy.pelletMaximum=2;original.enemy.pelletProbability=0.5f;
+ original.enemy.pelletSize=1;original.enemy.pelletMinimum=1;original.enemy.pelletMaximum=2;original.enemy.pelletProbability=0.4f;
  assert(catfish::decode(original,e));assert(original.sourceKey=="tutorial/initgen.txt#25");
 
+ std::string bank="P2_AQUATIC_BANK_1\nspecies Catfish 26\n";
+ const char* names[]={"attack","dead","flick","move1","type5","wait1","waitact2"};
+ const unsigned durations[]={85,95,70,25,40,30,16};
+ const char* events[]={"17:2,75:3","-","25:2,47:3","0:0,24:1","10:0,29:1","-","-"};
+ for(unsigned i=0;i<7;++i)bank+="clip Catfish "+std::string(names[i])+" "+std::to_string(durations[i])+" "+events[i]+" poses 2 converted frames 0,"+std::to_string(durations[i]-1)+"\n";
+ std::istringstream authored(bank);assert(catfish::validateCatfishBank(authored,e));
+ for(unsigned variant=0;variant<4;++variant){std::string changedBank=bank;
+  if(variant==0)changedBank.replace(changedBank.find("Catfish 26"),10,"Catfish 25");
+  if(variant==1)changedBank.replace(changedBank.find("attack 85"),9,"attack 84");
+  if(variant==2)changedBank.replace(changedBank.find("17:2"),4,"17:3");
+  if(variant==3)changedBank.resize(changedBank.find("clip Catfish waitact2"));
+  std::istringstream badBank(changedBank);assert(!catfish::validateCatfishBank(badBank,e));
+ }
+ if(argc==2){std::ifstream actual(argv[1]);assert(catfish::validateCatfishBank(actual,e));}
  std::cout<<"P2_ORIGINAL_CATFISH_PROVIDER PASS\n";
 }
