@@ -39,7 +39,7 @@ struct Native::Impl final:Engine {
   actor->mPersonality->mPosition.set(p.x,p.y,p.z);actor->mPersonality->mNestPosition.set(p.x,p.y,p.z);
   actor->mPersonality->mFaceDirection=facing;actor->reset();actor->startAI(0);
   actor->mGenerator=generator;actor->mFaceDirection=facing;actor->mSRT.r.set(0,facing,0);
-  actor->mVelocity.set(0,0,0);actor->mRebirthDay=generator->getRebirthDay();e.clear();return true;
+  actor->mVelocity.set(0,0,0);actor->mRebirthDay=generator->mRespawnInterval;e.clear();return true;
  }
  bool attach(const CatalogRow& row,Creature* actor,unsigned ordinal,unsigned token,std::string& e)override {
   unsigned source=0,actualToken=0;InstanceIdentity identity;

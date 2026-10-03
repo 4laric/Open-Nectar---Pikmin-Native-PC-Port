@@ -258,6 +258,8 @@ float pc_p2_frog_param_f(const BTeki* actor,int idx,float fallback){
 }
 bool pc_p2_frog_suppress_ai(const BTeki* actor){return ready&&actors.count(static_cast<PelletView*>(const_cast<BTeki*>(actor)))!=0;}
 void pc_p2_frog_setup(){
+    // Original catalog owns preparation/birth. Its typed GenObject has no P1 roster.
+    for(const auto& row:p2original::originalActors().rows())if(row.second.enemy.source==17||row.second.enemy.source==18)return;
     pc_p2_frog_reset();
     std::printf("P2_FROG_SETUP\n");std::fflush(stdout);
     const bool bridge = pc_randomizer_p2_bridge() && !pc_pikipelago_room_preview();
