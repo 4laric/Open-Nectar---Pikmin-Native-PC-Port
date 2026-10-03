@@ -280,7 +280,10 @@ bool pc_p2_original_course_load(const char* directory,const char* course,std::fu
  };
  p2original::PikiManifest pikiAtlas;std::vector<unsigned> pikiActive;std::map<unsigned,int> pikiExpiry;
  std::error_code pikiStatus;const std::string pikiPath=std::string(directory)+"/campaign.p2pk";
- const bool hasPikis=std::filesystem::exists(pikiPath,pikiStatus);if(pikiStatus)return fail(e,"original Pikmin atlas status failed");
+ const bool hasPikis=selectedSession?pc_randomizer_original_has_input("p2-original/campaign.p2pk")
+  :std::filesystem::exists(pikiPath,pikiStatus);
+ if(pikiStatus)return fail(e,"original Pikmin atlas status failed");
+ if(selectedSession&&!hasPikis)return fail(e,"selected original Pikmin atlas missing from immutable Bundle");
  if(hasPikis){std::string b;
   if(!loadBytes(pikiPath,b)||!p2original::readPikiManifest(b,pikiAtlas,e))return false;
   if(pikiAtlas.campaign!=manifest.fingerprint)return fail(e,"original Pikmin atlas selected campaign mismatch");
@@ -296,7 +299,8 @@ bool pc_p2_original_course_load(const char* directory,const char* course,std::fu
  }
  const std::string onyonPath=std::string(directory)+"/"+selected+".p2on";
  std::error_code statusError;
- const bool hasOnyons=std::filesystem::exists(onyonPath,statusError);
+ const bool hasOnyons=selectedSession?pc_randomizer_original_has_input("p2-original/"+selected+".p2on")
+  :std::filesystem::exists(onyonPath,statusError);
  if(statusError)return fail(e,"original typed Onyon manifest status failed");
  std::vector<OnyonRecord> onyons;
  if(hasOnyons){
@@ -311,7 +315,11 @@ bool pc_p2_original_course_load(const char* directory,const char* course,std::fu
  std::vector<BarrelRecord> barrels;std::vector<CaveRecord> caves;
  const auto typedFile=[&](const char* suffix,std::string& path,bool& exists){
   path=std::string(directory)+"/"+selected+suffix;std::error_code status;
-  exists=std::filesystem::exists(path,status);if(status)return fail(e,"original typed item manifest status failed");return true;
+  // Selection membership survives a later missing/changed physical file.
+  // A selected-present sidecar must reach loadBytes and refuse failed reads.
+  exists=selectedSession?pc_randomizer_original_has_input("p2-original/"+selected+suffix)
+   :std::filesystem::exists(path,status);
+  if(status)return fail(e,"original typed item manifest status failed");return true;
  };
  std::string gatePath,bridgePath,barrelPath,cavePath;bool hasGates=false,hasBridges=false,hasBarrels=false,hasCaves=false;
  if(!typedFile(".p2gt",gatePath,hasGates)||!typedFile(".p2br",bridgePath,hasBridges)||!typedFile(".p2ba",barrelPath,hasBarrels)||!typedFile(".p2cv",cavePath,hasCaves))return false;
