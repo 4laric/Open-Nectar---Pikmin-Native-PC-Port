@@ -60,6 +60,7 @@
 #include "pc_p2_preview.h"
 #include "pc_p2_white_treasure.h"
 #include "pc_p2_campaign_treasure.h"
+#include "pc_p2_campaign_treasure_held.h"
 #include "pc_p2_white_treasure_policy.h"
 #include "pc_p2_cave_bud_actor.h"
 #include "FlowController.h"
@@ -484,6 +485,7 @@ void pc_p2_preview_setup() {
 }
 
 bool pc_p2_preview_draw(Pellet* pellet, Graphics& gfx, Matrix4f& matrix) {
+    if(pc_p2_campaign_treasure_held_draw(pellet,gfx,matrix))return true;
     if(pc_p2_white_treasure_draw(pellet,gfx,matrix))return true;
     if(pc_p2_campaign_treasure_draw(pellet,gfx,matrix))return true;
     if(!pc_pikipelago_room_preview() || !pellet)return false;
@@ -496,6 +498,7 @@ bool pc_p2_preview_draw(Pellet* pellet, Graphics& gfx, Matrix4f& matrix) {
 }
 
 bool pc_p2_preview_deliver(Pellet* pellet) {
+    if(pc_p2_campaign_treasure_held_deliver(pellet))return true;
     if(!pellet)return false;
     if(pc_p2_white_treasure_deliver(pellet))return true;
     if(pc_p2_campaign_treasure_deliver(pellet))return true;
