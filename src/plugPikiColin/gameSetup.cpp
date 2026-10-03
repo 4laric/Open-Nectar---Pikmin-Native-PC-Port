@@ -1,3 +1,6 @@
+#if defined(PIKI_PC_PORT)
+#include "pc_p2_authored_cave_campaign.h"
+#endif
 #include "pc_p2_surface_save.h"
 #include "pc_p2_original_progress.h"
 #include "GameSetupSection.h"
@@ -191,6 +194,9 @@ GameSetupSection::GameSetupSection()
 
 	// load all stages
 	flowCont.readMapList("stages/stages.ini");
+#if defined(PIKI_PC_PORT)
+    pc_p2_cave_campaign_prepare();
+#endif
 	flowCont.mEndingType = ENDING_None;
 
 	// cache info on some important arc/dir and model/anim pairs
@@ -268,7 +274,7 @@ void GameSetupSection::update()
             gameflow.mWorldClock.setTime(gameflow.mParameters->mStartHour());
             gameflow.mCurrentStageID = -1;
             gameflow.mPendingStageUnlockID = -1;
-            gameflow.mNextOnePlayerSectionID = pc_p2_surface_save_resume_scene() ? ONEPLAYER_NewPikiGame : ONEPLAYER_MapSelect;
+            gameflow.mNextOnePlayerSectionID = (pc_p2_cave_campaign_resume_scene() || pc_p2_surface_save_resume_scene()) ? ONEPLAYER_NewPikiGame : ONEPLAYER_MapSelect;
             std::printf("[Pikmin Randomizer] CAMPAIGN_RESUMED day=%d\n", gameflow.mWorldClock.mCurrentDay);
             gsys->softReset();
             return;
