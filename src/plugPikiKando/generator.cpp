@@ -1,3 +1,4 @@
+#include "pc_p2_surface_save.h"
 #include "Generator.h"
 #include "Age.h"
 #include "DebugLog.h"
@@ -15,6 +16,7 @@
 #include "pc_randomizer.h"
 #include "pc_p2_original_group_engine.h"
 #include "pc_p2_original_gen_object.h"
+#include "pc_p2_original_onyon_native.h"
 #include <cstdlib>
 #include "pc_p2_species_unit.h"
 #include <cmath>
@@ -234,6 +236,7 @@ void GenObjectFactory::createInstance()
 		factory->registerMember('piki', &makeObjectPiki, "create PIKI", 'v0.0');
 #if defined(PIKI_PC_PORT)
 		pc_p2_original_gen_object_register();
+		pc_p2_original_onyon_register();
 #endif
 	}
 }
@@ -615,6 +618,10 @@ void Generator::init()
         std::fprintf(stderr,"P2_ORIGINAL_GENERATOR_INIT_FAIL %s\n",originalError.c_str());std::abort();
     }
     if(originalHandled)return;
+    if(!pc_p2_original_onyon_generator_init(this,originalHandled,originalError)) {
+        std::fprintf(stderr,"P2_ORIGINAL_ONYON_INIT_FAIL %s\n",originalError.c_str());std::abort();
+    }
+    if(originalHandled)return;
 #endif
 	// we're past our day limit, do nothing.
 	if (isExpired()) {
@@ -641,8 +648,18 @@ void Generator::init()
 		mGenObject->init(this);
 	}
 
+#if defined(PIKI_PC_PORT) && PIKI_PC_PORT
+    if (ramMode && pc_p2_surface_save_living_scene() && (mCarryOverFlags & GENCARRY_SaveCreature)) {
+        // The authenticated living card's creature record is the sole birth
+        // authority. loadCreature increments this count after restoring it;
+        // count-based births here would duplicate the exact saved actor.
+        mAliveCount = 0;
+        return;
+    }
+#endif
+
 	if (ramMode && (mCarryOverFlags & GENCARRY_SaveSpawnCount)) {
-		if (gameflow.mWorldClock.mCurrentDay >= mLatestSpawnDay + mRespawnInterval) {
+		if (!pc_p2_surface_save_living_scene() && gameflow.mWorldClock.mCurrentDay >= mLatestSpawnDay + mRespawnInterval) {
 			// we're due to respawn afresh.
 			PRINT("****** RESET DAY (curr=%d / save=%d interval=%d)\n", gameflow.mWorldClock.mCurrentDay, mLatestSpawnDay,
 			      mRespawnInterval);

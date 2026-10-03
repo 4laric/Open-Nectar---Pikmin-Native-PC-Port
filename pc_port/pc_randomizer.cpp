@@ -140,6 +140,7 @@ bool generatedCave = false;
 P2CaveSeedBinding generatedCaveBinding;
 P2CaveSeedBudget generatedCaveBudget;
 P2CaveCacheBanks generatedCaveCache;
+P2SurfaceSession surfaceSession;
 std::unordered_map<unsigned, unsigned> p2CheckIndices;
 std::unordered_map<unsigned, std::set<std::pair<unsigned, int>>> p2CheckSources;
 unsigned campaignAssignments[72] = {};
@@ -217,6 +218,7 @@ struct CkptScan {
     p2whitecampaign::Budget whiteBudget;
     P2CaveSeedBudget caveBudget;
     P2CaveCacheBanks caveCache;
+    P2SurfaceSession surface;
     p2whitetreasure::Ledger whiteTreasure;
     unsigned thelynkUsed[18] = {};
 };
@@ -249,6 +251,9 @@ CkptScanStatus scanCampaignCheckpoint(CkptScan& s) {
     }
     if (generatedCave) valid = valid && s.caveBudget.read(meta) && s.caveCache.read(meta);
     if (thelynk) for (int i = 0; i < 18; ++i) valid = valid && bool(meta >> s.thelynkUsed[i]) && s.thelynkUsed[i] <= 330;
+    // Optional extension: legacy cards end immediately in their numeric hash.
+    meta >> std::ws;
+    if (valid && meta.peek()=='S') valid = s.surface.read(meta);
     if (!valid || !(meta >> hash) || magic != (thelynk ? "THELYNK_CAMPAIGN_1" : generatedCave ? "PIKMIN_CAMPAIGN_GENERATED_CAVE_2" : whiteTreasureCampaign ? "PIKMIN_CAMPAIGN_WHITE_TREASURE_1" : whiteCampaign ? "PIKMIN_CAMPAIGN_WHITE_1" : purpleCampaign ? "PIKMIN_CAMPAIGN_PURPLE_1" : prereleaseTraps ? "PIKMIN_CAMPAIGN_5" : proggTraps ? "PIKMIN_CAMPAIGN_4" : bombTraps ? "PIKMIN_CAMPAIGN_3" : bombDeliveries ? "PIKMIN_CAMPAIGN_2" : "PIKMIN_CAMPAIGN_1")
         || savedFingerprint != fingerprint || generation != s.generation || (meta >> extra))
         return kCkptMismatch;
@@ -277,6 +282,7 @@ void loadCampaignCheckpoint() {
     p2whitecampaign::budget = s.whiteBudget;
     generatedCaveBudget = s.caveBudget;
     generatedCaveCache = s.caveCache;
+    surfaceSession = s.surface;
     p2whitetreasure::ledger = s.whiteTreasure;
     for (int i = 0; i < 18; ++i) thelynkUsed[i] = s.thelynkUsed[i];
     campaignResumed = true;
@@ -2372,6 +2378,8 @@ bool write_campaign_checkpoint(const void* source, unsigned long long generation
         generatedCaveCache.write(meta);
     }
     if (thelynk) for (int i = 0; i < 18; ++i) meta << ' ' << thelynkUsed[i];
+    if (!surfaceSession.valid()) {if(fatal)fail("invalid living surface session");return false;}
+    surfaceSession.write(meta);
     std::string block(static_cast<const char*>(source), 32768);
     const auto hash = checkpointHash(meta.str() + "\n" + block);
     std::string bytes = meta.str() + " " + std::to_string(hash) + "\n" + block;
@@ -2696,6 +2704,7 @@ bool pc_randomizer_adopt_checkpoint() {
     p2whitecampaign::budget = p2whitecampaign::Budget();
     generatedCaveBudget = P2CaveSeedBudget();
     generatedCaveCache = P2CaveCacheBanks();
+    surfaceSession = P2SurfaceSession();
     p2whitetreasure::ledger = p2whitetreasure::Ledger();
     loadCampaignCheckpoint();
     if (campaignResumed) {
@@ -2977,3 +2986,10 @@ void pc_randomizer_mirror_save_fail(uint32_t frame, unsigned long long gen) {
     if (line.empty()) { std::printf("[netplay] mirror skip SAVE_FAIL gen=%llu: not expressible\n", gen); return; }
     mirror_append(std::vector<std::string>{ line });
 }
+
+const P2SurfaceSession& pc_randomizer_surface_session() { return surfaceSession; }
+void pc_randomizer_surface_session_set(const P2SurfaceSession& next) {
+    if (!enabled || !next.valid()) fail("invalid living surface session adoption");
+    surfaceSession=next;
+}
+std::uint64_t pc_randomizer_active_campaign_generation() {return enabled?campaignGeneration:0;}

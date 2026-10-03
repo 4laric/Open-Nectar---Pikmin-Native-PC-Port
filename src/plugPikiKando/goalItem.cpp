@@ -1,4 +1,7 @@
 #include "pc_p2_original_pelplant_native.h"
+#include "pc_p2_original_onyon_native.h"
+#include "pc_p2_original_piki_init.h"
+#include <optional>
 #include "pc_p2_ship.h"
 #include "pc_randomizer.h"
 #include "pc_p2_campaign_actor.h"
@@ -475,7 +478,7 @@ void GoalItem::exitPikis(int pikis, int requesterNaviId)
         if (pikis > available) pikis = available;
     }
 
-    if (!pc_bbft_color_access(mOnionColour)) return;
+    if (!pc_p2_original_onyon_color_access(this, pc_bbft_color_access(mOnionColour))) return;
 #if defined(PIKI_PC_PORT)
 	// Co-op only: with one captain the default captain is always the right one, so single-player is untouched.
 	if (requesterNaviId >= 0 && requesterNaviId < PC_COOP_CAPTAINS && naviMgr->getNaviCount() > 1) {
@@ -492,7 +495,7 @@ void GoalItem::exitPikis(int pikis, int requesterNaviId)
  */
 Piki* GoalItem::exitPiki()
 {
-    if (!pc_bbft_color_access(mOnionColour)) return nullptr;
+    if (!pc_p2_original_onyon_color_access(this, pc_bbft_color_access(mOnionColour))) return nullptr;
 	int leg = gsys->getRand(1.0f) * 3.0f;
 	if (leg >= 3) {
 		leg = 2;
@@ -533,6 +536,10 @@ Piki* GoalItem::exitPiki()
 	}
 	// VS: salen hacia el capitán dueño de la cebolla.
 	if (pc_vs_active() && mPcOwner >= 0 && naviMgr->getNavi(mPcOwner)) navi = naviMgr->getNavi(mPcOwner);
+#endif
+#if defined(PIKI_PC_PORT)
+	std::optional<PcOriginalPikiInitScope> originalBirth;
+	if (pc_p2_original_onyon_access(this)) originalBirth.emplace(piki);
 #endif
 	piki->init(navi);
 	piki->resetPosition(legColl->mCentre);
@@ -781,7 +788,12 @@ void GoalItem::startAI(int)
 	}
 
 	WayPoint* wp = routeMgr->getWayPoint('test', mWaypointIdx);
-	if (!playerState->hasBootContainer(mOnionColour) || playerState->isTutorial()) {
+	bool needsBoot = !playerState->hasBootContainer(mOnionColour) || playerState->isTutorial();
+#if defined(PIKI_PC_PORT)
+	bool originalBooted = false;
+	if (pc_p2_original_onyon_booted(this, originalBooted)) needsBoot = !originalBooted;
+#endif
+	if (needsBoot) {
 		setMotionSpeed(0.0f);
 		C_SAI(this)->start(this, GoalAI::GOAL_BootInit);
 		startConeShrink();
@@ -810,11 +822,16 @@ void GoalItem::startAI(int)
  */
 void GoalItem::startBoot()
 {
-    if (!pc_bbft_color_access(mOnionColour)) return;
+    bool original = false;
+#if defined(PIKI_PC_PORT)
+    original = pc_p2_original_onyon_boot(this);
+#endif
+    if (!original && !pc_bbft_color_access(mOnionColour)) return;
 	_3CC = 3;
 	setMotionSpeed(30.0f);
 	C_SAI(this)->start(this, GoalAI::GOAL_BootInit);
-	playerState->setBootContainer(mOnionColour);
+	if (original) playerState->mContainerFlag |= (1 << mOnionColour) | (1 << (mOnionColour + 3));
+	else playerState->setBootContainer(mOnionColour);
 }
 
 /**
@@ -822,7 +839,7 @@ void GoalItem::startBoot()
  */
 void GoalItem::emitPiki()
 {
-    if (!pc_bbft_color_access(mOnionColour)) return;
+    if (!pc_p2_original_onyon_color_access(this, pc_bbft_color_access(mOnionColour))) return;
 	C_SAI(this)->start(this, GoalAI::GOAL_Unk2);
 }
 

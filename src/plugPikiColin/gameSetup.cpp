@@ -1,3 +1,4 @@
+#include "pc_p2_surface_save.h"
 #include "GameSetupSection.h"
 #include "pc_bbft.h"
 #include "pc_randomizer.h"
@@ -266,7 +267,7 @@ void GameSetupSection::update()
             gameflow.mWorldClock.setTime(gameflow.mParameters->mStartHour());
             gameflow.mCurrentStageID = -1;
             gameflow.mPendingStageUnlockID = -1;
-            gameflow.mNextOnePlayerSectionID = ONEPLAYER_MapSelect;
+            gameflow.mNextOnePlayerSectionID = pc_p2_surface_save_resume_scene() ? ONEPLAYER_NewPikiGame : ONEPLAYER_MapSelect;
             std::printf("[Pikmin Randomizer] CAMPAIGN_RESUMED day=%d\n", gameflow.mWorldClock.mCurrentDay);
             gsys->softReset();
             return;

@@ -267,14 +267,24 @@ set(PC_PORT_SOURCES
     pc_port/pc_p2_original_catalog.cpp
     pc_port/pc_p2_original_actor.cpp
     pc_port/pc_p2_original_lifecycle.cpp
+    pc_port/pc_p2_original_armor.cpp
+    pc_port/pc_p2_original_armor_native.cpp
     pc_port/pc_p2_original_group.cpp
+    pc_port/pc_p2_original_dispatch.cpp
+    pc_port/pc_p2_original_course.cpp
+    pc_port/pc_p2_original_manifest.cpp
+    pc_port/pc_p2_original_piki_manifest.cpp
     pc_port/pc_p2_original_progress.cpp
+    pc_port/pc_p2_original_chappy.cpp
+    pc_port/pc_p2_original_chappy_native.cpp
     pc_port/pc_p2_original_group_engine.cpp
     pc_port/pc_p2_original_piki_init.cpp
     pc_port/pc_p2_original_piki_spawn.cpp
     pc_port/pc_p2_original_drop.cpp
     pc_port/pc_p2_original_drop_engine.cpp
     pc_port/pc_p2_original_gen_object.cpp
+    pc_port/pc_p2_original_onyon.cpp
+    pc_port/pc_p2_original_onyon_native.cpp
     pc_port/pc_p2_campaign_goal_probe.cpp
     pc_port/pc_bbft.cpp
     pc_port/pc_p2_surface_topology.cpp
@@ -325,6 +335,8 @@ set(PC_PORT_SOURCES
     # without this TU.
     pc_port/pc_p2_challenge_stages_ext.cpp
     pc_port/pc_p2_preview.cpp
+    pc_port/pc_p2_campaign_treasure.cpp
+    pc_port/pc_p2_campaign_treasure_held.cpp
     pc_port/pc_p2_captain.cpp
     pc_port/pc_p2_second_captain.cpp
     pc_port/pc_p2_economy.cpp
@@ -355,6 +367,11 @@ set(PC_PORT_SOURCES
     pc_port/pc_p2_white_poison.cpp
     pc_port/pc_p2_cave.cpp
     pc_port/pc_p2_cave_campaign_cache_engine.cpp
+    pc_port/pc_p2_campaign_flush.cpp
+    pc_port/pc_p2_original_piki_origin.cpp
+    pc_port/pc_p2_cave_campaign_party_engine.cpp
+    pc_port/pc_p2_surface_save.cpp
+    pc_port/pc_p2_original_piki_physical.cpp
     pc_port/pc_p2_cave_dialog_window.cpp
     pc_port/pc_p2_cave_generate.cpp
     pc_port/pc_p2_cave_generator.cpp
@@ -365,6 +382,8 @@ set(PC_PORT_SOURCES
     pc_port/pc_p2_cave_carry.cpp
     pc_port/pc_p2_enemy.cpp
     pc_port/pc_p2_sheargrub.cpp
+    pc_port/pc_p2_original_red.cpp
+    pc_port/pc_p2_original_red_native.cpp
     pc_port/pc_p2_kochappy.cpp
     pc_port/pc_p2_dwarf_orange.cpp
     pc_port/pc_p2_bluechappy.cpp
@@ -381,12 +400,16 @@ set(PC_PORT_SOURCES
     pc_port/pc_p2_breadbug_actor.cpp
     pc_port/pc_p2_breadbug_contest_host.cpp
     pc_port/pc_p2_giant_breadbug_actor.cpp
+    pc_port/pc_p2_original_frog.cpp
+    pc_port/pc_p2_original_frog_native.cpp
     pc_port/pc_p2_frog.cpp
     pc_port/pc_p2_kogane.cpp
     pc_port/pc_p2_mamuta.cpp
     pc_port/pc_p2_mamuta_rules.cpp
     pc_port/pc_p2_mamuta_fsm.cpp
     pc_port/pc_p2_tank.cpp
+    pc_port/pc_p2_original_tank.cpp
+    pc_port/pc_p2_original_tank_native.cpp
     pc_port/pc_p2_attack_fx.cpp
     pc_port/pc_p2_gas_cloud.cpp
     pc_port/pc_p2_hiba.cpp
@@ -409,6 +432,8 @@ set(PC_PORT_SOURCES
     pc_port/pc_p2_kurage_receiver.cpp
     pc_port/pc_p2_sokkuri.cpp
     pc_port/pc_p2_uji.cpp
+    pc_port/pc_p2_original_uji.cpp
+    pc_port/pc_p2_original_uji_native.cpp
     pc_port/pc_p2_armor.cpp
     pc_port/pc_p2_otakara.cpp
     pc_port/pc_p2_otakara_fx.cpp
@@ -3134,11 +3159,31 @@ pikmin_add_ci_fixture(captain_reentry tools/p2_captain_reentry_runtime.cpp)
 # #1079 local native card save/resume acceptance, built only on CI.
 pikmin_add_ci_fixture(captain_campaign_resume tools/p2_captain_campaign_resume_runtime.cpp)
 pikmin_add_ci_fixture(original_pelplant tools/p2_original_pelplant_runtime.cpp)
+pikmin_add_ci_fixture(original_chappy tools/p2_original_chappy_runtime.cpp)
 add_executable(pc_p2_original_pelplant_test tools/test_p2_original_pelplant.cpp
     pc_port/pc_p2_original_pelplant.cpp pc_port/pc_p2_original_spawn_plan.cpp)
 target_include_directories(pc_p2_original_pelplant_test PRIVATE pc_port)
 target_compile_options(pc_p2_original_pelplant_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
 add_test(NAME pc_p2_original_pelplant_test COMMAND pc_p2_original_pelplant_test)
+add_executable(pc_p2_original_uji_test tools/test_p2_original_uji.cpp
+    pc_port/pc_p2_original_uji.cpp pc_port/pc_p2_original_spawn_plan.cpp
+    pc_port/pc_p2_original_drop.cpp pc_port/pc_p2_original_catalog.cpp)
+target_include_directories(pc_p2_original_uji_test PRIVATE pc_port)
+target_compile_options(pc_p2_original_uji_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME pc_p2_original_uji_test COMMAND pc_p2_original_uji_test)
+add_executable(pc_p2_original_chappy_test tools/pc_p2_original_chappy_test.cpp
+    pc_port/pc_p2_original_chappy.cpp pc_port/pc_p2_original_spawn_plan.cpp
+    pc_port/pc_p2_original_drop.cpp pc_port/pc_p2_original_catalog.cpp
+    pc_port/netplay/pc_netplay_sha256.h)
+target_include_directories(pc_p2_original_chappy_test PRIVATE pc_port)
+target_compile_options(pc_p2_original_chappy_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME pc_p2_original_chappy_test COMMAND pc_p2_original_chappy_test)
+add_executable(pc_p2_original_tank_test tools/test_p2_original_tank.cpp
+    pc_port/pc_p2_original_tank.cpp pc_port/pc_p2_original_spawn_plan.cpp
+    pc_port/pc_p2_original_drop.cpp pc_port/pc_p2_original_catalog.cpp)
+target_include_directories(pc_p2_original_tank_test PRIVATE pc_port)
+target_compile_options(pc_p2_original_tank_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME pc_p2_original_tank_test COMMAND pc_p2_original_tank_test)
 pikmin_add_ci_fixture(captain_onion_owner_sdl tools/p2_captain_onion_owner_sdl_fixture.cpp)
 if(TARGET pikmin_ci_fixture_captain_onion_owner_sdl)
     target_include_directories(pikmin_ci_fixture_captain_onion_owner_sdl PRIVATE ${P2_CHALLENGE_GUARD_INCLUDE_DIR})
@@ -3249,6 +3294,20 @@ add_test(NAME pc_midday_render_graph COMMAND pc_midday_render_graph_test)
         pc_port/pc_p2_original_lifecycle.cpp)
     target_include_directories(pc_p2_original_group_test PRIVATE "${PROJECT_SOURCE_DIR}/pc_port")
     add_test(NAME p2_original_group COMMAND pc_p2_original_group_test)
+    add_executable(pc_p2_original_dispatch_test tools/pc_p2_original_dispatch_test.cpp
+        pc_port/pc_p2_original_dispatch.cpp pc_port/pc_p2_original_catalog.cpp
+        pc_port/pc_p2_original_spawn_plan.cpp)
+    target_include_directories(pc_p2_original_dispatch_test PRIVATE "${PROJECT_SOURCE_DIR}/pc_port")
+    add_test(NAME p2_original_dispatch COMMAND pc_p2_original_dispatch_test)
+    add_executable(pc_p2_original_manifest_test tools/pc_p2_original_manifest_test.cpp
+        pc_port/pc_p2_original_manifest.cpp pc_port/pc_p2_original_catalog.cpp
+        pc_port/pc_p2_original_spawn_plan.cpp pc_port/pc_p2_original_lifecycle.cpp)
+    target_include_directories(pc_p2_original_manifest_test PRIVATE "${PROJECT_SOURCE_DIR}/pc_port")
+    add_test(NAME p2_original_manifest COMMAND pc_p2_original_manifest_test)
+    add_executable(pc_p2_original_piki_manifest_test tools/pc_p2_original_piki_manifest_test.cpp
+        pc_port/pc_p2_original_piki_manifest.cpp)
+    target_include_directories(pc_p2_original_piki_manifest_test PRIVATE "${PROJECT_SOURCE_DIR}/pc_port")
+    add_test(NAME p2_original_piki_manifest COMMAND pc_p2_original_piki_manifest_test)
     add_executable(pc_p2_original_progress_test tools/pc_p2_original_progress_test.cpp
         pc_port/pc_p2_original_progress.cpp)
     target_include_directories(pc_p2_original_progress_test PRIVATE "${PROJECT_SOURCE_DIR}/pc_port")
@@ -3304,6 +3363,24 @@ endif()
 pikmin_add_ci_fixture(original_gen_object tools/p2_original_gen_object_runtime.cpp)
 pikmin_add_ci_fixture(original_piki_init tools/p2_original_piki_init_runtime.cpp)
 
+
+add_executable(pc_p2_original_frog_test tools/test_p2_original_frog.cpp
+    pc_port/pc_p2_original_frog.cpp pc_port/pc_p2_original_spawn_plan.cpp
+    pc_port/pc_p2_original_drop.cpp pc_port/pc_p2_original_catalog.cpp)
+target_include_directories(pc_p2_original_frog_test PRIVATE pc_port)
+target_compile_options(pc_p2_original_frog_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME pc_p2_original_frog_test COMMAND pc_p2_original_frog_test)
+pikmin_add_ci_fixture(original_onyon tools/p2_original_onyon_runtime.cpp)
+
+add_executable(pc_p2_original_onyon_test tools/test_p2_original_onyon.cpp pc_port/pc_p2_original_onyon.cpp)
+target_include_directories(pc_p2_original_onyon_test PRIVATE "${PROJECT_SOURCE_DIR}/pc_port")
+
+add_executable(pc_p2_original_red_test tools/test_p2_original_red.cpp
+    pc_port/pc_p2_original_red.cpp pc_port/pc_p2_original_spawn_plan.cpp
+    pc_port/pc_p2_original_drop.cpp pc_port/pc_p2_original_catalog.cpp)
+target_include_directories(pc_p2_original_red_test PRIVATE pc_port)
+target_compile_options(pc_p2_original_red_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME pc_p2_original_red_test COMMAND pc_p2_original_red_test)
 # Compile the real rescue implementation against minimal observable engine doubles.
 if(PIKMIN_BUILD_TESTS)
 add_executable(rescue_actual_test tools/test_rescue_actual.cpp src/plugPikiKando/aiRescue.cpp)
@@ -3328,3 +3405,42 @@ add_executable(pc_p2_hanachirashi_source_test tools/test_p2_hanachirashi_source.
 target_include_directories(pc_p2_hanachirashi_source_test PRIVATE pc_port)
 target_compile_options(pc_p2_hanachirashi_source_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
 add_test(NAME pc_p2_hanachirashi_source_test COMMAND pc_p2_hanachirashi_source_test)
+# Original retail Armor source-15 provider contract; no engine/gameplay substitute.
+add_executable(pc_p2_original_armor_test tools/pc_p2_original_armor_test.cpp
+ pc_port/pc_p2_original_armor.cpp pc_port/pc_p2_original_spawn_plan.cpp
+ pc_port/pc_p2_original_drop.cpp pc_port/pc_p2_original_catalog.cpp)
+target_include_directories(pc_p2_original_armor_test PRIVATE pc_port)
+target_compile_options(pc_p2_original_armor_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME pc_p2_original_armor_test COMMAND pc_p2_original_armor_test)
+
+pikmin_add_ci_fixture(original_armor tools/p2_original_armor_runtime.cpp)
+# Shared party codec and living surface descriptor: no assets or gameplay stubs.
+add_executable(p2_surface_session_test tools/test_p2_surface_session.cpp)
+target_include_directories(p2_surface_session_test PRIVATE pc_port)
+target_compile_options(p2_surface_session_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+add_test(NAME p2_surface_session COMMAND p2_surface_session_test)
+add_executable(p2_cave_campaign_party_test tools/test_p2_cave_campaign_party.cpp)
+target_include_directories(p2_cave_campaign_party_test PRIVATE pc_port)
+target_compile_options(p2_cave_campaign_party_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+add_test(NAME p2_cave_campaign_party COMMAND p2_cave_campaign_party_test)
+
+add_executable(p2_original_piki_origin_test tools/pc_p2_original_piki_origin_test.cpp pc_port/pc_p2_original_piki_origin.cpp)
+target_include_directories(p2_original_piki_origin_test PRIVATE pc_port)
+target_compile_options(p2_original_piki_origin_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+add_test(NAME p2_original_piki_origin COMMAND p2_original_piki_origin_test)
+
+pikmin_add_ci_fixture(surface_campaign_sdl tools/p2_surface_campaign_sdl_fixture.cpp)
+
+pikmin_add_ci_fixture(original_piki_physical tools/p2_original_piki_physical_runtime.cpp)
+add_executable(p2_campaign_treasure_test tools/test_p2_campaign_treasure.cpp)
+target_include_directories(p2_campaign_treasure_test PRIVATE pc_port)
+target_compile_options(p2_campaign_treasure_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_campaign_treasure_test COMMAND p2_campaign_treasure_test)
+add_executable(p2_campaign_treasure_config_test tools/test_p2_campaign_treasure_config.cpp)
+target_include_directories(p2_campaign_treasure_config_test PRIVATE pc_port)
+target_compile_options(p2_campaign_treasure_config_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_campaign_treasure_config_test COMMAND p2_campaign_treasure_config_test)
+add_executable(p2_campaign_treasure_held_test tools/test_p2_campaign_treasure_held.cpp)
+target_include_directories(p2_campaign_treasure_held_test PRIVATE pc_port)
+target_compile_options(p2_campaign_treasure_held_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_campaign_treasure_held_test COMMAND p2_campaign_treasure_held_test)
