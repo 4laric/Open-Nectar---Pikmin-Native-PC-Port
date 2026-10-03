@@ -2216,6 +2216,7 @@ void GameCoreSection::finalSetup()
   // Actual Body owner must install its 20 source actors here before admitting
   // the physical floor. An ordinary P1 field count cannot satisfy this query.
   if(!pc_p2_original_captain_scene_reset(error)||
+     !pc_p2_retail_scene_bodies_create(*retailScene,error)||
      !pc_p2_retail_scene_bodies_admitted(*retailScene,error)||!pc_p2_retail_scene_boot(error)||
      !pc_p2_original_captain_scene_activate(error)){
    std::fprintf(stderr,"P2_RETAIL_STARTUP_REFUSED %s\n",error.c_str());std::abort();

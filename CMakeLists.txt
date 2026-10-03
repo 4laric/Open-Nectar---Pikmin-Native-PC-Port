@@ -446,6 +446,8 @@ set(PC_PORT_SOURCES
     pc_port/pc_p2_retail_cave_native.cpp
     pc_port/pc_p2_retail_scene_input.cpp
     pc_port/pc_p2_retail_start.cpp
+    pc_port/pc_p2_retail_starting_piki.cpp
+    pc_port/pc_p2_retail_starting_piki_selected.cpp
     pc_port/pc_p2_retail_geometry.cpp
     pc_port/pc_p2_retail_scene_map.cpp
     pc_port/pc_p2_retail_exit.cpp
