@@ -14,6 +14,7 @@
 #include "MapCode.h"
 #include "Graphics.h"
 #include "Dolphin/gx.h"
+#include "gl/pc_gfx.h"
 #include "Camera.h"
 #include "MapMgr.h"
 #include "MoviePlayer.h"
@@ -21,6 +22,7 @@
 #include "system.h"
 #include <algorithm>
 #include <cstdio>
+extern "C" int pc_gfx_fog_allowed();
 
 // The qualified source line may ship before the optional cave provider. A
 // composed provider enables this only after linking the real transition owner.
@@ -159,7 +161,9 @@ void pc_p2_cave_visible_draw(Graphics& gfx){
         std::printf("P2_CAVE_VISIBLE_DRAW kind=%s scene=%lu x=%.3f y=%.3f z=%.3f authored=1\n",
             actor.returning?"geyser":"hole",drawnScene,actor.x,actor.y,actor.z);probe(actor);}
     const Colour color=gfx.mPrimaryColour,aux=gfx.mAuxiliaryColour;
-    const int blend=gfx.setCBlending(BLEND_Alpha),cull=gfx.setCullFront(2);
+    const int blend=gfx.setCBlending(BLEND_Alpha),cull=gfx.mCullMode;
+    gfx.setCullFront(2);
+    const int fogAllowed=pc_gfx_fog_allowed();pc_gfx_set_fog_allowed(0);
     const bool depth=gfx.setDepth(true);
     Texture* texture=gfx.mActiveTexture[0];const bool light=gfx.setLighting(false,nullptr);
     gfx.setPerspective(gfx.mCamera->mPerspectiveMatrix.mMtx,gfx.mCamera->mFov,
@@ -182,6 +186,7 @@ void pc_p2_cave_visible_draw(Graphics& gfx){
     gfx.useMatrix(gfx.mCamera->mLookAtMtx,0);
     gfx.setColour(color,true);gfx.mAuxiliaryColour=aux;gfx.setCBlending(blend);
     gfx.useTexture(texture,0);gfx.setLighting(light,nullptr);gfx.setDepth(depth);gfx.setCullFront(cull);
+    pc_gfx_set_fog_allowed(fogAllowed);
 }
 #else
 bool pc_p2_cave_visible_interact(Navi*){return false;}
