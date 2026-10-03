@@ -434,6 +434,7 @@ set(PC_PORT_SOURCES
     pc_port/pc_p2_retail_geometry.cpp
     pc_port/pc_p2_retail_rooms.cpp
     pc_port/pc_p2_original_number_room.cpp
+    pc_port/pc_p2_original_number_triangle.cpp
     pc_port/pc_p2_retail_scene_map.cpp
     pc_port/pc_p2_retail_exit.cpp
     pc_port/pc_p2_retail_cave_foliage.cpp
@@ -3729,15 +3730,19 @@ add_executable(pc_p2_retail_scene_input_test tools/p2_retail_scene_input_test.cp
 target_include_directories(pc_p2_retail_scene_input_test PRIVATE pc_port)
 target_compile_options(pc_p2_retail_scene_input_test PRIVATE -UNDEBUG)
 add_test(NAME p2_retail_scene_input COMMAND pc_p2_retail_scene_input_test)
-add_executable(pc_p2_retail_rooms_test tools/p2_retail_rooms_test.cpp pc_port/pc_p2_retail_rooms.cpp pc_port/pc_p2_original_number_room.cpp)
+add_executable(pc_p2_retail_rooms_test tools/p2_retail_rooms_test.cpp pc_port/pc_p2_retail_rooms.cpp pc_port/pc_p2_original_number_room.cpp pc_port/pc_p2_original_number_triangle.cpp)
 target_include_directories(pc_p2_retail_rooms_test PRIVATE pc_port)
 target_compile_options(pc_p2_retail_rooms_test PRIVATE -UNDEBUG)
 target_link_libraries(pc_p2_retail_rooms_test PRIVATE p2_retail_cave_catalog)
-add_executable(pc_p2_original_number_room_test tools/p2_original_number_room_test.cpp pc_port/pc_p2_original_number_room.cpp)
+add_executable(pc_p2_original_number_room_test tools/p2_original_number_room_test.cpp pc_port/pc_p2_original_number_room.cpp pc_port/pc_p2_original_number_triangle.cpp)
 target_include_directories(pc_p2_original_number_room_test PRIVATE pc_port)
 target_compile_options(pc_p2_original_number_room_test PRIVATE -UNDEBUG)
 add_test(NAME p2_original_number_room COMMAND pc_p2_original_number_room_test)
-set_source_files_properties(pc_port/pc_p2_original_number_room.cpp pc_port/pc_p2_retail_rooms.cpp pc_port/pc_p2_retail_scene_map.cpp
+add_executable(pc_p2_original_number_triangle_test tools/p2_original_number_triangle_test.cpp pc_port/pc_p2_original_number_triangle.cpp)
+target_include_directories(pc_p2_original_number_triangle_test PRIVATE pc_port)
+target_compile_options(pc_p2_original_number_triangle_test PRIVATE -UNDEBUG)
+add_test(NAME p2_original_number_triangle COMMAND pc_p2_original_number_triangle_test)
+set_source_files_properties(pc_port/pc_p2_original_number_room.cpp pc_port/pc_p2_original_number_triangle.cpp pc_port/pc_p2_retail_rooms.cpp pc_port/pc_p2_retail_scene_map.cpp
     PROPERTIES COMPILE_OPTIONS "-ffp-contract=off;-fno-fast-math")
 add_executable(pc_p2_retail_exit_test tools/p2_retail_exit_test.cpp)
 target_include_directories(pc_p2_retail_exit_test PRIVATE pc_port)

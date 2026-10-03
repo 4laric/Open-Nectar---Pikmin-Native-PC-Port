@@ -1,5 +1,6 @@
 #pragma once
 #include "pc_p2_retail_scene_input.h"
+#include <map>
 
 namespace p2retail {
 struct SourceRoomUnit {
@@ -28,6 +29,13 @@ struct SourceWaterUnit {std::string name,raw;unsigned version=0,count=0;};
 // lifecycle must still adopt it; this record is never runtime known-dry.
 struct SourceWaterInputs {std::string sha256,roomCensusSha256;std::vector<SourceWaterUnit> units;};
 bool parseSourceWaterInputs(const SelectedSceneInputs&,const SourceRoomCensus&,SourceWaterInputs&,std::string&);
+struct SourceFloorParameters {
+ std::string sha256,sourceBytes,roomCensusSha256,waterCensusSha256;
+ std::map<std::string,std::string> parameters;
+ unsigned definitionIndex=0,firstFloor=0,lastFloor=0,hiddenCollisionValue=0;
+ bool hasHiddenCollision=false;
+};
+bool parseSourceFloorParameters(const SelectedSceneInputs&,const SourceRoomCensus&,const SourceWaterInputs&,SourceFloorParameters&,std::string&);
 struct SourceRoomMatrix {unsigned roomIndex=0,unit=0;std::array<float,12> matrix{};};
 struct SourceRoomTriangle {std::array<unsigned,3> abc{};unsigned roomIndex=0;unsigned char mapcode=0;};
 struct SourceRoomGeometry {

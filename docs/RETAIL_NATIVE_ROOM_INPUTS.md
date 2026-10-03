@@ -10,6 +10,18 @@ packet is rewritten. These are the exact reviewed authored profiles from root
 b903531e and c3d387d; independent whole-buffer pins authenticate their original
 archive/member provenance rather than trusting hashes described in the JSON.
 
+`P2_RETAIL_DEVELOPMENT_FLOOR_3` preserves the eight version-2 digests and adds
+the mandatory ninth `floor-parameters` digest. Its role is
+`p2-original/retail-caves/tutorial_1/floor<N>/floor-parameters.json`, at most
+64 KiB. Versions 1 and 2 are unchanged and have no floor-parameter getter.
+The supported root 0b21d409 profiles retain the authenticated original caveinfo
+member. Native decoding re-reads its literal parameter lines, header count,
+unique explicit f000/f001 ranges and all selected values; f013 must be explicit
+0 or 1. `hasHiddenCollision` is exactly `f013 == TRUE(1)`. A missing flag or role
+is unavailable and cannot become false. Actual SceneRuntime owns the parsed
+floor parameters under the same serial/revision/thread/session lifetime guards.
+The getter is a construction view, not live trace/contact admission.
+
 `parseSourceRoomCensus` verifies selected buffer/plan bindings and re-decodes
 retained original binary32 bits, A/B/C order, mapcodes, serialized unit bounds,
 vertex bounds and divider headers from the raw members. Signed zero is retained.
@@ -33,6 +45,12 @@ from dd5b91f2e, with explicit f32/FMA boundaries and paired-lane order. The owne
 retains actual matrices, transformed source vertices, offset A/B/C, mapcodes,
 triangle-to-room indices and expanded vertex bounds. Portable quarter-LUT
 arithmetic controls pass; original PPC/libm runtime bit identity is unobserved.
+The room FMA backend is superseded by Numeric411a985a: exact binary32 products,
+binary64 TwoSum residual and midpoint correction avoid the observed host
+MinGW fmaf error, including signed finite-MAX overflow boundaries. Scene930
+reruns both actual floor vertex/matrix/triangle-provenance controls with that
+backend. Earlier dd5/3866 receipts remain engineering evidence. Original
+hardware/FPSCR comparison remains unobserved.
 A native quantized quarter-turn matrix is not substituted. Source combined
 planes/spheres/grid, hiddenCollision and active Plat lifecycle remain absent.
 

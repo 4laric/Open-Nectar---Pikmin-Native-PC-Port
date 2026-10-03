@@ -152,7 +152,7 @@ SourceRoomUnit unit(const Json& j){
 }
 bool parseSourceRoomCensus(const SelectedSceneInputs& selected,SourceRoomCensus& out,std::string& error){
  try{
-  check(selected.selection.version==2&&selected.selection.floor>=1&&selected.selection.floor<=2,"room selected version/floor");
+  check(selected.selection.version>=2&&selected.selection.version<=3&&selected.selection.floor>=1&&selected.selection.floor<=2,"room selected version/floor");
   const auto& raw=selected.bytes[6];const auto digest=hash(raw);
   // Independent qualified profile pins authenticate the raw member provenance;
   // the self-described archive hashes alone are never a trust root.
@@ -194,7 +194,7 @@ bool parseSourceRoomCensus(const SelectedSceneInputs& selected,SourceRoomCensus&
 }
 bool parseSourceWaterInputs(const SelectedSceneInputs& selected,const SourceRoomCensus& rooms,SourceWaterInputs& out,std::string& error){
  try{
-  check(selected.selection.version==2&&selected.selection.floor>=1&&selected.selection.floor<=2,"water selected version/floor");
+  check(selected.selection.version>=2&&selected.selection.version<=3&&selected.selection.floor>=1&&selected.selection.floor<=2,"water selected version/floor");
   const auto& raw=selected.bytes[7];const auto digest=hash(raw);
   static constexpr const char* pins[]={"31f212070f0e182dcfe5cbc45cbc9f0ba01634d07f594f67d2ba33dfa8edd1fe","0e7b2ffbc7747e593c2d6e4f26620256b2f72a4f15462dcff5e5b41b76c7fdb2"};
   check(!raw.empty()&&raw.size()<=65536&&digest==selected.selection.sha256[7]&&digest==pins[selected.selection.floor-1],"water selected/profile digest");
@@ -234,6 +234,60 @@ bool parseSourceWaterInputs(const SelectedSceneInputs& selected,const SourceRoom
    check(j.at("version").numeric(0)&&j.at("count").numeric(0)&&array(j.at("boxes"),0).empty(),"water literal count differs");
    next.units.push_back({u.name,literal,0,0});
   }
+  out=std::move(next);error.clear();return true;
+ }catch(const std::exception& e){error=e.what();return false;}
+}
+bool parseSourceFloorParameters(const SelectedSceneInputs& selected,const SourceRoomCensus& rooms,const SourceWaterInputs& water,SourceFloorParameters& out,std::string& error){
+ try{
+  check(selected.selection.version==3&&selected.selection.floor>=1&&selected.selection.floor<=2,"floor parameters selected version/floor");
+  const auto& raw=selected.bytes[8];const auto digest=hash(raw);
+  static constexpr const char* pins[]={"a7a0e74a3af6ccfb10921a7207a555bf7bab8c3c558baf61809f97e8d90ea85f","884d20883f48be3d266c0eb9667832a02abad1d953c966c4df2e0e5b26809631"};
+  check(!raw.empty()&&raw.size()<=65536&&digest==selected.selection.sha256[8]&&digest==pins[selected.selection.floor-1],"floor parameters selected/profile digest");
+  SourceRoomCensus actualRooms;SourceWaterInputs actualWater;
+  check(parseSourceRoomCensus(selected,actualRooms,error)&&parseSourceWaterInputs(selected,actualRooms,actualWater,error)&&
+   actualRooms.sha256==rooms.sha256&&actualWater.sha256==water.sha256,"floor parameters actual room/water binding");
+  const auto doc=JsonReader(raw).read();const auto& plan=selected.plan;
+  check(doc.at("schema").numeric(1)&&doc.at("policy").text("authored-emergence-floor-parameters/1")&&
+   doc.at("cave").text(plan.cave)&&doc.at("floor").numeric(plan.floor)&&doc.at("room_census_sha256").text(actualRooms.sha256)&&
+   doc.at("water_census_sha256").text(actualWater.sha256)&&doc.at("layout_sha256").text(plan.layoutSha256)&&
+   doc.at("cave_source_sha256").text(plan.sourceSha256)&&doc.at("catalog_sha256").text(plan.catalogSha256)&&
+   doc.at("geometry_sha256").text(selected.selection.sha256[1])&&doc.at("routes_sha256").text(selected.selection.sha256[2])&&
+   doc.at("start_sha256").text(selected.selection.sha256[3])&&doc.at("pool").at("sha256").text(selected.selection.sha256[4]),"floor parameters selected bindings");
+  for(const char* flag:{"native_ready","runtime_lifecycle_provided","physical_trace_provided"})check(doc.at(flag).kind==Json::False,"floor parameters input authority boundary");
+  const auto& source=doc.at("source");SourceFloorParameters next;
+  next.sourceBytes=base64(text(source.at("bytes_base64")));
+  check(source.at("member").text("user/Mukki/mapunits/caveinfo/tutorial_1.txt")&&source.at("sha256").text(plan.sourceSha256)&&
+   !next.sourceBytes.empty()&&next.sourceBytes.size()<=32768&&hash(next.sourceBytes)==plan.sourceSha256,"floor parameters original source member");
+  // Re-decode literal parameter lines from this independently pinned original
+  // member. Shift-JIS comments are removed as raw bytes; values are retained
+  // verbatim. No original constructor default or ambient floor flag is used.
+  std::vector<std::map<std::string,std::string>> definitions;std::map<std::string,std::string> current;
+  unsigned count=0;bool header=false;std::istringstream lines(next.sourceBytes);std::string line;
+  auto number=[](const std::string& value,unsigned max){check(!value.empty()&&value.size()<=3,"floor source integer framing");unsigned n=0;
+   for(char c:value){check(c>='0'&&c<='9',"floor source integer digit");n=n*10+unsigned(c-'0');}check(n<=max,"floor source integer bound");return n;};
+  while(std::getline(lines,line)){std::istringstream row(line.substr(0,line.find('#')));std::string key,size,value,extra;if(!(row>>key))continue;
+   if(key=="{_eof}"){if(!current.empty()){definitions.push_back(std::move(current));current.clear();}continue;}
+   if(key=="{c000}"){check(!header&&bool(row>>size>>value)&&size=="4"&&!(row>>extra),"floor source header");count=number(value,128);header=true;continue;}
+   if(key.size()==6&&key[0]=='{'&&key[1]=='f'&&key[5]=='}'){
+    check(bool(row>>size>>value)&&(size=="4"||size=="-1")&&!(row>>extra)&&current.emplace(key.substr(1,4),value).second,"floor source duplicate/invalid parameter");
+   }
+  }
+  check(header&&count>0&&current.empty()&&definitions.size()==count,"floor source definition count/framing");
+  unsigned matched=0;std::array<bool,128> occupied{};
+  for(unsigned i=0;i<definitions.size();++i){const auto& fields=definitions[i];
+   check(fields.count("f000")&&fields.count("f001")&&fields.count("f013"),"floor source explicit range/hidden flag missing");
+   const unsigned first=number(fields.at("f000"),127),last=number(fields.at("f001"),127),hidden=number(fields.at("f013"),1);
+   check(first<=last,"floor source range inverted");for(unsigned f=first;f<=last;++f){check(!occupied[f],"floor source overlapping range");occupied[f]=true;}
+   if(first<=selected.selection.floor-1&&selected.selection.floor-1<=last){++matched;next.parameters=fields;next.definitionIndex=i;
+    next.firstFloor=first+1;next.lastFloor=last+1;next.hiddenCollisionValue=hidden;next.hasHiddenCollision=hidden==1;}
+  }
+  check(matched==1,"floor source selected definition unavailable");const auto& definition=doc.at("definition");
+  check(definition.at("definition_index").numeric(next.definitionIndex)&&definition.at("first_floor").numeric(next.firstFloor)&&
+   definition.at("last_floor").numeric(next.lastFloor)&&definition.at("hidden_collision_value").numeric(next.hiddenCollisionValue)&&
+   definition.at("has_hidden_collision").kind==(next.hasHiddenCollision?Json::True:Json::False),"floor source predicate/selection differs");
+  const auto& parameters=definition.at("parameters");check(parameters.kind==Json::Object&&parameters.object.size()==next.parameters.size(),"floor source complete parameters differ");
+  for(const auto& field:next.parameters)check(parameters.at(field.first.c_str()).text(field.second),"floor original parameter differs");
+  next.sha256=digest;next.roomCensusSha256=actualRooms.sha256;next.waterCensusSha256=actualWater.sha256;
   out=std::move(next);error.clear();return true;
  }catch(const std::exception& e){error=e.what();return false;}
 }

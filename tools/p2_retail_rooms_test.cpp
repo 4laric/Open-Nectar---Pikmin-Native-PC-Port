@@ -5,14 +5,20 @@
 static std::string file(const std::string& path){std::ifstream f(path,std::ios::binary);assert(f);return {std::istreambuf_iterator<char>(f),{}};}
 static std::string hash(const std::string& bytes){unsigned char d[32];pc_netplay_sha::sha256(bytes.data(),bytes.size(),d);return pc_netplay_sha::hex(d,32);}
 int main(int argc,char** argv){
- assert(argc==4);using namespace p2retail;
- for(unsigned floor=1;floor<=2;++floor){SelectedSceneInputs input;input.selection.cave="tutorial_1";input.selection.floor=floor;input.selection.version=2;
+ assert(argc==5);using namespace p2retail;
+ for(unsigned floor=1;floor<=2;++floor){SelectedSceneInputs input;input.selection.cave="tutorial_1";input.selection.floor=floor;input.selection.version=3;
   for(unsigned i=0;i<6;++i){input.bytes[i]=file(std::string(argv[1])+"/"+sceneInputRole(input.selection,static_cast<SceneInput>(i)));input.selection.sha256[i]=hash(input.bytes[i]);}
   input.bytes[6]=file(std::string(argv[2])+"/floor"+std::to_string(floor)+"/p2-retail-room-census.json");input.selection.sha256[6]=hash(input.bytes[6]);
   input.bytes[7]=file(std::string(argv[3])+"/floor"+std::to_string(floor)+"/p2-retail-water-census.json");input.selection.sha256[7]=hash(input.bytes[7]);
+  input.bytes[8]=file(std::string(argv[4])+"/floor"+std::to_string(floor)+"/p2-retail-floor-parameters.json");input.selection.sha256[8]=hash(input.bytes[8]);
   std::string error;assert(parseFloorPlan(input.bytes[0],input.selection.sha256[0],input.plan,error));
   SourceRoomCensus census;assert(parseSourceRoomCensus(input,census,error));assert(census.rooms.size()==(floor==1?3:1));
   SourceWaterInputs water;assert(parseSourceWaterInputs(input,census,water,error));assert(water.units.size()==census.units.size());
+  SourceFloorParameters parameters;assert(parseSourceFloorParameters(input,census,water,parameters,error));
+  assert(!parameters.hasHiddenCollision&&parameters.hiddenCollisionValue==0&&parameters.parameters.at("f013")=="0"&&parameters.firstFloor==floor&&parameters.lastFloor==floor);
+  auto legacy=input;legacy.selection.version=2;legacy.bytes[8].clear();legacy.selection.sha256[8].clear();
+  SourceRoomCensus legacyRooms;SourceWaterInputs legacyWater;
+  assert(parseSourceRoomCensus(legacy,legacyRooms,error)&&parseSourceWaterInputs(legacy,legacyRooms,legacyWater,error));
   assert(census.units.size()==(floor==1?2:1));
   unsigned vertices=0,triangles=0;for(const auto& room:census.rooms){const auto& unit=census.units.at(room.unit);vertices+=unit.vertexBits.size();triangles+=unit.triangles.size();}
   assert(vertices==(floor==1?238u:800u));assert(triangles==(floor==1?352u:1414u));
@@ -53,5 +59,17 @@ int main(int argc,char** argv){
   for(const char* label:{"count","bytes_base64","room_census_sha256","runtime_known_dry","quarter_turn"}){
    bad=input;const auto at=bad.bytes[7].find(label);assert(at!=std::string::npos);bad.bytes[7][at]='X';bad.selection.sha256[7]=hash(bad.bytes[7]);waterRefuse(bad);}
   std::cout<<"floor="<<floor<<" water input PASS count0 units="<<water.units.size()<<" refusals="<<waterNegatives<<"; runtime known-dry unavailable\n";
+  unsigned parameterNegatives=0;auto parameterRefuse=[&](const SelectedSceneInputs& changed){auto retained=parameters;
+   assert(!parseSourceFloorParameters(changed,census,water,retained,error));assert(!error.empty());
+   assert(retained.sha256==parameters.sha256&&retained.sourceBytes==parameters.sourceBytes&&retained.parameters==parameters.parameters);++parameterNegatives;};
+  parameterRefuse(legacy);
+  bad=input;bad.bytes[8].clear();parameterRefuse(bad);
+  bad=input;bad.selection.sha256[8]=std::string(64,'0');parameterRefuse(bad);
+  bad=input;bad.bytes[8].pop_back();bad.selection.sha256[8]=hash(bad.bytes[8]);parameterRefuse(bad);
+  bad=input;bad.bytes[8]+=std::string(65536,' ');bad.selection.sha256[8]=hash(bad.bytes[8]);parameterRefuse(bad);
+  for(unsigned index:{6u,7u}){bad=input;bad.bytes[index]+="tamper";parameterRefuse(bad);}
+  for(const char* label:{"f013","has_hidden_collision","first_floor","bytes_base64","room_census_sha256","water_census_sha256"}){
+   bad=input;const auto at=bad.bytes[8].find(label);assert(at!=std::string::npos);bad.bytes[8][at]='X';bad.selection.sha256[8]=hash(bad.bytes[8]);parameterRefuse(bad);}
+  std::cout<<"floor="<<floor<<" original parameter PASS explicitf013=0 refusals="<<parameterNegatives<<"; no trace/contact grant\n";
  }
 }

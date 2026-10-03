@@ -16,6 +16,12 @@ int main(){
  assert(sceneInputRole(newer,SceneInput::Rooms)=="p2-original/retail-caves/tutorial_1/floor1/room-census.json");
  assert(sceneInputRole(newer,SceneInput::Water)=="p2-original/retail-caves/tutorial_1/floor1/water-census.json");
  assert(!parseDevelopmentFloor(successor.substr(0,successor.find("water-census")),newer,error));
+ auto third=successor;third.replace(third.find("FLOOR_2"),7,"FLOOR_3");third+="floor-parameters "+hash+"\n";
+ DevelopmentFloor parameters;assert(parseDevelopmentFloor(third,parameters,error)&&parameters.version==3&&parameters.sha256[8]==hash);
+ assert(sceneInputRole(parameters,SceneInput::Parameters)=="p2-original/retail-caves/tutorial_1/floor1/floor-parameters.json");
+ assert(sceneInputRole(newer,SceneInput::Parameters).empty());
+ assert(!parseDevelopmentFloor(third.substr(0,third.find("floor-parameters")),parameters,error));
+ assert(!parseDevelopmentFloor(successor+"floor-parameters "+hash+"\n",parameters,error));
  auto missing=successor.substr(0,successor.find("room-census"));
  assert(!parseDevelopmentFloor(missing,newer,error)&&newer.version==2&&newer.sha256[6]==hash);
  assert(!parseDevelopmentFloor(text+"room-census "+hash+"\n",newer,error));
