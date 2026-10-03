@@ -77,6 +77,8 @@ int main(){
  reset();world.state=c::Phase::Loading;bankCurrent=false;bankOwned=false;std::string error;
  auto& stage=*pc_p2_retail_scene_prepared();
  check(!p::nativePlate(scene,error),"absent composition exposes no storage");
+ check(!p::nativeAnimator(scene,error),"absent composition exposes no animator");
+ check(!p::nativeEffects(scene,error),"absent composition exposes no effects producer");
  stageThread=false;
  check(!p::prepareNativeComposition(stage,observedCaptain,effectReader,environmentReader,physicalReader,error)&&bankPreparations==0,"wrong Stage thread refuses before model preparation");
  stageThread=true;
@@ -84,11 +86,14 @@ int main(){
  check(!p::prepareNativeComposition(stage,observedCaptain,effectReader,environmentReader,physicalReader,error),"real C++ component constructor allocation failure refuses");
  check(failedAllocations==1&&bankOwned&&bankPreparations==1&&animationPreparations==0,"partial bank binding retained before failed animator construction");
  check(!p::nativePlate(scene,error),"failed constructor exposes no fabricated Plate");
+ check(!p::nativeAnimator(scene,error),"failed constructor exposes no fabricated animator");
  check(!p::prepareNativeComposition(stage,observedCaptain,effectReader,environmentReader,physicalReader,error),"failed animator preparation retains partial actual composition");
  check(bankPreparations==1&&animationPreparations==1&&bankOwned,"model owner remains retained after animation refusal");
  auto* plate=p::nativePlate(scene,error);
  check(plate!=nullptr,"constructed partial Plate borrow does not fabricate twenty bodies");
  check(p::nativeServices(scene,error)==nullptr,"unprepared animation refuses Services borrow");
+ check(!p::nativeAnimator(scene,error),"unprepared animator refuses callable borrow");
+ check(p::nativeEffects(scene,error)==&effectReader,"partial constructor retains genuine effects cleanup producer");
  failAnimation=false;
  installed=reinterpret_cast<p::Services*>(0x7000);
  check(!p::prepareNativeComposition(stage,observedCaptain,effectReader,environmentReader,physicalReader,error),"conflicting installed Runtime Services owner refuses");
@@ -98,12 +103,26 @@ int main(){
  check(bankPreparations==1&&animationPreparations==2,"retry does not reload or lose selected native bank");
  check(p::nativePlate(scene,error)==plate&&p::nativeServices(scene,error)==installed,"stable actual storage and installed Services returned");
  check(p::nativePhysicalSource(scene,error)==&physicalReader,"real mandatory physical producer retained");
+ auto* animator=p::nativeAnimator(scene,error);
+ check(animator!=nullptr&&p::nativeAnimator(scene,error)==animator,"prepared animator borrows actual stable retained owner");
+ auto* effects=p::nativeEffects(scene,error);
+ check(effects==&effectReader&&p::nativeEffects(scene,error)==effects,"checked effects borrow retains actual producer identity");
+ check(!p::nativeEffects(foreign,error),"foreign scene cannot borrow effects producer");
+ check(!p::nativeAnimator(foreign,error),"foreign scene cannot borrow animator");
+ bankCurrent=false;check(!p::nativeAnimator(scene,error),"stale selected bank refuses animator borrow");
+ check(!p::nativeEffects(scene,error),"stale selected bank refuses effects producer borrow");
+ bankCurrent=true;check(p::nativeAnimator(scene,error)==animator,"restored exact bank preserves animator owner");
  check(!p::nativePlate(foreign,error),"foreign canonical descriptor refuses borrow");
  ownerCallback=[](unsigned){selected=&foreign;};
  check(!p::nativeServices(scene,error),"virtual owner scene replacement refuses before borrow publication");
+ check(!p::nativeAnimator(scene,error),"changed scene refuses animator borrow");
  ownerCallback={};selected=&scene;
  ownerCallback=[&](unsigned){std::string nested;check(!p::nativePlate(scene,nested),"nested borrow refuses reentrant owner inspection");};
  check(!p::nativeServices(scene,error),"reentrant producer observation invalidates outer borrow");
+ ownerCallback=[&](unsigned){std::string nested;check(!p::nativeAnimator(scene,nested),"nested animator borrow refuses reentrant inspection");};
+ check(!p::nativeAnimator(scene,error),"reentrant observation invalidates outer animator borrow");
+ ownerCallback=[&](unsigned){std::string nested;check(!p::nativeEffects(scene,nested),"nested effects borrow refuses reentrant inspection");};
+ check(!p::nativeEffects(scene,error),"reentrant observation invalidates outer effects borrow");
  ownerCallback={};
  check(p::nativeServices(scene,error)==installed,"refused readonly observation preserves retained storage for retry");
   const std::function<void()> changes[]={[]{selected=&foreign;},[]{selectedWorld=nullptr;},[]{++scene.serial;},[]{world.state=c::Phase::Inactive;},[]{stageThread=false;}};
@@ -112,21 +131,30 @@ int main(){
    reset();world.state=c::Phase::Loading;bankCurrent=true;stageThread=true;
    ownerCallback=[&](unsigned index){if(index==callbackIndex)change();};
    check(!p::nativeServices(scene,error),"each callback refuses scene/world/incarnation/phase/thread changes");
+   reset();world.state=c::Phase::Loading;bankCurrent=true;stageThread=true;
+   check(!p::nativeAnimator(scene,error),"animator refuses every callback scene/world/incarnation/phase/thread change");
+   reset();world.state=c::Phase::Loading;bankCurrent=true;stageThread=true;
+   check(!p::nativeEffects(scene,error),"effects refuses every callback scene/world/incarnation/phase/thread change");
   }
  }
  ownerCallback={};reset();world.state=c::Phase::Loading;bankCurrent=true;stageThread=true;
  ObservedCaptain substitute;
  check(!p::prepareNativeComposition(stage,substitute,effectReader,environmentReader,physicalReader,error),"producer substitution cannot replace retained constructor references");
  check(p::nativeServices(scene,error)==installed,"substitution refusal preserves original storage");
+ check(p::nativeAnimator(scene,error)==animator,"refused animator observation preserves exact owner for retry");
+ check(p::nativeEffects(scene,error)==effects,"refused effects observation preserves exact producer for retry");
  world.state=c::Phase::Inactive;
  check(p::nativePlate(scene,error)==plate,"inactive retained cleanup can borrow actual Plate without action grant");
  effectReader.sceneRetained=false;
  check(!p::nativeServices(scene,error),"retired effect descriptor refuses composition borrow gracefully");
+ check(!p::nativeEffects(scene,error),"retired effects descriptor refuses its own borrow");
  check(effectReader.sceneReferenceCalls==0,"composition never dereferences retired effect Scene reference");
  effectReader.sceneRetained=true;
  check(p::nativeServices(scene,error)==installed,"real retained effect descriptor restores checked borrow");
  stageThread=false;
  check(!p::nativePhysicalSource(scene,error),"wrong creating thread refuses after construction too");
+ check(!p::nativeAnimator(scene,error),"wrong creating thread refuses animator borrow");
+ check(!p::nativeEffects(scene,error),"wrong creating thread refuses effects borrow");
  std::printf("NativeComposition controls PASS %u (Stage/model/animator doubles; no body factory)\n",checks);
 }
 
