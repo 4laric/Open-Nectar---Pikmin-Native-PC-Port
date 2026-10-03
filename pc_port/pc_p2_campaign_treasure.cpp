@@ -21,6 +21,8 @@
 
 // Campaign SAVE owner supplies selected bootstrap/card authority (#1229).
 std::string pc_randomizer_campaign_treasure_source();
+bool pc_randomizer_original_session();
+bool pc_randomizer_original_input(const std::string&,std::string&,std::string&);
 #if defined(__GNUC__)
 extern void pc_p2_equipment_reconcile_courses() __attribute__((weak));
 #endif
@@ -94,6 +96,14 @@ void pc_p2_campaign_treasure_setup() {
     // A catalog, model, environment variable or sidecar alone grants nothing.
     if(!p2treasurestate::state.active())return;
     if(pc_randomizer_campaign_treasure_source()!=p2treasurestate::state.source())reject("selected campaign source mismatch");
+    if(pc_randomizer_original_session()) {
+        std::string bytes,error,magic;
+        if(!pc_randomizer_original_input("p2-treasure-placements.txt",bytes,error)
+           ||p2treasureplacements::hash(bytes)!=p2treasurestate::state.source())reject("selected original treasury changed");
+        std::istringstream descriptor(bytes);
+        if(!(descriptor>>magic)||(magic!="P2_TREASURE_RETAIL_1"&&magic!="P2_TREASURE_HELD_1"))reject("selected original treasury provider unsupported");
+        return; // Source-owned loose/held providers retain their actual actor lifecycle.
+    }
     {std::ifstream descriptor("p2-treasure-placements.txt");std::string magic;
      if(descriptor>>magic&&magic=="P2_TREASURE_HELD_1")return;}
     if(pc_pikipelago_room_preview())reject("ordinary surface provider excludes preview");
