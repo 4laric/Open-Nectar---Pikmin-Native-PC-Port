@@ -86,7 +86,7 @@ Teki* find(unsigned token){
     return nullptr;
 }
 class ContactApp:public PlugPikiApp {
-    int frame=0,age=0,ready=0,throwTicks=0;
+    int frame=0,age=0,ready=0,throwTicks=0,neutralThrowTicks=0,uiResumeTicks=0;
     bool captainSeen=false,started=false,offContactSeen=false,reverseSeen=false;
     bool slotSeen[2]={false,false};
     int acquisition=0,acquisitionTicks=0,whiteGather=0,ivoryThrowTicks=0;
@@ -218,8 +218,12 @@ public:
         if(gameflow.mMoviePlayer&&gameflow.mMoviePlayer->mIsActive){gameflow.mMoviePlayer->requestSkip();return result;}
         if(!initialized||!pikiMgr||!tekiMgr||gameflow.mPauseAll||gameflow.mIsUIOverlayActive){
             if(frame%60==0){std::printf("P2_ELECBUG_WAIT frame=%d initialized=%d pause=%d overlay=%d captain_state=%d buttons=%08x\n",frame,int(initialized),int(gameflow.mPauseAll),int(gameflow.mIsUIOverlayActive),initialized?n->getCurrState()->getID():-1,initialized?n->mKontroller->mCurrentInput:0);std::fflush(nullptr);}
+            if(initialized&&gameflow.mIsUIOverlayActive&&electric()&&desiredSpecies()!=P2SpeciesWhite){
+                input(frame%30<5?KBBTN_A:0);aHeld=false;uiResumeTicks=15;
+            }
             return result;
         }
+        if(uiResumeTicks>0){--uiResumeTicks;input();return result;}
         if(!started&&(n->getCurrState()->getID()!=NAVISTATE_Walk||++ready<45))return result;
         Teki* enemy=find(Target);Teki* partner=find(Partner);
         require(enemy&&partner&&pc_p2_elecbug_registered(enemy)&&pc_p2_elecbug_registered(partner),"two bound ElecBugs");
@@ -327,7 +331,12 @@ public:
         if(age<90){input(KBBTN_B);return result;}
         if(distance(n->mSRT.t,enemy->mSRT.t)>140.f){
             if(aHeld){for(const auto& entry:flight)witness(entry.first,"invalidated");flight.clear();aHeld=false;}
+            neutralThrowTicks=0;
             point(n,enemy->mSRT.t,true);return result;
+        }
+        if(electric()&&desiredSpecies()!=P2SpeciesWhite&&neutralThrowTicks<15){
+            input();if(n->getCurrState()->getID()==NAVISTATE_Walk)++neutralThrowTicks;
+            return result;
         }
         Piki* held=nullptr;
         Iterator holding(pikiMgr);CI_LOOP(holding){Piki* p=static_cast<Piki*>(*holding);if(p&&p->isAlive()&&p->mNavi==n&&p->getCurrState()&&p->getState()==PIKISTATE_Hanged)held=p;}
