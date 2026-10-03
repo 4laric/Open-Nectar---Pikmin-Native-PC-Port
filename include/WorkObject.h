@@ -84,6 +84,7 @@ public:
 	static immut char* getShapeName(int);
 	void addUseList(int);
 	void originalAdopt(WorkObject*);
+	WorkObjectNode* originalAdoptNode(WorkObject*);
 	bool originalForget(WorkObject*);
 
 protected:
