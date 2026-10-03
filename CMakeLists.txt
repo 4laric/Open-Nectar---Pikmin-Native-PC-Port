@@ -3920,6 +3920,36 @@ if(PIKMIN_PIKI_JPA_COMPONENT)
     if(PIKMIN_PIKI_JPA_TEST_ASSETS)
         add_test(NAME p2_piki_jpa_selected_policy COMMAND pc_p2_piki_jpa_test "${PIKMIN_PIKI_JPA_TEST_ASSETS}")
     endif()
+    if(NOT ANDROID)
+        # Compile the actual transport and dependencies; no fake GL/context.
+        add_executable(pc_p2_piki_halo_transport_test
+            tools/p2_piki_halo_transport_test.cpp
+            pc_port/gl/pc_gfx.cpp
+            pc_port/gl/pc_gfx_deferred_tex.cpp
+            pc_port/gl/pc_postprocess.cpp
+            pc_port/gl/pc_tev_shader.cpp
+            pc_port/gl/pc_texpack.cpp
+            pc_port/netplay/pc_netplay_present.cpp
+            pc_port/netplay/pc_netplay_det.cpp
+            pc_port/netplay/pc_sim_rng.cpp
+            pc_port/timing/pc_render_packet.cpp
+            pc_port/timing/pc_render_phase.cpp
+            pc_port/timing/pc_tick_profiler.cpp)
+        target_compile_definitions(pc_p2_piki_halo_transport_test PRIVATE
+            PC_GFX_HALO_SCOPE_TEST=1 PC_NETPLAY_PRESENT_HOST=1)
+        target_compile_options(pc_p2_piki_halo_transport_test PRIVATE
+            ${NATIVE_COMPILE_OPTIONS} -UNDEBUG -UWIN32 -ffunction-sections -fdata-sections)
+        target_include_directories(pc_p2_piki_halo_transport_test PRIVATE pc_port/dolphin_stubs)
+        target_link_options(pc_p2_piki_halo_transport_test PRIVATE -Wl,--gc-sections)
+        if(WIN32)
+            target_link_libraries(pc_p2_piki_halo_transport_test PRIVATE ${SDL2_LIBRARIES} opengl32)
+        elseif(PIKMIN_GLES)
+            target_link_libraries(pc_p2_piki_halo_transport_test PRIVATE ${SDL2_LIBRARIES} OpenGL::GLES3)
+        else()
+            target_link_libraries(pc_p2_piki_halo_transport_test PRIVATE ${SDL2_LIBRARIES} OpenGL::GL)
+        endif()
+        add_test(NAME p2_piki_halo_transport COMMAND pc_p2_piki_halo_transport_test)
+    endif()
 endif()
 
 add_executable(p2_equipment_policy_test tools/pc_p2_equipment_test.cpp)

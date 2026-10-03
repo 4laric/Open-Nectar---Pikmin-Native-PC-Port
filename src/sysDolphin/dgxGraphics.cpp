@@ -10,8 +10,10 @@
 #include "pc_gfx.h"
 #include "pc_p2_envmap.h"
 #include "pc_p2_billboard_draw.h"
+#include "pc_p2_piki_jpa_render_scope.h"
 #include "netplay/pc_netplay_present.h"
 #include <cstdlib>
+#include <cstdio>
 #endif
 
 /**
@@ -144,6 +146,70 @@ static int oldTevGroup;
 static int frameNum;
 
 static int oldTexs[8] = { 0, 0, 0, 0, 0, 0, 0, 0 };
+
+#if defined(PIKI_PC_PORT)
+namespace p2original { namespace pikiJPA {
+struct HaloRenderScope::Impl {
+ PcGfxHaloScope* transport=nullptr;
+ DGXGraphics* graphics=nullptr;
+ const Matrix4f* activeMatrix=nullptr;
+ Texture* textures[8]{};
+ BOOL hasTexGen=FALSE;
+ bool lighting=false,depth=false;
+ int blend=0,cull=0,matrixId=0,cullCache=0;
+ std::string lastRefusal;
+};
+HaloRenderScope::HaloRenderScope():m(std::make_unique<Impl>()){}
+HaloRenderScope::~HaloRenderScope(){
+ if(m->transport||m->graphics){
+  std::fprintf(stderr,"P2_PIKI_HALO_RENDER_SCOPE_DESTROY_REFUSED last_cleanup=%s\n",
+   m->lastRefusal.empty()?"not checked":m->lastRefusal.c_str());
+  std::fflush(stderr);std::abort();
+ }
+}
+bool HaloRenderScope::retained()const noexcept{return m->transport||m->graphics;}
+bool HaloRenderScope::begin(Graphics& graphics,std::string& error){
+ if(retained()){error="Piki halo render scope already retained";m->lastRefusal=error;return false;}
+ // Native System owns this exact DGX instance. Arbitrary Graphics subclasses
+ // cannot supply a cache proof, and no ambient renderer is substituted.
+ auto* actual=DGXGraphics::gfx;
+ if(!actual||!gsys||gsys->mDGXGfx!=actual||&graphics!=actual){
+  error="Piki halo requires actual owned DGX Graphics";m->lastRefusal=error;return false;
+ }
+ const char* refusal=nullptr;
+ if(!pc_gfx_begin_halo_scope(m->transport,&refusal)){
+  error=refusal?refusal:"Piki halo transport begin refused";m->lastRefusal=error;return false;
+ }
+ // Transport capture changes no Graphics caches. Capture the helper caches
+ // before the caller's first setLighting/useMatrix/useTexture operation.
+ m->graphics=actual;m->activeMatrix=actual->mActiveMatrix;
+ for(unsigned i=0;i<8;++i)m->textures[i]=actual->mActiveTexture[i];
+ m->hasTexGen=actual->mHasTexGen;m->lighting=actual->mIsLightingEnabled;
+ m->depth=actual->mIsDepthEnabled;m->blend=actual->mBlendMode;
+ m->cull=actual->mCullMode;m->matrixId=actual->mCurrentMatrixId;m->cullCache=oldCull;
+ error.clear();return true;
+}
+bool HaloRenderScope::end(Graphics& graphics,std::string& error){
+ auto* actual=m->graphics;
+ if(!actual||!m->transport||&graphics!=actual||DGXGraphics::gfx!=actual||
+    !gsys||gsys->mDGXGfx!=actual){
+  error="Piki halo render end requires exact retained DGX owner";m->lastRefusal=error;return false;
+ }
+ const char* refusal=nullptr;
+ if(!pc_gfx_end_halo_scope(m->transport,&refusal)){
+  error=refusal?refusal:"Piki halo transport end refused";m->lastRefusal=error;return false;
+ }
+ // Restore caches directly after the queued halo draw and exact transport
+ // restoration. Calling Graphics helpers would rewrite restored GX state.
+ actual->mActiveMatrix=m->activeMatrix;
+ for(unsigned i=0;i<8;++i)actual->mActiveTexture[i]=m->textures[i];
+ actual->mHasTexGen=m->hasTexGen;actual->mIsLightingEnabled=m->lighting;
+ actual->mIsDepthEnabled=m->depth;actual->mBlendMode=m->blend;
+ actual->mCullMode=m->cull;actual->mCurrentMatrixId=m->matrixId;oldCull=m->cullCache;
+ m->graphics=nullptr;m->lastRefusal.clear();error.clear();return true;
+}
+} }
+#endif
 
 GColor GColors[1];
 
