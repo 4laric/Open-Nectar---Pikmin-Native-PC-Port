@@ -10,6 +10,12 @@
 #include "pc_p2_original_tank_native.h"
 #include "pc_p2_original_armor_native.h"
 #include "pc_p2_original_foliage_native.h"
+#include "pc_p2_original_catfish_native.h"
+#include "pc_p2_original_bulblax_snagret_native.h"
+#include "pc_p2_original_hanachirashi_native.h"
+#include "pc_p2_original_cannon_native.h"
+#include "pc_p2_original_corpse_native.h"
+#include "pc_p2_chappy.h"
 #include "pc_p2_original_onyon_native.h"
 #include "pc_p2_original_manifest.h"
 #include "pc_p2_original_progress.h"
@@ -35,6 +41,10 @@ struct Course {
  std::unique_ptr<tank::Native> tanks;
  std::unique_ptr<armor::Native> armors;
  std::unique_ptr<foliage::Native> foliage;
+ std::unique_ptr<catfish::Native> catfishes;
+ std::unique_ptr<bulblax_snagret::Native> bulblaxes;
+ std::unique_ptr<hanachirashi::Native> witherings;
+ std::unique_ptr<cannon::Native> cannons;
  Dispatch dispatch;
  std::map<unsigned,GeneratorState> literal;
  std::set<const Generator*> shadows;
@@ -52,6 +62,8 @@ bool pc_p2_original_course_prepare(const std::string& fingerprint,const std::vec
  next->chappies=std::make_unique<chappy::Native>();next->frogs=std::make_unique<frog::Native>();next->ujis=std::make_unique<uji::Native>();
  next->reds=std::make_unique<red::Native>();next->tanks=std::make_unique<tank::Native>();next->armors=std::make_unique<armor::Native>();
  next->foliage=std::make_unique<foliage::Native>();
+ next->catfishes=std::make_unique<catfish::Native>();next->bulblaxes=std::make_unique<bulblax_snagret::Native>();
+ next->witherings=std::make_unique<hanachirashi::Native>();next->cannons=std::make_unique<cannon::Native>(pc_p2_original_corpse_resources);
  if(!next->dispatch.add(0,next->plants->provider(),[](const CatalogRow& r,std::string& e){pelplant::Initial value;return pelplant::decode(r,value,e);},e))return false;
  for(unsigned source:{2u,43u})if(!next->dispatch.add(source,next->chappies->provider(),chappy::admits,e))return false;
  for(unsigned source:{17u,18u})if(!next->dispatch.add(source,next->frogs->provider(),frog::capability,e))return false;
@@ -60,6 +72,10 @@ bool pc_p2_original_course_prepare(const std::string& fingerprint,const std::vec
  for(unsigned source:{24u,25u})if(!next->dispatch.add(source,next->tanks->provider(),tank::decode,e))return false;
  if(!next->dispatch.add(15,next->armors->provider(),armor::admits,e))return false;
  for(unsigned source:{91u,88u})if(!next->dispatch.add(source,next->foliage->provider(),foliage::decode,e))return false;
+ if(!next->dispatch.add(26,next->catfishes->provider(),catfish::decode,e))return false;
+ for(unsigned source:{33u,34u})if(!next->dispatch.add(source,next->bulblaxes->provider(),bulblax_snagret::decode,e))return false;
+ if(!next->dispatch.add(55,next->witherings->provider(),hanachirashi::decode,e))return false;
+ for(unsigned source:{95u,96u})if(!next->dispatch.add(source,next->cannons->provider(),cannon::decode,e))return false;
  // Validate structural/source metadata atomically BEFORE publishing catalog.
  Catalog checked;
  if(!checked.install(fingerprint,rows,[&](const CatalogRow& r,std::string& e){return next->dispatch.capability(r,e);},e))return false;
@@ -123,7 +139,11 @@ bool pc_p2_original_course_start(GeneratorList* list,std::string& e){
  unsigned roots=0,pellets=0;
  for(const auto& row:originalActors().rows()){
   const auto& r=row.second.enemy;roots+=r.count;
-  if(!foliage::supported(r.source))pellets+=r.count*(1+(r.pelletProbability>0?std::max(r.pelletMinimum,r.pelletMaximum):0));
+  if(r.source==16)roots+=r.count; // one captured original Egg per Honeywisp
+  if(!foliage::supported(r.source)){
+   const unsigned cargo=(r.source==0||!corpseDisabled(r.source))?1:0;
+   pellets+=r.count*(cargo+(r.pelletProbability>0?std::max(r.pelletMinimum,r.pelletMaximum):0)+(r.treasureCode?1:0));
+  }
  }
  if(!tekiMgr||!pelletMgr||tekiMgr->getMax()-tekiMgr->getSize()<int(roots)
   ||pelletMgr->getMax()-pelletMgr->getSize()<int(pellets))return fail(e,"original whole-course native actor/corpse/drop capacity insufficient");
@@ -131,6 +151,15 @@ bool pc_p2_original_course_start(GeneratorList* list,std::string& e){
  else if(!onyonInventory.empty())return fail(e,"original source Onyons lack admitted typed manifest");
  if(current->pikis){if(!pc_p2_original_piki_preflight(pikiInventory,e))return false;}
  else if(!pikiInventory.empty())return fail(e,"original source Pikmin lack admitted full atlas/calendar census");
+ // Shared Chappy bank is published once with the full source union; later
+ // family preflights must not add a missing Fire/Hairy variant to live data.
+ std::set<unsigned> chappySources;
+ for(const auto& entry:originalActors().rows()){
+  const auto source=entry.second.enemy.source;
+  if(source==2||source==33||source==43)chappySources.insert(source);
+  if(!pc_p2_original_corpse_resources(source,e))return false;
+ }
+ if(!chappySources.empty()&&!pc_p2_chappy_prepare_original(chappySources,e))return false;
  if(!pc_p2_original_course_install(bindings,current->dispatch,e))return false;
  current->shadows=std::move(shadows);current->started=true;e.clear();return true;
 }
@@ -139,6 +168,7 @@ bool pc_p2_original_course_finish(std::string& e){
  // Refuse before disposing generators, actors or their App-heap resources.
  // A collected receipt cannot replace a pending physical cargo graph.
  if(!pc_p2_campaign_treasure_held_unload(e))return false;
+ if(!pc_p2_original_corpse_unload(e))return false;
  if(current->started&&!pc_p2_original_course_unload(e))return false;
  if(current->pikis)pc_p2_original_piki_unload();
  current.reset();e.clear();return true;
@@ -216,6 +246,10 @@ bool pc_p2_original_course_use_models(std::string& e){
   else if(source==18)type=TEKI_Frow;
   else if(uji::species(source))type=uji::nativeType(source);
   else if(tank::species(source))type=tank::nativeType(source);
+  else if(catfish::species(source))type=catfish::nativeType(source);
+  else if(bulblax_snagret::species(source))type=bulblax_snagret::nativeType(source);
+  else if(hanachirashi::species(source))type=hanachirashi::nativeType(source);
+  else if(cannon::species(source))type=cannon::nativeType(source);
   if(type<0)return fail(e,"original source has no early resource owner");
   tekiMgr->mUsingType[type]=true;
  }

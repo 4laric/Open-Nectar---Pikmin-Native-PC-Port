@@ -380,6 +380,8 @@ set(PC_PORT_SOURCES
     pc_port/pc_p2_original_piki_physical.cpp
     pc_port/pc_p2_original_piki_recruit.cpp
     pc_port/pc_p2_original_piki_native.cpp
+    pc_port/pc_p2_original_bulblax_snagret.cpp
+    pc_port/pc_p2_original_bulblax_snagret_native.cpp
     pc_port/pc_p2_cave_dialog_window.cpp
     pc_port/pc_p2_cave_generate.cpp
     pc_port/pc_p2_cave_generator.cpp
@@ -825,6 +827,7 @@ else()
     endif()
 endif()
 target_compile_options(${NECTAR_GAME} PRIVATE ${NATIVE_COMPILE_OPTIONS})
+target_compile_definitions(${NECTAR_GAME} PRIVATE PIKMIN_P2_ORIGINAL_COURSE_PROVIDER=1)
 target_link_libraries(${NECTAR_GAME} PRIVATE ${NECTAR_LEGACY})
 # P2 fork targets (desktop only; the Android build is a shared library).
 if (NOT ANDROID)
@@ -3514,3 +3517,11 @@ add_executable(pc_p2_hanachirashi_source_test tools/test_p2_hanachirashi_source.
 target_include_directories(pc_p2_hanachirashi_source_test PRIVATE pc_port)
 target_compile_options(pc_p2_hanachirashi_source_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
 add_test(NAME pc_p2_hanachirashi_source_test COMMAND pc_p2_hanachirashi_source_test)
+
+add_executable(pc_p2_original_bulblax_snagret_test tools/test_p2_original_bulblax_snagret.cpp
+ pc_port/pc_p2_original_bulblax_snagret.cpp pc_port/pc_p2_original_spawn_plan.cpp
+ pc_port/pc_p2_original_drop.cpp pc_port/pc_p2_original_catalog.cpp)
+target_include_directories(pc_p2_original_bulblax_snagret_test PRIVATE pc_port)
+target_compile_options(pc_p2_original_bulblax_snagret_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME pc_p2_original_bulblax_snagret_test COMMAND pc_p2_original_bulblax_snagret_test)
+pikmin_add_ci_fixture(original_snagret tools/p2_original_snagret_runtime.cpp)
