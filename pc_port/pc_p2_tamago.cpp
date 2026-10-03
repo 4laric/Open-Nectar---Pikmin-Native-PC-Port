@@ -43,6 +43,8 @@
 // No other lane's module is modified; every hook is a no-op for unregistered actors.
 #include "pc_p2_tamago.h"
 #include "pc_p2_tamago_policy.h"
+#include "pc_p2_tamago_egg_policy.h"
+#include "netplay/pc_sim_rng.h"
 #include "pc_p2_astonish.h"
 #include "pc_p2_navi_select.h"
 #include "pc_p2_batch2.h"
@@ -65,6 +67,7 @@
 #include <cstdlib>
 #include <fstream>
 #include <map>
+#include <memory>
 #include <set>
 #include <string>
 #include <utility>
@@ -121,6 +124,10 @@ struct Clip {
     bool loop = false;
 };
 
+struct EggGroup {
+    p2tamago::GroupFrontier frontier;
+    std::array<BTeki*,10> children{};
+};
 struct Tamago {
     State state = TAMAGO_WALK;
     float stateTime = 0.0f;
@@ -144,6 +151,8 @@ struct Tamago {
     bool sourceMode = false;
     bool ballFall = false;
     bool bigFootDrop = false;
+    std::shared_ptr<EggGroup> eggGroup;
+    unsigned originalToken = 0;
     bool born = false;
     int member = 0;
     bool hidden = true;
@@ -160,10 +169,16 @@ struct Tamago {
     float turnFactor = 1.0f;
     float speedFactor = 1.0f;
     float moveOffset = 0.0f;
+    float originalMoveFactor = 0.3f;
     Vector3f goal;
 };
 
 std::map<PelletView*, Tamago> actors;
+std::map<p2tamago::GroupIdentity,std::shared_ptr<EggGroup>> eggGroups;
+bool originalEggPrepared = false;
+unsigned originalEggManagerLimit=10;
+P2TamagoHoneyProvider originalHoney;
+unsigned nextEggToken = 0x54000001u; // session-unique, never reset on scene reuse
 std::map<std::string, Clip> clips;
 bool ready = false;
 // Birth-mode group state: when p2-tamago-host.txt is present, the host births its
@@ -297,7 +312,7 @@ void pickGoal(BTeki* a, Tamago& s) {
 }
 // Obj::appearPanic: only the leader; every Pikmin within the panic radius.
 int appearPanic(BTeki* a, Tamago& s) {
-    if (s.born) return 0;
+    if (s.born && (!s.eggGroup || !s.isLeader)) return 0;
     const Vector3f pos = a->getPosition();
     int hit = 0, seen = 0;
     if (pikiMgr) {
@@ -334,6 +349,25 @@ void astonishContactsSource(BTeki* a, Tamago& s) {
 void dropHoney(BTeki* a, Tamago& s) {
     if (s.honeyDropped) return;
     s.honeyDropped = true;
+    if (s.eggGroup) {
+        // Source genItem consumes chance RNG even at rate1. Typed Honey owner
+        // alone births/inits the reward; never fall back to a P1 Water actor.
+        auto& frontier=s.eggGroup->frontier.members[s.member];
+        const p2tamago::MemberIdentity id{s.eggGroup->frontier.identity,unsigned(s.member)};
+        const Vector3f p=a->getPosition();
+        const p2original::Position pos{p.x,p.y+2.0f,p.z};
+        const float sine=std::sin(a->getDirection());
+        const p2original::Position velocity{sine*50.0f,200.0f,sine*50.0f}; // source both sines
+        p2tamago::attemptHoney(frontier,HONEY_RATE,[]{return pc_sim_randf(1.0f);},[&]{
+            return originalHoney.birth?originalHoney.birth(originalHoney.context,id,0,pos,velocity):P2TamagoHoneyBirth::ResourceError;
+        });
+        if(frontier.honeyFault) {
+            std::fprintf(stderr,"P2_ORIGINAL_MITITE_HONEY_RESOURCE_FAILURE member=%d\n",s.member);
+            std::abort(); // immutable preflight contract broke; never pretend a pool-null
+        }
+        std::printf("P2_ORIGINAL_MITITE_HONEY member=%d source=68 typed=%d\n",s.member,int(frontier.honeyBorn));
+        return;
+    }
     if (!(HONEY_RATE > 0.0f) || !itemMgr) return;
     const Vector3f pos = a->getPosition();
     Creature* drop = itemMgr->birth(OBJTYPE_Water);
@@ -346,10 +380,14 @@ void dropHoney(BTeki* a, Tamago& s) {
 }
 
 void pc_p2_tamago_reset() {
+    pc_p2_tamago_original_egg_scene_release(); // never leave an owned body with cleared family AI
     pc_p2_astonish_reset();
     actors.clear();
     clips.clear();
     pendingKills.clear();
+    eggGroups.clear();
+    originalEggPrepared = false;
+    originalHoney = {};
     ready = false;
 }
 void pc_p2_tamago_forget(BTeki* actor) {
@@ -359,6 +397,12 @@ void pc_p2_tamago_forget(BTeki* actor) {
     pc_randomizer_p2_forget_source(static_cast<PelletView*>(actor));
     auto it = actors.find(static_cast<PelletView*>(actor));
     if (it == actors.end()) return;
+    if (it->second.eggGroup) {
+        auto& group=*it->second.eggGroup;
+        auto& member=group.frontier.members[it->second.member];
+        p2tamago::retireMember(member);
+        group.children[it->second.member]=nullptr;
+    }
     const bool wasLeader = it->second.isLeader;
     const unsigned gone = it->second.generator;
     const bool wasGroupHost = it->second.isGroupHost;
@@ -397,6 +441,10 @@ void pc_p2_tamago_forget(BTeki* actor) {
     for (auto& entry : actors) {
         if (entry.second.leaderActor != actor) continue;
         entry.second.leaderActor = nullptr;
+        if (entry.second.eggGroup) {
+            entry.second.isLeader = p2tamago::orphanLeaderRole(unsigned(entry.second.member));
+            continue; // source member0 remains the sole leader; never replay panic
+        }
         entry.second.isLeader = true;
         entry.second.leaderGenerator = entry.second.generator;
         std::printf("P2_TAMAGO_PROMOTE generator=%u leader_gone=%u source_id=68\n",
@@ -583,6 +631,194 @@ int pc_p2_tamago_birth_bigfoot(BTeki* boss, unsigned generator, const Vector3f& 
     return born;
 }
 
+bool pc_p2_tamago_original_honey_provider(const P2TamagoHoneyProvider& provider) {
+    if (provider.birth==originalHoney.birth&&provider.preflight==originalHoney.preflight&&provider.context==originalHoney.context) return true;
+    for (const auto& entry:eggGroups) for (BTeki* child:entry.second->children) if (child) return false;
+    for (const auto& entry:eggGroups) for(const auto& m:entry.second->frontier.members) if(m.honeyBorn&&!m.honeyRetired)return false;
+    originalHoney=provider; originalEggPrepared=false;
+    return true;
+}
+bool pc_p2_tamago_prepare_original_egg(std::string& error,unsigned managerLimit) {
+    originalEggPrepared=false;
+    if(managerLimit!=10){error="original Egg Mitite producer currently supports surface manager limit10";return false;}
+    if(managerLimit!=originalEggManagerLimit) {
+        for(const auto& entry:eggGroups) for(BTeki* child:entry.second->children)
+            if(child){error="cannot change Mitite manager context with owned children";return false;}
+    }
+    auto* shape=tekiMgr?tekiMgr->getTekiShapeObject(TEKI_Chappy):nullptr;
+    if (!tekiMgr||!tekiMgr->hasType(TEKI_Chappy)||!tekiMgr->hasModel(TEKI_Chappy)||!shape||!shape->mShape||!shape->mAnimMgr
+            ||!tekiMgr->getTekiParameters(TEKI_Chappy)||!tekiMgr->getStrategy(TEKI_Chappy)) {error="Mitite physical vehicle manager resources unavailable";return false;}
+    if (!p2tamago::preflightHoney(originalHoney,error)) return false;
+    if (!pc_p2_batch2_prepare_tamago()) {error="Mitite resource-only pose bank unavailable";return false;}
+    // Setup may never have run in a pure original session. Load clocks without
+    // an actors sidecar/AP seed and without resetting any existing family actor.
+    std::ifstream bank("p2-ground-bank.txt");
+    std::map<std::string,Clip> stagedClips;
+    std::string token;
+    if (!(bank>>token)||token!="P2_GROUND_BANK_1") {error="Mitite clock bank unavailable";return false;}
+    while (bank>>token) {
+        if (token=="species") {std::string species,id;bank>>species>>id;}
+        else if (token=="clip") {
+            std::string species,name,events,marker,status;long long frames=0;int poses=0;
+            if (!(bank>>species>>name>>frames>>events>>marker>>poses>>status)) {error="Mitite clock bank malformed";return false;}
+            if (species=="TamagoMushi"&&frames>0) stagedClips[name]=Clip{name,float(frames)/30.0f,name=="move"||name=="wait"};
+        } else if (token=="frames") {std::string frames;bank>>frames;}
+        else break;
+    }
+    for (const char* name:{"wait","move","dead","dive"})
+        if (!stagedClips.count(name)) {error="Mitite required clock absent";return false;}
+    clips.swap(stagedClips);
+    originalEggManagerLimit=managerLimit;originalEggPrepared=true;ready=true;error.clear();return true;
+}
+bool pc_p2_tamago_original_manager_available() {
+    return originalEggPrepared&&tekiMgr&&tekiMgr->hasType(TEKI_Chappy)
+        &&tekiMgr->getTekiShapeObject(TEKI_Chappy)&&originalHoney.birth;
+}
+namespace {
+struct EggIO {
+    std::shared_ptr<EggGroup> group;
+    bool available()const{return pc_p2_tamago_original_manager_available();}
+    int freeSlots()const{
+        int allocated=0;
+        for(const auto& entry:actors){
+            if(entry.second.eggGroup){++allocated;continue;}
+            unsigned source=0,token=0;
+            if(p2original::originalActors().query(static_cast<Creature*>(static_cast<BTeki*>(entry.first)),source,token)&&source==68)++allocated;
+        }
+        // Source getFreeNum counts manager allocation, not combat targetability
+        // or health: falling Wait/dead/corpse actors retain their manager slot.
+        return std::min(tekiMgr->getMax()-tekiMgr->getSize(),int(originalEggManagerLimit)-allocated);
+    }
+    float draw(){return pc_sim_randf(1.0f);}
+    bool birth(unsigned member,const p2original::Position& pos,float face) {
+        Teki* child=tekiMgr->newTeki(TEKI_Chappy);
+        if (!child) return false;
+        try {
+            auto result=actors.try_emplace(static_cast<PelletView*>(child));
+            Tamago& s=result.first->second;
+            s.eggGroup=group;s.originalToken=nextEggToken++;
+            s.generator=s.leaderGenerator=group->frontier.identity.parent.generator;
+            s.member=int(member);s.sourceMode=s.born=s.madeFellow=true;
+            s.home.set(pos.x,pos.y,pos.z);s.heading=face;s.hidden=false;
+            // Neutral physical reset only: startAI would run Chappy strategy/RNG.
+            child->mGenerator=nullptr;
+            child->mPersonality->reset();
+            child->mPersonality->mPosition.input(s.home);
+            child->mPersonality->mNestPosition.input(s.home);
+            child->mPersonality->mFaceDirection=face;
+            child->reset();
+            child->resetCreatureFlag(CF_IsOnGround);
+            child->mHealth=LIFE;
+            if (!pc_p2_batch2_bind_tamago(child)) {
+                std::fprintf(stderr,"P2_ORIGINAL_MITITE_RESOURCE_ERROR bind source=68\n");
+                child->kill(false);
+                std::abort(); // resource failure cannot masquerade as manager pool-null
+            }
+            group->children[member]=child;
+            group->frontier.members[member].born=true;
+            return true;
+        } catch (...) {
+            child->kill(false); // retire only the newly allocated vehicle
+            return false;
+        }
+    }
+    Tamago& state(unsigned member){return actors.at(static_cast<PelletView*>(group->children[member]));}
+    void init(unsigned member) {
+        auto& s=state(member);
+        const p2original::Position p{s.home.x,s.home.y,s.home.z};
+        const auto init=p2tamago::initialize(p,s.heading,[&](){return draw();});
+        s.activeMax=init.activeMax;s.turnFactor=init.turnFactor;s.speedFactor=init.speedFactor;
+        s.goal.set(init.goal.x,init.goal.y,init.goal.z);
+        s.appearDelay=float(init.appearWait)/30.0f;
+        s.moveOffset=0.0f;
+        s.originalMoveFactor=init.moveFactor;
+        // Initial Appear is immediately superseded by source setTypeBall. Both
+        // source appearance draws above are consumed even though never displayed.
+        enter(s,TAMAGO_APPEAR,"set");
+    }
+    void ball(unsigned member) {
+        auto& s=state(member);s.ballFall=true;s.bigFootDrop=true;
+        enter(s,TAMAGO_WAIT,"wait");
+        auto* child=group->children[member];child->clearTekiOption(TEKIOPT_Atari);child->setTekiOption(TEKIOPT_Invincible);
+    }
+    void velocity(unsigned member,const p2original::Position& v){group->children[member]->mVelocity.set(v.x,v.y,v.z);}
+    p2original::Position leaderVelocity()const {
+        const Vector3f& v=group->children[0]->mVelocity;return {v.x,v.y,v.z};
+    }
+    void leader(unsigned member,unsigned leaderMember) {
+        auto& s=state(member);s.leaderActor=group->children[leaderMember];s.isLeader=member==leaderMember;
+        // Source setLeader performs the follower Ball transition after velocity.
+        if (member!=leaderMember&&state(leaderMember).ballFall) ball(member);
+    }
+    void place(unsigned member,const p2original::Position& p,float face) {
+        group->children[member]->inputPosition(Vector3f(p.x,p.y,p.z));
+        group->children[member]->setDirection(face);state(member).heading=face;
+    }
+};
+}
+bool pc_p2_tamago_birth_original_egg(const p2tamago::EggGroupRequest& request) noexcept {
+    if (!p2tamago::valid(request)||!pc_p2_tamago_original_manager_available()) return false;
+    if (eggGroups.count(request.identity)||nextEggToken>0x54fffff5u) return false;
+    try {
+        auto group=std::make_shared<EggGroup>();group->frontier.identity=request.identity;group->frontier.attempted=true;
+        if(!p2tamago::claimGroup(eggGroups,request.identity,group))return false; // bookkeeping before engine/RNG
+        EggIO io{group};
+        const int born=p2tamago::createEggGroup(request,io);
+        group->frontier.leaderBorn=born>0;
+        std::printf("P2_ORIGINAL_EGG_MITITES uid=%u ordinal=%u epoch=%llu activation=%llu group_slot=%u born=%d source=68\n",
+                    request.identity.parent.generator,request.identity.parent.ordinal,
+                    (unsigned long long)request.identity.parent.epoch,(unsigned long long)request.identity.parent.activation,
+                    request.identity.slot,born);
+        return born>0;
+    } catch (...) {
+        auto found=eggGroups.find(request.identity);
+        // A successfully born leader is a source success even if a later
+        // follower fails. Owned physical children stay registered for teardown.
+        if (found==eggGroups.end()) return false;
+        found->second->frontier.leaderBorn=found->second->frontier.members[0].born;
+        return found->second->frontier.leaderBorn;
+    }
+}
+bool pc_p2_tamago_original_child(const Creature* actor,p2tamago::MemberIdentity& out,unsigned* token) {
+    if (!actor) return false;
+    // The common query accepts any Creature, including non-Teki resources.
+    // Compare known family objects through their base; never downcast a caller.
+    auto found=std::find_if(actors.begin(),actors.end(),[&](const auto& entry){
+        return static_cast<const Creature*>(static_cast<const BTeki*>(entry.first))==actor;
+    });
+    if (found==actors.end()||!found->second.eggGroup) return false;
+    const Tamago& s=found->second;
+    out={s.eggGroup->frontier.identity,unsigned(s.member)};
+    if (token) *token=s.originalToken;
+    return true;
+}
+bool pc_p2_tamago_original_group(const p2tamago::GroupIdentity& id,p2tamago::GroupFrontier& out) {
+    auto found=eggGroups.find(id);if(found==eggGroups.end())return false;out=found->second->frontier;return true;
+}
+bool pc_p2_tamago_original_honey_consumed(const p2tamago::MemberIdentity& id,unsigned rewardSlot) {
+    if(rewardSlot||id.member>=10)return false;
+    auto found=eggGroups.find(id.group);if(found==eggGroups.end())return false;
+    return p2tamago::consumeHoney(found->second->frontier.members[id.member]);
+}
+bool pc_p2_tamago_original_honey_retired(const p2tamago::MemberIdentity& id,unsigned rewardSlot,bool consumed) {
+    if(rewardSlot||id.member>=10)return false;
+    auto found=eggGroups.find(id.group);if(found==eggGroups.end())return false;
+    auto& member=found->second->frontier.members[id.member];
+    return p2tamago::retireHoney(member,consumed);
+}
+void pc_p2_tamago_original_egg_scene_release() {
+    for (const auto& entry:eggGroups) {
+        const auto children=entry.second->children; // forgetting mutates the owned array
+        for (unsigned member=0;member<10;++member) if(children[member]) {
+            pendingKills.erase(std::remove(pendingKills.begin(),pendingKills.end(),children[member]),pendingKills.end());
+            if(entry.second->frontier.members[member].terminal==p2tamago::Terminal::None)
+                entry.second->frontier.members[member].terminal=p2tamago::Terminal::Scene;
+            children[member]->kill(false);
+        }
+    }
+    originalEggPrepared=false;
+}
+
 float pc_p2_tamago_param_f(const BTeki* actor, int idx, float fallback) {
     if (!ready || !actors.count(static_cast<PelletView*>(const_cast<BTeki*>(actor)))) return fallback;
     if (idx == TPF_Life) return LIFE;
@@ -605,6 +841,7 @@ float pc_p2_tamago_param_f(const BTeki* actor, int idx, float fallback) {
 
 int pc_p2_tamago_corpse_type(const BTeki* actor, int fallback) {
     if (!ready || !actors.count(static_cast<PelletView*>(const_cast<BTeki*>(actor)))) return fallback;
+    if (actors.at(static_cast<PelletView*>(const_cast<BTeki*>(actor))).eggGroup) return TEKICORPSE_NoCorpse;
     // inst-bugs lane (#871): a killed Mitite leaves its natural carriable
     // corpse (the campaign kill->carry->Onion loop needs a real pellet for
     // the onion:p2:68 receipt) alongside the exactly-once honey drop
@@ -886,6 +1123,7 @@ void pc_p2_tamago_update(BTeki* actor) {
     }
 
     if (actor->mHealth <= 0.0f && s.state != TAMAGO_DEAD) {
+        if (s.eggGroup) s.eggGroup->frontier.members[s.member].terminal=p2tamago::Terminal::Death;
         if (!s.deadLogged) {
             std::printf("P2_TAMAGO_DEAD generator=%u source_id=68 health=0\n", generator);
             std::fflush(stdout);
@@ -897,6 +1135,13 @@ void pc_p2_tamago_update(BTeki* actor) {
 
     if (s.sourceMode) {
         if (s.ballFall && s.state != TAMAGO_DEAD) {
+            if (s.eggGroup) {
+                const float angle=std::atan2(s.goal.x-pos.x,s.goal.z-pos.z);
+                const float vy=actor->mVelocity.y;
+                const Vector3f drive(std::sin(angle)*20.0f,0.0f,std::cos(angle)*20.0f);
+                actor->inputDrive(drive);
+                actor->mVelocity.set(drive.x,vy,drive.z);
+            }
             // P2 StateWait ends on bounceCallback. The P1 collision flag is set
             // by the real terrain trace; do not freeze vertical falling velocity.
             s.stateTime += dt;
@@ -911,12 +1156,15 @@ void pc_p2_tamago_update(BTeki* actor) {
                 bounced.y += 10.0f;
                 actor->inputPosition(bounced);
                 actor->resetCreatureFlag(CF_IsOnGround);
+                const float bounceRandom=s.eggGroup?pc_sim_randf(1.0f):rnd01();
                 actor->mVelocity.set(std::sin(s.heading) * 80.0f,
-                                     50.0f * (0.7f + 0.3f * rnd01()), std::cos(s.heading) * 80.0f);
+                                     50.0f * (0.7f + 0.3f * bounceRandom), std::cos(s.heading) * 80.0f);
                 appearPanic(actor, s);
-                s.walkMax = p2tamagopolicy::walkSeconds(rnd01());
-                pickGoal(actor, s);
-                enter(s, TAMAGO_WALK, "move");
+                if (!s.eggGroup) {
+                    s.walkMax = p2tamagopolicy::walkSeconds(rnd01());
+                    pickGoal(actor, s);
+                    enter(s, TAMAGO_WALK, "move");
+                }
                 std::printf("P2_BIGFOOT_MITITE_LAND generator=%u member=%d\n", generator, s.member);
             }
             return;
@@ -924,6 +1172,12 @@ void pc_p2_tamago_update(BTeki* actor) {
         if (s.state != TAMAGO_DEAD) astonishContactsSource(actor, s);
         s.stateTime += dt;
         switch (s.state) {
+        case TAMAGO_WAIT:
+            if (s.eggGroup) {
+                s.walkMax=p2tamagopolicy::walkSeconds(pc_sim_randf(1.0f));
+                enter(s,TAMAGO_WALK,"move"); // initial goal survives source bounce
+            }
+            break;
         case TAMAGO_APPEAR: {
             stop(actor);
             if (!s.found) {
@@ -986,7 +1240,7 @@ void pc_p2_tamago_update(BTeki* actor) {
             float diff = wrapPi(want - s.heading);
             if (diff > turn) diff = turn;
             if (diff < -turn) diff = -turn;
-            s.moveOffset += 0.3f;
+            s.moveOffset += s.eggGroup?s.originalMoveFactor:0.3f;
             s.heading = wrapPi(s.heading + diff + 0.15f * std::sin(s.moveOffset) * dt);
             actor->setDirection(s.heading);
             const float speed = s.speedFactor * p2tamagopolicy::MoveSpeed;
@@ -1027,6 +1281,7 @@ void pc_p2_tamago_update(BTeki* actor) {
                     s.hidden = true;
                     applyGate(actor, s);
                     if (!s.cleanupDone) {
+                        if (s.eggGroup) s.eggGroup->frontier.members[s.member].terminal=p2tamago::Terminal::Hide;
                         std::printf("P2_TAMAGO_HIDE_KILL generator=%u member=%d source=StateHide\n", generator, s.member);
                         std::fflush(stdout);
                         s.cleanupDone = true;
