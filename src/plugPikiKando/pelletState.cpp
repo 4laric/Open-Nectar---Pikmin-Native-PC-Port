@@ -1,5 +1,6 @@
 #include "PelletState.h"
 #include "pc_p2_preview.h"
+#include "pc_p2_campaign_treasure_held.h"
 #include "pc_p2_original_pod.h"
 #include "DebugLog.h"
 #include "FlowController.h"
@@ -253,9 +254,8 @@ void PelletGoalState::init(Pellet* pelt)
 	if (pelt->mTargetGoal->mObjType == OBJTYPE_Ufo) {
 		mTargetIsShip = true;
 #if defined(PIKI_PC_PORT)
-		// VS: la pieza solo puntúa; nada de escenas de la historia (motor,
-		// "pieza recuperada", despegue).
-		if (pc_vs_active()) {
+		// VS and literal held treasures do not use P1 part story events.
+		if (pc_vs_active() || pc_p2_campaign_treasure_held_owns(pelt)) {
 		} else
 #endif
 		if (!playerState->mDemoFlags.isFlag(DEMOFLAG_CollectEngine)) {
@@ -277,7 +277,7 @@ void PelletGoalState::init(Pellet* pelt)
 			gameflow.mGameInterface->movie(DEMOID_CollectPart, 0, pelt, &pelt->mSRT.t, &pelt->mSRT.r, CAF_AllVisibleMask, true);
 		}
 #if defined(PIKI_PC_PORT)
-		if (!pc_vs_active())
+		if (!pc_vs_active() && !pc_p2_campaign_treasure_held_owns(pelt))
 #endif
 		playerState->preloadHenkaMovie();
 

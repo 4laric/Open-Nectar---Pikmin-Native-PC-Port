@@ -17,6 +17,9 @@
 #include "pc_p2_umimushi.h"
 #include "Navi.h"
 #if defined(PIKI_PC_PORT)
+#include "pc_p2_original_piki_origin.h"
+#endif
+#if defined(PIKI_PC_PORT)
 #include "audio/pc_audio_source.h"
 #endif
 #include "pc_randomizer.h"
@@ -356,7 +359,11 @@ void Navi::enterAllPikis()
 	CI_LOOP(iter)
 	{
 		Piki* piki = static_cast<Piki*>(*iter);
-		if (piki->isAlive() && piki->mMode == PikiMode::FormationMode) {
+		if (piki->isAlive() && piki->mMode == PikiMode::FormationMode
+#if defined(PIKI_PC_PORT)
+            && !pc_p2_original_piki_body_wild(piki)
+#endif
+        ) {
 			#if defined(PIKI_PC_PORT)
 			// The field limit is configurable, so this gather can no longer
 			// assume the squad fits. Stop filling rather than run off the array.
