@@ -280,6 +280,9 @@ void pc_gfx_release_texture(void* gxTexObj);
 /// from that data is stale; a heap reset means every mesh may be.
 void pc_gfx_invalidate_cpu_range(const void* addr, size_t bytes);
 void pc_gfx_invalidate_resident_meshes(void);
+/// Stopped-rendering resource disposal: erase only cache/input references whose
+/// native storage is accepted by the actual owner. Predicate is read-only.
+void pc_gfx_forget_owned_native_storage(bool (*owns)(const void*, void*), void* owner);
 /// Vertex storage the CPU rewrites every frame (P2 pose blending): drop any
 /// resident mesh built from it and never cache one that reads it again.
 void pc_gfx_mark_dynamic_vertex_range(const void* addr, size_t bytes);
