@@ -177,19 +177,6 @@ static bool animate(Navi* n,const std::function<bool(Animator,Listener,int)>& em
  struct EndAnimation {unsigned slot;std::uint64_t generation;~EndAnimation(){if(actors[slot].generation==generation){actors[slot].animating=false;actors[slot].animationReentered=false;}}} endAnimation{b.slot,token};
  if(!pc_p2_original_captain_control_effects)return fail(e,"missing source animation observation provider");
  const auto* effects=pc_p2_original_captain_control_effects(n);if(!effects||&effects->scene()!=b.scene)return fail(e,"noncanonical source animation provider");
- AnimationFrame frame;if(!effects->animationFrame(*n,frame,e))return false;
- if(!frame.gameFrozen)return fail(e,"missing actual source gameFrozen observation");
- if(!std::isfinite(frame.deltaTime)||frame.deltaTime<=0)return fail(e,"invalid actual source animation delta");
- MotionState self,bound;int lock=-1;
- if(!b.bank->stateAnimator(n,Animator::Self,self,e)||!b.bank->stateAnimator(n,Animator::Bound,bound,e))return false;
- if(selection&&(!b.bank->boundMotionLock(n,lock,e)||lock<-1))return fail(e,"invalid actual source bound motion lock");
- Listener selfListener=Listener::None,boundListener=Listener::None;
- if(clocks&&(!b.bank->listenerAnimator(n,Animator::Self,selfListener,e)||!b.bank->listenerAnimator(n,Animator::Bound,boundListener,e)))return false;
- if(legacy&&(selfListener==Listener::SourceState||boundListener==Listener::SourceState))return fail(e,"untyped animation callback cannot receive source state listener");
- auto next=actor->animation;next.bound=selectorMotion(bound.motion);
- control::AnimationOutput selected;
- if(selection&&(!frame.displacementKnown||!control::updateWalkAnimation(b.params,frame.displacement,frame.deltaTime,b.frame.face,frame.faceDirectionOffset,self.motion==Motion::Jkoke,next,selected,e)))return fail(e,"source locomotion displacement is unknown or invalid");
- if(clocks&&!emit)return fail(e,"missing actual source animator event receiver");
  auto current=[&](){
   bool knownAlive=false;
   return pc_p2_original_captain_loaded_scene()==b.scene&&pc_p2_original_captain_world()==b.world
@@ -202,17 +189,32 @@ static bool animate(Navi* n,const std::function<bool(Animator,Listener,int)>& em
    &&pc_p2_original_captain_control_effects(n)==effects;
  };
  if(!current())return fail(e,"source animation authority changed during preflight");
+ auto checked=[&](){return current()?true:fail(e,"source animation callback expired actual owner");};
+ auto readMotion=[&](Animator channel,MotionState& out){return checked()&&b.bank->stateAnimator(n,channel,out,e)&&checked();};
+ AnimationFrame frame;if(!effects->animationFrame(*n,frame,e)||!checked())return false;
+ if(!frame.gameFrozen)return fail(e,"missing actual source gameFrozen observation");
+ if(!std::isfinite(frame.deltaTime)||frame.deltaTime<=0)return fail(e,"invalid actual source animation delta");
+ MotionState self,bound;int lock=-1;
+ if(!readMotion(Animator::Self,self)||!readMotion(Animator::Bound,bound))return false;
+ if(selection&&(!checked()||!b.bank->boundMotionLock(n,lock,e)||!checked()||lock<-1))return fail(e,"invalid actual source bound motion lock");
+ Listener selfListener=Listener::None,boundListener=Listener::None;
+ if(clocks&&(!checked()||!b.bank->listenerAnimator(n,Animator::Self,selfListener,e)||!checked()||!b.bank->listenerAnimator(n,Animator::Bound,boundListener,e)||!checked()))return false;
+ if(legacy&&(selfListener==Listener::SourceState||boundListener==Listener::SourceState))return fail(e,"untyped animation callback cannot receive source state listener");
+ auto next=actor->animation;next.bound=selectorMotion(bound.motion);
+ control::AnimationOutput selected;
+ if(selection&&(!frame.displacementKnown||!control::updateWalkAnimation(b.params,frame.displacement,frame.deltaTime,b.frame.face,frame.faceDirectionOffset,self.motion==Motion::Jkoke,next,selected,e)))return fail(e,"source locomotion displacement is unknown or invalid");
+ if(clocks&&!emit)return fail(e,"missing actual source animator event receiver");
  const auto selfGeneration=self.generation,boundGeneration=bound.generation;
  auto generations=[&](){
   MotionState nowSelf,nowBound;
-  return current()&&b.bank->stateAnimator(n,Animator::Self,nowSelf,e)&&b.bank->stateAnimator(n,Animator::Bound,nowBound,e)
+  return readMotion(Animator::Self,nowSelf)&&readMotion(Animator::Bound,nowBound)
    &&nowSelf.generation==selfGeneration&&nowBound.generation==boundGeneration;
  };
  if(clocks&&!*frame.gameFrozen){
   bool stopped=false;
   const float amount=actor->animationSpeed*frame.deltaTime;
   auto advance=[&](Animator channel,Listener listener){
-   return b.bank->advanceAnimator(n,channel,amount,[&](int key){
+   return checked()&&b.bank->advanceAnimator(n,channel,amount,[&](int key){
     if(!generations())return false;
     const bool keep=emit(channel,listener,key);if(!keep)stopped=true;return keep&&generations();
    },e);
@@ -226,7 +228,7 @@ static bool animate(Navi* n,const std::function<bool(Animator,Listener,int)>& em
  // FakePiki::doSimulation selects the next rate/motion after actual movement.
  if(selection&&selected.transition){
   Motion target=sourceMotion(selected.motion);
-  if(!b.bank->supports(n,target,e))return false;
+  if(!checked()||!b.bank->supports(n,target,e)||!checked())return false;
   const Listener listener=selected.listener?Listener::SourceActor:Listener::None;
   if(selected.preserveFrame){
    // Literal source order saves each clock separately: moving Bound first,
