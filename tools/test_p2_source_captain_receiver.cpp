@@ -2,6 +2,7 @@
 // Canonical damage policy itself is independently tested by its owner.
 #include "engine.h"
 #include "pc_p2_hanachirashi_receiver.h"
+#include "pc_p2_hanachirashi_source.h"
 #include "pc_p2_original_captain_damage.h"
 #include "pc_p2_original_captain_motion.h"
 #include "pc_p2_original_captain_states.h"
@@ -59,6 +60,17 @@ int main(){
  int targetDraws=systemControl.draws;const auto targetGeneration=selfMotion.generation;machine.states.erase(38);assert(!pc_p2_source_flick_navi(&owner,&n,80,7,0));assert(!pc_p2_hanachirashi_wind_navi(&owner,&n,Vector3f(5,40,10)));NaviState fakeTarget(38);machine.states[38]=&fakeTarget;assert(!pc_p2_source_flick_navi(&owner,&n,80,7,0));assert(!pc_p2_hanachirashi_wind_navi(&owner,&n,Vector3f(5,40,10)));assert(systemControl.draws==targetDraws&&selfMotion.generation==targetGeneration&&n.current==&walk&&damageCalls==0);machine.states[38]=receiver;
  NaviState spoof(38);n.current=&spoof;int beforeSpoof=systemControl.draws;assert(!pc_p2_hanachirashi_wind_navi(&owner,&n,Vector3f(5,40,10))&&systemControl.draws==beforeSpoof);n.current=&walk;
  admission=Refusal::NotReunited;int draws=systemControl.draws;assert(!pc_p2_source_flick_navi(&owner,&n,80,7,0)&&systemControl.draws==draws);admission=Refusal::None;
+ // Genuine source CF authority differs from native HP eligibility. The
+ // ordinary producer excludes this dead captain before creating Wind.
+ cfAlive=false;n.mHealth=100;const auto excludedGeneration=selfMotion.generation;const auto excludedDispatches=systemControl.sourceDispatches;const auto excludedDraws=systemControl.draws;
+ assert(!p2hana::naviTargetAlive(&n));if(p2hana::naviTargetAlive(&n))pc_p2_hanachirashi_wind_navi(&owner,&n,Vector3f(5,40,10));
+ assert(n.current==&walk&&n.mHealth==100&&selfMotion.generation==excludedGeneration&&systemControl.sourceDispatches==excludedDispatches&&systemControl.draws==excludedDraws&&damageCalls==0);
+ // Direct retail Wind has no alive predicate; do not invent one in its
+ // receiver. Its admission does not revive the authenticated source flag.
+ assert(pc_p2_hanachirashi_wind_navi(&owner,&n,Vector3f(5,40,10)));assert(!cfAlive&&n.mHealth==100);auto* directDead=dynamic_cast<State*>(n.current);assert(directDead&&!directDead->sourceAlive(n));machine.transit(&n,48);
+ // Generated Flick likewise retains the literal absence of early alive guard.
+ n.mHealth=0;assert(pc_p2_source_flick_navi(&owner,&n,80,7,0));assert(!cfAlive&&n.mHealth==0);machine.transit(&n,48);
+ cfAlive=true;n.mHealth=0;assert(p2hana::naviTargetAlive(&n));n.mHealth=100;lifetimePresent=false;assert(!p2hana::naviTargetAlive(&n));lifetimePresent=true;
  assert(pc_p2_source_flick_navi(&owner,&n,80,7,0));auto* typed=dynamic_cast<State*>(n.getCurrState());assert(typed&&typed->nativeState()==receiver&&typed->sourceStateId()==StateId::Flick&&!typed->sourceInvincible());assert(typed->actorInvincibleFrames(n)==0);frames=60;assert(typed->actorInvincibleFrames(n)==60);frames=0;assert(selfMotion.motion==Motion::Jhit&&selfListener==Listener::SourceActor&&boundListener==Listener::None);
  const auto oldGeneration=selfMotion.generation;PcSourceNaviReactionGate gate;assert(pc_p2_source_navi_reaction_gate(&n,gate));const auto oldActivation=gate.activation;
  assert(!pc_p2_source_navi_reaction_animation_key(&n,&walk,oldGeneration,1000,error));assert(!pc_p2_source_navi_reaction_animation_key(&n,receiver,oldGeneration+1,1000,error));assert(damageCalls==0&&selfMotion.motion==Motion::Jhit);

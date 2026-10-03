@@ -25,6 +25,17 @@ HP-mutating interactions never execute and legacy actCommon is never called.
 The actual Navi stimulus fence and its integration remain the captain owner's
 responsibility.
 
+Ordinary Withering wind target eligibility uses the genuine source captain
+Creature alive flag (Hanachirashi.cpp780), not native HP. A source-dead captain
+with positive native HP is excluded before Wind construction; missing source
+lifetime authority is also unavailable. Retail direct InteractWind and
+InteractFlick have no alive predicate, so authenticated direct calls retain
+that behavior and do not change the source alive flag. Component controls
+exercise both cases and the converse source-alive/zero-HP eligibility.
+The nearby Flick producer has no alive/HP filter, matching
+EnemyFunc::flickNearbyNavi in enemyAction.cpp827; its direct receiver admission
+still requires the genuine world, reunion and authenticated source attacker.
+
 Source END1000: Hit enters Fling with JKOKE both listeners None; Fling END is
 ignored. Koke enters Timer before addDamage; GetUp restores the genuine saved
 source Walk/Follow through captain recover_reaction. JHIT, Koke JKOKE and GETUP
