@@ -1,6 +1,8 @@
 // Native birth/resource/lifecycle diagnostic. Human mode leaves the actual
 // authored Burrowing Snagret encounter running; no HP/state/transport writes.
 #include <SDL2/SDL.h>
+#include "p2_original_snagret_captain_guard.h"
+#include "MapMgr.h"
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -29,7 +31,7 @@
 #include "settings/pc_settings_p2d.h"
 namespace {
 using namespace p2original;
-bool human=false;
+bool human=false,negativeGuard=false;
 void require(bool yes,const char* text){if(!yes){std::fprintf(stderr,"FAIL P2_ORIGINAL_SNAGRET %s\n",text);std::fflush(nullptr);std::_Exit(1);}}
 void checked(bool yes,const std::string& e){if(!yes)std::fprintf(stderr,"P2_ORIGINAL_SNAGRET_ERROR %s\n",e.c_str());require(yes,"native provider call");}
 CatalogRow retail(){
@@ -40,6 +42,7 @@ CatalogRow retail(){
 }
 class SnagretApp:public PlugPikiApp {
  std::unique_ptr<bulblax_snagret::Native> native;std::unique_ptr<Generator> generator;
+ bool captainObserved=false,parked=false;Vector3f parkPosition;
  GeneratorState state;Creature* actor=nullptr;unsigned token=0;int frame=0,age=0,entries=0,before=0;
  void enter(){
   struct Heap{int prior;Heap():prior(gsys->setHeap(SYSHEAP_App)){}~Heap(){gsys->setHeap(prior);}} heap;
@@ -63,11 +66,29 @@ class SnagretApp:public PlugPikiApp {
 public:
  SnagretApp(){state.uid=retail().enemy.uid;state.count=1;state.reserved=5;state.resurrectionDays=5;}
  int idle()override{
-  int result=PlugPikiApp::idle();require(++frame<18000||human,"bounded frame budget");
-  if(gameflow.mMoviePlayer&&gameflow.mMoviePlayer->mIsActive){gameflow.mMoviePlayer->requestSkip();return result;}
+  int result=PlugPikiApp::idle();
+  // Guard precedes movie/pause/readiness/frame/PASS observations.
   Navi* n=naviMgr?naviMgr->getNavi():nullptr;
+  if(GameStat::orimaDead)p2_fixture_require_captain(true,true,0.0f,age);
+  if(n&&n->getCurrState()){
+   captainObserved=true;
+   p2_fixture_require_captain(GameStat::orimaDead,n->getCurrState()->getID()==NAVISTATE_Dead||!n->isAlive(),n->mHealth,age);
+  }else if(captainObserved)p2_fixture_require_captain(false,true,0.0f,age);
+  require(++frame<18000||human,"bounded frame budget");
+  if(gameflow.mMoviePlayer&&gameflow.mMoviePlayer->mIsActive){gameflow.mMoviePlayer->requestSkip();return result;}
   if(!n||!n->getCurrState()||!pikiMgr||!tekiMgr||!pelletMgr||gameflow.mPauseAll||gameflow.mIsUIOverlayActive)return result;
-  require(n->mHealth>0&&!GameStat::orimaDead,"captain remains alive");
+  if(!human){
+   // Diagnostic only: park at a real course floor outside the source bite
+   // reach. No health/protection writes; human controls remain ordinary.
+   if(!parked){parkPosition=n->getPosition();
+    const auto authored=retail().enemy.position;
+    const float dx=parkPosition.x-authored.x,dz=parkPosition.z-authored.z;
+    if(dx*dx+dz*dz<700.0f*700.0f){parkPosition.set(authored.x+1000.0f,0,authored.z);
+     require(mapMgr,"diagnostic parking terrain available");parkPosition.y=mapMgr->getMinY(parkPosition.x,parkPosition.z,true);}
+    parked=true;
+   }
+   n->resetPosition(parkPosition);n->mVelocity.set(0,0,0);
+  }
   if(!native){if(n->getCurrState()->getID()!=NAVISTATE_Walk)return result;
    unsigned live=0;Iterator it(pikiMgr);CI_LOOP(it){auto* p=static_cast<Piki*>(*it);if(p->isAlive())++live;}
    require(live==20,"20 live Pikmin fixture baseline");before=tekiMgr->getSize();enter();}
@@ -82,7 +103,11 @@ public:
 };
 }
 int main(int argc,char** argv){
- for(int i=1;i<argc;++i)if(!std::strcmp(argv[i],"--manual-encounter"))human=true;
+ for(int i=1;i<argc;++i){
+  if(!std::strcmp(argv[i],"--manual-encounter"))human=true;
+  if(!std::strcmp(argv[i],"--guard-negative-test"))negativeGuard=true;
+ }
+ if(negativeGuard){p2_fixture_require_captain(true,true,0.0f,0);return 1;}
  SDL_setenv("SDL_AUDIODRIVER","dummy",1);SDL_SetMainReady();pc_gpu_preference_apply();pc_bbft_init(argc,argv);
  require(pc_pikipelago_surface_course()&&!std::strcmp(pc_pikipelago_surface_course(),"tutorial"),"ordinary imported tutorial course");
  require(pc_window_init("Original Burrowing Snagret provider fixture",960,540),"window init");

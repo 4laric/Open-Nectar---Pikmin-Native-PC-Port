@@ -14,3 +14,7 @@ target_compile_options(pc_p2_original_bulblax_snagret_test PRIVATE ${NATIVE_COMP
 add_test(NAME pc_p2_original_bulblax_snagret_test COMMAND pc_p2_original_bulblax_snagret_test)
 
 pikmin_add_ci_fixture(original_snagret tools/p2_original_snagret_runtime.cpp)
+
+add_executable(pc_p2_original_snagret_captain_guard_test tools/test_p2_original_snagret_captain_guard.cpp)
+target_compile_options(pc_p2_original_snagret_captain_guard_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME pc_p2_original_snagret_captain_guard_test COMMAND pc_p2_original_snagret_captain_guard_test)
