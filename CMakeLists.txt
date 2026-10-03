@@ -372,6 +372,8 @@ set(PC_PORT_SOURCES
     pc_port/pc_p2_cave_carry.cpp
     pc_port/pc_p2_enemy.cpp
     pc_port/pc_p2_sheargrub.cpp
+    pc_port/pc_p2_original_red.cpp
+    pc_port/pc_p2_original_red_native.cpp
     pc_port/pc_p2_kochappy.cpp
     pc_port/pc_p2_dwarf_orange.cpp
     pc_port/pc_p2_bluechappy.cpp
@@ -3346,3 +3348,10 @@ pikmin_add_ci_fixture(original_onyon tools/p2_original_onyon_runtime.cpp)
 
 add_executable(pc_p2_original_onyon_test tools/test_p2_original_onyon.cpp pc_port/pc_p2_original_onyon.cpp)
 target_include_directories(pc_p2_original_onyon_test PRIVATE "${PROJECT_SOURCE_DIR}/pc_port")
+
+add_executable(pc_p2_original_red_test tools/test_p2_original_red.cpp
+    pc_port/pc_p2_original_red.cpp pc_port/pc_p2_original_spawn_plan.cpp
+    pc_port/pc_p2_original_drop.cpp pc_port/pc_p2_original_catalog.cpp)
+target_include_directories(pc_p2_original_red_test PRIVATE pc_port)
+target_compile_options(pc_p2_original_red_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME pc_p2_original_red_test COMMAND pc_p2_original_red_test)
