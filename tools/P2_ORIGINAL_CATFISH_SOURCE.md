@@ -64,7 +64,11 @@ receiver. Retail carcass Carry5 uses type5 duration40 and loop10/29. The
 source corpse accessor exposes that clip and phase separately. Pre-carry
 starts paused at frame0, source carry-start resumes the clock, optional
 restart starts Carcass again, and carry-finish allows the loop to exit at
-frame39. BTeki's family update runs before its dead-state gate, so the
+frame39. Carry-stop pauses without changing frame; start resumes it.
+Lifecycle hooks also own the pending escaped corpse during Pellet::init,
+before becomePellet assigns its pointer and dieSoon sets dead-state2. The
+corpse accessor and ticking still require the actual retained pellet.
+BTeki's family update runs before its dead-state gate, so the
 retained actor-backed corpse advances without replaying death/drop events.
 The shared integration owner must connect actual pellet view callbacks and
 the corpse draw override; transport gameplay remains an acceptance gate.

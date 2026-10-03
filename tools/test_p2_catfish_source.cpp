@@ -31,6 +31,8 @@ int main(int argc,char** argv){
  corpse.advance(30);assert(corpse.motion().frame()==39); // completed END remains stable
  corpse.start(true);assert(corpse.motion().frame()==0&&!corpse.motion().finishing());
  corpse.advance(11);assert(corpse.motion().frame()==11);
+ corpse.stop();corpse.advance(18);assert(corpse.motion().frame()==11);
+ corpse.start();corpse.advance(18);assert(corpse.motion().frame()==29);
  assert(registration(WaitAnim).keys.size()==2&&registration(TurnAnim).keys.size()==2&&registration(PressAnim).keys.empty());
  assert(!startFlick(1,0)&&startFlick(2,0)&&startFlick(2,1));
  assert(!startFlick(2,2)&&startFlick(3,2)&&startFlick(3,3));
