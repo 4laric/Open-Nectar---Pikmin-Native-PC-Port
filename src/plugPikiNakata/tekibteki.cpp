@@ -806,6 +806,9 @@ void BTeki::doAI()
 	if (pc_p2_catfish_suppress_ai(this)) {
 		return;
 	}
+	if (pc_p2_hanachirashi_suppress_ai(this)) {
+		return;
+	}
 	if (pc_p2_hana_suppress_ai(this)) {
 		return;
 	}

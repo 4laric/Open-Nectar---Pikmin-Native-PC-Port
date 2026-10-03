@@ -429,6 +429,8 @@ set(PC_PORT_SOURCES
     pc_port/pc_p2_catfish_mouth.cpp
     pc_port/pc_p2_catfish_source.cpp
     pc_port/pc_p2_catfish.cpp
+    pc_port/pc_p2_original_hanachirashi.cpp
+    pc_port/pc_p2_original_hanachirashi_native.cpp
     pc_port/pc_p2_hanachirashi.cpp
     pc_port/pc_p2_dangomushi.cpp
     pc_port/pc_p2_snakejoint.cpp
@@ -3350,3 +3352,9 @@ add_executable(pc_p2_catfish_source_test tools/test_p2_catfish_source.cpp)
 target_include_directories(pc_p2_catfish_source_test PRIVATE pc_port)
 target_compile_options(pc_p2_catfish_source_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
 add_test(NAME pc_p2_catfish_source_test COMMAND pc_p2_catfish_source_test)
+add_executable(pc_p2_original_hanachirashi_test tools/test_p2_original_hanachirashi.cpp
+    pc_port/pc_p2_original_hanachirashi.cpp pc_port/pc_p2_original_spawn_plan.cpp
+    pc_port/pc_p2_original_drop.cpp pc_port/pc_p2_original_catalog.cpp)
+target_include_directories(pc_p2_original_hanachirashi_test PRIVATE pc_port)
+target_compile_options(pc_p2_original_hanachirashi_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME pc_p2_original_hanachirashi_test COMMAND pc_p2_original_hanachirashi_test)
