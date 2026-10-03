@@ -211,8 +211,8 @@ static bool squadImpl(Navi* n,std::vector<Frame>& out,std::string& e){
  for(std::size_t i=1;i<next.size();++i)if(next[i-1].formationSlot==next[i].formationSlot)return fail(e,"duplicate source CPlate slot");
  out=std::move(next);return true;
 }
-static bool sortFormationImpl(Handle h,unsigned happa,std::string& e){
- auto* x=current(h,e);if(!x||happa>2||x->runtime.brain.action!=Action::Formation||x->runtime.brain.slot<0)return false;
+static bool sortFormationImpl(Handle h,int happa,std::string& e){
+ auto* x=current(h,e);if(!x||happa< -1||happa>2||x->runtime.brain.action!=Action::Formation||x->runtime.brain.slot<0)return false;
  if(!services->sortSlot(h,x->runtime.brain.navi,x->runtime.brain.slot,happa,e))return false;
  x->runtime.brain.sortState=2;return true;
 }
@@ -486,7 +486,7 @@ bool gather(Handle h,const Vector3f& goal,float radius,std::string& e){OwnerOper
 bool launch(Handle h,Navi* n,const Vector3f& v,std::string& e){OwnerOperation op(e);return op.admitted()&&op.complete(launchImpl(h,n,v,e),e);}
 bool bounce(Handle h,std::string& e){OwnerOperation op(e);return op.admitted()&&op.complete(bounceImpl(h,e),e);}
 bool collision(Handle h,const CollEvent& event,std::string& e){OwnerOperation op(e);return op.admitted()&&op.complete(collisionImpl(h,event,e),e);}
-bool sortFormation(Handle h,unsigned happa,std::string& e){OwnerOperation op(e);return op.admitted()&&op.complete(sortFormationImpl(h,happa,e),e);}
+bool sortFormation(Handle h,int happa,std::string& e){OwnerOperation op(e);return op.admitted()&&op.complete(sortFormationImpl(h,happa,e),e);}
 bool retire(Piki* p,std::string& e){OwnerOperation op(e);return op.admitted()&&op.complete(retireImpl(p,e),e);}
 bool retireScene(std::string& e){OwnerOperation op(e);return op.admitted()&&op.complete(retireSceneImpl(e),e);}
 void forget(Piki* p)noexcept{try{std::string error;retire(p,error);}catch(...){ }}
