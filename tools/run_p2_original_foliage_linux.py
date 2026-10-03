@@ -46,11 +46,22 @@ with (evidence/'native.log').open('wb') as log:
         code = child.wait(timeout=60)
     except subprocess.TimeoutExpired:
         timed_out = True
-        os.killpg(child.pid,signal.SIGTERM)
+        try:
+            os.killpg(child.pid,signal.SIGTERM)
+        except ProcessLookupError:
+            pass
         try:
             code = child.wait(timeout=5)
         except subprocess.TimeoutExpired:
+            code = None
+        # xvfb-run can exit before a native descendant. Retire the owned
+        # process group independently of the wrapper's return, including races
+        # where the whole group has already exited. No unrelated PID is used.
+        try:
             os.killpg(child.pid,signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        if code is None:
             code = child.wait(timeout=5)
 log = (evidence/'native.log').read_text(errors='replace')
 markers = dict(diagnostic='PASS ORIGINAL_FOLIAGE sources=', walk='PASS ORIGINAL_FOLIAGE_WALK',
