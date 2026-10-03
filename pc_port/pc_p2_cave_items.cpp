@@ -113,9 +113,9 @@ std::string rewardId(const P2CaveItemEntry& entry)
 {
     return "treasure:" + placement.cave + ":f" + std::to_string(placement.floor) + ":" + entry.slot_id;
 }
-void receiptFailure()
+void receiptFailure(const char* reason = "persistence_failure")
 {
-    std::fputs("P2_CAVE_ITEM_RECEIPT FATAL persistence failure; refusing reward loss\n", stderr);
+    std::fprintf(stderr,"P2_CAVE_ITEM_RECEIPT FATAL persistence failure; refusing reward loss reason=%s\n",reason);
     std::fflush(nullptr);
     std::abort();
 }
@@ -188,18 +188,19 @@ void pc_p2_cave_items_setup()
         return;
     }
     if (pc_randomizer_generated_cave()) {
-        if (!pc_randomizer_ready() || placement.items.size() != 2)
-            receiptFailure();
+        if (!pc_randomizer_ready()) receiptFailure("campaign_not_ready");
+        if (placement.items.size() != 2) receiptFailure("campaign_item_count");
         for (const auto& entry : placement.items)
             if (!entry.tagged || !pc_randomizer_generated_cave_matches(
                     placement.seed, placement.cave.c_str(), placement.floor,
                     entry.item.c_str(), entry.host.c_str(), entry.slot_id.c_str(),
                     pc_p2_cave_boundary_token().c_str()))
-                receiptFailure();
+                receiptFailure("campaign_item_identity_or_boundary");
         campaignPod = itemMgr ? itemMgr->getContainer(Red) : nullptr;
-        if (!campaignPod || !campaignPod->isAlive()) receiptFailure();
+        if (!campaignPod) receiptFailure("campaign_red_receiver_missing");
+        if (!campaignPod->isAlive()) receiptFailure("campaign_red_receiver_inactive");
         campaignPodShape = gameflow.loadShape("courses/pikmin2room/pod.mod", true);
-        if (!campaignPodShape) receiptFailure();
+        if (!campaignPodShape) receiptFailure("campaign_receiver_model_missing");
         for (int i = 0; i < campaignPodShape->mTexAttrCount; ++i)
             if (campaignPodShape->mTexAttrList[i].mTexture)
                 campaignPodShape->mTexAttrList[i].mTexture->attach();
