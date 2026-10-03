@@ -14,10 +14,11 @@ struct ControlledEngine final:Engine {
  std::vector<std::unique_ptr<Pellet>> pellets;
  unsigned reservedActors=0,allocations=0,cleanups=0,releases=0,kills=0,motionIndex=99;
  std::array<unsigned,4> reservedPellets{};
- bool cleanupFails=false,captureFails=false,allocationFails=false;unsigned met=7;
+ bool cleanupFails=false,captureFails=false,allocationFails=false,commonResourceFails=false;unsigned met=7;
  ControlledEngine(){pack.model=pack.root=pack.head=pack.neck=pack.collider=true;pack.clips.fill(true);
   for(auto& colors:pack.numberConfigs)colors.fill(true);pack.parameters={90,60,1.5f,50};}
  bool resources(Resources& r,std::string&)override{r=pack;return true;}
+ bool commonResources(const CatalogRow&,std::string&)override{return !commonResourceFails;}
  bool identity(Host& h,std::string& durable,std::string&)override{durable="fixture-catalog:"+h.row.sourceKey+":"+std::to_string(h.ordinal)+":epoch1:activation1";return true;}
  bool reserve(unsigned a,const std::array<unsigned,4>& p,std::string&)override{reservedActors=a;reservedPellets=p;return true;}
  bool allocate(Host& h,const Position&,float,std::string&)override{auto p=std::make_unique<Creature>();p->identity=++allocations;h.creature=p.get();roots.push_back(std::move(p));return !allocationFails;}
@@ -53,6 +54,7 @@ int main(){
  std::vector<CatalogRow> rows{row(1,1,2),row(2,1,2),row(3,1,1,2),row(4,5,2),row(5,5,2),row(6,5,2),row(7,10,1)};
  engine.pack.clips[7]=false;assert(!provider.preflight(rows,error)&&engine.allocations==0);engine.pack.clips[7]=true;
  engine.pack.numberConfigs[2][2]=false;assert(!provider.preflight(rows,error)&&engine.allocations==0);engine.pack.numberConfigs[2][2]=true;
+ engine.commonResourceFails=true;assert(!provider.preflight(rows,error)&&engine.allocations==0&&engine.reservedActors==0);engine.commonResourceFails=false;
  assert(provider.preflight(rows,error));auto changed=rows;changed[0].enemy.treasureCode=5;assert(!provider.reserve(changed,error));
  const std::array<unsigned,4> expectedPellets{{4,3,1,0}};
  assert(provider.reserve(rows,error)&&engine.reservedActors==8&&engine.reservedPellets==expectedPellets);

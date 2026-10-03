@@ -11,6 +11,7 @@
 #include "Interactions.h"
 #include "pc_p2_receipt_host.h"
 #include "pc_p2_original_actor.h"
+#include "pc_p2_original_drop_engine.h"
 #include "pc_p2_original_pelplant_blend.h"
 #include <fstream>
 #include <sstream>
@@ -197,7 +198,14 @@ struct Native::Impl final:Engine {
  }
  bool flick(Host& h,std::string&)override{std::vector<Creature*> snapshot;Stickers attached(h.creature);Iterator it(&attached);CI_LOOP(it)snapshot.push_back(*it);
   for(Creature* p:snapshot){InteractFlick flick(h.creature,10,0,-1000);p->stimulate(flick);}return true;}
- bool deathProcedure(Host& h,std::string&)override{static_cast<BTeki*>(h.creature)->clearTekiOption(BTeki::TEKI_OPTION_ORGANIC);return true;}
+ bool commonResources(const CatalogRow& row,std::string& e)override{return pc_p2_original_drop_resources(row,e);}
+ bool deathProcedure(Host& h,std::string& e)override{
+  // EnemyBase throws common items at death entry, independently of the
+  // captured number pellet released by Pelplant's death-animation END.
+  auto* actor=static_cast<BTeki*>(h.creature);
+  if(!pc_p2_original_spawn_items(actor)){e="Pelplant death lost original registry ownership";return false;}
+  actor->clearTekiOption(BTeki::TEKI_OPTION_ORGANIC);return true;
+ }
  bool endCapture(Host& h,Pellet* pellet,std::string&)override{auto& t=*tracks.at(h.creature);pellet->mCreatureFlags=t.pelletFlags;pellet->mVelocity.set(0,0,0);cargo.erase(pellet);return true;}
  bool killPlant(Host& h,std::string&)override{static_cast<BTeki*>(h.creature)->clearTekiOption(BTeki::TEKI_OPTION_ALIVE);return true;}
  bool cleanup(Host& h,std::string&)override{
