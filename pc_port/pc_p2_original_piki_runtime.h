@@ -56,13 +56,16 @@ public:
  virtual bool motion(Handle,Motion,std::string&)=0;
  virtual bool animate(Handle,float delta,std::string&)=0;
  virtual bool currentMotion(Handle,Motion&,std::string&)const=0;
+ virtual bool canRemoveFreeEffects(Handle,std::string&)const=0;
  virtual bool freeEffects(Handle,bool,std::string&)=0;
+ virtual bool canRemoveThrowEffects(Handle,std::string&)const=0;
  virtual bool throwEffects(Handle,bool,std::string&)=0;
  virtual bool hangSound(Handle,std::string&)=0;
  virtual bool landSound(Handle,std::string&)=0;
  virtual bool calledSound(Handle,std::string&)=0;
  virtual bool nudgeRumble(Handle,Navi*,std::string&)=0;
  virtual bool allocateSlot(Handle,Navi*,int&,std::string&)=0;
+ virtual bool canReleaseSlot(Handle,Navi*,int,std::string&)const=0;
  virtual bool releaseSlot(Handle,Navi*,int,std::string&)=0;
  virtual bool slotPosition(Handle,Navi*,int,Vector3f&,std::string&)const=0;
  virtual bool formed(Handle,Navi*,std::string&)=0;
@@ -96,6 +99,8 @@ struct BrainState {
  std::uint16_t distanceType=5,oldDistanceType=5;
  float lostTimer=0,tripDistance=0;
  bool releasedSlot=false;
+ // Retained attempted effect creation remains cleanup-owned even on refusal.
+ bool freeEffectsOwned=false;
  Vector3f gatherGoal;float gatherRadius=0,gatherTimer=0;
  BoreState bore;
  // A newly acquired slot remains owned through a failed old-action cleanup.
@@ -105,13 +110,24 @@ struct RuntimeState {
  State state=State::Walk;
  BrainState brain;
  std::uint16_t flyingFrames=0;
+ bool throwEffectsOwned=false;
  bool flowerFalling=false,collisionFlick=true,atari=true,moveVelocity=true,forceActive=false;
  Vector3f velocityDirection;
  float directionalSpeed=0,halfDirectionalSpeed=0,slowFallTimer=0;
  float lookWaitTime=0;std::uint8_t lookSubState=0;
 };
 bool installServices(Services&)noexcept;
+// Canonical owned Loading or Active permits birth initialization only; all
+// action/frame/physics queries remain GameWorldActive gated. Startup binds
+// selected source resources first, initializes bodies, then grants activation
+// through the actual typed Captain bootstrap owner. No ready bool is accepted.
 bool initialize(Piki*,std::string&);
+struct SlotChange {Handle handle;Navi* captain=nullptr;int oldSlot=-1,newSlot=-1;};
+// Genuine CPlate compaction/sort delivers an entire source-listener batch.
+// Leaf preflights its no-fail mapping commit before notifying. This validates
+// every exact lifetime/owned old slot before writes, works during inactive
+// cleanup, and may nest in Services callbacks without erasing runtime owners.
+bool slotsChanged(const std::vector<SlotChange>&,std::string&);
 bool handle(const Piki*,Handle&);
 bool snapshot(Handle,RuntimeState&);
 bool frame(Handle,Frame&,std::string&);
@@ -139,6 +155,31 @@ void sceneExit()noexcept;
 // Teardown must use these checked forms before origin retirement or heap reuse.
 // They verify the exact native lifetime independently of world action phase.
 // Failed resource cleanup retains ownership and refuses retirement.
+// Ordered barrier: nativeControl/Throw held-handle forget first; retireScene
+// while origin/canonical scene, Navi/CPlate and selected effects remain live;
+// observe zero runtime plus genuine provider owners; then retire plates and
+// Shape/Bank resources; only then origin sceneExit/native pool or heap reuse.
 bool retire(Piki*,std::string&);
 bool retireScene(std::string&);
+struct Ownership {
+ std::uint64_t entries=0,committed=0,pendingInitializations=0;
+ std::uint64_t formationSlots=0,pendingSlots=0,freeEffectOwners=0,throwEffectOwners=0;
+};
+// Observes actual retained runtime owners; no source readiness/empty fallback.
+// Stage must also observe genuine plate/effect-provider owners independently.
+bool readOwnership(Ownership&,std::string&);
+// Nonmutating reference preflight; actual resource owners inspect retained
+// handles, not world flags. No effect/slot cleanup is performed here.
+bool canRetireScene(std::string&);
+bool owned()noexcept;
+bool retired(std::string&);
 } }
+
+// Strong component retirement ABI for Stage Prepared/Loading/Active barriers.
+// These cover this runtime's retained GenPiki FSM owners only. Stage separately
+// observes genuine physical factory/partial-body/Shape/Bank owners; ordinary
+// starting20 bodies never become a source roster through this empty query.
+bool pc_p2_original_piki_runtime_owned()noexcept;
+bool pc_p2_original_piki_runtime_can_retire(std::string&);
+bool pc_p2_original_piki_runtime_retire(std::string&);
+bool pc_p2_original_piki_runtime_retired(std::string&);
