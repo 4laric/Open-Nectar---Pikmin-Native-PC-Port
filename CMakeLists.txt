@@ -654,6 +654,9 @@ pc_port/pc_p2_projectile_host.cpp
     pc_port/dolphin_stubs/audio_stubs.cpp
     pc_port/dolphin_stubs/jaudio_hw_stubs.cpp
     pc_port/dolphin_stubs/misc_stubs.cpp
+    pc_port/pc_p2_original_egg_save.cpp
+    pc_port/pc_p2_original_honey_save.cpp
+    pc_port/pc_p2_original_wisp_save.cpp
 )
 if (ANDROID)
     list(APPEND PC_PORT_SOURCES

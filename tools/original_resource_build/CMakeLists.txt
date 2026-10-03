@@ -5,25 +5,6 @@ get_filename_component(RESOURCE_SOURCE "${CMAKE_CURRENT_LIST_DIR}/../.." ABSOLUT
 # Additive private producer harness. Shared production CMake/dispatch remain
 # with the startup owner. Explicitly links the real native adapter into engine.
 add_subdirectory("${RESOURCE_SOURCE}" engine)
-target_sources(pikmin_pc PRIVATE
- "${RESOURCE_SOURCE}/pc_port/pc_p2_original_gas.cpp"
- "${RESOURCE_SOURCE}/pc_port/pc_p2_original_gas_native.cpp"
- "${RESOURCE_SOURCE}/pc_port/pc_p2_original_gas_links.cpp"
- "${RESOURCE_SOURCE}/pc_port/pc_p2_original_gas_save.cpp"
- "${RESOURCE_SOURCE}/pc_port/pc_p2_original_egg.cpp"
- "${RESOURCE_SOURCE}/pc_port/pc_p2_original_egg_native.cpp"
- "${RESOURCE_SOURCE}/pc_port/pc_p2_original_egg_snapshot.cpp"
- "${RESOURCE_SOURCE}/pc_port/pc_p2_original_honey_native.cpp"
- "${RESOURCE_SOURCE}/pc_port/pc_p2_original_honey_bank.cpp"
- "${RESOURCE_SOURCE}/pc_port/pc_p2_original_contents_save.cpp"
- "${RESOURCE_SOURCE}/pc_port/pc_p2_original_egg_save.cpp"
- "${RESOURCE_SOURCE}/pc_port/pc_p2_original_wisp_save.cpp"
- "${RESOURCE_SOURCE}/pc_port/pc_p2_original_honey_save.cpp"
- "${RESOURCE_SOURCE}/pc_port/pc_p2_original_wisp.cpp"
- "${RESOURCE_SOURCE}/pc_port/pc_p2_original_wisp_native.cpp"
- "${RESOURCE_SOURCE}/pc_port/pc_p2_original_resource_contents.cpp")
-target_sources(pikmin_pc PRIVATE "${RESOURCE_SOURCE}/pc_port/pc_p2_original_resource_state.cpp")
-target_sources(pikmin_pc PRIVATE "${RESOURCE_SOURCE}/pc_port/pc_p2_original_resource_save.cpp")
 add_executable(p2_original_gas_policy
  "${RESOURCE_SOURCE}/tools/p2_original_gas_test.cpp"
  "${RESOURCE_SOURCE}/pc_port/pc_p2_original_gas.cpp"

@@ -1,3 +1,4 @@
+#include <sstream>
 #include "pc_p2_original_gate.h"
 #include "netplay/pc_netplay_sha256.h"
 #include <cmath>
@@ -30,8 +31,8 @@ std::string gateDigest(const GateRecord& r){
  unsigned char digest[32];pc_netplay_sha::sha256(bytes.data(),bytes.size(),digest);
  std::string result;const char* hex="0123456789abcdef";for(unsigned char c:digest){result.push_back(hex[c>>4]);result.push_back(hex[c&15]);}return result;
 }
-bool readGates(const std::string& path,std::vector<GateRecord>& out,std::string& e){
- std::ifstream in(path);std::string magic;unsigned n=0;
+static bool parseGatesStream(std::istream& in,std::vector<GateRecord>& out,std::string& e){
+ std::string magic;unsigned n=0;
  if(!(in>>magic>>n)||magic!="P2_ORIGINAL_GATE_1"||!n||n>4096)return fail(e,"invalid original gate manifest envelope");
  std::vector<GateRecord> rows;std::set<unsigned> uids;std::set<std::string> keys;
  for(unsigned i=0;i<n;++i){GateRecord r;std::string object,local;
@@ -44,5 +45,9 @@ bool readGates(const std::string& path,std::vector<GateRecord>& out,std::string&
  }
  if(in>>magic)return fail(e,"trailing original gate manifest data");
  out.swap(rows);e.clear();return true;
+}
+bool readGates(const std::string& path,std::vector<GateRecord>& out,std::string& e){std::ifstream input(path);return parseGatesStream(input,out,e);}
+bool parseGates(const std::string& bytes,std::vector<GateRecord>& out,std::string& e){
+ if(bytes.empty()||bytes.size()>4*1024*1024)return fail(e,"original typed item input bound invalid");std::istringstream input(bytes);return parseGatesStream(input,out,e);
 }
 }

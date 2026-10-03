@@ -199,11 +199,16 @@ bool pc_p2_original_course_load(const char* directory,const char* course,std::fu
  const std::string selected=course;
  for(char c:selected)if(!((c>='a'&&c<='z')||c=='_'))return fail(e,"original manifest course path invalid");
  const std::string path=std::string(directory)+"/"+selected+".p2c";
- std::ifstream input(path,std::ios::binary|std::ios::ate);
- if(!input)return fail(e,"selected original course manifest missing");
- const auto size=input.tellg();if(size<=0||size>4*1024*1024)return fail(e,"original private manifest size invalid");
- std::string bytes(size_t(size),'\0');input.seekg(0);
- if(!input.read(bytes.data(),size))return fail(e,"original private manifest read failed");
+ std::string bytes;
+ if(pc_randomizer_original_session()){
+  if(!pc_randomizer_original_input("p2-original/"+selected+".p2c",bytes,e))return false;
+ }else{
+  std::ifstream input(path,std::ios::binary|std::ios::ate);
+  if(!input)return fail(e,"selected original course manifest missing");
+  const auto size=input.tellg();if(size<=0||size>4*1024*1024)return fail(e,"original private manifest size invalid");
+  bytes.assign(size_t(size),'\0');input.seekg(0);
+  if(!input.read(bytes.data(),size))return fail(e,"original private manifest read failed");
+ }
  SourceManifest manifest;
  if(!readSourceManifest(bytes,selected,manifest,e))return false;
  const bool selectedSession=pc_randomizer_original_session();
@@ -224,6 +229,7 @@ bool pc_p2_original_course_load(const char* directory,const char* course,std::fu
  // P2PK1 is all-calendar authority; P2PA1 names the exact selected native
  // calendar inventory and binds its zero-based source day independently.
  const auto loadBytes=[&](const std::string& path,std::string& out){
+  if(selectedSession){const auto name=std::filesystem::path(path).filename().generic_string();return pc_randomizer_original_input("p2-original/"+name,out,e);}
   std::ifstream in(path,std::ios::binary|std::ios::ate);if(!in)return fail(e,"original typed source file missing");
   auto n=in.tellg();if(n<=0||n>4*1024*1024)return fail(e,"original typed source size invalid");
   std::string b(size_t(n),'\0');in.seekg(0);if(!in.read(b.data(),n))return fail(e,"original typed source read failed");out.swap(b);return true;
@@ -250,7 +256,8 @@ bool pc_p2_original_course_load(const char* directory,const char* course,std::fu
  if(statusError)return fail(e,"original typed Onyon manifest status failed");
  std::vector<OnyonRecord> onyons;
  if(hasOnyons){
-  if(!readOnyons(onyonPath,onyons,e))return false;
+  if(selectedSession){std::string b;if(!loadBytes(onyonPath,b)||!parseOnyons(b,onyons,e))return false;}
+  else if(!readOnyons(onyonPath,onyons,e))return false;
   for(const auto& row:onyons){
    if(row.sourceKey.compare(0,selected.size()+1,selected+"/"))return fail(e,"original Onyon manifest belongs to another course");
    for(const auto& enemy:manifest.rows)if(enemy.enemy.uid==row.uid)return fail(e,"original typed source UID collision");
@@ -263,8 +270,8 @@ bool pc_p2_original_course_load(const char* directory,const char* course,std::fu
  };
  std::string gatePath,bridgePath;bool hasGates=false,hasBridges=false;
  if(!typedFile(".p2gt",gatePath,hasGates)||!typedFile(".p2br",bridgePath,hasBridges))return false;
- if(hasGates&&!readGates(gatePath,gates,e))return false;
- if(hasBridges&&!readBridges(bridgePath,bridges,e))return false;
+ if(hasGates){if(selectedSession){std::string b;if(!loadBytes(gatePath,b)||!parseGates(b,gates,e))return false;}else if(!readGates(gatePath,gates,e))return false;}
+ if(hasBridges){if(selectedSession){std::string b;if(!loadBytes(bridgePath,b)||!parseBridges(b,bridges,e))return false;}else if(!readBridges(bridgePath,bridges,e))return false;}
  // The shared UID namespace covers every kind, including inactive Pikmin.
  std::set<unsigned> sourceUids;
  for(const auto& row:manifest.rows)sourceUids.insert(row.enemy.uid);

@@ -13,6 +13,7 @@ struct GateRecord {
 };
 bool validateGate(const GateRecord&,std::string&);
 std::string gateDigest(const GateRecord&);
+bool parseGates(const std::string& bytes,std::vector<GateRecord>&,std::string&);
 bool readGates(const std::string&,std::vector<GateRecord>&,std::string&);
 // Retail itemGate.cpp: damage is accumulated, consumed in Damaged::exec,
 // a segment falls only below zero, and advances only at its animation key.
