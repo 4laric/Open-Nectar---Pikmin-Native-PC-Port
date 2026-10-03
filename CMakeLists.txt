@@ -394,6 +394,8 @@ set(PC_PORT_SOURCES
     pc_port/pc_p2_mamuta_rules.cpp
     pc_port/pc_p2_mamuta_fsm.cpp
     pc_port/pc_p2_tank.cpp
+    pc_port/pc_p2_original_tank.cpp
+    pc_port/pc_p2_original_tank_native.cpp
     pc_port/pc_p2_attack_fx.cpp
     pc_port/pc_p2_gas_cloud.cpp
     pc_port/pc_p2_hiba.cpp
@@ -3150,6 +3152,12 @@ add_executable(pc_p2_original_chappy_test tools/pc_p2_original_chappy_test.cpp
 target_include_directories(pc_p2_original_chappy_test PRIVATE pc_port)
 target_compile_options(pc_p2_original_chappy_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
 add_test(NAME pc_p2_original_chappy_test COMMAND pc_p2_original_chappy_test)
+add_executable(pc_p2_original_tank_test tools/test_p2_original_tank.cpp
+    pc_port/pc_p2_original_tank.cpp pc_port/pc_p2_original_spawn_plan.cpp
+    pc_port/pc_p2_original_drop.cpp pc_port/pc_p2_original_catalog.cpp)
+target_include_directories(pc_p2_original_tank_test PRIVATE pc_port)
+target_compile_options(pc_p2_original_tank_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME pc_p2_original_tank_test COMMAND pc_p2_original_tank_test)
 pikmin_add_ci_fixture(captain_onion_owner_sdl tools/p2_captain_onion_owner_sdl_fixture.cpp)
 if(TARGET pikmin_ci_fixture_captain_onion_owner_sdl)
     target_include_directories(pikmin_ci_fixture_captain_onion_owner_sdl PRIVATE ${P2_CHALLENGE_GUARD_INCLUDE_DIR})
