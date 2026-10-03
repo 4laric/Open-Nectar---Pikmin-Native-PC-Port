@@ -7,6 +7,10 @@
 #include "pc_p2_original_sprout_native.h"
 #define PC_P2_PARTY_SOURCE_SPROUT_PROVIDER 1
 #endif
+#if __has_include("pc_p2_sprays.h")
+#include "pc_p2_sprays.h"
+#define PC_P2_PARTY_SPICY_PROVIDER 1
+#endif
 #include "pc_p2_purple.h"
 #include "pc_p2_white.h"
 #include "pc_p2_captain.h"
@@ -68,6 +72,13 @@ bool pc_p2_cave_campaign_party_capture(P2CaveCampaignParty& party,bool inside){
             return held("invalid_captain_fields");}}
     Iterator bodies(pikiMgr);CI_LOOP(bodies){Piki* p=static_cast<Piki*>(*bodies);
         if(!p->isAlive())continue;
+#if defined(PC_P2_PARTY_SPICY_PROVIDER)
+        float spicyRemaining;bool pendingDope;
+        if(!pc_p2_spicy_save_observation(p,spicyRemaining,pendingDope))return held("invalid_spicy_snapshot");
+        if(pendingDope)return held("spicy_pending_dope");
+        // Party3 has neither the effect timer nor the pending receiver codec.
+        if(spicyRemaining>0)return held("spicy_remaining_requires_graph");
+#endif
         PcP2SourceBody typed;
         const auto kind=pc_p2_source_body_query(p,typed);
         // Party3 cannot represent conversion/Onyon ancestry or an expired
