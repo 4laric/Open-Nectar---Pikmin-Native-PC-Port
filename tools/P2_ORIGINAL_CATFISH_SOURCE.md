@@ -28,8 +28,9 @@ reset to their start and discard overshoot; finishMotion disables that loop
 until END. END clamps the drawn frame to duration-1 and fires once.
 The authored body/mouth joints follow before event capture and again after
 any state/animation or facing change, matching that frame's visible pose.
-Wait consumes its source random draw on each entry, even though its frame0
-first key makes the resulting start timer zero. Alive pressed Pikmin remain
+Birth's WaitArg 'rand' consumes the source random draw; later Wait transitions
+pass nullptr and consume none. Frame0 makes that initial timer zero.
+Alive pressed Pikmin remain
 searchable; only the host's separate sprout population states are excluded.
 
 Wait searches before finishing its loop; END turns toward the stored target
