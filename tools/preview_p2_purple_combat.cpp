@@ -347,6 +347,8 @@ class PurpleCombatApp : public PlugPikiApp {
     bool sdlPoseProbeActive=false;
     PcPurplePoseProbeBudget sdlPoseProbeBudget;
     SdlPluckPoint sdlPoseProbeOrigin;
+    bool sdlPoseProbeYawObserved=false;
+    float sdlPoseProbeYawStart=0,sdlPoseProbeYawArc=0;
     PcPurpleDismissPolicy sdlDismissPolicy;
     std::vector<Piki*> sdlDismissRoster;
     PikiHeadItem* sdlDismissHead=nullptr;
@@ -1250,6 +1252,9 @@ class PurpleCombatApp : public PlugPikiApp {
     }
 
     void sdlPoseProbeClear(Navi* n,Pom* violet) {
+        if(sdlPoseProbeYawObserved)require(std::isfinite(n->mSRT.r.y)
+            &&std::fabs(std::remainder(n->mSRT.r.y-sdlPoseProbeYawStart,6.283185307f))<=sdlPoseProbeYawArc+.0001f,
+            "cursor probe left native one-tick yaw admission");
         require(pluckLength(pluckSub(sdlPoint(n->mSRT.t),sdlPoseProbeOrigin))<.1f
             && pluckLength(sdlPoint(n->mVelocity))<=1.f && pluckLength(sdlPoint(n->mTargetVelocity))==0.f,
             "cursor pose probe moved captain");
@@ -1258,28 +1263,37 @@ class PurpleCombatApp : public PlugPikiApp {
         require(!n->mCollInfo->checkCollision(violet->mCollInfo,&self,&other,push),"cursor pose probe native contact");
         require(sdlPulseTerrainClear(sdlPoint(n->mSRT.t),sdlPoint(n->mSRT.t),n->mSRT.t.y,.1f),
             "cursor pose probe terrain changed");
-        // A conservative all-yaw envelope of the CAPTURED current pose. This
-        // does not certify an unobserved animation sweep. The next refreshed
-        // actual parts must pass the same checks before any further input.
+        require(pc_window_get_control_mode()==PC_CONTROL_CLASSIC && !n->mPcLockTarget && !pc_first_person_active()
+            && pc_window_get_mouse_cursor_delta_x()==0.f && pc_window_get_mouse_cursor_delta_y()==0.f
+            && !n->isCreatureFlag(CF_DisableAutoFaceDir),"cursor probe requires ordinary unpinned classic cursor");
+        require(std::isfinite(n->mSRT.r.y)&&std::isfinite(n->mFaceDirection)
+            &&std::fabs(std::remainder(n->mSRT.r.y-n->mFaceDirection,6.283185307f))<.001f,"cursor probe pose/yaw mismatch");
+        float halfArc=0;
+        require(pcPurpleCursorYawBound(n->mSRT.r.y,n->mCursorPosition.x,n->mCursorPosition.z,
+            C_NAVI_PARM(n,mCursorMoveSpeed),1.f/30.f,halfArc),"cursor probe native one-tick yaw bound invalid");
+        // Captured compatible-motion offsets over the actual native one-tick
+        // cursor yaw bound. Unseen animation transitions remain unproven; every
+        // next idle refresh must pass current geometry before another input.
         std::vector<CollPart*> captainParts,violetParts;
         collectCaptainParts(n->mCollInfo->getBoundingSphere(),captainParts);
         collectCaptainParts(violet->mCollInfo->getBoundingSphere(),violetParts);
-        float envelope=0.f;
-        for(CollPart* part:captainParts) {
-            const Vector3f offset=part->mCentre-n->mSRT.t;
-            require(std::isfinite(part->mRadius) && part->mRadius>0.f,"cursor pose invalid captain radius");
-            envelope=std::max(envelope,std::sqrt(offset.x*offset.x+offset.y*offset.y+offset.z*offset.z)+part->mRadius);
+        for(CollPart* captain:captainParts)for(CollPart* part:violetParts) {
+            const auto* envelope=capturedCaptainPoses.find(unsigned(captain->getID().mId),reinterpret_cast<std::uintptr_t>(captain));
+            float radius=0;
+            require(envelope&&PcPurplePoseEnvelope::projectedRadius(*envelope,part->mCentre.y-n->mSRT.t.y,part->mRadius,radius,halfArc),"cursor probe captured local envelope invalid");
+            if(radius<=0)continue;
+            for(int sample=-1;sample<=1;++sample){
+                float ox=0,oz=0;
+                require(PcPurplePoseEnvelope::rotatedOffset(*envelope,n->mSRT.r.y+sample*halfArc,ox,oz),"cursor probe captured local rotation invalid");
+                const float gap=std::hypot(part->mCentre.x-n->mSRT.t.x-ox,part->mCentre.z-n->mSRT.t.z-oz);
+                require(std::isfinite(gap)&&gap>radius+.05f,"cursor probe native bounded yaw envelope blocked");
+            }
         }
-        require(std::isfinite(envelope)&&envelope>0.f,"cursor pose invalid captured envelope");
-        for(CollPart* part:violetParts) {
-            const Vector3f offset=part->mCentre-n->mSRT.t;
-            const float separation=std::sqrt(offset.x*offset.x+offset.y*offset.y+offset.z*offset.z);
-            require(std::isfinite(separation) && std::isfinite(part->mRadius) && part->mRadius>0.f
-                && separation>envelope+part->mRadius+1.f,"cursor pose captured yaw envelope blocked");
-        }
+        sdlPoseProbeYawStart=n->mSRT.r.y;sdlPoseProbeYawArc=halfArc;sdlPoseProbeYawObserved=true;
+        std::printf("P2_PURPLE_PLUCK_CURSOR_YAW tick=%d half_arc=%.9g native_factor=.2 maximum_dt=0.0333333351 captured_compatible_motion_only=1 future_animation_transition_proven=0 actor_writes=0\n",ticks,halfArc);
     }
     void sdlProbePose(Navi* n,Pom* violet,float tau) {
-        if(!sdlPoseProbeActive) {sdlPoseProbeOrigin=sdlPoint(n->mSRT.t);sdlPoseProbeActive=true;}
+        if(!sdlPoseProbeActive) {sdlPoseProbeOrigin=sdlPoint(n->mSRT.t);sdlPoseProbeActive=true;sdlPoseProbeYawObserved=false;}
         sdlPoseProbeClear(n,violet);
         require(sdlPoseProbeBudget.take(),"finite cursor pose probe budget exhausted");
         if(sdlCancelOwnedCollision(n,tau))return;
@@ -1383,7 +1397,7 @@ class PurpleCombatApp : public PlugPikiApp {
             if(sdlPoseProbeActive) {
                 // Release the ordinary cursor input; measure the ensuing native
                 // pose again before starting a movement forecast.
-                acquisitionInput();sdlPoseProbeActive=false;return false;
+                acquisitionInput();sdlPoseProbeActive=false;sdlPoseProbeYawObserved=false;return false;
             }
             while(pluckRouteIndex+1<pluckRoute.size() && planarDistance(n->mSRT.t,pluckRoute[pluckRouteIndex])<4.f
                 && (!sdlAcquisitionMode() || sdlPluckAtRest(pluckSpeed,pluckTargetSpeed))

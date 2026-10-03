@@ -26,8 +26,8 @@ public:
   for(unsigned i=0;i<count_;++i)if(parts_[i].id==id&&parts_[i].key==key)return &parts_[i];
   return nullptr;
  }
- static bool projectedRadius(const Part& p,float relativeY,float otherRadius,float& radius) {
-  if(!std::isfinite(relativeY)||!std::isfinite(otherRadius)||otherRadius<=0
+ static bool projectedRadius(const Part& p,float relativeY,float otherRadius,float& radius,float halfArc=3.141592654f/8.f) {
+  if(!std::isfinite(halfArc)||halfArc<0||halfArc>3.141592654f||!std::isfinite(relativeY)||!std::isfinite(otherRadius)||otherRadius<=0
    ||!std::isfinite(p.horizontal)||p.horizontal<0||!std::isfinite(p.low)||!std::isfinite(p.high)||p.low>p.high
    ||!std::isfinite(p.radius)||p.radius<=0||!std::isfinite(p.lowX)||!std::isfinite(p.highX)||p.lowX>p.highX
    ||!std::isfinite(p.lowZ)||!std::isfinite(p.highZ)||p.lowZ>p.highZ)return false;
@@ -35,9 +35,9 @@ public:
   if(!std::isfinite(dy)||!std::isfinite(sum))return false;
   const float spread=std::hypot((p.highX-p.lowX)*.5f,(p.highZ-p.lowZ)*.5f);
   const float centre=std::hypot((p.highX+p.lowX)*.5f,(p.highZ+p.lowZ)*.5f);
-  // Three yaw samples at -pi/8,0,+pi/8. Any intermediate offset lies
+  // Three yaw samples at -halfArc,0,+halfArc. Any intermediate offset lies
   // within this chord reserve of a sample. Captured animation box only.
-  const float chord=2.f*centre*std::sin(3.141592654f/32.f);
+  const float chord=2.f*centre*std::sin(halfArc/4.f);
   radius=dy>=sum?0.f:std::sqrt(sum*sum-dy*dy)+spread+chord;return std::isfinite(radius);
  }
  static bool rotatedOffset(const Part& p,float yaw,float& x,float& z){
@@ -50,6 +50,17 @@ private:
  bool fail(){failed_=true;return false;}
  std::array<Part,32> parts_{};unsigned count_=0;std::uintptr_t owner_=0;bool failed_=false;
 };
+
+// navi.cpp movement-neutral classic cursor: displacement <=speed*dt,
+// then yaw +=0.2*shortest(cursor angle-yaw). Tangent clipping is a projection.
+inline bool pcPurpleCursorYawBound(float yaw,float cursorX,float cursorZ,float speed,float dt,float& halfArc){
+ if(!std::isfinite(yaw)||!std::isfinite(cursorX)||!std::isfinite(cursorZ)||!std::isfinite(speed)||speed<0
+  ||!std::isfinite(dt)||dt<=0||dt>1.f/30.f)return false;
+ const float cursor=std::hypot(cursorX,cursorZ),step=speed*dt;
+ if(!std::isfinite(cursor)||cursor<=0||!std::isfinite(step)||step>=cursor)return false;
+ halfArc=.2f*(std::fabs(std::remainder(std::atan2(cursorX,cursorZ)-yaw,6.283185307f))+std::asin(step/cursor));
+ return std::isfinite(halfArc)&&halfArc>=0&&halfArc<=3.141592654f;
+}
 
 constexpr float PcPurplePulseYawHalfArc=3.141592654f/8.f;
 inline bool pcPurplePulseYawEligible(float yaw,float targetX,float targetZ,float cursorX,float cursorZ,float cursorSpeed,float faceAdjust,float maximumDt){
