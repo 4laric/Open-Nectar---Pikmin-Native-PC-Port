@@ -9,7 +9,7 @@
 namespace {
 using namespace p2original::piki;
 struct Owner {
- bool reserved=false,reused=false,registration=false;
+ bool reserved=false,reused=false,registration=false,releasePending=false;
  PoolTicket ticket;PikiMgr* manager=nullptr;
  PoolPhase phase=PoolPhase::Allocated;
  OriginalPikiBody source;std::uint64_t nativeLifetime=0;
@@ -24,7 +24,7 @@ Owner* find(PoolTicket t)noexcept {
  return nullptr;
 }
 bool current(const Owner& o)noexcept {
- return o.ticket.body&&!o.reused&&o.manager==pikiMgr
+ return o.ticket.body&&!o.reused&&!o.releasePending&&o.manager==pikiMgr
   &&pc_p2_original_piki_pool_slot_live(o.manager,o.ticket.body)
   &&(!o.nativeLifetime||pc_p2_original_piki_body_current(o.ticket.body,o.nativeLifetime));
 }
@@ -123,6 +123,63 @@ bool initializePool(PoolTicket ticket,const std::array<float,3>& xyz,std::string
   OriginalPikiBodyHandle h;if(pc_p2_original_piki_body_handle(p,h))o->nativeLifetime=h.nativeLifetime;
   e="source pool initializer threw; exact partial allocation retained";return false;
  }
+}
+bool poolSource(PoolTicket t,OriginalPikiBody& out,std::string& e){
+ Operation operation;auto* o=find(t);
+ if(!operation.admitted||!o||o->releasePending||!current(*o)){
+  e="source pool immutable query lacks current retained allocation";return false;
+ }
+ OriginalPikiBody copied=o->source;
+ if(find(t)!=o||!current(*o)){
+  e="source pool immutable query allocation changed";return false;
+ }
+ out=std::move(copied);e.clear();return true;
+}
+bool poolBeginPhysicalInitialization(PoolTicket t,OriginalPikiBody& out,std::string& e){
+ Operation operation;auto* o=find(t);OriginalPikiBodyHandle associated;
+ if(!operation.admitted||!o||o->releasePending||!current(*o)||
+    o->phase!=PoolPhase::Allocated||o->registration||o->nativeLifetime||
+    pc_p2_original_piki_body_handle(t.body,associated)){
+  e="source physical handoff requires current unassociated allocation";return false;
+ }
+ OriginalPikiBody copied=o->source;
+ if(find(t)!=o||!current(*o)||pc_p2_original_piki_body_handle(t.body,associated)||!current(*o)){
+  e="source physical handoff allocation changed before registration";return false;
+ }
+ // No foreign callback or fallible copy follows this ownership transition.
+ // All potential partial registration is retained, even if caller's first
+ // native write subsequently fails. Allocation-only release now always refuses.
+ o->registration=true;o->phase=PoolPhase::Initializing;
+ out=std::move(copied);e.clear();return true;
+}
+bool poolReleaseAllocation(PoolTicket t,std::string& e){
+ Operation operation;auto* o=find(t);
+ if(!operation.admitted||!o||o->reused||o->manager!=pikiMgr||
+    o->phase!=PoolPhase::Allocated||o->registration||o->nativeLifetime){
+  e="source pool release requires exact unregistered allocation";return false;
+ }
+ OriginalPikiBodyHandle associated;
+ if(pc_p2_original_piki_body_handle(t.body,associated)){
+  e="source allocation already has actual canonical association";return false;
+ }
+ if(o->reused||o->manager!=pikiMgr){e="source allocation changed during association inspection";return false;}
+ if(o->releasePending){
+  if(!pc_p2_original_piki_pool_slot_retired(o->manager,t.body)){
+   e="source pool allocation release remains pending native retirement";return false;
+  }
+ }else{
+  if(!current(*o)){e="source pool allocation release is stale";return false;}
+  // Ownership of the attempt is retained before native pool mutation. Raw
+  // manager kill consults actual reference count and may defer with status -2.
+  o->releasePending=true;
+  try{o->manager->MonoObjectMgr::kill(t.body);}
+  catch(...){e="source native allocator kill threw; ticket retained";return false;}
+ }
+ if(find(t)!=o||o->reused||o->manager!=pikiMgr||
+    !pc_p2_original_piki_pool_slot_retired(o->manager,t.body)){
+  e="source pool allocation has not reached exact native retirement";return false;
+ }
+ *o=Owner{};e.clear();return true;
 }
 bool poolCurrent(PoolTicket t)noexcept {auto* o=find(t);return o&&current(*o);}
 std::size_t poolOwners(std::array<PoolOwner,20>& out)noexcept {
