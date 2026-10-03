@@ -281,7 +281,7 @@ constexpr float ReceiverRouteReach=.5f;
 // non-slip access, then ascend the western non-slip ramp. These are ordinary
 // guidance points, not assigned actor coordinates or AI-trajectory proof.
 constexpr ReceiverWaypoint ReceiverPrefix[]={
- {-950.f,2260.f},{-950.f,2320.f},{-950.f,2260.f},{-860.f,2245.f}
+ {-950.f,2260.f},{-950.f,2300.f},{-950.f,2260.f},{-860.f,2245.f}
 };
 constexpr int ReceiverPrefixCount=sizeof(ReceiverPrefix)/sizeof(ReceiverPrefix[0]);
 struct RouteFloor {float y;int face;};
