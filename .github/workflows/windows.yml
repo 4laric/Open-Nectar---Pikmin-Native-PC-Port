@@ -50,7 +50,7 @@ jobs:
       # For pull_request events github.sha is the synthetic merge commit; name
       # the artifact after the requested commit; BUILD_INFO separately binds the
       # actual checked-out commit/tree (including any PR synthetic merge).
-      HEAD_SHA: a108f0b85b34e5aabed7cdf6cec6198712b47229
+      HEAD_SHA: bbd3ec8d92567f41275ae2ce6b07c04bd8a00917
       NETPLAY_BUILD: ${{ inputs.netplay && 'ON' || 'OFF' }}
       NETPLAY_SUFFIX: ${{ inputs.netplay && '-netplay' || '' }}
       CCACHE_DIR: ${{ github.workspace }}/.ccache
@@ -65,7 +65,7 @@ jobs:
 
       - uses: actions/checkout@v4
         with:
-          ref: a108f0b85b34e5aabed7cdf6cec6198712b47229
+          ref: bbd3ec8d92567f41275ae2ce6b07c04bd8a00917
 
       - name: Fetch pinned canonical fixture guard (source only)
         uses: actions/checkout@v4
@@ -203,8 +203,8 @@ jobs:
           path: .ccache
           key: ccache-windows-mingw64-netplay-${{ env.HEAD_SHA }}
 
-      - name: Run p2 and bbft tests
-        run: ctest --test-dir build -R 'p2_|pc_bbft_|^pc_midday_' --no-tests=error --output-on-failure -j 2 --timeout 300
+      - name: Run all registered host tests
+        run: ctest --test-dir build --no-tests=error --output-on-failure -j 2 --timeout 300
 
       - name: Run deterministic netplay consumer and FP gates
         if: ${{ inputs.netplay }}
