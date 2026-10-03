@@ -31,6 +31,7 @@ public:
  // Called only after actual native bootstrap/reset has completed. Rebind or
  // wrong/duplicate Native NaviMgr slot pointers are refused.
  bool bindRoster(Navi* olimar,Navi* louie,std::string&);
+ bool supports(Navi*,Motion,std::string&)const;
  bool start(Navi*,Motion,std::string&);
  // Only genuine locomotion transitions preserve the bound source frame.
  bool startPreservingFrame(Navi*,Motion,std::string&);

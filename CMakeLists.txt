@@ -280,6 +280,7 @@ set(PC_PORT_SOURCES
     pc_port/pc_p2_original_group.cpp
     pc_port/pc_p2_original_dispatch.cpp
     pc_port/pc_p2_original_course.cpp
+    pc_port/pc_p2_original_captain_motion.cpp
     pc_port/pc_p2_original_chappy.cpp
     pc_port/pc_p2_original_chappy_native.cpp
     pc_port/pc_p2_original_group_engine.cpp

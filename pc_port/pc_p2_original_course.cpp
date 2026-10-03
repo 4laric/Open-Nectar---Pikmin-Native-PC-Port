@@ -1,4 +1,5 @@
 #include "pc_p2_original_course.h"
+#include "pc_p2_original_captain_motion.h"
 #include "pc_p2_original_dispatch.h"
 #include "pc_p2_original_gen_object.h"
 #include "pc_p2_original_group_engine.h"
@@ -41,6 +42,7 @@
 namespace {
 using namespace p2original;
 struct Course {
+ std::unique_ptr<captain::SourceBank> captains;
  std::unique_ptr<pelplant::Native> plants;
  std::unique_ptr<chappy::Native> chappies;
  std::unique_ptr<frog::Native> frogs;
@@ -218,6 +220,7 @@ bool pc_p2_original_course_finish(std::string& e){
  if(!pc_p2_campaign_treasure_held_unload(e))return false;
  if(!pc_p2_original_corpse_unload(e))return false;
  if(current->started&&!pc_p2_original_course_unload(e))return false;
+ if(current->bridges)pc_p2_original_bridge_before_teardown();
  if(current->barrels)pc_p2_original_barrel_before_teardown();
  if(current->pikis)pc_p2_original_piki_unload();
  current.reset();e.clear();return true;
@@ -506,3 +509,5 @@ bool pc_p2_original_course_read_plan(bool& defaultLoaded,bool& dayLoaded,bool& i
  if(!defaultLoaded)return fail(e,"original literal calendar omitted default source member");
  e.clear();return true;
 }
+
+p2original::captain::SourceBank* pc_p2_original_captain_source_bank(){return current&&current->captains&&current->captains->ready()?current->captains.get():nullptr;}
