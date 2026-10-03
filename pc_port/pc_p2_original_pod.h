@@ -19,7 +19,8 @@ struct Config {
  // infer the source scene from an Onion, preview receiver or active P1 stage.
  unsigned unit=0,slot=0,baseGenType=7;
  float x=0,y=0,z=0,yaw=0;
- std::string model="pod.mod";
+ // Engine-relative; preflight hashes the exact System/DVDOpen-resolved file.
+ std::string model="courses/pikmin2room/pod.mod";
  std::string sourceArchive="pod/arc.szs",sourceModel="pod/pot.bmd",sourceCollision="pod/coll.txt";
  // Independently issues the original source epoch/activation. Borrowed for
  // the floor's lifetime, never the same untrusted cargo input copied back.

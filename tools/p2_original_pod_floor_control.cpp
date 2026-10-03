@@ -1,4 +1,5 @@
 #include "pc_p2_original_pod_floor.h"
+#include "pc_p2_original_pod_paths.h"
 #include <cassert>
 #include <fstream>
 #include <iterator>
@@ -9,6 +10,15 @@ struct UnusedAuthority:p2retail::FloorIdentityAuthority {
                     unsigned,unsigned,p2retail::BirthIdentity&,std::string&)const override{++calls;return false;}
 };
 int main(int argc,char** argv){
+ std::string modelPath;
+ assert(p2originalpod::engineModelPath("","dataDir/","courses/pikmin2room/pod.mod",modelPath));
+ assert(modelPath=="assets/dataDir/courses/pikmin2room/pod.mod");
+ assert(p2originalpod::engineModelPath("/","dataDir/","pod.mod",modelPath)&&modelPath=="assets/dataDir/pod.mod");
+ assert(p2originalpod::engineModelPath("private/","dataDir/","pod.mod",modelPath)&&modelPath=="assets/private/dataDir/pod.mod");
+ assert(!p2originalpod::engineModelPath(nullptr,"dataDir/","pod.mod",modelPath));
+ assert(!p2originalpod::engineModelPath("","dataDir/","pod.mod?alias",modelPath));
+ assert(!p2originalpod::engineModelPath("","dataDir/",std::string(256,'a'),modelPath));
+ assert(!p2originalpod::engineModelPath(std::string(250,'a').c_str(),"dataDir/","pod.mod",modelPath));
  assert(argc==3);std::ifstream in(argv[1],std::ios::binary);assert(in);
  std::string bytes{std::istreambuf_iterator<char>(in),{}};std::string error;
  p2retail::FloorPlan plan;assert(p2retail::parseFloorPlan(bytes,argv[2],plan,error));

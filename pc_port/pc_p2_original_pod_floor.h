@@ -6,7 +6,7 @@
 
 namespace p2originalpod {
 struct Resources {
- std::string model="pod.mod",archive="pod/arc.szs",sourceModel="pod/pot.bmd",collision="pod/coll.txt";
+ std::string model="courses/pikmin2room/pod.mod",archive="pod/arc.szs",sourceModel="pod/pot.bmd",collision="pod/coll.txt";
 };
 inline bool sameFloor(const p2retail::Snapshot& a,const p2retail::Snapshot& b){
  return a.cave==b.cave&&a.source==b.source&&a.sourceSha256==b.sourceSha256
