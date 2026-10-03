@@ -15,6 +15,7 @@
 #include "pc_p2_dangomushi.h"
 #include "pc_p2_hanachirashi.h"
 #include "pc_p2_catfish.h"
+#include "pc_p2_catfish_source.h"
 #include "pc_p2_mar.h"
 #include "pc_p2_tadpole.h"
 #include "pc_p2_hana.h"
@@ -136,6 +137,12 @@ DEFINE_PRINT("teki");
  */
 void BTeki::viewStartTrembleMotion(f32 motionSpeed)
 {
+#if defined(PIKI_PC_PORT) && PIKI_PC_PORT
+    if(pc_p2_catfish_source_carry_start(this,true)){
+        if(motionSpeed<=0)pc_p2_catfish_source_carry_stop(this);
+        return;
+    }
+#endif
 	startMotion(TekiMotion::Type5);
 	setTekiOption(TEKIOPT_ManualAnimation);
 	mMotionSpeed = motionSpeed;
@@ -146,6 +153,9 @@ void BTeki::viewStartTrembleMotion(f32 motionSpeed)
  */
 void BTeki::viewSetMotionSpeed(f32 speed)
 {
+#if defined(PIKI_PC_PORT) && PIKI_PC_PORT
+    if(speed<=0?pc_p2_catfish_source_carry_stop(this):pc_p2_catfish_source_carry_start(this))return;
+#endif
 	mMotionSpeed = speed;
 }
 
@@ -162,6 +172,9 @@ void BTeki::viewDoAnimation()
  */
 void BTeki::viewFinishMotion()
 {
+#if defined(PIKI_PC_PORT) && PIKI_PC_PORT
+    if(pc_p2_catfish_source_carry_finish(this))return;
+#endif
 	mTekiAnimator->finishMotion(PaniMotionInfo(PANI_NO_MOTION, this));
 }
 

@@ -1,39 +1,12 @@
-// Catfish (Water Dumple, EnemyID 26) source behavior on the P1 TEKI_Namazu
-// placement vehicle. Catfish has no dedicated state file: Catfish.cpp forwards
-// onInit/birth to the shared KochappyBase FSM (KochappyBase.cpp and
-// kochappyState.cpp). This port implements that inherited source FSM:
-//   Wait 0 -> Turn 2 -> Walk 3 -> Attack 4 -> Flick 5,
-//   TurnToHome 6 -> GoHome 7, Dead 1.
-// Attack is driven by the source animation key events: the bite event runs
-// attackNavi + eatPikmin (or the Eat motion) and the later event runs
-// swallowPikmin. Source revision 632af93787b9c95b63f0c13be32b161375ce3a96;
-// retail parms from experimental/pikmin2_aquatic_assets.py (GPVE01 rev 0).
-//
-// Port adaptations (recorded, not retail-faithful):
-//   * The P2 two-slot mouth (kamu1/kamu2, Catfish.cpp:83) is not representable
-//     on the P1 host. The P2 ingest is resolved as an explicit nearest-first
-//     capture of up to two Pikmin inside the source attack sweep at the banked
-//     attack bite animation event (attack frame 17, event 2), then exactly one
-//     InteractKill per captured Pikmin at the banked swallow event (attack frame
-//     75, event 3). The same Pikmin is never captured twice and each captured
-//     Pikmin is consumed once (pc_p2_catfish_residual_policy.h). Mirrors the
-//     Armor port.
-//   * StateAttack KEYEVENT_2 also runs the source attackNavi (general fp22=50
-//     hit radius, fp23=15 deg hit angle, fp24=10 damage) against the active
-//     Navi, and the banked swallow applies the source proper fp02=300 poison to
-//     the eater for each consumed White Pikmin while preserving the normal
-//     InteractKill death/corpse.
-//   * Catfish ships no waitact1 clip (the KochappyBase Turn motion), so the Turn
-//     state reuses wait1. Original actors enter the Eat motion (waitact2) when
-//     the bite captures no prey; legacy AP actors retain the attack clip.
-//   * Target detection accepts the nearest Navi or Pikmin; the source view angle
-//     is treated as a full hemisphere because the Catfish general block does not
-//     override it. The attack sweep angle is a P1-host ~45 deg; turn rate and the
-//     flick latch radius are P1-host values. The flick knockback/damage/range use
-//     the source general fp17/fp18/fp19 defaults (300/0/120).
-// Every hook is a no-op for unregistered actors; no other lane's module is
-// modified.
+// Catfish (Water Dumple, original EnemyID26) uses the KochappyBase source
+// FSM, indexed animator clocks, authored collision/mouth hierarchy, and
+// source flick receivers through pc_p2_catfish_source. The retained legacy
+// AP actor path below keeps its prior host adaptations. Original actors never
+// enter that path; family membership here suppresses the chassis AI and owns
+// registration/retirement. Source revision632af93787b9c95b63f0c13be32b161375ce3a96.
 #include "pc_p2_catfish.h"
+#include "pc_p2_catfish_source.h"
+#include "pc_p2_hanachirashi_receiver.h"
 #include "pc_p2_original_actor.h"
 #include "pc_p2_original_catfish_bank.h"
 #include "pc_p2_original_catfish_native.h"
@@ -430,12 +403,16 @@ void pc_p2_catfish_reset() {
 }
 
 void pc_p2_catfish_forget(BTeki* actor) {
+    pc_p2_catfish_source_forget(actor);
     pc_p2_original_catfish_forget(actor);
     actors.erase(static_cast<PelletView*>(actor));
     corpses.erase(actor);
 }
 
 float pc_p2_catfish_param_f(const BTeki* actor, int idx, float fallback) {
+    auto original = actors.find(static_cast<PelletView*>(const_cast<BTeki*>(actor)));
+    if (original != actors.end() && original->second.original)
+        return pc_p2_catfish_source_param(actor, idx, fallback);
     if (!ready || !actors.count(static_cast<PelletView*>(const_cast<BTeki*>(actor)))) return fallback;
     if (idx == TPF_Life) return LIFE;
     if (idx == TPF_LifeRecoverRate) return 0.0f;
@@ -460,6 +437,7 @@ bool pc_p2_catfish_suppress_ai(const BTeki* actor) {
 }
 
 bool pc_p2_catfish_clip(const BTeki* actor, const char*& name, float& phase) {
+    if (pc_p2_catfish_source_clip(actor, name, phase)) return true;
     if (!ready) return false;
     auto it = actors.find(static_cast<PelletView*>(const_cast<BTeki*>(actor)));
     if (it == actors.end()) return false;
@@ -469,11 +447,43 @@ bool pc_p2_catfish_clip(const BTeki* actor, const char*& name, float& phase) {
 }
 
 
+namespace {
+// EnemyFunc flicks stickers before nearby creatures. Snapshot before accepted
+// receiver transitions detach stickers; consume the source chance draw even
+// with Catfish's literal shake chance of one.
+bool originalSourceFlick(BTeki* actor, bool stuckOnly, float angle,
+                         float range, float knockback, float damage) {
+    if (!actor || !gsys || !std::isfinite(angle) || !std::isfinite(range) || range < 0) return false;
+    std::vector<Piki*> stickers;
+    for (Creature* c=actor->mStickListHead;c;c=c->mNextSticker)
+        if (c->isPiki()) stickers.push_back(static_cast<Piki*>(c));
+    const float pi=3.14159265358979323846f, tau=2*pi;
+    const float nearbyAngle=angle+pi;
+    float stickerAngle=nearbyAngle;
+    // Retail roundAng adjusts once, preserving the backward sentinel.
+    if(stickerAngle<0)stickerAngle+=tau;
+    if(stickerAngle>=tau)stickerAngle-=tau;
+    for(Piki* p:stickers)
+        if(1.0f>gsys->getRand(1.0f)) pc_p2_source_flick_piki(actor,p,knockback,stickerAngle);
+    if(stuckOnly)return true;
+    const Vector3f origin=actor->getPosition();
+    auto nearby=[&](Creature* c){const Vector3f at=c->getPosition();
+        const float x=at.x-origin.x,y=at.y-origin.y,z=at.z-origin.z;
+        return x*x+y*y+z*z<range*range;};
+    if(pikiMgr){Iterator it(pikiMgr);CI_LOOP(it){Piki* p=static_cast<Piki*>(*it);
+        if(p->getStickObject()!=actor&&nearby(p))pc_p2_source_flick_piki(actor,p,knockback,nearbyAngle);}}
+    for(Navi* n:pc_p2_navis())if(n&&nearby(n))pc_p2_source_flick_navi(actor,n,knockback,damage,nearbyAngle);
+    // Receiver refusal (already flicked, dead, swallowed) is a normal result.
+    return true;
+}
+}
 bool pc_p2_catfish_original_resources(std::string& error) {
     if (!gsys) { error="Catfish system unavailable"; return false; }
     std::ifstream authored("p2-aquatic-bank.txt");
     if(!p2original::catfish::validateCatfishBank(authored,error))return false;
     if (!pc_p2_batch3_original_resources(26,error)) return false;
+    if (!pc_p2_catfish_source_set_flick_receiver(originalSourceFlick,error)
+            || !pc_p2_catfish_source_resources(error)) return false;
     std::ifstream input("p2-aquatic-bank.txt"); std::string line;
     if (!std::getline(input,line) || line!="P2_AQUATIC_BANK_1") { error="Catfish authored bank header missing"; return false; }
     std::map<std::string,Clip> staged;
@@ -512,6 +522,7 @@ bool pc_p2_catfish_original_birth(BTeki* actor,unsigned uid,unsigned ordinal,std
     auto* teki=static_cast<Teki*>(actor);
     if(!ready||!actor||!uid||teki->mTekiType!=TEKI_Namazu||actors.count(static_cast<PelletView*>(actor))) {error="Catfish original birth lacks unique prepared chassis";return false;}
     if(!pc_p2_batch3_original_birth(actor,26,error))return false;
+    if(!pc_p2_catfish_source_birth(actor,uid,ordinal,error))return false;
     Catfish state;state.original=true;state.uid=uid;state.ordinal=ordinal;
     state.home=actor->getPosition();state.heading=actor->getDirection();state.wanderTarget=state.home;
     state.rng=(uid*2654435761u+ordinal*2246822519u)|1u;
@@ -522,6 +533,7 @@ bool pc_p2_catfish_original_birth(BTeki* actor,unsigned uid,unsigned ordinal,std
 bool pc_p2_catfish_original_registry(BTeki* actor,unsigned token,std::string& error) {
     auto entry=actors.find(static_cast<PelletView*>(actor));unsigned source=0,found=0;p2original::InstanceIdentity id;
     if(entry==actors.end()||!entry->second.original||entry->second.token||!token||!p2original::originalActors().query(static_cast<Creature*>(actor),source,found,&id)||source!=26||found!=token||id.generator!=entry->second.uid||id.ordinal!=entry->second.ordinal) {error="Catfish original registry identity mismatch";return false;}
+    if(!pc_p2_catfish_source_registry(actor,token,error))return false;
     entry->second.token=token;
     std::printf("P2_ORIGINAL_CATFISH_BIRTH source=26 uid=%u ordinal=%u token=%u epoch=%llu activation=%llu\n",id.generator,id.ordinal,token,(unsigned long long)id.epoch,(unsigned long long)id.activation);
     error.clear();return true;
@@ -662,6 +674,7 @@ void pc_p2_catfish_update(BTeki* actor) {
     auto it = actors.find(static_cast<PelletView*>(actor));
     if (it == actors.end()) return;
     Catfish& s = it->second;
+    if(s.original){pc_p2_catfish_source_update(actor);return;}
     float dt = gsys->getFrameTime();
     if (dt <= 0.0f) return;
     // Clamp a pathological single-frame hitch (e.g. a debugger pause) so one

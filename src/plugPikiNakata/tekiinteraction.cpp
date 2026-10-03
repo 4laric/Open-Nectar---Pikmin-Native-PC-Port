@@ -5,6 +5,7 @@
 #include "teki.h"
 #if defined(PIKI_PC_PORT) && PIKI_PC_PORT
 #include "pc_p2_sokkuri.h"
+#include "pc_p2_catfish_source.h"
 #include "pc_p2_elecbug.h"
 #include "pc_p2_armor.h"
 #include "pc_p2_hana.h"
@@ -204,6 +205,7 @@ bool InteractSwallow::actTeki(Teki*) immut
 bool InteractPress::actTeki(Teki* teki) immut
 {
 #if defined(PIKI_PC_PORT) && PIKI_PC_PORT
+    if (pc_p2_catfish_source_press(teki, mOwner, mDamage)) return true;
 	if (pc_p2_elecbug_pressed(teki, mOwner)) return true;
 	if (pc_p2_sokkuri_pressed(teki, mOwner)) return true;
 	if (pc_p2_hardlanes_fuefuki_pressed(teki, mOwner)) return true;

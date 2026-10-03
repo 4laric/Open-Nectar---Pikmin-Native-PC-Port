@@ -1,6 +1,7 @@
 #include "pc_p2_original_catfish_native.h"
 #include "pc_p2_original_actor.h"
 #include "pc_p2_original_drop_engine.h"
+#include "pc_p2_original_corpse_native.h"
 #include "pc_p2_catfish.h"
 #include "teki.h"
 #include "TekiPersonality.h"
@@ -25,9 +26,9 @@ struct Native::Impl final:Engine {
   const int type=nativeType(row.enemy.source);auto* shape=tekiMgr->getTekiShapeObject(type);
   if(!tekiMgr->hasModel(type)||!shape||!shape->mShape||!shape->mAnimMgr||!tekiMgr->getTekiParameters(type)||!tekiMgr->getStrategy(type))return refuse(e,"Catfish chassis model/animation/parameters/strategy not preloaded");
   Heap heap;
-  const u32 corpse=TekiMgr::getTypeId(type);
-  // View-backed corpses use the enemy's dead visual, not a standalone pellet shape.
-  if(!pelletMgr||!pelletMgr->getConfig(corpse)||tekiMgr->getTekiParameters(type)->getI(TPI_CorpseType)!=TEKICORPSE_LeaveCorpse)return refuse(e,"original Catfish physical corpse config unavailable");
+  // The genuine dead animation remains family-owned. Carry/profile/Onion
+  // receipts use the audited original source hook, never the chassis ID.
+  if(!pc_p2_original_corpse_resources(row.enemy.source,e))return false;
   return pc_p2_original_drop_resources(row,e)&&pc_p2_catfish_original_resources(e);
  }
  bool reserve(const std::vector<CatalogRow>& rows,unsigned count,std::string& e)override{
