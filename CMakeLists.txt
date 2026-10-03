@@ -278,7 +278,6 @@ set(PC_PORT_SOURCES
     pc_port/pc_p2_original_chappy.cpp
     pc_port/pc_p2_original_chappy_native.cpp
     pc_port/pc_p2_original_group_engine.cpp
-    pc_port/pc_p2_original_onyon.cpp
     pc_port/pc_p2_original_piki_init.cpp
     pc_port/pc_p2_original_piki_spawn.cpp
     pc_port/pc_p2_original_drop.cpp
@@ -384,9 +383,15 @@ set(PC_PORT_SOURCES
     pc_port/pc_p2_cave_geometry.cpp
     pc_port/pc_p2_cave_items.cpp
     pc_port/pc_p2_cave_bud_actor.cpp
+    pc_port/pc_p2_original_blackpom_native.cpp
     pc_port/pc_p2_cave_carry.cpp
     pc_port/pc_p2_enemy.cpp
     pc_port/pc_p2_sheargrub.cpp
+    pc_port/pc_p2_original_snow.cpp
+    pc_port/pc_p2_original_snow_native.cpp
+    pc_port/pc_p2_retail_cave_native.cpp
+    pc_port/pc_p2_retail_cave_foliage.cpp
+    pc_port/pc_p2_retail_cave_blackpom.cpp
     pc_port/pc_p2_original_red.cpp
     pc_port/pc_p2_original_red_native.cpp
     pc_port/pc_p2_kochappy.cpp
@@ -421,6 +426,8 @@ set(PC_PORT_SOURCES
     pc_port/pc_p2_flora_actor.cpp
     pc_port/pc_p2_original_pelplant.cpp
     pc_port/pc_p2_original_pelplant_native.cpp
+    pc_port/pc_p2_original_foliage.cpp
+    pc_port/pc_p2_original_foliage_native.cpp
     pc_port/pc_p2_receipt_host.cpp
     pc_port/pc_p2_delivery_host.cpp
     pc_port/pc_p2_pom.cpp
@@ -3498,6 +3505,50 @@ foreach(pikmin_component IN LISTS pikmin_component_targets)
         endif()
         if(NOT "pc_port/pc_p2_original_lifecycle.cpp" IN_LIST pikmin_component_sources)
             target_sources(${pikmin_component} PRIVATE pc_port/pc_p2_original_lifecycle.cpp)
+        endif()
+    endif()
+endforeach()
+add_executable(pc_p2_original_snow_test tools/test_p2_original_snow.cpp
+    pc_port/pc_p2_original_snow.cpp pc_port/pc_p2_original_spawn_plan.cpp
+    pc_port/pc_p2_original_catalog.cpp pc_port/pc_p2_original_drop.cpp)
+target_include_directories(pc_p2_original_snow_test PRIVATE pc_port)
+target_compile_options(pc_p2_original_snow_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME pc_p2_original_snow_test COMMAND pc_p2_original_snow_test)
+
+add_executable(pc_p2_retail_cave_context_test pc_port/pc_p2_retail_cave_context_test.cpp)
+target_include_directories(pc_p2_retail_cave_context_test PRIVATE pc_port)
+target_compile_options(pc_p2_retail_cave_context_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME pc_p2_retail_cave_context_test COMMAND pc_p2_retail_cave_context_test)
+add_executable(pc_p2_retail_cave_registry_test pc_port/pc_p2_retail_cave_registry_test.cpp
+    pc_port/pc_p2_original_catalog.cpp pc_port/pc_p2_original_spawn_plan.cpp)
+target_include_directories(pc_p2_retail_cave_registry_test PRIVATE pc_port)
+target_compile_options(pc_p2_retail_cave_registry_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME pc_p2_retail_cave_registry_test COMMAND pc_p2_retail_cave_registry_test)
+
+# Compile immutable metadata once; putting its large initializer in every actor
+# TU needlessly multiplies compile memory/time. Initialization is a startup-only
+# operation, so this data accessor does not need optimizer/LTO work.
+add_library(p2_retail_cave_catalog STATIC pc_port/pc_p2_retail_cave_catalog.cpp)
+target_include_directories(p2_retail_cave_catalog PRIVATE pc_port)
+target_compile_options(p2_retail_cave_catalog PRIVATE ${NATIVE_COMPILE_OPTIONS} -O0)
+set_property(TARGET p2_retail_cave_catalog PROPERTY INTERPROCEDURAL_OPTIMIZATION FALSE)
+
+
+# Original decorative source91/88 (#1251); no asset payloads are committed.
+pikmin_add_ci_fixture(original_foliage tools/p2_original_foliage_runtime.cpp)
+add_executable(pc_p2_original_foliage_test tools/test_p2_original_foliage.cpp
+    pc_port/pc_p2_original_foliage.cpp pc_port/pc_p2_original_spawn_plan.cpp pc_port/pc_p2_original_catalog.cpp pc_port/pc_p2_original_actor.cpp)
+target_include_directories(pc_p2_original_foliage_test PRIVATE pc_port)
+target_compile_options(pc_p2_original_foliage_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME pc_p2_original_foliage_test COMMAND pc_p2_original_foliage_test)
+get_property(p2_retail_catalog_consumers DIRECTORY PROPERTY BUILDSYSTEM_TARGETS)
+foreach(p2_retail_catalog_consumer IN LISTS p2_retail_catalog_consumers)
+    if(NOT p2_retail_catalog_consumer STREQUAL "p2_retail_cave_catalog")
+        get_target_property(p2_retail_catalog_consumer_type ${p2_retail_catalog_consumer} TYPE)
+        if(p2_retail_catalog_consumer_type STREQUAL "EXECUTABLE" OR
+           p2_retail_catalog_consumer_type STREQUAL "SHARED_LIBRARY")
+            # Unreferenced archive members are not pulled into unrelated tools.
+            target_link_libraries(${p2_retail_catalog_consumer} PRIVATE p2_retail_cave_catalog)
         endif()
     endif()
 endforeach()

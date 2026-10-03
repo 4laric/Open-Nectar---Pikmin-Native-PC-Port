@@ -4,7 +4,7 @@
 using namespace p2retail;
 // Policy test double only; never a gameplay provider or native birth evidence.
 struct Provider final:FloorProvider {
- bool ready=true,missing=false,cleanup=true,consumed=false,receiptVerified=false,forge=false;
+ bool ready=true,missing=false,cleanup=true,consumed=false,receiptVerified=false,forge=false,commitReady=true;
  unsigned installs=0,releases=0;
  int actors[100]{};
  bool preflight(const CaveDescriptor&,const FloorDefinition&,unsigned,const SceneIdentity&,std::string& e)override{
@@ -24,6 +24,7 @@ struct Provider final:FloorProvider {
   if(forge&&!out.empty())out.front().identity.epoch++;
   return true;
  }
+ bool commit(const Snapshot&,std::string& e)override{if(!commitReady)e="test_commit_failure";return commitReady;}
  bool release(std::string& e)override{++releases;if(!cleanup)e="test_cleanup_failure";return cleanup;}
  bool verifyAbsent(const CaveDescriptor&,unsigned,const ContentRow&,const SceneIdentity&,const BirthIdentity&,const LiveBinding&)const override{
   return receiptVerified;
@@ -58,6 +59,11 @@ int main(){
  assert(error=="retail_floor_unverified_absent_source");provider.receiptVerified=true;
  assert(session.activate("tutorial_1",2,scene,true,authority,provider,error)&&session.snapshot(scene,s));
  assert(session.unload(error));
+ provider.commitReady=false;provider.cleanup=false;
+ assert(!session.activate("tutorial_1",2,scene,true,authority,provider,error));
+ assert(error=="test_commit_failure;release_failed:test_cleanup_failure"&&!session.snapshot(scene,s));
+ assert(!session.activate("tutorial_1",2,scene,true,authority,provider,error));
+ provider.cleanup=true;assert(session.unload(error));provider.commitReady=true;
  provider.forge=true;assert(!session.activate("tutorial_1",2,scene,true,authority,provider,error));
  assert(error=="retail_floor_origin_mismatch"&&!session.snapshot(scene,s));
  std::cout<<"PASS retail descriptor/source45/loose-map01/preflight/partial-cleanup/stale-scene policy\n";
