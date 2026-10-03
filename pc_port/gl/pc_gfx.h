@@ -136,6 +136,19 @@ struct PcGfxPipelineState {
 };
 PcGfxPipelineState pc_gfx_get_pipeline_state(void);
 void pc_gfx_set_pipeline_state(const PcGfxPipelineState& state);
+
+// Opaque, nonnested actual-context scope for NativeEffects halo GX transport.
+// Begin/end flush queued primitives on their respective sides of restoration.
+// Borrowed GX source arrays/texture owners must remain alive through end.
+// Captured texture release/reinit/refilter is prohibited; first-use upload of
+// a new uncaptured halo texture is allowed. Failed end retains the handle.
+// Graphics/DGX caches are separately retained by the actual renderer owner.
+struct PcGfxHaloScope;
+bool pc_gfx_begin_halo_scope(PcGfxHaloScope*& out, const char** error);
+bool pc_gfx_end_halo_scope(PcGfxHaloScope*& owned, const char** error);
+// Actual GXBegin/EndDisplayList eligibility only; not a recording backend.
+void pc_gfx_note_display_list_recording(bool begin);
+
 void pc_gfx_set_color_update(GXBool updateEnable);
 void pc_gfx_set_alpha_update(GXBool updateEnable);
 void pc_gfx_set_alpha_compare(GXCompare comp0, u8 ref0, GXAlphaOp op, GXCompare comp1, u8 ref1);
