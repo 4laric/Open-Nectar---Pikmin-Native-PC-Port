@@ -293,6 +293,7 @@ set(PC_PORT_SOURCES
     pc_port/pc_p2_original_gate.cpp
     pc_port/pc_p2_original_gate_state.cpp
     pc_port/pc_p2_original_gate_cache.cpp
+    pc_port/pc_p2_original_gate_checkpoint.cpp
     pc_port/pc_p2_original_gate_native.cpp
     pc_port/pc_p2_original_bridge.cpp
     pc_port/pc_p2_original_bridge_native.cpp
@@ -3540,6 +3541,8 @@ pikmin_add_ci_fixture(original_snagret tools/p2_original_snagret_runtime.cpp)
 
 add_executable(pc_p2_original_gate_test tools/test_p2_original_gate.cpp pc_port/pc_p2_original_gate.cpp pc_port/pc_p2_original_gate_state.cpp pc_port/pc_p2_original_gate_cache.cpp)
 target_include_directories(pc_p2_original_gate_test PRIVATE "${PROJECT_SOURCE_DIR}/pc_port")
+add_executable(pc_p2_original_gate_checkpoint_test tools/test_p2_original_gate_checkpoint.cpp pc_port/pc_p2_original_gate.cpp pc_port/pc_p2_original_gate_state.cpp pc_port/pc_p2_original_gate_cache.cpp pc_port/pc_p2_original_gate_checkpoint.cpp)
+target_include_directories(pc_p2_original_gate_checkpoint_test PRIVATE "${PROJECT_SOURCE_DIR}/pc_port")
 
 pikmin_add_ci_fixture(original_gate tools/p2_original_gate_runtime.cpp)
 add_executable(pc_p2_surface_water_drain_test tools/test_p2_surface_water_drain.cpp)

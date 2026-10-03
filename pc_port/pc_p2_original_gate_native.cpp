@@ -1,4 +1,5 @@
 #include "pc_p2_original_gate_native.h"
+#include "pc_randomizer.h"
 #include "BuildingItem.h"
 #include "Piki.h"
 #include "PikiMgr.h"
@@ -150,6 +151,35 @@ bool pc_p2_original_gate_forget(BuildingItem* b){
  die("owned gate retirement lost physical list node");
 }
 bool pc_p2_original_gate_snapshot(const Creature* b,GateState& s,std::string& id){auto i=actors.find(b);if(i==actors.end())return false;s=i->second.state;s.animationFrame=static_cast<const BuildingItem*>(b)->mItemAnimator.mAnimationCounter;const auto& r=row(i->second.uid);id=r.sourceSha+":"+r.sourceKey;return true;}
+bool pc_p2_original_gate_checkpoint_capture(const std::string& campaign,
+ const PcOriginalGateCheckpointIdentity& identity,std::vector<std::uint8_t>& out,std::string& e){
+ if(!pc_randomizer_original_session()||campaign!=pc_randomizer_original_campaign()
+    ||!identity||!admitted||records.empty()||actors.size()!=records.size()
+    ||generators.size()!=records.size()||birthOrder.size()!=records.size()){
+  e="gate checkpoint live selection/census/identity resolver incomplete";return false;
+ }
+ std::vector<GateRecord> authority;for(const auto& r:records)authority.push_back(r.second);
+ std::vector<GateCheckpointEntry> entries;std::set<const Generator*> seen;
+ for(unsigned order=0;order<birthOrder.size();++order){
+  const unsigned uid=birthOrder[order];const BuildingItem* body=nullptr;const GateBinding* binding=nullptr;
+  for(const auto& actor:actors)if(actor.second.uid==uid){
+   if(body){e="gate checkpoint source has duplicate bodies";return false;}
+   body=static_cast<const BuildingItem*>(actor.first);binding=&actor.second;
+  }
+  const auto* g=body?body->mGenerator:nullptr;const auto found=generators.find(g);
+  if(!body||!g||found==generators.end()||found->second!=uid
+     ||g->mLatestSpawnCreature!=body||g->mAliveCount!=1||!seen.insert(g).second){
+   e="gate checkpoint actual generator/body binding changed";return false;
+  }
+  GateCheckpointEntry entry;entry.order=order;entry.state=binding->state;
+  entry.state.animationFrame=body->mItemAnimator.mAnimationCounter;
+  if(!nativeFrameValid(entry.state,e)||!identity(g,body,entry.identity,e))return false;
+  if(body->mItemAnimator.mAnimationCounter!=entry.state.animationFrame
+     ||g->mLatestSpawnCreature!=body){e="gate checkpoint source advanced during readonly capture";return false;}
+  entries.push_back(entry);
+ }
+ return gateCheckpointExport(campaign,authority,entries,out,e);
+}
 std::vector<PcOriginalGateLink> pc_p2_original_gate_links(){
  std::vector<PcOriginalGateLink> links;
  for(unsigned uid:birthOrder)for(const auto& a:actors)if(a.second.uid==uid){const auto& r=row(uid);const auto& p=a.first->mSRT.t;links.push_back(PcOriginalGateLink{r.sourceSha+":"+r.sourceKey,{p.x,p.y,p.z},a.second.state.phase!=GatePhase::Open});break;}

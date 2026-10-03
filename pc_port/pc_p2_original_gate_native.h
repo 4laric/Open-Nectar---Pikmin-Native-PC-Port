@@ -1,5 +1,7 @@
 #pragma once
 #include "pc_p2_original_gate.h"
+#include "pc_p2_original_gate_checkpoint.h"
+#include <functional>
 #include "Generator.h"
 struct BuildingItem;
 struct Piki;
@@ -16,6 +18,12 @@ bool pc_p2_original_gate_save(BuildingItem*,RandomAccessStream&,bool& handled,st
 bool pc_p2_original_gate_load(BuildingItem*,RandomAccessStream&,bool& handled,std::string&);
 bool pc_p2_original_gate_forget(BuildingItem*); // unlinks only owned node-list bodies
 bool pc_p2_original_gate_snapshot(const Creature*,p2original::GateState&,std::string& identity);
+// Called with the scene clock stopped. The resolver reads retained actual
+// scene incarnation stamps; it must never bind, initialize or invent one.
+using PcOriginalGateCheckpointIdentity = std::function<bool(const Generator*,
+    const BuildingItem*,p2original::InstanceIdentity&,std::string&)>;
+bool pc_p2_original_gate_checkpoint_capture(const std::string& campaign,
+    const PcOriginalGateCheckpointIdentity&,std::vector<std::uint8_t>&,std::string&);
 struct PcOriginalGateLink {
  std::string identity;
  std::array<float,3> position{};
