@@ -161,7 +161,7 @@ int main() {
     check(poses.observe(1,2,3,1,14,2,8.4f),"capture actual pose");
     check(poses.observe(1,2,3,3,15,4,8.5f),"capture animated growth");
     const auto* pose=poses.find(3,2);check(pose&&pose->horizontal==5&&pose->low==14&&pose->high==15&&pose->radius==8.5f,"bounded union retains extrema");
-    check(PcPurplePoseEnvelope::projectedRadius(*pose,14.5f,6,reserve)&&reserve==20.5f,"all-yaw captured band reserve");
+    check(PcPurplePoseEnvelope::projectedRadius(*pose,14.5f,6,reserve)&&reserve>17.f&&reserve<20.f,"all-yaw captured band reserve");
     check(PcPurplePoseEnvelope::projectedRadius(*pose,100,6,reserve)&&reserve==0,"vertically separated band");
     check(!poses.observe(1,4,3,0,0,0,1),"same id foreign part refused");
     check(!poses.find(3,2),"identity refusal sticky");
@@ -171,9 +171,31 @@ int main() {
     check(captured17.observe(1,2,1751474532,1.726929f,14.588223f,2.445801f,8.4f)
         &&captured17.observe(1,2,1751474532,1.903809f,14.625286f,2.176514f,8.4f),"captured17 animation frames");
     const auto* actual=captured17.find(1751474532,2);
-    check(PcPurplePoseEnvelope::projectedRadius(*actual,14.6f,6,reserve)&&reserve>17.f,"captured animation retains reserve beyond current14.655 circle");
+    check(PcPurplePoseEnvelope::projectedRadius(*actual,14.6f,6,reserve)&&reserve>15.4f&&reserve<17.f,"captured animation retains reserve beyond current14.655 circle");
     auto bad=*pose;bad.horizontal=NAN;check(!PcPurplePoseEnvelope::projectedRadius(bad,14,6,reserve),"malformed captured bound refused");
     PcPurplePoseEnvelope bound;for(unsigned i=0;i<32;++i)check(bound.observe(1,i+1,i,0,0,0,1),"bounded part capture");
     check(!bound.observe(1,33,33,0,0,0,1),"part overflow refused");
+    PcPurplePoseEnvelope rotation;
+    check(rotation.observe(1,2,3,3,14,0,8.4f,1.570796327f),"captured rotated local pose");
+    float rx=0,rz=0;check(PcPurplePoseEnvelope::rotatedOffset(*rotation.find(3,2),1.570796327f,rx,rz)&&std::fabs(rx-3)<.0001f&&std::fabs(rz)<.0001f,"actual yaw reconstruction");
+    check(pcPurplePulseYawEligible(0,0,10,0,100,100,1,1.f/30.f),"native face and neutral cursor stay in admitted arc");
+    check(!pcPurplePulseYawEligible(0,10,0,0,100,100,1,1.f/30.f),"opposite pulse yaw refused");
+    check(!pcPurplePulseYawEligible(0,0,10,100,0,100,1,1.f/30.f),"neutral cursor heading outside arc refused");
+    check(!pcPurplePulseYawEligible(0,0,10,0,1,100,1,1.f/30.f),"cursor displacement may cross origin refused");
+    check(!pcPurplePulseYawEligible(0,0,10,0,100,100,3.1f,1.f/30.f),"loaded face overshoot refused");
+    check(!pcPurplePulseYawEligible(0,0,10,0,100,100,1,.04f),"unsupported timing refused");
+    check(!pcPurplePulseYawEligible(NAN,0,10,0,100,100,1,1.f/30.f),"invalid yaw refused");
+    check(pcPurplePulseYawEligible(0,0,10,0,100,100,3,1.f/60.f),"variable supported frame rate remains bounded");
+    check(pcPurplePulseYawEligible(0,0,10,std::sin(.39f)*100,std::cos(.39f)*100,0,1,1.f/30.f),"cursor arc boundary inside");
+    check(!pcPurplePulseYawEligible(0,0,10,std::sin(.4f)*100,std::cos(.4f)*100,0,1,1.f/30.f),"cursor beyond admitted yaw arc refuses");
+    const auto* captured=rotation.find(3,2);
+    check(PcPurplePoseEnvelope::projectedRadius(*captured,14,6,reserve),"local envelope projection");
+    for(int i=0;i<=32;++i){
+        const float yaw=-PcPurplePulseYawHalfArc+2*PcPurplePulseYawHalfArc*i/32;
+        float x=0,z=0;check(PcPurplePoseEnvelope::rotatedOffset(*captured,yaw,x,z),"intermediate captured yaw");
+        float nearest=1000;
+        for(int sample=-1;sample<=1;++sample){float sx=0,sz=0;check(PcPurplePoseEnvelope::rotatedOffset(*captured,sample*PcPurplePulseYawHalfArc,sx,sz),"envelope sample yaw");nearest=std::min(nearest,std::hypot(x-sx,z-sz));}
+        check(nearest<=reserve-15.4f+.0001f,"sampled chord reserve covers admitted intermediate yaw");
+    }
     std::puts("Purple collision trace controls PASS");
 }
