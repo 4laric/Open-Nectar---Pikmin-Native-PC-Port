@@ -150,6 +150,7 @@ P2SurfaceSession surfaceSession;
 std::string originalCampaign, treasureSource;
 std::string originalCatalogRoot;
 p2original::SourceCalendar originalCalendar;
+p2originalsession::Bundle originalInputs;
 bool originalStandalone=false;
 p2treasure::Catalog verifiedTreasureCatalog;
 std::unordered_map<unsigned, unsigned> p2CheckIndices;
@@ -810,8 +811,8 @@ bool pc_randomizer_init(int argc, char** argv) {
         p2originalsession::Bundle bundle;std::string error;
         if(!p2originalsession::load(fingerprint,originalCampaign,bundle,error))fail("original immutable session inputs invalid");
         std::string calendarBytes,rawStages;
-        if(!p2treasureplacements::bounded("p2-original/calendar.p2sc",16*1024*1024,calendarBytes)
-            ||!p2treasureplacements::bounded("p2-original/stages.txt",1024*1024,rawStages)
+        if(!p2originalsession::input(bundle,"p2-original/calendar.p2sc",calendarBytes,error)||calendarBytes.size()>16*1024*1024
+            ||!p2originalsession::input(bundle,"p2-original/stages.txt",rawStages,error)||rawStages.size()>1024*1024
             ||!originalCalendar.read(calendarBytes,originalCampaign,p2treasureplacements::hash(rawStages),error))fail("original source calendar invalid");
         originalCatalogRoot=std::filesystem::canonical("p2-original").generic_string();
         const char* catalogLocator=std::getenv("PIKMIN_P2_ORIGINAL_CATALOG");
@@ -819,6 +820,7 @@ bool pc_randomizer_init(int argc, char** argv) {
         if(!p2original::originalProgress().initialize(originalCampaign,error)||!pc_p2_original_incarnation_initialize(originalCampaign,error))fail("original source authority initialization failed");
         directory=std::filesystem::absolute(bootstrap).parent_path();campaignDirectory=directory.parent_path().parent_path()/"campaign";saveRoot=(campaignDirectory/"card").generic_string();
         if(std::filesystem::exists(directory/"hello.txt")||std::filesystem::exists(directory/"checks.txt"))fail("original run directory already used");
+        originalInputs=std::move(bundle);
         originalStandalone=true;schema=1;checkCount=0;loadCampaignCheckpoint();enabled=true;pc_randomizer_update();
         std::ofstream hello(directory/"hello.txt");hello<<"ORIGINAL_P2_HELLO 1 "<<token<<' '<<fingerprint<<" original-campaign-state-v1 p2-second-captain-v1";
         if(!treasureSource.empty())hello<<" source-treasure-state-v1";hello<<" END\n";hello.close();if(!hello)fail("cannot publish original native handshake");
@@ -2458,6 +2460,12 @@ bool pc_randomizer_original_calendar_plan(const std::string& course,const p2orig
 }
 std::string pc_randomizer_campaign_treasure_source(){return treasureSource;}
 std::string pc_randomizer_session_fingerprint(){return hex64(fingerprint)&&enabled?fingerprint:std::string{};}
+bool pc_randomizer_original_input(const std::string& role,std::string& bytes,std::string& error){
+    if(!enabled||!originalStandalone||originalInputs.campaign!=originalCampaign||!p2originalsession::path(role)){
+        error="original immutable input authority is inactive or path invalid";return false;
+    }
+    return p2originalsession::input(originalInputs,role,bytes,error);
+}
 bool pc_randomizer_load_campaign(void* destination) {
     if (!pc_randomizer_resumed()) return false;
     std::memcpy(destination, campaignBlock.data(), 32768);

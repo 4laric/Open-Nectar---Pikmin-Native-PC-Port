@@ -25,8 +25,15 @@ int main(int argc,char** argv){
  for(const char* course:{"tutorial","forest","yakushima","last"}){const bool tutorial=std::string(course)=="tutorial";calendar<<course<<" 1\ndefaultgen.txt "<<std::string(64,'b')<<' '<<(tutorial?2:1)<<'\n';calendar<<p2original::originalGeneratorUid(std::string(course)+"/defaultgen.txt#0")<<" 0 teki\n";if(tutorial)calendar<<row.spawn.uid<<" 1 piki\n";calendar<<"0\n0\n";}calendar<<"END\n";
  bytes=calendar.str();files["p2-original/calendar.p2sc"]=p2treasureplacements::hash(bytes);save("p2-original/calendar.p2sc",bytes);
  bytes="actual physical input control";files["assets/terrain.bin"]=p2treasureplacements::hash(bytes);save("assets/terrain.bin",bytes);
+ const std::string bank="explicit selected source bank";files["p2-original-egg-bank.txt"]=p2treasureplacements::hash(bank);save("p2-original-egg-bank.txt",bank);
  std::ostringstream out;out<<"P2_ORIGINAL_SESSION 1 "<<campaign<<' '<<files.size()<<'\n';for(const auto& f:files)out<<f.first<<' '<<f.second<<'\n';out<<"END\n";const auto descriptor=out.str(),fingerprint=p2treasureplacements::hash(descriptor);save("p2-original-session.txt",descriptor);
  p2originalsession::Bundle bundle;check(p2originalsession::load(fingerprint,campaign,bundle,reason));check(bundle.files==files);check(!p2original::originalProgress().ready());
+ std::string selectedInput="old output";check(p2originalsession::input(bundle,"p2-original-egg-bank.txt",selectedInput,reason));check(selectedInput==bank);
+ save("p2-original-egg-bank.txt","changed source bank");check(!p2originalsession::input(bundle,"p2-original-egg-bank.txt",selectedInput,reason));check(selectedInput==bank);
+ check(!p2originalsession::input(bundle,"assets/unselected.bin",selectedInput,reason));check(selectedInput==bank);
+ check(!p2originalsession::input(bundle,"p2-original/../card.sav",selectedInput,reason));check(selectedInput==bank);
+ check(!p2originalsession::load(fingerprint,campaign,bundle,reason));save("p2-original-egg-bank.txt",bank);check(p2originalsession::load(fingerprint,campaign,bundle,reason));
+ check(p2originalsession::path("size20-joints.txt"));check(!p2originalsession::path("p2-original-unknown-bank.txt"));
  for(std::size_t n=0;n<descriptor.size()-1;++n){auto old=bundle;check(!p2originalsession::parse(descriptor.substr(0,n),fingerprint,campaign,bundle));check(bundle.files==old.files);}
  check(!p2originalsession::parse(descriptor,fingerprint,std::string(64,'c'),bundle));
  save("assets/terrain.bin","changed physical terrain");check(!p2originalsession::load(fingerprint,campaign,bundle,reason));check(!p2original::originalProgress().ready());save("assets/terrain.bin",bytes);

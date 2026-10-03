@@ -35,6 +35,8 @@ bool pc_randomizer_original_calendar_plan(const std::string& course,const p2orig
 std::string pc_randomizer_campaign_treasure_source();
 // Stable selected immutable descriptor fingerprint; never a process token.
 std::string pc_randomizer_session_fingerprint();
+// Reverify an explicitly selected immutable input at each actual native read.
+bool pc_randomizer_original_input(const std::string& relativeRole, std::string& bytes, std::string& error);
 bool pc_randomizer_enabled();
 // SAVE1229 supplies this verified ORIGINAL_P2_CAMPAIGN bootstrap boundary.
 // Terrain, typed engineering fixtures and AP seeds do not enable it.
