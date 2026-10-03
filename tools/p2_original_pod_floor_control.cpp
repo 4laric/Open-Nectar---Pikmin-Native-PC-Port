@@ -11,8 +11,8 @@ struct UnusedAuthority:p2retail::FloorIdentityAuthority {
 };
 int main(int argc,char** argv){
  std::string modelPath;
- assert(p2originalpod::engineModelPath("","dataDir/","courses/pikmin2room/pod.mod",modelPath));
- assert(modelPath=="assets/dataDir/courses/pikmin2room/pod.mod");
+ assert(p2originalpod::engineModelPath("","dataDir/","courses/pikmin2retailpod/pod.mod",modelPath));
+ assert(modelPath=="assets/dataDir/courses/pikmin2retailpod/pod.mod");
  assert(p2originalpod::engineModelPath("/","dataDir/","pod.mod",modelPath)&&modelPath=="assets/dataDir/pod.mod");
  assert(p2originalpod::engineModelPath("private/","dataDir/","pod.mod",modelPath)&&modelPath=="assets/private/dataDir/pod.mod");
  assert(!p2originalpod::engineModelPath(nullptr,"dataDir/","pod.mod",modelPath));
