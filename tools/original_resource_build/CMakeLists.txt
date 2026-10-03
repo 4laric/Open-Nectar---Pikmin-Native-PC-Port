@@ -11,9 +11,8 @@ target_sources(pikmin_pc PRIVATE
  "${RESOURCE_SOURCE}/pc_port/pc_p2_original_gas_links.cpp"
  "${RESOURCE_SOURCE}/pc_port/pc_p2_original_gas_save.cpp"
  "${RESOURCE_SOURCE}/pc_port/pc_p2_original_egg.cpp"
- "${RESOURCE_SOURCE}/pc_port/pc_p2_original_wisp.cpp"
- "${RESOURCE_SOURCE}/pc_port/pc_p2_original_resource_contents.cpp")
-target_sources(pikmin_pc PRIVATE "${RESOURCE_SOURCE}/pc_port/pc_p2_original_resource_state.cpp")
+ "${RESOURCE_SOURCE}/pc_port/pc_p2_original_wisp.cpp")
+
 add_executable(p2_original_gas_policy
  "${RESOURCE_SOURCE}/tools/p2_original_gas_test.cpp"
  "${RESOURCE_SOURCE}/pc_port/pc_p2_original_gas.cpp"
@@ -27,8 +26,7 @@ add_executable(p2_original_wisp_policy
  "${RESOURCE_SOURCE}/pc_port/pc_p2_original_wisp.cpp"
  "${RESOURCE_SOURCE}/pc_port/pc_p2_original_spawn_plan.cpp")
 add_executable(p2_original_egg_contents_policy
- "${RESOURCE_SOURCE}/pc_port/pc_p2_original_resource_contents_test.cpp"
- "${RESOURCE_SOURCE}/pc_port/pc_p2_original_resource_contents.cpp")
+ "${RESOURCE_SOURCE}/pc_port/pc_p2_original_resource_contents_test.cpp")
 add_executable(p2_original_egg_policy
  "${RESOURCE_SOURCE}/tools/p2_original_egg_test.cpp"
  "${RESOURCE_SOURCE}/pc_port/pc_p2_original_egg.cpp"
@@ -43,8 +41,7 @@ add_executable(p2_original_gas_save_policy
  "${RESOURCE_SOURCE}/pc_port/pc_p2_original_gas_save.cpp")
 add_executable(p2_original_resource_state_policy
  "${RESOURCE_SOURCE}/tools/p2_original_resource_state_test.cpp"
- "${RESOURCE_SOURCE}/pc_port/pc_p2_original_resource_state.cpp"
- "${RESOURCE_SOURCE}/pc_port/pc_p2_original_resource_contents.cpp")
+ "${RESOURCE_SOURCE}/pc_port/pc_p2_original_resource_state.cpp")
 foreach(target p2_original_gas_policy p2_original_wisp_policy p2_original_egg_contents_policy p2_original_egg_policy p2_original_gas_links_policy p2_original_gas_save_policy p2_original_resource_state_policy)
  target_include_directories(${target} PRIVATE "${RESOURCE_SOURCE}/pc_port")
  target_compile_options(${target} PRIVATE -Wall -Wextra -Werror -UNDEBUG)

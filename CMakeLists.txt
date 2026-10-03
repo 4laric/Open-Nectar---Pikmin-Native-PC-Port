@@ -353,6 +353,9 @@ set(PC_PORT_SOURCES
     pc_port/pc_p2_species.cpp
     pc_port/pc_p2_bulbmin.cpp
     pc_port/pc_p2_white.cpp
+    pc_port/pc_p2_sprays.cpp
+    pc_port/pc_p2_original_resource_state.cpp
+    pc_port/pc_p2_original_resource_contents.cpp
     pc_port/pc_p2_white_poison.cpp
     pc_port/pc_p2_cave.cpp
     pc_port/pc_p2_cave_campaign_cache_engine.cpp
@@ -3324,3 +3327,10 @@ add_executable(p2_campaign_economy_test tools/test_p2_campaign_economy.cpp)
 target_include_directories(p2_campaign_economy_test PRIVATE pc_port)
 target_compile_options(p2_campaign_economy_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
 add_test(NAME p2_campaign_economy_test COMMAND p2_campaign_economy_test)
+
+if(PIKMIN_BUILD_TESTS)
+    add_executable(pc_p2_spicy_policy_test tools/p2_spicy_policy_test.cpp pc_port/pc_p2_original_resource_state.cpp pc_port/pc_p2_original_resource_contents.cpp)
+    target_include_directories(pc_p2_spicy_policy_test PRIVATE "${PROJECT_SOURCE_DIR}/pc_port")
+    target_compile_options(pc_p2_spicy_policy_test PRIVATE -UNDEBUG)
+    add_test(NAME p2_spicy_policy COMMAND pc_p2_spicy_policy_test)
+endif()

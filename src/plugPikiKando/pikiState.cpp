@@ -11,6 +11,7 @@
 #include "pc_p2_white.h"
 #include "pc_p2_breadbug_teki.h"
 #include "PikiState.h"
+#include "pc_p2_sprays.h"
 #include "AIConstant.h"
 #include "BombItem.h"
 #include "CPlate.h"
@@ -157,6 +158,7 @@ void PikiStateMachine::init(Piki* piki)
 	create(PIKISTATE_Count);
 
 	registerState(new PikiNormalState());
+	registerState(pc_p2_spicy_state());
 	registerState(new PikiFlickState());
 	registerState(new PikiFlownState());
 	registerState(new PikiEmitState());
