@@ -426,6 +426,7 @@ set(PC_PORT_SOURCES
     pc_port/pc_midday_render_graph.cpp
     pc_port/pc_midday_render_graph_engine.cpp
     pc_port/pc_midday_render_descriptors_engine.cpp
+    pc_port/pc_midday_render_prototypes_engine.cpp
     pc_port/pc_midday_render_mutable.cpp
     pc_port/pc_midday_render_mutable_engine.cpp
     pc_port/pc_midday_animation_context.cpp
@@ -3464,3 +3465,24 @@ target_include_directories(pc_midday_render_graph_test PRIVATE pc_port include)
 target_compile_definitions(pc_midday_render_graph_test PRIVATE PIKI_PC_PORT)
 target_compile_options(pc_midday_render_graph_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
 add_test(NAME pc_midday_render_graph COMMAND pc_midday_render_graph_test)
+
+# Linux headless source census controls use explicit loader/physical-fence stubs.
+# Actual factory/renderer acceptance remains the real-engine fixture.
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    add_executable(pc_midday_render_prototypes_test
+        tools/pc_midday_render_prototypes_test.cpp
+        pc_port/pc_midday_render_prototypes_engine.cpp
+        pc_port/pc_midday_render_graph.cpp
+        pc_port/pc_midday_render_descriptors_engine.cpp
+        pc_port/pc_midday_actor_archive.cpp
+        src/sysCommon/id32.cpp)
+    target_include_directories(pc_midday_render_prototypes_test PRIVATE
+        pc_port include include/Dolphin include/Dolphin/OS include/Dolphin/GX)
+    target_compile_definitions(pc_midday_render_prototypes_test PRIVATE
+        PIKI_PC_PORT=1 PIKI_USE_JAUDIO=0 VERSION_GPIE01_01=1 DTK_CONFIG_NONMATCHING=1)
+    target_compile_options(pc_midday_render_prototypes_test PRIVATE
+        ${NATIVE_COMPILE_OPTIONS} -ffunction-sections -fdata-sections
+        -include "${CMAKE_CURRENT_SOURCE_DIR}/pc_port/pc_types.h")
+    target_link_options(pc_midday_render_prototypes_test PRIVATE -Wl,--gc-sections)
+    add_test(NAME pc_midday_render_prototypes COMMAND pc_midday_render_prototypes_test)
+endif()
