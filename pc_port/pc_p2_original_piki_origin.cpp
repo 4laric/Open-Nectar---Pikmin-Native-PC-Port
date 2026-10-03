@@ -62,6 +62,7 @@ bool pc_p2_original_piki_origin_restore_saved(Piki* p,const OriginalPikiOrigin& 
  return attach(p,o);
 }
 void pc_p2_original_piki_origin_forget(Piki* p){bodies.erase(p);}
+void pc_p2_original_piki_origin_scene_exit() noexcept {bodies.clear();}
 
 bool pc_p2_original_piki_body_associate_birth(Piki* p,const OriginalPikiBody& body){
  // Fresh source setZikatu(true/false) never produces a previously-recruited body.

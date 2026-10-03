@@ -39,6 +39,7 @@
 #include "pc_p2_sarai_manager.h"
 #include "pc_p2_cave.h"
 #include "pc_p2_cave_campaign.h"
+#include "pc_p2_original_piki_origin.h"
 #include "pc_p2_cave_items_engine.h"
 #include "pc_p2_kurage_receiver.h"
 #include "pc_p2_captain.h"
@@ -1011,6 +1012,7 @@ void GameCoreSection::exitStage()
 {
 #if defined(PIKI_PC_PORT)
 	pc_p2_cave_campaign_scene_exit();
+	pc_p2_original_piki_origin_scene_exit();
 	pc_demon_drop_scene_exit();
 	pc_demon_scene_exit();
 #endif

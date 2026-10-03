@@ -62,5 +62,18 @@ int main(){std::string e,fp(64,'a');int slots[3]={};auto p=reinterpret_cast<Piki
  pc_p2_original_piki_origin_forget(q);auto freshReplay=body;freshReplay.state={0,true,true};CHECK(!pc_p2_original_piki_body_birth_admit(freshReplay));bodyPermitted=false;CHECK(!pc_p2_original_piki_body_restore_saved(p,body));bodyPermitted=true;
  CHECK(pc_p2_original_piki_body_restore_saved(p,body)); // selected older SAVE remains legitimate
  pc_p2_original_piki_origin_forget(p);CHECK(pc_p2_original_piki_origin_associate_birth(p,o));CHECK(!pc_p2_original_piki_body_query(p,bodyOut));CHECK(!pc_p2_original_piki_body_recruited(p));pc_p2_original_piki_origin_forget(p);
+ auto sceneBody=body;sceneBody.origin.activation=8;sceneBody.state={0,true,true};
+ CHECK(pc_p2_original_piki_body_associate_birth(p,sceneBody));
+ CHECK(pc_p2_original_piki_body_wild(p));CHECK(pc_p2_original_piki_body_color_access(p,0));
+ pc_p2_original_piki_origin_scene_exit();
+ CHECK(!pc_p2_original_piki_origin_query(p,out));CHECK(!pc_p2_original_piki_body_query(p,bodyOut));
+ CHECK(!pc_p2_original_piki_body_wild(p));CHECK(!pc_p2_original_piki_body_color_access(p,0));
+ CHECK(pc_p2_original_piki_origin_install(fp,{row},e));
+ CHECK(!pc_p2_original_piki_body_birth_admit(sceneBody));
+ CHECK(!pc_p2_original_piki_body_associate_birth(q,sceneBody));
+ // Scene teardown does not revoke an authenticated selected SAVE rollback.
+ ticket=sceneBody.origin;selectedState=sceneBody.state;
+ CHECK(pc_p2_original_piki_body_restore_saved(q,sceneBody));
+ pc_p2_original_piki_origin_scene_exit();CHECK(!pc_p2_original_piki_body_query(q,bodyOut));
  std::cout<<"PASS "<<checks<<" original Piki origin controls; cave ticket mocked, no native birth\n";
 }
