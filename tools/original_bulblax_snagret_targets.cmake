@@ -12,3 +12,5 @@ add_executable(pc_p2_original_bulblax_snagret_test
 target_include_directories(pc_p2_original_bulblax_snagret_test PRIVATE pc_port)
 target_compile_options(pc_p2_original_bulblax_snagret_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
 add_test(NAME pc_p2_original_bulblax_snagret_test COMMAND pc_p2_original_bulblax_snagret_test)
+
+pikmin_add_ci_fixture(original_snagret tools/p2_original_snagret_runtime.cpp)
