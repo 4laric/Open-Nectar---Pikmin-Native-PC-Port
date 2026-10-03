@@ -284,6 +284,7 @@ set(PC_PORT_SOURCES
     pc_port/pc_p2_original_captain_scene.cpp
     pc_port/pc_p2_piki_jpa_bank.cpp
     pc_port/pc_p2_piki_jpa_selected.cpp
+    pc_port/pc_p2_source_camera_math.cpp
     pc_port/pc_p2_equipment.cpp
     pc_port/pc_p2_original_captain_damage.cpp
     pc_port/pc_p2_original_captain_runtime.cpp
