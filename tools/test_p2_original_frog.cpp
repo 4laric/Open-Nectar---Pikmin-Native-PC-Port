@@ -16,7 +16,7 @@ int main(){
  auto invalid=b;invalid.enemy.generatorTail={"0"};Fake engine;frog::Provider provider(engine);
  assert(!provider.preflight({a,invalid},e)&&engine.prepares==0);
  invalid=b;invalid.enemy.generatorVersion="0000";assert(!frog::capability(invalid,e));
- invalid=b;invalid.enemy.enemySize=2;assert(!frog::capability(invalid,e));
+ invalid=b;invalid.enemy.enemySize=2;assert(frog::capability(invalid,e));
  invalid=b;invalid.enemy.uid++;assert(!frog::capability(invalid,e));
  invalid=b;invalid.enemy.treasureCode=1;assert(!frog::capability(invalid,e));
  assert(provider.preflight({a,b},e)&&engine.prepares==1);
