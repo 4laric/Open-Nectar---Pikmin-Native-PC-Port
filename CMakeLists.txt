@@ -284,6 +284,7 @@ set(PC_PORT_SOURCES
     pc_port/pc_p2_original_chappy.cpp
     pc_port/pc_p2_original_chappy_native.cpp
     pc_port/pc_p2_original_group_engine.cpp
+    pc_port/pc_p2_original_onyon.cpp
     pc_port/pc_p2_original_piki_init.cpp
     pc_port/pc_p2_original_sprout_native.cpp
     pc_port/pc_p2_original_sprout_reader.cpp
@@ -293,7 +294,6 @@ set(PC_PORT_SOURCES
     pc_port/pc_p2_original_drop.cpp
     pc_port/pc_p2_original_drop_engine.cpp
     pc_port/pc_p2_original_gen_object.cpp
-    pc_port/pc_p2_original_onyon.cpp
     pc_port/pc_p2_original_onyon_native.cpp
     pc_port/pc_p2_original_gate.cpp
     pc_port/pc_p2_original_gate_state.cpp
@@ -3409,10 +3409,6 @@ add_test(NAME pc_midday_render_graph COMMAND pc_midday_render_graph_test)
         pc_port/pc_p2_original_piki_manifest.cpp)
     target_include_directories(pc_p2_original_piki_manifest_test PRIVATE "${PROJECT_SOURCE_DIR}/pc_port")
     add_test(NAME p2_original_piki_manifest COMMAND pc_p2_original_piki_manifest_test)
-    add_executable(pc_p2_original_progress_test tools/pc_p2_original_progress_test.cpp
-        pc_port/pc_p2_original_progress.cpp)
-    target_include_directories(pc_p2_original_progress_test PRIVATE "${PROJECT_SOURCE_DIR}/pc_port")
-    add_test(NAME p2_original_progress COMMAND pc_p2_original_progress_test)
 
     add_executable(pc_p2_original_piki_init_test tools/pc_p2_original_piki_init_test.cpp
         pc_port/pc_p2_original_piki_init.cpp)
@@ -3582,6 +3578,7 @@ add_executable(p2_original_progress_test tools/pc_p2_original_progress_test.cpp 
 target_include_directories(p2_original_progress_test PRIVATE pc_port)
 target_compile_options(p2_original_progress_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
 add_test(NAME p2_original_progress_standalone COMMAND p2_original_progress_test)
+add_test(NAME p2_original_progress COMMAND p2_original_progress_test)
 
 add_executable(pc_p2_original_catfish_test tools/test_p2_original_catfish.cpp
     pc_port/pc_p2_original_catfish.cpp pc_port/pc_p2_original_spawn_plan.cpp
