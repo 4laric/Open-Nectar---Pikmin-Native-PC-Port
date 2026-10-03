@@ -472,6 +472,13 @@ void GoalItem::enterGoal(Piki* piki)
  */
 void GoalItem::exitPikis(int pikis, int requesterNaviId)
 {
+    if (pc_p2_original_onyon_campaign_owned(this)) {
+        int available = 100 - int(GameStat::mapPikis) - itemMgr->getContainerExitCount();
+        int stored = mHeldPikis[Leaf] + mHeldPikis[Bud] + mHeldPikis[Flower] - mPikisToExit;
+        if (available <= 0 || stored <= 0 || pikis <= 0) return;
+        if (pikis > available) pikis = available;
+        if (pikis > stored) pikis = stored;
+    }
     if (pc_randomizer_expanded()) {
         int available = pc_randomizer_field_capacity() - int(GameStat::mapPikis) - itemMgr->getContainerExitCount();
         if (available <= 0 || pikis <= 0) return;
@@ -496,15 +503,19 @@ void GoalItem::exitPikis(int pikis, int requesterNaviId)
 Piki* GoalItem::exitPiki()
 {
     if (!pc_p2_original_onyon_color_access(this, pc_bbft_color_access(mOnionColour))) return nullptr;
+    const bool original = pc_p2_original_onyon_campaign_owned(this);
+    if (original && (mPikisToExit <= 0
+        || mHeldPikis[Leaf] + mHeldPikis[Bud] + mHeldPikis[Flower] <= 0)) return nullptr;
 	int leg = gsys->getRand(1.0f) * 3.0f;
 	if (leg >= 3) {
 		leg = 2;
 	}
 	CollPart* legColl          = mCollInfo->getSphere(leg_ids[leg]);
 	pikiMgr->containerExitMode = true;
-	Piki* piki                 = (Piki*)pikiMgr->birth();
+	Piki* piki = static_cast<Piki*>(original ? pikiMgr->birthOriginalP2Container() : pikiMgr->birth());
 	pikiMgr->containerExitMode = false;
 	if (!piki) {
+        if (original) return nullptr;
 #if defined(PIKI_PC_PORT)
 		// Co-op: the exit that failed is still counted off by GoalItem::update (mPikisToExit--), so forfeit one
 		// owed exit too; otherwise the debt outlives the queue and the next day-start exit goes to captain 2.
@@ -908,6 +919,12 @@ void GoalItem::update()
 	if (mIsDispensingPikis) {
 		if (mPikiSpawnTimer <= 0.0f) {
 			if (!exitPiki()) {
+                if (pc_p2_original_onyon_campaign_owned(this)) {
+                    // Keep the reserved exit and stock intact until a real
+                    // body can be allocated; no failed exit consumes a queue.
+                    mPikiSpawnTimer = 0.2f;
+                    return;
+                }
 				int mapPikis = GameStat::mapPikis;
 				int mePikis  = GameStat::mePikis;
 				BUGPRINT("map=%d mePiki=%d exitC=%d", mapPikis, mePikis, mPikisToExit);

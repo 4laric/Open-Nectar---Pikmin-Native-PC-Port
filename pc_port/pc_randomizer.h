@@ -26,6 +26,9 @@ int pc_randomizer_carry_strength(int color);
 // Standalone file-IPC adapter. No game state is touched before validation.
 bool pc_randomizer_init(int argc, char** argv);
 bool pc_randomizer_enabled();
+// SAVE1229 supplies this verified ORIGINAL_P2_CAMPAIGN bootstrap boundary.
+// Terrain, typed engineering fixtures and AP seeds do not enable it.
+bool pc_randomizer_original_session();
 // Separate, versioned TheLynk AP contract. Physical checks and rewards differ.
 bool pc_randomizer_thelynk();
 bool pc_randomizer_thelynk_part(unsigned model, bool received);
