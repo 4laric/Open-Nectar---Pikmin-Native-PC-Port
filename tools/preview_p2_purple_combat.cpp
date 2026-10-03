@@ -13,6 +13,7 @@
 #include "pc_purple_collision_trace.h"
 #include "pc_purple_sdl_axis_policy.h"
 #include "pc_purple_dismiss_policy.h"
+#include "pc_purple_pose_envelope.h"
 #include "KeyConfig.h"
 #include "timing/pc_render_phase.h"
 #include "pc_diary_observer.h"
@@ -332,6 +333,8 @@ struct PurpleTransportTrace : ActTransport {
 class PurpleCombatApp : public PlugPikiApp {
     struct PluckObstacle { Vector3f centre; float radius; };
     std::vector<PluckObstacle> pluckObstacles;
+    std::vector<PluckObstacle> pluckAdmissionObstacles;
+    PcPurplePoseEnvelope capturedCaptainPoses;
     std::vector<Vector3f> pluckRoute;
     size_t pluckRouteIndex=0;
     bool sdlPluckBraking=false;
@@ -357,6 +360,17 @@ class PurpleCombatApp : public PlugPikiApp {
     bool pluckSegmentClear(const Vector3f& a,const Vector3f& b) const {
         const float dx=b.x-a.x,dz=b.z-a.z,length2=dx*dx+dz*dz;
         for(const auto& obstacle:pluckObstacles) {
+            const float t=length2>0?std::max(0.f,std::min(1.f,((obstacle.centre.x-a.x)*dx+(obstacle.centre.z-a.z)*dz)/length2)):0.f;
+            const float x=a.x+t*dx-obstacle.centre.x,z=a.z+t*dz-obstacle.centre.z;
+            if(x*x+z*z<obstacle.radius*obstacle.radius) return false;
+        }
+        return true;
+    }
+    bool pluckAdmissionSegmentClear(const Vector3f& a,const Vector3f& b) const {
+        if(!std::isfinite(a.x)||!std::isfinite(a.z)||!std::isfinite(b.x)||!std::isfinite(b.z))return false;
+        const float dx=b.x-a.x,dz=b.z-a.z,length2=dx*dx+dz*dz;
+        for(const auto& obstacle:(sdlAcquisitionMode()?pluckAdmissionObstacles:pluckObstacles)) {
+            if(!std::isfinite(obstacle.centre.x)||!std::isfinite(obstacle.centre.z)||!std::isfinite(obstacle.radius)||obstacle.radius<0)return false;
             const float t=length2>0?std::max(0.f,std::min(1.f,((obstacle.centre.x-a.x)*dx+(obstacle.centre.z-a.z)*dz)/length2)):0.f;
             const float x=a.x+t*dx-obstacle.centre.x,z=a.z+t*dz-obstacle.centre.z;
             if(x*x+z*z<obstacle.radius*obstacle.radius) return false;
@@ -393,6 +407,13 @@ class PurpleCombatApp : public PlugPikiApp {
                 }
                 if(dy<sum) pluckObstacles.push_back({Vector3f(part->mCentre.x-offset.x,n->mSRT.t.y,part->mCentre.z-offset.z),
                     std::sqrt(sum*sum-dy*dy)});
+                if(sdlAcquisitionMode()) {
+                    const auto* envelope=capturedCaptainPoses.find(unsigned(captain->getID().mId),reinterpret_cast<std::uintptr_t>(captain));
+                    float reserve=0;
+                    require(envelope && PcPurplePoseEnvelope::projectedRadius(*envelope,part->mCentre.y-n->mSRT.t.y,part->mRadius,reserve),"captured pose envelope invalid");
+                    if(reserve>0)pluckAdmissionObstacles.push_back({Vector3f(part->mCentre.x,n->mSRT.t.y,part->mCentre.z),reserve});
+                    if(ticks%30==0)std::printf("P2_PURPLE_PLUCK_POSE_ADMISSION tick=%d captain_id=%u violet_id=%u captured_horizontal=%.6f captured_low=%.6f captured_high=%.6f captured_radius=%.6f admission_radius=%.6f captured_all_yaw=1 future_animation_sweep_proven=0 current_guard_unchanged=1 read_only=1 actor_writes=0\n",ticks,unsigned(captain->getID().mId),unsigned(part->getID().mId),envelope->horizontal,envelope->low,envelope->high,envelope->radius,reserve);
+                }
             }
         }
         for(int i=0;i<part->getChildCount();++i) collectPluckObstacles(part->getChildAt(i),n,captainParts,depth+1);
@@ -403,8 +424,13 @@ class PurpleCombatApp : public PlugPikiApp {
         std::vector<CollPart*> captainParts;
         collectCaptainParts(n->mCollInfo->getBoundingSphere(),captainParts);
         require(!captainParts.empty(),"captain collision parts absent");
-        pluckObstacles.clear();
+        pluckObstacles.clear();pluckAdmissionObstacles.clear();
+        if(sdlAcquisitionMode())for(CollPart* part:captainParts) {
+            const Vector3f offset=part->mCentre-n->mSRT.t;
+            require(capturedCaptainPoses.observe(reinterpret_cast<std::uintptr_t>(n),reinterpret_cast<std::uintptr_t>(part),unsigned(part->getID().mId),offset.x,offset.y,offset.z,part->mRadius),"captain pose identity/finite/bound invalid");
+        }
         collectPluckObstacles(violet->mCollInfo->getBoundingSphere(),n,captainParts);
+        if(sdlAcquisitionMode())pluckAdmissionObstacles.insert(pluckAdmissionObstacles.end(),pluckObstacles.begin(),pluckObstacles.end());
     }
     void pluckTrace(const char* event,Navi* n,PikiHeadItem* head,Pom* violet) {
         if(!sdlAcquisitionMode())return;
@@ -429,7 +455,7 @@ class PurpleCombatApp : public PlugPikiApp {
         refreshPluckObstacles(n,violet);
         pluckTrace("plan_begin",n,head,violet);
         auditBody("captain_route",n);
-        for(const auto& obstacle:pluckObstacles) std::printf("P2_PURPLE_PLUCK_OBSTACLE xyz=%.3f,%.3f,%.3f radius=%.3f live_part_pairs=1\n",
+        for(const auto& obstacle:(sdlAcquisitionMode()?pluckAdmissionObstacles:pluckObstacles)) std::printf("P2_PURPLE_PLUCK_OBSTACLE xyz=%.3f,%.3f,%.3f radius=%.3f admission_union=1 future_animation_sweep_proven=0\n",
             obstacle.centre.x,obstacle.centre.y,obstacle.centre.z,obstacle.radius);
         std::vector<Vector3f> nodes{n->mSRT.t};std::vector<bool> goal{false};
         auto addNode=[&](Vector3f p,bool isGoal) {
@@ -438,7 +464,7 @@ class PurpleCombatApp : public PlugPikiApp {
             // retain the existing bounded no-route refusal; never reverse
             // a minimum-strength walking command across an arrival point.
             if(sdlAcquisitionMode() && !isGoal && planarDistance(n->mSRT.t,p)<=4.f) return;
-            if(pluckSegmentClear(p,p)) {nodes.push_back(p);goal.push_back(isGoal);}
+            if(pluckAdmissionSegmentClear(p,p)) {nodes.push_back(p);goal.push_back(isGoal);}
         };
         // Choose a reachable position inside the engine's actual pluck range,
         // using the real sprout and current Violet parts. This plans controller
@@ -452,7 +478,7 @@ class PurpleCombatApp : public PlugPikiApp {
                 for(float radius=.5f;radius<pluckRange-.25f;radius+=.25f) {
                     Vector3f point=head->mSRT.t+Vector3f(radius*std::cos(angle),0,radius*std::sin(angle));
                     float slack=pluckRange-.25f-radius;
-                    for(const auto& obstacle:pluckObstacles)slack=std::min(slack,planarDistance(point,obstacle.centre)-obstacle.radius);
+                    for(const auto& obstacle:(sdlAcquisitionMode()?pluckAdmissionObstacles:pluckObstacles))slack=std::min(slack,planarDistance(point,obstacle.centre)-obstacle.radius);
                     if(slack>best){best=slack;selected=point;}
                 }
                 if(best>.5f)addNode(selected,true);
@@ -464,7 +490,7 @@ class PurpleCombatApp : public PlugPikiApp {
                 addNode(head->mSRT.t+Vector3f(goalRadius*std::cos(a),0,goalRadius*std::sin(a)),true);
             }
         }
-        for(const auto& obstacle:pluckObstacles) for(int i=0;i<16;++i) {
+        for(const auto& obstacle:(sdlAcquisitionMode()?pluckAdmissionObstacles:pluckObstacles)) for(int i=0;i<16;++i) {
             const float a=i*6.283185307f/16.f;
             const float r=obstacle.radius/std::cos(3.141592654f/16.f)+4.f;
             addNode(obstacle.centre+Vector3f(r*std::cos(a),0,r*std::sin(a)),false);
@@ -475,7 +501,7 @@ class PurpleCombatApp : public PlugPikiApp {
             int here=-1;for(size_t i=0;i<count;++i) if(!visited[i] && (here<0 || cost[i]<cost[here])) here=int(i);
             if(here<0 || !std::isfinite(cost[here])) break;
             visited[here]=true;if(goal[here]) {end=here;break;}
-            for(size_t next=0;next<count;++next) if(!visited[next] && pluckSegmentClear(nodes[here],nodes[next])) {
+            for(size_t next=0;next<count;++next) if(!visited[next] && pluckAdmissionSegmentClear(nodes[here],nodes[next])) {
                 const float candidate=cost[here]+planarDistance(nodes[here],nodes[next]);
                 if(candidate<cost[next]) {cost[next]=candidate;parent[next]=here;}
             }
@@ -483,7 +509,7 @@ class PurpleCombatApp : public PlugPikiApp {
         if(sdlAcquisitionMode()) {
             unsigned goals=0,reachable=0;for(size_t i=0;i<count;++i)if(goal[i]){++goals;if(std::isfinite(cost[i]))++reachable;}
             std::printf("P2_PURPLE_PLUCK_GRAPH tick=%d nodes=%u goals=%u reachable_goals=%u end=%d start_clear=%d read_only=1\n",
-                ticks,unsigned(count),goals,reachable,end,int(pluckSegmentClear(n->mSRT.t,n->mSRT.t)));
+                ticks,unsigned(count),goals,reachable,end,int(pluckAdmissionSegmentClear(n->mSRT.t,n->mSRT.t)));
             if(end<0)pluckTrace("plan_failure",n,head,violet);
         }
         if(end<0 && sdlAcquisitionMode())return false;
@@ -1069,6 +1095,17 @@ class PurpleCombatApp : public PlugPikiApp {
         }
         return true;
     }
+    bool sdlAdmissionSegmentClear(SdlPluckPoint a,SdlPluckPoint b,float margin=0.f) const {
+        if(!pluckFinite(a)||!pluckFinite(b)||!std::isfinite(margin)||margin<0.f)return false;
+        const auto delta=pluckSub(b,a);const float square=delta.x*delta.x+delta.z*delta.z;
+        for(const auto& obstacle:pluckAdmissionObstacles) {
+            if(!sdlFinitePoint(obstacle.centre)||!std::isfinite(obstacle.radius)||obstacle.radius<0.f)return false;
+            const auto offset=pluckSub(sdlPoint(obstacle.centre),a);
+            const float t=square>0.f?std::max(0.f,std::min(1.f,(offset.x*delta.x+offset.z*delta.z)/square)):0.f;
+            if(pluckLength(pluckSub(pluckAdd(a,pluckScale(delta,t)),sdlPoint(obstacle.centre)))<obstacle.radius+margin)return false;
+        }
+        return true;
+    }
     bool sdlNeutralEnvelopeClear(const SdlPluckState& state,float tau) const {
         if(state.fixed) {
             // After native pull starts the qualified recurrence contracts toward
@@ -1155,15 +1192,18 @@ class PurpleCombatApp : public PlugPikiApp {
             const SdlPluckPoint target=pluckInputTarget(x,y,model);if(pluckLength(target)<.01f)continue;
             // Qualified prospective bound for one input tick followed by neutral,
             // for any next dt in (0,1/30]. This is CURRENT-pose geometry, not
-            // proof about future animation/camera/contact. Observe every tick.
+            // proof about future animation/camera/contact. Captured-pose reserve
+            // additionally screens admission; actual current-pair .05 guard
+            // remains unchanged and is observed every tick.
             const float lengthFactor=(limit*limit+2.f*maximum*limit)/tau;
             const auto furthest=pluckAdd(start.position,pluckScale(target,lengthFactor));
+            if(!sdlAdmissionSegmentClear(start.position,furthest,(tau+limit)*pluckLength(start.velocity)+.05f))continue;
             if(!sdlPulseSegmentClear(start.position,furthest,(tau+limit)*pluckLength(start.velocity)+.05f))continue;
             SdlPluckState trial=start;bool clear=true;
             for(int frame=0;frame<64;++frame) {
                 const auto before=trial.position;
                 if(!pluckPulseStep(trial,frame==0?target:SdlPluckPoint{},dt,tau)
-                    ||!sdlPulseSegmentClear(before,trial.position,.05f)){clear=false;break;}
+                    ||!sdlAdmissionSegmentClear(before,trial.position,.05f)||!sdlPulseSegmentClear(before,trial.position,.05f)){clear=false;break;}
                 if(frame>0&&pluckPulseSettled(trial))break;
             }
             if(!clear||!pluckPulseSettled(trial))continue;
