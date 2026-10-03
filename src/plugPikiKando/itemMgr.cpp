@@ -3,6 +3,7 @@
 #include "pc_coop.h"
 #include "pc_randomizer.h"
 #include "pc_p2_original_gate_native.h"
+#include "pc_p2_original_barrel_native.h"
 #endif
 #if defined(PIKI_PC_PORT)
 #include "netplay/pc_netplay_policy.h"
@@ -1394,6 +1395,9 @@ void ItemMgr::update()
 	}
 
 	mMeltingPotMgr->update();
+#if defined(PIKI_PC_PORT)
+	pc_p2_original_barrel_finish_updates();
+#endif
 }
 
 /**

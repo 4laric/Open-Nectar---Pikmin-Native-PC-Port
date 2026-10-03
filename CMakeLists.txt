@@ -296,6 +296,7 @@ set(PC_PORT_SOURCES
     pc_port/pc_p2_original_gate_native.cpp
     pc_port/pc_p2_original_bridge.cpp
     pc_port/pc_p2_original_barrel.cpp
+    pc_port/pc_p2_original_barrel_native.cpp
     pc_port/pc_p2_original_bridge_native.cpp
     pc_port/pc_p2_campaign_goal_probe.cpp
     pc_port/pc_bbft.cpp
