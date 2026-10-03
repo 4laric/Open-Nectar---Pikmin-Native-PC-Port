@@ -27,7 +27,7 @@ def main():
     output = args.output.resolve()
     if not output.is_relative_to(root / 'output') or output.exists():
         raise SystemExit('Output must be a fresh directory beneath the workspace output')
-    header = (Path(__file__).resolve().parents[1] / 'pc_port/pc_p2_original_pod.h').read_text()
+    header = (Path(__file__).resolve().parents[1] / 'pc_port/pc_p2_original_pod_sources.h').read_text()
     pins = dict(re.findall(r'constexpr const char\* (\w+)="([0-9a-f]{64})";', header))
     sys.path.insert(0, str(root))
     from experimental.pikmin2_assets import disc_files, archive_files
@@ -44,6 +44,7 @@ def main():
             members[source] = archive_files(raw[source])
     files = {
         'pod/arc.szs': (raw['user/Kando/pod/arc.szs'], pins['archiveSha256']),
+        'pod/texts.szs': (raw['user/Kando/pod/texts.szs'], pins['originalTextsSha256']),
         'pod/pot.bmd': (members['user/Kando/pod/arc.szs']['pot.bmd'], pins['originalModelSha256']),
         'pod/coll.txt': (members['user/Kando/pod/texts.szs']['coll.txt'], pins['originalCollisionSha256']),
         'pod.mod': (args.converted_model.read_bytes(), pins['convertedModelSha256']),

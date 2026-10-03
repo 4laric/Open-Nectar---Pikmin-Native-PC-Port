@@ -12,7 +12,7 @@ authority. It never creates an economy ledger, seeds, or P1 ship repairs.
 ## Resource and presentation boundary
 
 Preflight verifies exact source archive, raw model, collision text and converted
-model bytes against the fixed SHA-256 pins in `pc_p2_original_pod.h`. Resources
+model bytes against the fixed SHA-256 pins in pure `pc_p2_original_pod_sources.h`. Resources
 stay in private output; no game bytes are distributed in source. The known
 converted model path is engine-relative (`courses/pikmin2room/pod.mod` by
 default). Preflight hashes the exact file reached by System's active directory
@@ -102,6 +102,14 @@ still requires explicit actual ground-graph retention for unfinished cargo.
 The plan control tests placement/context only and issues no birth or receipt.
 Concrete selected StageInfo/geometry/routes, source cargo and ledger bridge
 remain prerequisites for gameplay.
+
+When cargo owns coupled rollback/collected retirement, its explicit teardown
+callback invokes `FloorLifecycle.release` once, then cargo verifies the raw
+`pc_p2_original_pod_owned()` observer is false before retiring bodies. A failed
+context lookup is not evidence of receiver teardown. Preflight alone owns
+native resources, so rollback still calls native abort when no body was born.
+Private staging also retains the exact original `texts.szs` archive for selected
+input closure; its fixed hash is in the same pure source header.
 
 Use the floor owner's composed Emergence floor 2 launcher with original geometry,
 actual source cargo and canonical ledger, 20 Pikmin, a centered 960x540 window,
