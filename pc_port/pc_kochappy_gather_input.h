@@ -208,3 +208,35 @@ struct PcKochappyGuidePulse {
   walk=1;neutral=1;return I::Walk;
  }
 };
+
+// Ordinary near-guide input adapter. Model exact Navi angle bin/boost and
+// strict per-axis SDL dead zone; this does not predict collision movement.
+struct PcKochappyGuideAxes {bool valid=false;int x=0,y=0;float magnitude=0,bearingError=0;};
+inline PcKochappyGuideAxes pc_kochappy_analog_guide(float dx,float dz,float cameraX,float cameraZ,
+    int deadZone,float binDegrees,float clamp,float neutral,float cursor) {
+ PcKochappyGuideAxes out;
+ if(!std::isfinite(dx)||!std::isfinite(dz)||!std::isfinite(cameraX)||!std::isfinite(cameraZ)
+    ||std::fabs(std::hypot(cameraX,cameraZ)-1.f)>.001f||deadZone<0||deadZone>127
+    ||!std::isfinite(binDegrees)||binDegrees<=0||binDegrees>180||!std::isfinite(clamp)||clamp<=0||clamp>1
+    ||!std::isfinite(neutral)||neutral<0||!std::isfinite(cursor)||cursor<neutral||cursor>=clamp)return out;
+ const float distance=std::hypot(dx,dz);if(!std::isfinite(distance)||distance<=.5f||distance>=12)return out;
+ const float pi=3.14159265358979323846f,quarter=pi*.25f,width=pi/180.f*binDegrees;
+ float bestError=10,bestMagnitude=10;
+ for(int x=-74;x<=74;++x)for(int y=-74;y<=74;++y){
+  const float sx=std::abs(x)>deadZone?x/74.f:0.f,sz=std::abs(y)>deadZone?-y/74.f:0.f;
+  float magnitude=std::hypot(sx,sz);if(magnitude==0)continue;
+  float theta=std::atan2(sx,sz);if(theta<0)theta+=2*pi;
+  const float angle=width*int((theta+width*.5f)/width),remainder=angle-int(angle/quarter)*quarter;
+  const float length=std::sin(quarter)/(std::sin(remainder)+std::sin(quarter-remainder));
+  magnitude*=1.f/length;if(magnitude>=clamp)magnitude=1;
+  if(!std::isfinite(magnitude)||magnitude<=cursor||magnitude>=clamp)continue;
+  const float lx=std::sin(angle),lz=std::cos(angle);
+  const float wx=cameraX*lx-cameraZ*lz,wz=cameraZ*lx+cameraX*lz;
+  const float error=1.f-(wx*dx+wz*dz)/distance;
+  if(!std::isfinite(error)||error<-.00001f)continue;
+  if(error<bestError-.000001f||(std::fabs(error-bestError)<=.000001f&&magnitude<bestMagnitude)){
+   bestError=error;bestMagnitude=magnitude;out={true,x,y,magnitude,error};
+  }
+ }
+ return out;
+}

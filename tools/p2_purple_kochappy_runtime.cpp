@@ -932,7 +932,21 @@ public:
      if(command==PcKochappyGuideInput::Refuse)std::printf("P2_PURPLE_KOCHAPPY_GUIDE_REFUSAL age=%d guide=%d remaining=%.9g observations=%d last_progress=%d bursts=%d best=%.9g walk_remaining=%d neutral_remaining=%d actor_writes=0\n",age,receiverWaypoint,guideDistance,guidePulse.elapsed,guidePulse.lastProgress,guidePulse.pulses,guidePulse.best,guidePulse.walk,guidePulse.neutral);
      require(command!=PcKochappyGuideInput::Refuse,"guide braking geometry invalid");
      if(guideDistance<12.f)std::printf("P2_PURPLE_KOCHAPPY_GUIDE_BRAKE age=%d waypoint=%d distance=%.6f speed=%.6f target=%.6f neutral=%d ordinary_input=1 actor_writes=0\n",age,receiverWaypoint,guideDistance,guideSpeed,guideTarget,int(command==PcKochappyGuideInput::Neutral));
-     if(command==PcKochappyGuideInput::Neutral)input();else point(n,goal,true,KeyConfig::_instance->mSetCursorKey.mBind,ReceiverRouteReach);return result;
+     if(command==PcKochappyGuideInput::Neutral)input();
+     else if(guideDistance<12.f){
+      require(pc_window_get_control_mode()==PC_CONTROL_CLASSIC&&pc_window_get_stick_invert()==0,
+        "analog guide requires ordinary classic noninverted input");
+      const auto& axis=n->controlCamera()->mViewXAxis;const float yaw=std::atan2(axis.z,axis.x);
+      const auto axes=pc_kochappy_analog_guide(goal.x-n->mSRT.t.x,goal.z-n->mSRT.t.z,
+        std::cos(yaw),std::sin(yaw),pc_window_get_stick_dead_zone(),C_NAVI_PARM(n,mShakePreventionAngle),
+        C_NAVI_PARM(n,mClampStickToMaxThreshold),C_NAVI_PARM(n,mNeutralStickThreshold),C_NAVI_PARM(n,mCursorMoveStickThreshold));
+      require(axes.valid,"analog guide loaded input has no genuinely moving axis");
+      std::printf("P2_PURPLE_KOCHAPPY_ANALOG_GUIDE age=%d guide=%d remaining=%.6f raw=%d,%d magnitude=%.9f bearing_error=%.9f loaded_bin=%.6f loaded_cursor=%.6f current_velocity=%.6f,%.6f ordinary_input=1 collision_prediction=0 actor_writes=0\n",
+        age,receiverWaypoint,guideDistance,axes.x,axes.y,axes.magnitude,axes.bearingError,
+        C_NAVI_PARM(n,mShakePreventionAngle),C_NAVI_PARM(n,mCursorMoveStickThreshold),n->mVelocity.x,n->mVelocity.z);
+      input(KeyConfig::_instance->mSetCursorKey.mBind,axes.x,axes.y);
+     }else point(n,goal,true,KeyConfig::_instance->mSetCursorKey.mBind,ReceiverRouteReach);
+     return result;
     }
     if(distance(n->mSRT.t,violet->mSRT.t)>approach){point(n,violet->mSRT.t,true,KeyConfig::_instance->mSetCursorKey.mBind);return result;}
     std::printf("P2_PURPLE_KOCHAPPY_APPROACH loaded_cursor_radius=%.4f captain_bud_xz=%.4f target_distance=%.4f SDL_walk=1\n",radius,distance(n->mSRT.t,violet->mSRT.t),approach);

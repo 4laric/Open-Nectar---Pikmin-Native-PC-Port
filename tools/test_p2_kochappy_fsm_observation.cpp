@@ -255,4 +255,18 @@ int main(){
  CHECK(landed.observe(true,20,59.99f,0,true)==PcKochappyCatchupInput::Hold);
  CHECK(landed.observe(true,20,59.99f,0,true)==PcKochappyCatchupInput::Hold);
  CHECK(landed.observe(true,20,59.99f,0,true)==PcKochappyCatchupInput::Continue);
+ const auto analog=pc_kochappy_analog_guide(4,-4,-1,0,8,10,.9f,.1f,.65f);
+ CHECK(analog.valid&&analog.magnitude>.65f&&analog.magnitude<.9f&&analog.bearingError<.004f);
+ CHECK(std::abs(analog.x)<=74&&std::abs(analog.y)<=74);
+ for(int i=0;i<8;++i){const float a=i*.7853981633974483f;
+  const auto selected=pc_kochappy_analog_guide(5*std::cos(a),5*std::sin(a),1,0,8,10,.9f,.1f,.65f);
+  CHECK(selected.valid&&selected.magnitude>.65f&&selected.magnitude<.9f&&selected.bearingError<.004f);
+ }
+ CHECK(!pc_kochappy_analog_guide(4,-4,-1,0,74,10,.9f,.1f,.65f).valid);
+ CHECK(!pc_kochappy_analog_guide(4,-4,-1,0,8,0,.9f,.1f,.65f).valid);
+ CHECK(!pc_kochappy_analog_guide(4,-4,0,0,8,10,.9f,.1f,.65f).valid);
+ CHECK(!pc_kochappy_analog_guide(4,-4,-1,0,8,10,.65f,.1f,.65f).valid);
+ CHECK(!pc_kochappy_analog_guide(NAN,-4,-1,0,8,10,.9f,.1f,.65f).valid);
+ CHECK(!pc_kochappy_analog_guide(.5f,0,-1,0,8,10,.9f,.1f,.65f).valid);
+ CHECK(!pc_kochappy_analog_guide(12,0,-1,0,8,10,.9f,.1f,.65f).valid);
 }
