@@ -261,14 +261,18 @@ static bool positionImpl(Handle h,const Vector3f& v,std::string& e){auto* x=curr
 static bool whistleResultImpl(Handle h,Navi* n,bool combine,bool newToParty,bool& accepted,std::string& e){
  (void)newToParty; // Retail InteractFue::actPiki does not read this Navi flag.
  auto* x=current(h,e);if(!x)return false;
- CaptainFrame f;if(!services->captainFrame(n,f,e))return false;
+ CaptainFrame f;if(!services->captainFrame(n,f,e)||!current(h,e))return false;
  unsigned captain=services->scene().captainAt(0)==n?0:services->scene().captainAt(1)==n?1:2;
+ if(!current(h,e))return false;
  if(captain>1)return fail(e,"whistle source captain outside canonical roster");
  auto* world=pc_p2_original_captain_world();
- if(world->demo()==captain::Demo::Unknown||world->demo()==captain::Demo::Absent)return fail(e,"source whistle movie authority absent");
- bool movie=world->demo()==captain::Demo::Playing;
+ if(!world||!current(h,e)||pc_p2_original_captain_world()!=world)return fail(e,"source whistle world changed during inspection");
+ const auto demo=world->demo();
+ if(!current(h,e)||pc_p2_original_captain_world()!=world)return false;
+ if(demo==captain::Demo::Unknown||demo==captain::Demo::Absent)return fail(e,"source whistle movie authority absent");
+ bool movie=demo==captain::Demo::Playing;
  PcP2SourceBody source;if(!body(h.body,source,e)||!current(h,e))return false;
- const auto reject=[&](){accepted=false;e.clear();return true;};
+ const auto reject=[&](){if(!current(h,e))return false;accepted=false;e.clear();return true;};
  // Genuine retail eligibility rejection is an authenticated result. Source
  // invocations may continue through their ordered roster without string tests.
  if(!f.alive||!f.formationable||!originalProgress().captainAllowed(captain,source.state.wasWild)
@@ -279,12 +283,13 @@ static bool whistleResultImpl(Handle h,Navi* n,bool combine,bool newToParty,bool
  // All eligibility comes from this exact source lifetime + actual Walk state;
  // the legacy callback's nativeEligible argument is not exposed to callers.
  // It owns source day-0/reunion partition and transactional wild/progress write.
- if(!pc_p2_original_piki_recruit_allowed(h.body,captain,movie,true,e)||!services->supports(h,Motion::Notice,e))return false;
- if(!pc_p2_original_piki_recruit_accepted(h.body,captain,movie,true,e))return false;
- if(!brainCleanup(h,x->runtime,*services,e)||!cleanup(*x,e))return false;
+ if(!pc_p2_original_piki_recruit_allowed(h.body,captain,movie,true,e)||!current(h,e)
+   ||!services->supports(h,Motion::Notice,e)||!current(h,e))return false;
+ if(!pc_p2_original_piki_recruit_accepted(h.body,captain,movie,true,e)||!current(h,e))return false;
+ if(!brainCleanup(h,x->runtime,*services,e)||!current(h,e)||!cleanup(*x,e)||!current(h,e))return false;
  x->runtime.brain.action=Action::None;
  h.body->mNavi=n;
- float random=0;if(!services->random(random,e)||!std::isfinite(random)||random<0||random>1)return false;
+ float random=0;if(!services->random(random,e)||!current(h,e)||!std::isfinite(random)||random<0||random>1)return false;
  x->runtime.state=State::LookAt;x->runtime.lookSubState=0;x->runtime.lookWaitTime=0.3f*random;
  if(!services->calledSound(h,e)||!current(h,e))return false;
  accepted=true;return true;
