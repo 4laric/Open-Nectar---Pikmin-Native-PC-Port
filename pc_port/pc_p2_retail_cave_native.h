@@ -20,6 +20,8 @@ struct FamilyOps {
 class SceneOps {
 public:
  virtual ~SceneOps()=default;
+ // Actual selected session/revision + installed stage/native serial; no allocation.
+ virtual bool owns(const SceneIdentity&)const noexcept=0;
  virtual bool mode(const SceneIdentity&,bool& story,bool& inCave,std::string&)const=0;
  virtual bool preflight(const FloorPlan&,const Snapshot&,std::string&)=0;
  virtual bool begin(const FloorPlan&,const Snapshot&,std::string&)=0;
@@ -33,6 +35,7 @@ public:
  virtual bool release(std::string&)=0;
  virtual bool retired(const BirthIdentity&,const Snapshot&,std::string&)=0;
 };
+enum class FloorPhase {Empty,Preparing,Installing,Committed,Releasing};
 class NativeFloor final:public FloorProvider {
 public:
  NativeFloor(FloorPlan,SceneOps&);~NativeFloor();
@@ -47,8 +50,13 @@ public:
  bool commit(const Snapshot&,std::string&)override;
  // Trusted installation lookup for cargo/Pod adapters; raw plan remains rechecked.
  // Read-only actual installed census; revokes before any release/teardown.
+ FloorPhase phase()const noexcept;
+ bool bindingFacts(Snapshot&,std::uint64_t& floorEpoch,FloorPhase&,std::string&)const;
+ bool bindingCurrent(const SceneIdentity&,std::uint64_t floorEpoch)const noexcept;
  bool installed(Snapshot&,std::uint64_t& floorEpoch,std::string&)const;
  bool current(const SceneIdentity&,std::uint64_t floorEpoch)const noexcept;
+ bool boundSourceBirth(const Creature*,unsigned token,const p2original::InstanceIdentity&,
+                       BirthIdentity&,Snapshot&,FloorPhase&,std::string&)const;
  bool expectedSourceBirth(const Creature*,unsigned token,const p2original::InstanceIdentity&,
                           BirthIdentity&,Snapshot&,std::string&)const;
  // Retained actual parent incarnation after natural death, never an output receipt.
