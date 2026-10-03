@@ -175,3 +175,33 @@ owner plus attachment TUs in the native link; without that composition the API
 explicitly refuses. The old private component graph does not link test observers
 as a substitute. Whole-party membership/mapping has no released contract yet,
 so scene wiring, linked qualification and physical capture acceptance are open.
+
+## Root production intake recipe
+
+The successor to qualified private composition353 uses the root entry point:
+
+```powershell
+cmake -S output/native-original-sentinel -B output/source77-root-build -G Ninja `
+  -DPIKMIN_ORIGINAL_SENTINEL=ON -DCMAKE_BUILD_TYPE=Release `
+  -DPIKMIN_NETPLAY_BUILD=OFF -DPIKMIN_NATIVE_JAUDIO=OFF `
+  -DPIKMIN_NATIVE_OPTIMIZE=OFF -DPIKMIN_ENABLE_IPO=ON
+cmake --build output/source77-root-build --target pikmin_pc
+```
+
+Use a private build directory and the supported platform toolchain. The root
+option defaults OFF. ON adds the ten source77 TUs once to `PC_PORT_SOURCES` and
+sets consistent actor/attachment guards for the game and linked legacy/runtime
+fixtures. The source77 harness now selects this root option; it no longer
+injects production sources or definitions. `original_resource_build` likewise
+obtains the production dependencies from root CMake, without duplicate TUs.
+
+Required source intake is the complete PR208 source77 leaf set plus its eight
+owner-pinned1c4 Honey/typed-ancestry dependency files and the released actual397
+Piki SDK/Body hooks. Keep maintained successors, Watage and foliage93/brown-large
+cases; do not overwrite those owners from the older component branch. This
+option is a code/link intake, not actual Scene or whole-party admission. Genuine
+private banks and concrete parent/emission/birth/retirement/AILOD/FX services,
+independent selected whole-party membership, and the complete cold graph remain
+required. Missing services refuse; no Scene or party stubs are supplied. Gameplay
+and SAVE remain unqualified. Prior353/union06/07 receipts describe the earlier
+private harness composition and must not be relabelled as root-entry evidence.
