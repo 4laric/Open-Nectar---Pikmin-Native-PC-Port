@@ -240,3 +240,16 @@ inline PcKochappyGuideAxes pc_kochappy_analog_guide(float dx,float dz,float came
  }
  return out;
 }
+
+inline PcKochappyGuideAxes pc_kochappy_directed_prefix_edge(float dx,float dz,float cameraX,float cameraZ,int power,int deadZone){
+ PcKochappyGuideAxes out;
+ const float d=std::hypot(dx,dz);
+ if(!std::isfinite(d)||d<=.5f||d>=512||!std::isfinite(cameraX)||!std::isfinite(cameraZ)
+   ||std::fabs(std::hypot(cameraX,cameraZ)-1.f)>.001f||power<1||power>74||deadZone<0||deadZone>127)return out;
+ const int x=int(std::lround(power*(dx*cameraX+dz*cameraZ)/d));
+ const int y=int(std::lround(power*(dx*cameraZ-dz*cameraX)/d));
+ const float effectiveX=std::abs(x)>deadZone?float(x):0.f,effectiveY=std::abs(y)>deadZone?float(y):0.f;
+ const float magnitude=std::hypot(effectiveX,effectiveY)/74.f;
+ if(!std::isfinite(magnitude)||magnitude<=.05f)return out;
+ return {true,x,y,magnitude,0};
+}

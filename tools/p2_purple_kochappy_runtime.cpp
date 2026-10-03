@@ -651,7 +651,14 @@ class PurpleKochappyApp:public PlugPikiApp {
    std::printf("P2_PURPLE_KOCHAPPY_PREFIX_NEUTRAL age=%d observations=%d controlled=%d locked=%d neutral=%d band=%d right=%.6f previous=%.6f target_speed=%.6f edge=%d edge_verified=%d ready=%d actor_writes=0\n",
     age,prefixNeutral.observations,int(allSafeControlled),int(n->mPlateDirLocked),int(n->mIsCStickNeutral),n->mFormationBand,rightLength,previous,targetSpeed,edge,int(prefixEdgeVerified),int(ready));
    require(setup>=0,"prefix bounded ordinary neutral setup exhausted");
-   if(edge>0){prefixEdgeSent=true;prefixEdgeAge=age;input(0,0,0,edge,0);}else input();
+   if(edge>0){
+    require(pc_window_get_cstick_invert()==0&&n->controlCamera(),"directed prefix edge requires live noninverted camera input");
+    const auto& w=ReceiverPrefix[prefixProgress.guide];const auto& axis=n->controlCamera()->mViewXAxis;
+    const auto directed=pc_kochappy_directed_prefix_edge(w.x-n->mSRT.t.x,w.z-n->mSRT.t.z,axis.x,axis.z,edge,pc_window_get_stick_dead_zone());
+    require(directed.valid,"directed prefix edge loaded axis unavailable");
+    std::printf("P2_PURPLE_KOCHAPPY_PREFIX_DIRECTED_EDGE age=%d guide=%d goal=%.6f,%.6f raw=%d,%d loaded_dead_zone=%d ordinary_input=1 direct_plate_write=0\n",age,prefixProgress.guide,w.x,w.z,directed.x,directed.y,pc_window_get_stick_dead_zone());
+    prefixEdgeSent=true;prefixEdgeAge=age;input(0,0,0,directed.x,directed.y);
+   }else input();
    prefixNeutralDone=setup==1;return true;
   }
   const auto& w=ReceiverPrefix[prefixProgress.guide];const Vector3f goal(w.x,0.f,w.z);

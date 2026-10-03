@@ -269,4 +269,13 @@ int main(){
  CHECK(!pc_kochappy_analog_guide(NAN,-4,-1,0,8,10,.9f,.1f,.65f).valid);
  CHECK(!pc_kochappy_analog_guide(.5f,0,-1,0,8,10,.9f,.1f,.65f).valid);
  CHECK(!pc_kochappy_analog_guide(12,0,-1,0,8,10,.9f,.1f,.65f).valid);
+ const auto westEdge=pc_kochappy_directed_prefix_edge(-60,107,-1,0,22,8);
+ CHECK(westEdge.valid&&westEdge.x==11&&westEdge.y==19&&westEdge.magnitude>.05f);
+ CHECK(pc_kochappy_directed_prefix_edge(10,0,1,0,22,8).x==22);
+ CHECK(pc_kochappy_directed_prefix_edge(0,10,1,0,22,8).y==-22);
+ CHECK(!pc_kochappy_directed_prefix_edge(0,0,1,0,22,8).valid);
+ CHECK(!pc_kochappy_directed_prefix_edge(10,0,1,0,22,22).valid);
+ CHECK(!pc_kochappy_directed_prefix_edge(10,0,0,0,22,8).valid);
+ CHECK(!pc_kochappy_directed_prefix_edge(NAN,0,1,0,22,8).valid);
+ CHECK(!pc_kochappy_directed_prefix_edge(512,0,1,0,22,8).valid);
 }
