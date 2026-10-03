@@ -146,6 +146,10 @@ bool pc_p2_cave_visible_interact(Navi* n){
         actor.returning?"return":"enter",source.sceneGeneration);
     return true;
 }
+bool pc_p2_cave_visible_active(){
+    P2CaveBoundarySnapshot source;P2CaveVisibleBoundary actor;
+    return snapshot(source,actor);
+}
 void pc_p2_cave_visible_reset(){input.reset();drawnScene=0;promptedScene=0;}
 void pc_p2_cave_visible_draw(Graphics& gfx){
     P2CaveBoundarySnapshot source;P2CaveVisibleBoundary actor;
@@ -175,6 +179,7 @@ void pc_p2_cave_visible_draw(Graphics& gfx){
 }
 #else
 bool pc_p2_cave_visible_interact(Navi*){return false;}
+bool pc_p2_cave_visible_active(){return false;}
 void pc_p2_cave_visible_draw(Graphics&){}
 void pc_p2_cave_visible_reset(){}
 #endif

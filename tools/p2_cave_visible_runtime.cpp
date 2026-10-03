@@ -112,8 +112,14 @@ public:int idle()override{
             if(ticks>=60&&ticks<64)a=1;
             if(ticks==60){++exitClicks;std::puts("CAVE_VISIBLE_INPUT return_A=1 F6=0");}
             if(boundary.floor==0){stage=7;ticks=0;returned=true;}
-        }else if(stage==7&&ticks>=60){
+        }else if(stage==7){
+            // Surface weeds/nearby actors can legitimately start work before a
+            // read-only snapshot. Settle through ordinary whistle, never FSM writes.
+            if(ticks==1)std::puts("CAVE_VISIBLE_INPUT gather_after_return ordinary_B=1");
+            if(ticks<90)b=1;
+            if(ticks>=150&&ticks%15==0){
             P2CaveCampaignParty actual;const bool captured=pc_p2_cave_campaign_party_capture(actual,false);
+            if(captured||ticks>=300){
             const auto& bank=pc_randomizer_generated_cave_cache();
             std::uint64_t generation=0;std::uint8_t sha[32]{};
             const bool checkpoint=pc_randomizer_checkpoint_info(&generation,sha)&&generation==baselineGeneration+2;
@@ -123,6 +129,8 @@ public:int idle()override{
             std::printf("P2_CAVE_VISIBLE_RUNTIME %s entry_A=%d return_A=%d identity_health=%d live20=%d generation=%llu authored_segment=1 F6=0\n",
                 passed?"PASS":"FAIL",entryClicks,exitClicks,int(preserved),int(population),(unsigned long long)generation);
             finish(passed?0:11);
+            }
+            }
         }
     }
     SDL_JoystickSetVirtualButton(pad,SDL_CONTROLLER_BUTTON_A,a);
