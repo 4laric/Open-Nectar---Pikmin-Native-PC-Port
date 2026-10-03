@@ -280,7 +280,7 @@ constexpr float ReceiverRouteReach=.5f;
 // non-slip access, then ascend the western non-slip ramp. These are ordinary
 // guidance points, not assigned actor coordinates or AI-trajectory proof.
 constexpr ReceiverWaypoint ReceiverPrefix[]={
- {-1100.f,2260.f},{-1100.f,2400.f},{-1100.f,2260.f},{-990.f,2260.f}
+ {-950.f,2260.f},{-950.f,2320.f},{-950.f,2260.f},{-860.f,2245.f}
 };
 constexpr int ReceiverPrefixCount=sizeof(ReceiverPrefix)/sizeof(ReceiverPrefix[0]);
 struct RouteFloor {float y;int face;};
@@ -568,6 +568,10 @@ class PurpleKochappyApp:public PlugPikiApp {
  }
  bool approachPrefix(Navi* n) {
   if(prefixProgress.guide==ReceiverPrefixCount)return false;
+  // requireCurrentActors already established live source enemy/manager identity.
+  const float sight=pc_p2_kochappy_fsm_sight(enemy);
+  require(std::isfinite(sight)&&sight>0,"prefix current source enemy sight unavailable");
+  require(pc_kochappy_enemy_path_clear(n->mSRT.t.x,n->mSRT.t.z,n->mSRT.t.x,n->mSRT.t.z,enemy->mSRT.t.x,enemy->mSRT.t.z,sight,n->mCollisionRadius),"prefix captain entered live enemy detection range");
   // Observe the edge at the very next native idle, before contact settling
   // can publish neutral and erase the real controller-edge witness.
   if(prefixEdgeSent&&!prefixEdgeVerified&&age>prefixEdgeAge){
@@ -603,6 +607,7 @@ class PurpleKochappyApp:public PlugPikiApp {
    allContact=allContact&&contact==PcKochappyPrefixContact::Admit;
    const float bodySpan=distance(n->mSRT.t,p->mSRT.t);
    require(std::isfinite(bodySpan)&&bodySpan<512.f,"prefix original body outside verified span");lag=std::max(lag,bodySpan);
+   require(pc_kochappy_enemy_path_clear(p->mSRT.t.x,p->mSRT.t.z,p->mSRT.t.x,p->mSRT.t.z,enemy->mSRT.t.x,enemy->mSRT.t.z,sight,p->mCollisionRadius),"prefix original body entered live enemy detection range");
   }
   const bool roster=initialBodyCount==20&&count==20&&n->getPlatePikis()==20;
   require(roster,"prefix original20 roster closure failed");
@@ -655,6 +660,9 @@ class PurpleKochappyApp:public PlugPikiApp {
   RouteVec end={w.x,double(y)+r/floor->mTriangle.mNormal.y,w.z};
   const double span=std::sqrt(rvdot(rvsub(end,begin),rvsub(end,begin)));
   require(std::isfinite(span)&&span<512.,"prefix captain shortcut span invalid");
+  const bool enemyClear=pc_kochappy_enemy_path_clear(begin.x,begin.z,end.x,end.z,enemy->mSRT.t.x,enemy->mSRT.t.z,sight,width+r);
+  std::printf("P2_PURPLE_KOCHAPPY_PREFIX_ENEMY age=%d guide=%d enemy=%.6f,%.6f source_sight=%.6f native_slot_width=%.6f planned_segment_clear=%d current_original20_outside_sight=1 future_enemy_trajectory_proven=0 actor_writes=0\n",age,prefixProgress.guide,enemy->mSRT.t.x,enemy->mSRT.t.z,sight,width,int(enemyClear));
+  require(enemyClear,"prefix intended party corridor crosses live enemy range");
   const int samples=std::max(1,int(std::ceil(span/.25)));
   for(int j=0;j<=samples;++j)receiverCheckSphere(rvadd(begin,rvscale(rvsub(end,begin),double(j)/samples)),r+.10+.125,"prefix-captain-segment",-1,prefixProgress.guide,j);
   const int guide=prefixProgress.guide;

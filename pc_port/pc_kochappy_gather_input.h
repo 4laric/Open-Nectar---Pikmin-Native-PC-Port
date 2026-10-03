@@ -152,3 +152,15 @@ inline bool pc_kochappy_current_wall_contact(double distance,double radius,doubl
  const double tolerance=pc_kochappy_current_wall_tolerance(radius,coordinateScale);
  return std::isfinite(distance)&&distance>=0&&tolerance>=0&&distance+tolerance>=radius;
 }
+
+inline bool pc_kochappy_enemy_path_clear(double ax,double az,double bx,double bz,double ex,double ez,double sight,double width){
+ if(!std::isfinite(ax)||!std::isfinite(az)||!std::isfinite(bx)||!std::isfinite(bz)||!std::isfinite(ex)||!std::isfinite(ez)
+  ||!std::isfinite(sight)||sight<=0||!std::isfinite(width)||width<0)return false;
+ const double dx=bx-ax,dz=bz-az,square=dx*dx+dz*dz;
+ if(!std::isfinite(square))return false;
+ const double raw=square>0?((ex-ax)*dx+(ez-az)*dz)/square:0;
+ if(!std::isfinite(raw))return false;
+ const double t=raw<0?0:raw>1?1:raw;
+ const double gap=std::hypot(ax+t*dx-ex,az+t*dz-ez);
+ return std::isfinite(gap)&&gap>sight+width;
+}

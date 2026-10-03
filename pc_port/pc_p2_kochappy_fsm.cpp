@@ -586,6 +586,15 @@ bool pc_p2_kochappy_fsm_suppress_ai(const BTeki* actor)
 	return ready && actors.count(static_cast<PelletView*>(const_cast<BTeki*>(actor))) != 0;
 }
 
+float pc_p2_kochappy_fsm_sight(const BTeki* actor)
+{
+ if(!ready||!actor)return -1.f;
+ const auto found=actors.find(static_cast<PelletView*>(const_cast<BTeki*>(actor)));
+ if(found==actors.end())return -1.f;
+ const float sight=found->second.params.sight;
+ return std::isfinite(sight)&&sight>0?sight:-1.f;
+}
+
 PcKochappyFsmSnapshot pc_p2_kochappy_fsm_observe(const BTeki* actor)
 {
  PcKochappyFsmSnapshot value;

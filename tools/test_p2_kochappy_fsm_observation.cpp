@@ -205,4 +205,12 @@ int main(){
  CHECK(!pc_kochappy_current_wall_contact(0,8.5,1000000));
  CHECK(pc_kochappy_current_wall_tolerance(8.5,2208.129883)>0);
  CHECK(pc_kochappy_current_wall_tolerance(8.5,1000000)<0);
+ CHECK(pc_kochappy_enemy_path_clear(-860,2153,-950,2260,-1153,2231,95,80));
+ CHECK(!pc_kochappy_enemy_path_clear(-860,2153,-1100,2260,-1153,2231,95,80));
+ CHECK(!pc_kochappy_enemy_path_clear(0,0,200,0,100,0,95,8.5));
+ CHECK(pc_kochappy_enemy_path_clear(0,0,0,0,120,0,95,8.5));
+ CHECK(!pc_kochappy_enemy_path_clear(0,0,0,0,95,0,95,0));
+ CHECK(!pc_kochappy_enemy_path_clear(0,0,0,0,120,0,-1,8.5));
+ CHECK(!pc_kochappy_enemy_path_clear(0,0,0,0,120,0,NAN,8.5));
+ CHECK(!pc_kochappy_enemy_path_clear(0,0,0,0,NAN,0,95,8.5));
 }

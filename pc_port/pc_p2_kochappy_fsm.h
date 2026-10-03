@@ -32,6 +32,9 @@ struct PcKochappyFsmSnapshot {
  int state=-1;float stateTime=0;
 };
 PcKochappyFsmSnapshot pc_p2_kochappy_fsm_observe(const BTeki*);
+// Current registered source parameter only; absent/invalid returns -1.
+// Caller establishes actual manager ownership, as for the FSM snapshot.
+float pc_p2_kochappy_fsm_sight(const BTeki*);
 inline bool pc_kochappy_overlay_preserved(const PcKochappyFsmSnapshot& before,const PcKochappyFsmSnapshot& now) {
  return before.available&&now.available&&before.stunPaused&&now.stunPaused&&!before.terminal&&!now.terminal
   &&std::isfinite(before.stateTime)&&std::isfinite(now.stateTime)&&before.state==now.state&&before.stateTime==now.stateTime
