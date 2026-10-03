@@ -73,7 +73,7 @@ void point(Navi* n,const Vector3f& goal,bool walk,unsigned keys=0){
     const Vector3f from=walk?n->mSRT.t:n->mCursorWorldPos;
     const float dx=goal.x-from.x,dz=goal.z-from.z,d=std::hypot(dx,dz);
     int x=0,y=0;
-    if(d>(walk?15.f:6.f)){
+    if(d>(walk?15.f:(!std::strcmp(mode,"red-electric")?3.f:6.f))){
         const Vector3f axis=n->controlCamera()->mViewXAxis;
         const float power=walk?65.f:22.f;
         x=int(std::lround(power*(dx*axis.x+dz*axis.z)/d));
@@ -410,6 +410,12 @@ public:
             if(!held&&!aHeld){aHeld=true;point(n,pressAim(n,enemy,partner),false,KBBTN_A);return result;}
             if(aHeld&&!discharging){point(n,pressAim(n,enemy,partner),false,KBBTN_A);return result;}
             if(aHeld){
+                if(!std::strcmp(mode,"red-electric")) {
+                    const Vector3f goal=pressAim(n,enemy,partner);
+                    const float error=distance(n->mCursorWorldPos,goal);
+                    if(error>3.f){point(n,goal,false,KBBTN_A);return result;}
+                    std::printf("P2_ELECBUG_RED_AIM frame=%d error=%.6f cursor=%.6f,%.6f goal=%.6f,%.6f ordinary_pad=1\n",frame,error,n->mCursorWorldPos.x,n->mCursorWorldPos.z,goal.x,goal.z);
+                }
                 input();for(auto& entry:flight)if(entry.second==1){entry.second=2;releasedAt[entry.first]=frame;witness(entry.first,"released");}
                 aHeld=false;return result;
             }
