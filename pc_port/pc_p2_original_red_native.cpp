@@ -24,6 +24,7 @@ struct Native::Impl final:Engine {
   Heap heap;
   for(const auto& row:rows){int type=chassis(row.enemy.source);auto* shape=tekiMgr->getTekiShapeObject(type);
    if(!shape||!shape->mShape||!shape->mAnimMgr||!tekiMgr->getTekiParameters(type)||!tekiMgr->getStrategy(type))return reject(e,"original red chassis not preloaded in early use-list");
+   if(tekiMgr->getTekiParameters(type)->getI(TPI_CorpseType)!=TEKICORPSE_LeaveCorpse)return reject(e,"original red chassis does not leave a view-backed corpse");
    const unsigned corpse=TekiMgr::getTypeId(type);
    if(!pelletMgr||!pelletMgr->getConfig(corpse))return reject(e,"original red ordinary corpse config unavailable");
    if(!pc_p2_original_drop_resources(row,e))return false;
