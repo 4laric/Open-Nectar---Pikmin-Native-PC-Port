@@ -3444,3 +3444,8 @@ add_executable(p2_campaign_treasure_held_test tools/test_p2_campaign_treasure_he
 target_include_directories(p2_campaign_treasure_held_test PRIVATE pc_port)
 target_compile_options(p2_campaign_treasure_held_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
 add_test(NAME p2_campaign_treasure_held_test COMMAND p2_campaign_treasure_held_test)
+# Actual shared receiver compiled with small observable engine doubles.
+add_executable(pc_p2_source_flick_receiver_test tools/test_p2_source_flick_receiver.cpp pc_port/pc_p2_hanachirashi_receiver.cpp)
+target_include_directories(pc_p2_source_flick_receiver_test BEFORE PRIVATE tools/source_flick_stubs pc_port)
+target_compile_options(pc_p2_source_flick_receiver_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME pc_p2_source_flick_receiver_test COMMAND pc_p2_source_flick_receiver_test)
