@@ -3,6 +3,7 @@
 #include "GlobalGameOptions.h"
 #include "pc_p2_original_onyon_native.h"
 #include "pc_p2_original_gate_native.h"
+#include "pc_p2_original_bridge_native.h"
 #include "settings/pc_settings.h"
 #endif
 #include "Animator.h"
@@ -129,6 +130,7 @@ void StdSystem::resetHeap(int heapIdx, int flag)
 	// source associations only after that boundary, before the next course load.
 	if (heapIdx == SYSHEAP_App) pc_p2_original_onyon_unload();
     if(heapIdx==SYSHEAP_App)pc_p2_original_gate_unload();
+    if(heapIdx==SYSHEAP_App)pc_p2_original_bridge_unload();
 #endif
 }
 

@@ -16,6 +16,7 @@
 #include "pc_randomizer.h"
 #include "pc_p2_original_group_engine.h"
 #include "pc_p2_original_gate_native.h"
+#include "pc_p2_original_bridge_native.h"
 #include "pc_p2_original_gen_object.h"
 #include "pc_p2_original_onyon_native.h"
 #include "pc_p2_original_piki_native.h"
@@ -241,6 +242,7 @@ void GenObjectFactory::createInstance()
 		pc_p2_original_onyon_register();
 		pc_p2_original_piki_register();
         pc_p2_original_gate_register();
+        pc_p2_original_bridge_register();
 #endif
 	}
 }
@@ -571,6 +573,9 @@ void Generator::loadCreature(RandomAccessStream& input)
     bool gateHandled=false;std::string gateError;
     if(!pc_p2_original_gate_generator_load(this,input,gateHandled,gateError)){std::fprintf(stderr,"P2_ORIGINAL_GATE_LOAD_FAIL %s\n",gateError.c_str());std::abort();}
     if(gateHandled)return;
+    bool bridgeHandled=false;std::string bridgeError;
+    if(!pc_p2_original_bridge_generator_load(this,input,bridgeHandled,bridgeError)){std::fprintf(stderr,"P2_ORIGINAL_BRIDGE_LOAD_FAIL %s\n",bridgeError.c_str());std::abort();}
+    if(bridgeHandled)return;
 #endif
 	if (mGenObject) {
 		BirthInfo info;
@@ -636,6 +641,8 @@ void Generator::init()
     }
     if(originalHandled)return;
     if(!pc_p2_original_gate_generator_init(this,originalHandled,originalError)){std::fprintf(stderr,"P2_ORIGINAL_GATE_INIT_FAIL %s\n",originalError.c_str());std::abort();}
+    if(originalHandled)return;
+    if(!pc_p2_original_bridge_generator_init(this,originalHandled,originalError)){std::fprintf(stderr,"P2_ORIGINAL_BRIDGE_INIT_FAIL %s\n",originalError.c_str());std::abort();}
     if(originalHandled)return;
 #endif
 	// we're past our day limit, do nothing.

@@ -17,6 +17,8 @@
 #include "pc_p2_original_corpse_native.h"
 #include "pc_p2_chappy.h"
 #include "pc_p2_original_onyon_native.h"
+#include "pc_p2_original_gate_native.h"
+#include "pc_p2_original_bridge_native.h"
 #include "pc_p2_original_manifest.h"
 #include "pc_p2_original_progress.h"
 #include "pc_p2_original_piki_native.h"
@@ -51,6 +53,8 @@ struct Course {
  bool started=false;
  bool onyons=false;
  bool pikis=false;
+ bool gates=false;
+ bool bridges=false;
 };
 std::unique_ptr<Course> current;
 bool fail(std::string& e,const char* text){e=text;return false;}
@@ -109,11 +113,14 @@ bool pc_p2_original_course_start(GeneratorList* list,std::string& e){
  std::vector<GroupBinding> bindings;std::map<unsigned,std::vector<Generator*>> inventory;
  std::vector<Generator*> onyonInventory;
  std::vector<Generator*> pikiInventory;
+ std::vector<Generator*> gateInventory,bridgeInventory;
  // Validate the entire list before collect mutates compatibility observations.
  for(auto* node=list->mGenListHead->mChild;node;node=node->mNext){
   auto* g=static_cast<Generator*>(node);auto* object=dynamic_cast<GenObjectOriginalEnemy*>(g->mGenObject);
   if(dynamic_cast<GenObjectOriginalOnyon*>(g->mGenObject))onyonInventory.push_back(g);
   if(dynamic_cast<GenObjectOriginalPiki*>(g->mGenObject))pikiInventory.push_back(g);
+  if(dynamic_cast<GenObjectOriginalGate*>(g->mGenObject))gateInventory.push_back(g);
+  if(dynamic_cast<GenObjectOriginalBridge*>(g->mGenObject))bridgeInventory.push_back(g);
   if(!object)continue;
   auto found=current->literal.find(object->mState.uid);
   if(found==current->literal.end())return fail(e,"original native list has unknown source object");
@@ -151,6 +158,10 @@ bool pc_p2_original_course_start(GeneratorList* list,std::string& e){
  else if(!onyonInventory.empty())return fail(e,"original source Onyons lack admitted typed manifest");
  if(current->pikis){if(!pc_p2_original_piki_preflight(pikiInventory,e))return false;}
  else if(!pikiInventory.empty())return fail(e,"original source Pikmin lack admitted full atlas/calendar census");
+ if(current->gates){if(!pc_p2_original_gate_preflight(gateInventory,e))return false;}
+ else if(!gateInventory.empty())return fail(e,"original source gates lack admitted typed manifest");
+ if(current->bridges){if(!pc_p2_original_bridge_preflight(bridgeInventory,e))return false;}
+ else if(!bridgeInventory.empty())return fail(e,"original source bridges lack admitted typed manifest");
  // Shared Chappy bank is published once with the full source union; later
  // family preflights must not add a missing Fire/Hairy variant to live data.
  std::set<unsigned> chappySources;
@@ -218,15 +229,48 @@ bool pc_p2_original_course_load(const char* directory,const char* course,std::fu
    for(const auto& enemy:manifest.rows)if(enemy.enemy.uid==row.uid)return fail(e,"original typed source UID collision");
   }
  }
+ std::vector<GateRecord> gates;std::vector<BridgeRecord> bridges;
+ const auto typedFile=[&](const char* suffix,std::string& path,bool& exists){
+  path=std::string(directory)+"/"+selected+suffix;std::error_code status;
+  exists=std::filesystem::exists(path,status);if(status)return fail(e,"original typed item manifest status failed");return true;
+ };
+ std::string gatePath,bridgePath;bool hasGates=false,hasBridges=false;
+ if(!typedFile(".p2gt",gatePath,hasGates)||!typedFile(".p2br",bridgePath,hasBridges))return false;
+ if(hasGates&&!readGates(gatePath,gates,e))return false;
+ if(hasBridges&&!readBridges(bridgePath,bridges,e))return false;
+ // The shared UID namespace covers every kind, including inactive Pikmin.
+ std::set<unsigned> sourceUids;
+ for(const auto& row:manifest.rows)sourceUids.insert(row.enemy.uid);
+ for(const auto& row:pikiAtlas.rows)if(!sourceUids.insert(row.spawn.uid).second)return fail(e,"original Pikmin/source UID collision");
+ const auto checkItem=[&](const auto& row){
+  if(row.sourceKey.compare(0,selected.size()+1,selected+"/")||!sourceUids.insert(row.uid).second)
+   return fail(e,"original typed item course or UID collision");return true;
+ };
+ for(const auto& row:onyons)if(!checkItem(row))return false;
+ for(const auto& row:gates)if(!checkItem(row))return false;
+ for(const auto& row:bridges)if(!checkItem(row))return false;
  if(!pc_p2_original_course_prepare(manifest.fingerprint,manifest.rows,manifest.literal,std::move(metColor),e))return false;
+ const auto rollback=[&](){
+  // No source body has been born during installation.
+  if(current->gates)pc_p2_original_gate_unload();
+  if(current->bridges)pc_p2_original_bridge_unload();
+  if(current->pikis)pc_p2_original_piki_unload();
+  if(current->onyons)pc_p2_original_onyon_unload();current.reset();
+ };
+ if(hasGates&&!gates.empty()){
+  if(!pc_p2_original_gate_install(gates,e)){rollback();return false;}current->gates=true;
+ }
+ if(hasBridges){
+  if(!pc_p2_original_bridge_install(bridges,e)){rollback();return false;}current->bridges=true;
+ }
  if(hasPikis){
-  if(!pc_p2_original_piki_install(pikiAtlas,pikiActive,e)){current.reset();return false;}
+  if(!pc_p2_original_piki_install(pikiAtlas,pikiActive,e)){rollback();return false;}
   current->pikis=true;
  }
  if(hasOnyons){
   auto progress=[](){const auto& s=originalProgress().snapshot();return PcOriginalOnyonProgress{std::uint8_t(s.container&7),std::uint8_t(s.boot&7)};};
   auto boot=[](int species){std::string e;if(!originalProgress().boot(unsigned(species),e)){std::fprintf(stderr,"P2_ORIGINAL_ONYON_BOOT_FAIL %s\n",e.c_str());std::abort();}};
-  if(!pc_p2_original_onyon_install(onyons,progress,boot,e)){if(current->pikis)pc_p2_original_piki_unload();current.reset();return false;}
+  if(!pc_p2_original_onyon_install(onyons,progress,boot,e)){rollback();return false;}
   current->onyons=true;
  }
  e.clear();return true;
