@@ -876,6 +876,15 @@ else()
     set(NECTAR_OUTPUT_NAME "nectar")
 endif()
 
+option(PIKMIN_PIKI_JPA_COMPONENT "Compile the uninstalled selected Piki halo component" OFF)
+set(PIKMIN_PIKI_JPA_TEST_ASSETS "" CACHE PATH "Private exact selected JPA roles for engineering controls")
+if(PIKMIN_PIKI_JPA_COMPONENT)
+    list(APPEND PC_PORT_SOURCES
+        pc_port/pc_p2_piki_jpa_bank.cpp
+        pc_port/pc_p2_piki_halo.cpp
+        pc_port/pc_p2_piki_jpa_native.cpp)
+endif()
+
 add_library(${NECTAR_LEGACY} STATIC
     ${SYSCOMMON_SOURCES}
     ${SYSDOLPHIN_SOURCES}
@@ -3798,6 +3807,18 @@ add_executable(pc_p2_original_barrel_test tools/test_p2_original_barrel.cpp
 target_include_directories(pc_p2_original_barrel_test PRIVATE pc_port)
 target_compile_options(pc_p2_original_barrel_test PRIVATE -UNDEBUG)
 add_test(NAME p2_original_barrel COMMAND pc_p2_original_barrel_test)
+
+# Engineering controls only. Enabling compilation installs no Scene/Body hooks.
+if(PIKMIN_PIKI_JPA_COMPONENT)
+    add_executable(pc_p2_piki_jpa_test tools/p2_piki_jpa_test.cpp
+        pc_port/pc_p2_piki_jpa_bank.cpp pc_port/pc_p2_piki_halo.cpp)
+    target_include_directories(pc_p2_piki_jpa_test PRIVATE pc_port)
+    target_compile_options(pc_p2_piki_jpa_test PRIVATE -Wall -Wextra -Werror -UNDEBUG)
+    add_test(NAME p2_piki_jpa_retired_guard COMMAND pc_p2_piki_jpa_test --guard-retired)
+    if(PIKMIN_PIKI_JPA_TEST_ASSETS)
+        add_test(NAME p2_piki_jpa_selected_policy COMMAND pc_p2_piki_jpa_test "${PIKMIN_PIKI_JPA_TEST_ASSETS}")
+    endif()
+endif()
 
 add_executable(p2_equipment_policy_test tools/pc_p2_equipment_test.cpp)
 target_include_directories(p2_equipment_policy_test PRIVATE pc_port)
