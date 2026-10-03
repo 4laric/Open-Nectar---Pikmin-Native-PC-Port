@@ -59,3 +59,10 @@ add_executable(p2_shijimi_attachment_control
 target_include_directories(p2_shijimi_attachment_control PRIVATE "${SENTINEL_SOURCE}/pc_port")
 target_compile_options(p2_shijimi_attachment_control PRIVATE -Wall -Wextra -Werror -UNDEBUG)
 add_test(NAME original_shijimi_attachment_refs COMMAND p2_shijimi_attachment_control)
+
+add_executable(p2_original_honey_identity_policy
+ "${SENTINEL_SOURCE}/pc_port/pc_p2_original_honey_identity_test.cpp"
+ "${SENTINEL_SOURCE}/pc_port/pc_p2_original_resource_contents.cpp")
+target_include_directories(p2_original_honey_identity_policy PRIVATE "${SENTINEL_SOURCE}/pc_port")
+target_compile_options(p2_original_honey_identity_policy PRIVATE -Wall -Wextra -Werror -UNDEBUG)
+add_test(NAME original_honey_identity_policy COMMAND p2_original_honey_identity_policy)
