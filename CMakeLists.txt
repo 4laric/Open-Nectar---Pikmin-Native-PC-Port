@@ -292,6 +292,7 @@ set(PC_PORT_SOURCES
     pc_port/pc_p2_original_captain_states.cpp
     pc_port/pc_p2_original_captain_throw.cpp
     pc_port/pc_p2_original_captain_actions_party.cpp
+    pc_port/pc_p2_original_captain_native_actions.cpp
     pc_port/pc_p2_original_captain_punch.cpp
     pc_port/pc_p2_original_captain_pluck.cpp
     pc_port/pc_p2_original_captain_dope.cpp

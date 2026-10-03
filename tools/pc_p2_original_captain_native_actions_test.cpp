@@ -102,7 +102,7 @@ bool SourceBank::sourceBytes(SourceResource,std::string& out,std::string&)const{
 bool SourceBank::state(const Navi*,MotionState& out,std::string&)const{out={};return true;}
 bool SourceBank::jointWorld(Navi*,unsigned joint,std::array<float,12>& out,std::string&){if(joint!=10)return false;out={1,0,0,10,0,1,0,20,0,0,1,30};return true;}
 namespace nativecontrol {std::optional<float> sceneAnimationTimer(const Navi*){return 2;}bool control(Navi*,std::string&){++controls;return true;}}
-namespace party {bool whistleCaptain(Navi* receiver,Navi* caller,bool,bool,std::string&){return receiver==&b&&caller==&a;}}
+namespace party {bool invocationAvailable=true,accepted=true;bool invokeWhistleCaptain(Navi* receiver,Navi* caller,bool,bool,WhistleOutcome& out,std::string&){if(!invocationAvailable||receiver!=&b||caller!=&a)return false;out={accepted};return true;}}
 }}
 namespace p2original {namespace piki {
 bool handle(const Piki* body,Handle& out){if(!sdkAvailable)return false;for(const auto& f:frames)if(f.handle.body==body){out=f.handle;return true;}return false;}
@@ -137,6 +137,7 @@ int main(int argc,char** argv){try{
  check(!bridge->freeMember(a,{&p,10},5,{1,2,3},true,error)&&gathers==1,"CF-dead member never mutated");alive=true;
  physicalAvailable=false;membership[0].kind=99;check(!bridge->members(a,membership,error)&&membership[0].kind==99,"missing physical authority refuses membership without output change");physicalAvailable=true;
  actor.candidates={{{&p,10},nullptr},{{},&b}};check(bridge->callPikis(a,error)&&whistles==2,"ordered source census dispatches Piki and partner");
+ actor.candidates={{{},&b},{{&p,10},nullptr}};party::accepted=false;int beforeWhistles=whistles;check(bridge->callPikis(a,error)&&whistles==beforeWhistles+1,"completed retail captain rejection continues ordered census");party::invocationAvailable=false;beforeWhistles=whistles;check(!bridge->callPikis(a,error)&&whistles==beforeWhistles,"missing captain authority halts census before next Piki");party::invocationAvailable=true;party::accepted=true;
  check(bridge->control(a,error)&&controls==1,"actual source control called once");check(bridge->moveRotation(a,false,error)&&(a.flags&CF_UsePriorityFaceDir),"physical priority face flag");
  check(bridge->togglePlayer(a,b,error),"source controller ownership toggle preserves both state identities");actor.toggleExpire=true;check(!bridge->togglePlayer(a,b,error),"unexpected target state expiry refuses toggle continuation");actor.toggleExpire=false;b.current=&typed;
  actor.expire=true;observation.face=99;check(!bridge->frame(a,observation,error)&&observation.face==99,"read callback state expiry leaves output unchanged");a.current=&typed;
