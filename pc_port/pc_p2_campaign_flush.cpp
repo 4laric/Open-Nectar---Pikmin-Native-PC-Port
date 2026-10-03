@@ -8,6 +8,16 @@
 #include "pc_p2_cave_campaign_cache_engine.h"
 #include <vector>
 
+PcP2CampaignLiveCache::PcP2CampaignLiveCache():image(pc_p2_campaign_cache_image()){
+    Generator* gen;
+    FOREACH_NODE_REUSE(Generator,generatorList->mGenListHead->mChild,gen)
+        indices.emplace_back(gen,gen->mGeneratorListIdx);
+}
+void PcP2CampaignLiveCache::restore() const {
+    pc_p2_campaign_cache_restore_image(image);
+    for(const auto& saved:indices)saved.first->mGeneratorListIdx=saved.second;
+}
+
 bool pc_p2_campaign_flush(std::string& reason) {
     if (!flowCont.mCurrentStage || !generatorCache || !generatorList
         || !generatorList->mGenListHead || !pelletMgr || !playerState) {
@@ -19,12 +29,10 @@ bool pc_p2_campaign_flush(std::string& reason) {
         reason = "foreign native cache directory key";
         return false;
     }
-    const auto previous=pc_p2_campaign_cache_image();
+    const PcP2CampaignLiveCache previous;
     unsigned expectedGenerators=0,expectedCreatures=0,expectedParts=0;
-    std::vector<std::pair<Generator*,int>> indices;
     Generator* observed;
     FOREACH_NODE_REUSE(Generator,generatorList->mGenListHead->mChild,observed){
-        indices.emplace_back(observed,observed->mGeneratorListIdx);
         if(!(observed->mCarryOverFlags&GENCARRY_SaveGenerator))continue;
         if(observed->mDayLimit==-1||observed->mDayLimit>gameflow.mWorldClock.mCurrentDay)++expectedGenerators;
         if((observed->mCarryOverFlags&GENCARRY_SaveCreature)&&!observed->isExpired()
@@ -56,8 +64,7 @@ bool pc_p2_campaign_flush(std::string& reason) {
         return value;};
     const auto entry=8+P2CaveCacheBanks::heapSize+stage*37+1;
     if(word(entry+24)!=expectedGenerators||word(entry+28)!=expectedCreatures||word(entry+32)!=expectedParts){
-        pc_p2_campaign_cache_restore_image(previous);
-        for(const auto& saved:indices)saved.first->mGeneratorListIdx=saved.second;
+        previous.restore();
         reason="native cache omitted a live record (capacity exhausted)";
         return false;
     }

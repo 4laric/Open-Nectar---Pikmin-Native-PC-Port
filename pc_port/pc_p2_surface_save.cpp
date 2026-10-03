@@ -100,7 +100,7 @@ bool commit(){
         return held("no_selected_native_slot");
     // Preserve the PRE-flush image. A failed physical card write must not
     // replace a prior scene cache while gameplay continues.
-    const auto oldImage=pc_p2_campaign_cache_image();
+    const PcP2CampaignLiveCache oldCache;
     const auto oldPlayState=gameflow.mPlayState;
     std::string reason;
     if(!pc_p2_campaign_flush(reason))return held(reason.c_str());
@@ -108,12 +108,16 @@ bool commit(){
     const auto before=pc_randomizer_active_campaign_generation();
     gameflow.mMemoryCard.saveCurrentGame();
     if(pc_randomizer_active_campaign_generation()<=before){
-        pc_p2_campaign_cache_restore_image(oldImage);
+        oldCache.restore();
         pc_randomizer_surface_session_set(oldSession);
         gameflow.mPlayState=oldPlayState;
         return held("native_card_failed_rolled_back");
     }
     if(!proof())invalid("committed checkpoint proof unavailable");
+    // endSave makes the serialized stage ALIVE; live gameplay's next normal
+    // day end/second F11 expects its consumed DEAD entry. Preserve that actual
+    // lifecycle without reloading/spawning the scene on top of itself.
+    oldCache.restore();
     std::printf("P2_SURFACE_SAVED generation=%llu day=%d time=%.9g stage=%d bodies=%zu heads=%zu options_failed=%d\n",
         static_cast<unsigned long long>(selectedGeneration),next.day,next.party.surfaceTime,next.stage,
         next.party.bodies.size(),next.party.surfaceHeads.size(),int(gameflow.mMemoryCard.didSaveFail()));
