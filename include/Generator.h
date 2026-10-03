@@ -1027,7 +1027,7 @@ public:
 	void init();
 	void setDayLimit(int);
 	void updateUseList();
-	void read(RandomAccessStream&, bool);
+	void read(RandomAccessStream&, bool, bool onlyNonpersistent = false);
 #if defined(PIKI_PC_PORT)
 	Generator* originalSourceHead() const { return mGenListHead; }
 	int originalSourceCount() const { return mGenCount; }
