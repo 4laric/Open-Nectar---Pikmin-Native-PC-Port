@@ -68,6 +68,14 @@ void mesh(Graphics& gfx,const P2CaveVisibleBoundary& a){
     // A recessed dark mouth with a solid irregular stone rim; the returning
     // actor adds a tall tapered water jet and a broad visible splash crown.
     constexpr int segments=24;constexpr float tau=6.28318530718f;
+    // This authored opening is a surface decal, not a cut in the legal map
+    // triangles. Draw its small stone/aperture surface above the map's depth;
+    // retain physical footing unchanged and restore normal depth for the jet.
+#if PIKI_USE_DGX
+    GXSetZMode(GX_FALSE,GX_LEQUAL,GX_FALSE);
+#else
+    gfx.setDepth(false);
+#endif
     for(int i=0;i<segments;++i){
         const float t=i*tau/segments,u=(i+1)*tau/segments;
         const float r=48.f+(i%3)*3.f,s=48.f+((i+1)%3)*3.f;
@@ -78,8 +86,15 @@ void mesh(Graphics& gfx,const P2CaveVisibleBoundary& a){
         tri(gfx,inner,next,outNext,stone);tri(gfx,inner,outNext,outer,stone);
         tri(gfx,outer,outNext,ring(a,u,s+7,1),Colour(91,97,105,255));
         tri(gfx,outer,ring(a,u,s+7,1),ring(a,t,r+7,1),Colour(91,97,105,255));
-        tri(gfx,Vector3f(a.x,a.y+14,a.z),next,inner,Colour(17,21,27,255));
-        if(a.returning){
+    }
+    for(int i=0;i<segments;++i){
+        const float t=i*tau/segments,u=(i+1)*tau/segments;
+        tri(gfx,Vector3f(a.x,a.y+14,a.z),ring(a,u,36,15),ring(a,t,36,15),Colour(17,21,27,255));
+    }
+    gfx.setDepth(true);
+    if(a.returning){
+        for(int i=0;i<segments;++i){
+            const float t=i*tau/segments,u=(i+1)*tau/segments;
             auto low=ring(a,t,16,5),lowNext=ring(a,u,16,5);
             auto high=ring(a,t,8,104),highNext=ring(a,u,8,104);
             tri(gfx,low,lowNext,highNext,Colour(75,195,239,255));
