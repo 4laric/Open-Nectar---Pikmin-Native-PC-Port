@@ -3121,3 +3121,17 @@ pikmin_add_ci_fixture(ivory_budget tools/preview_p2_ivory_budget.cpp)
 if(TARGET pikmin_ci_fixture_ivory_budget)
     target_include_directories(pikmin_ci_fixture_ivory_budget PRIVATE ${P2_CHALLENGE_GUARD_INCLUDE_DIR})
 endif()
+
+# #1191 ordinary Forest acquisition, original diamond haul, day-save and fresh resume.
+pikmin_add_ci_fixture(white_bank_campaign tools/p2_white_bank_campaign_runtime.cpp)
+if(TARGET pikmin_ci_fixture_white_bank_campaign)
+    target_include_directories(pikmin_ci_fixture_white_bank_campaign PRIVATE ${P2_CHALLENGE_GUARD_INCLUDE_DIR})
+endif()
+
+# Read-only ordinary world-map resume input controls; no engine or assets.
+if(PIKMIN_BUILD_TESTS)
+    add_executable(pc_world_map_resume_input_test tools/test_pc_world_map_resume_input.cpp)
+    target_include_directories(pc_world_map_resume_input_test PRIVATE pc_port)
+    target_compile_options(pc_world_map_resume_input_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+    add_test(NAME pc_world_map_resume_input_test COMMAND pc_world_map_resume_input_test)
+endif()
