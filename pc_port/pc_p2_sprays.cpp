@@ -2,6 +2,7 @@
 #include "pc_p2_original_resource_state.h"
 #include "PikiState.h"
 #include "Piki.h"
+#include "PikiMgr.h"
 #include "Navi.h"
 #include "NaviState.h"
 #include "CPlate.h"
@@ -13,12 +14,14 @@
 #include "gameflow.h"
 #include "sysNew.h"
 #include "timing/pc_render_phase.h"
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <string>
 namespace {
 p2originalresource::ResourceState* inventory = nullptr;
 p2originalresource::honey::ReceiverClip growup;
+PikiMgr* saveRoster = nullptr;
 bool gameplay() {
     return gsys && playerState && !playerState->mInDayEnd
         && gameflow.mMoviePlayer && !gameflow.mMoviePlayer->mIsActive
@@ -79,6 +82,33 @@ bool pc_p2_sprays_bind(p2originalresource::ResourceState* state,
     growup = *source; inventory = state; error.clear(); return true;
 }
 bool pc_p2_spicy_active(const Piki* p) { return p && p->mP2Spicy.active(); }
+bool pc_p2_spicy_save_observation(const Piki* p, float& remaining, bool& pendingDope) noexcept {
+    if (!p || !p->mCurrentState) return false;
+    const float seconds = p->mP2Spicy.remaining;
+    if (!std::isfinite(seconds) || seconds < 0 || seconds > p2sprays::Duration) return false;
+    const bool pending = p->mCurrentState->getID() == PIKISTATE_P2Dope;
+    remaining = seconds;
+    pendingDope = pending;
+    return true;
+}
+void pc_p2_spicy_save_roster_bind(PikiMgr* roster) noexcept { saveRoster = roster; }
+bool pc_p2_spicy_save_roster_bound() noexcept { return saveRoster != nullptr; }
+bool pc_p2_spicy_save_preflight(std::string& error) {
+    if (!saveRoster) { error = "spicy_missing_roster"; return false; }
+    if (saveRoster != pikiMgr) { error = "spicy_roster_owner_mismatch"; return false; }
+    Iterator bodies(saveRoster);
+    CI_LOOP(bodies) {
+        auto* p = static_cast<Piki*>(*bodies);
+        if (!p || !p->isAlive()) continue;
+        float remaining; bool pending;
+        if (!pc_p2_spicy_save_observation(p, remaining, pending)) {
+            error = "invalid_spicy_snapshot"; return false;
+        }
+        if (pending) { error = "spicy_pending_dope"; return false; }
+        if (remaining > 0) { error = "spicy_remaining_requires_graph"; return false; }
+    }
+    error.clear(); return true;
+}
 void pc_p2_spicy_tick(Piki* p) {
     if (!pc_render_is_authoritative()) return;
     if (!p->isAlive()) { p->mP2Spicy.clear(); return; }

@@ -7,6 +7,7 @@
 #include "pc_p2_original_sprout_native.h"
 #define PC_P2_PARTY_SOURCE_SPROUT_PROVIDER 1
 #endif
+#include "pc_p2_sprays.h"
 #include "pc_p2_purple.h"
 #include "pc_p2_white.h"
 #include "pc_p2_captain.h"
@@ -46,6 +47,9 @@ bool pc_p2_cave_campaign_party_capture(P2CaveCampaignParty& party,bool inside){
     std::string numericHold;
     if(!pc_p2_original_number_preflight_teardown(numericHold))return held("typed_source_number_requires_graph");
     if(!pikiMgr||!naviMgr||!itemMgr||!itemMgr->getPikiHeadMgr())return held("missing_managers");
+    // Refuse before even preparing a capture, regardless of captain state.
+    std::string spicyHold;
+    if(!pc_p2_spicy_save_preflight(spicyHold))return held(spicyHold.c_str());
     auto captured=party;captured.present=true;captured.inside=inside;
     captured.resumeLiving=true;
     captured.landing=false;

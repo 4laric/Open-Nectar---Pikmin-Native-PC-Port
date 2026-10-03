@@ -17,6 +17,12 @@
 #include "gameflow.h"
 #include "system.h"
 #include "pc_p2_sprays.h"
+#include "pc_p2_cave_campaign_party_engine.h"
+#include "pc_p2_cave_campaign_cache_engine.h"
+#include "pc_p2_cave_campaign_cache.h"
+#include "pc_randomizer.h"
+#include "MemoryCard.h"
+#include "GameExitSection.h"
 #include "pc_p2_original_resource_state.h"
 #include "pc_p2_original_honey_bank.h"
 #include "pc_window.h"
@@ -29,6 +35,10 @@
 #include <cstdlib>
 #include <string>
 #include <vector>
+#include <cstring>
+#include <limits>
+#include <sstream>
+#include <optional>
 namespace {
 void require(bool ok,const char* reason) {
     if (!ok) { std::printf("P2_SPICY_RUNTIME_FAIL %s\n",reason); std::fflush(nullptr); std::_Exit(1); }
@@ -44,6 +54,7 @@ struct Baseline { Piki* p; float attack,speed; int maturity; };
 class SpicyApp : public PlugPikiApp {
     int ticks=0,phase=0,pauseTicks=0;
     bool sawCaptain=false,whistled=false;
+    bool sawPendingBegin=false;
     std::vector<Baseline> squad;
     p2originalresource::ResourceState stock;
     p2originalresource::EggContents contents;
@@ -51,6 +62,45 @@ class SpicyApp : public PlugPikiApp {
     p2originalresource::honey::Resources resources;
     std::vector<float> pausedRemaining;
     float phaseTime=0,setupTime=0;
+    void saveHold(const char* label,const char* expected) {
+        std::string e;
+        require(!pc_p2_spicy_save_preflight(e)&&e==expected,"wrong living-roster SAVE hold");
+        p2originalresource::ResourceSnapshot before,after;
+        require(stock.snapshot(before,e),"stock snapshot before SAVE hold");
+        const auto generation=pc_randomizer_active_campaign_generation();
+        const auto cache=pc_p2_campaign_cache_image();
+        // A room regression has no generated/authored cave owner. Never read
+        // that owner's cache getter or fabricate a campaign to enable it.
+        std::optional<P2CaveCacheBanks> banks;
+        if(pc_randomizer_generated_cave())banks=pc_randomizer_generated_cave_cache();
+        const std::vector<u8> card(cardData,cardData+CARD_DATA_SIZE);
+        const auto savedDay=gameflow.mPlayState.mSavedDay;
+        const auto saveStatus=gameflow.mPlayState.mSaveStatus;
+        for(bool inside:{false,true}) {
+            P2CaveCampaignParty party;party.present=true;party.nextKey=37;
+            std::ostringstream original;party.write(original);
+            require(!pc_p2_cave_campaign_party_capture(party,inside),"spicy Party capture admitted");
+            std::ostringstream held;party.write(held);
+            require(original.str()==held.str()&&party.nextKey==37,"held Party capture published state");
+        }
+        // Valid slot prevents the historical invalid-slot guard masking this
+        // control. This invokes the actual common card API, not its UI.
+        const auto slot=gameflow.mGamePrefs.mSpareMemCardSaveIndex;
+        gameflow.mGamePrefs.mSpareMemCardSaveIndex=4;
+        gameflow.mMemoryCard.saveCurrentGame();
+        gameflow.mGamePrefs.mSpareMemCardSaveIndex=slot;
+        require(gameflow.mMemoryCard.didSaveFail(),"spicy native card SAVE admitted");
+        require(!std::memcmp(card.data(),cardData,CARD_DATA_SIZE),"held SAVE changed card bytes");
+        require(pc_randomizer_active_campaign_generation()==generation,"held SAVE advanced generation");
+        require(pc_p2_campaign_cache_image()==cache,"held SAVE changed native cache");
+        if(banks){const auto& heldBanks=pc_randomizer_generated_cave_cache();
+            require(banks->inside==heldBanks.inside&&banks->surface==heldBanks.surface&&banks->floor==heldBanks.floor,"held SAVE changed cache banks");}
+        require(savedDay==gameflow.mPlayState.mSavedDay&&saveStatus==gameflow.mPlayState.mSaveStatus,"held SAVE changed PlayState");
+        require(stock.snapshot(after,e)&&before.sprayCounts==after.sprayCounts
+            &&before.berryCounts==after.berryCounts&&before.sprayUses==after.sprayUses
+            &&before.sprayMade==after.sprayMade&&before.completed.size()==after.completed.size(),"held SAVE changed stock journal");
+        std::printf("P2_SPICY_SAVE_HOLD_CONTROL label=%s reason=%s actual_party_api_both_realms=1 actual_card_api=1 card_bytes_generation_cache_stock_unchanged=1 active_cave_cache_banks=%d authored_transition_UI=UNTESTED\n",label,expected,int(banks.has_value()));
+    }
     bool input(Navi* n) {
         auto previous=n->mKontroller->mInputPressed;
         n->mKontroller->mInputPressed=KBBTN_DPAD_UP;
@@ -107,18 +157,50 @@ public:
             require(!pc_p2_sprays_bind(&stock,nullptr,e),"bind accepted missing source receiver");
             if(!bank.resources(resources,e))require(false,e.c_str());
             require(pc_p2_sprays_bind(&stock,&resources.receiverClips[1],e),"source-clock/inventory binding");
+            require(pc_p2_spicy_save_roster_bound(),"actual GameCore did not bind its roster");
+            auto* liveRoster=pikiMgr;
+            pikiMgr=reinterpret_cast<PikiMgr*>(std::uintptr_t(1));
+            require(!pc_p2_spicy_save_preflight(e)&&e=="spicy_roster_owner_mismatch","mismatched roster was dereferenced");
+            pikiMgr=liveRoster;
+            pc_p2_spicy_save_roster_bind(nullptr);
+            // Explicit stale-global diagnostic: no tick occurs with this
+            // poisoned pointer, and unbound preflight must never dereference it.
+            pikiMgr=reinterpret_cast<PikiMgr*>(std::uintptr_t(1));
+            require(!pc_p2_spicy_save_roster_bound()&&!pc_p2_spicy_save_preflight(e)
+                &&e=="spicy_missing_roster","revoked roster read stale global");
+            pikiMgr=liveRoster;pc_p2_spicy_save_roster_bind(liveRoster);
+            std::puts("P2_SPICY_SAVE_LIFETIME_CONTROL actual_GameCore_bound=1 mismatched_poisoned_global_not_read=1 revoked_poisoned_global_not_read=1 diagnostic_rebind=1 title_card_save=UNTESTED");
+            float observed=12.5f;bool pending=true;
+            require(!pc_p2_spicy_save_observation(nullptr,observed,pending)&&observed==12.5f&&pending,"null observation changed outputs");
+            require(pc_p2_spicy_save_preflight(e),"normal zero-effect roster refused");
+            // Deliberate invalid scalar controls on an initialized live actor;
+            // restore immediately without any simulation tick or health write.
+            auto* controlled=squad.front().p;
+            for(float invalid:{-1.f,41.f,std::numeric_limits<float>::infinity(),std::numeric_limits<float>::quiet_NaN()}) {
+                const float saved=controlled->mP2Spicy.remaining;
+                controlled->mP2Spicy.remaining=invalid;
+                require(!pc_p2_spicy_save_observation(controlled,observed,pending)&&observed==12.5f&&pending,"invalid observation changed outputs");
+                saveHold("invalid_timer_injected","invalid_spicy_snapshot");
+                controlled->mP2Spicy.remaining=saved;
+            }
             require(input(n),"spicy input did not consume");
             require(stock.sprayCount(p2originalresource::HoneyKind::Spicy)==1,"wrong stock decrement");
             for(const auto& b:squad) require(!b.p->mP2Spicy.active()&&b.p->getState()==PIKISTATE_P2Dope,"effect committed before animation callback");
+            saveHold("actual_pre_ACTION","spicy_pending_dope");
             std::printf("P2_SPICY_RUNTIME_START alive=%d formation=%zu stocks=injected input=injected receiver=actual_animation captain=unprotected\n",alive,squad.size());
             phase=1;return result;
         }
         phaseTime+=gsys->getFrameTime();
         if(phase==1) {
+            if(!sawPendingBegin)for(const auto& b:squad)if(b.p->mP2Spicy.active()&&b.p->getState()==PIKISTATE_P2Dope) {
+                saveHold("actual_post_BEGIN_pre_END","spicy_pending_dope");sawPendingBegin=true;break;
+            }
             bool ready=true;
             for(const auto& b:squad) ready=ready&&b.p->mP2Spicy.active()&&b.p->getState()==PIKISTATE_Normal;
             require(phaseTime<8,"missing Growup callback or return to normal");
             if(!ready) return result;
+            require(sawPendingBegin,"post-BEGIN pending reaction was not observed");
+            saveHold("actual_active_Normal","spicy_remaining_requires_graph");
             for(const auto& b:squad) {
                 require(b.p->mHappa==b.maturity,"spicy changed maturity");
                 require(b.p->getAttackPower()==10&&b.p->getSpeed(.25f)==190,"source effects absent");
@@ -131,13 +213,26 @@ public:
             bool recovered=true;for(const auto& b:squad) recovered=recovered&&!b.p->mP2Spicy.active();
             require(phaseTime<43,"40sec effect did not expire");
             if(!recovered) return result;
+            std::string readyError;
+            require(pc_p2_spicy_save_preflight(readyError),"expired Normal roster still held by spicy gate");
+            for(const auto& b:squad){float remaining=-1;bool pending=true;
+                require(pc_p2_spicy_save_observation(b.p,remaining,pending)&&remaining==0&&!pending,"expired observation invalid");}
+            std::puts("P2_SPICY_SAVE_EXPIRED_CONTROL actual_actor_clock=1 spicy_preflight_allowed=1 full_capture_and_card_save=UNTESTED");
             require(phaseTime>=39,"effect expired early");
             for(const auto& b:squad) {
                 require(b.p->isAlive()&&b.p->mHappa==b.maturity,"survival or maturity changed");
                 require(b.p->getAttackPower()==b.attack&&b.p->getSpeed(.25f)==b.speed,"baseline effects not restored");
             }
             std::string e;require(pc_p2_sprays_bind(nullptr,nullptr,e),"detach");
-            std::printf("P2_SPICY_RUNTIME_PASS formation=%zu actual_animation=1 source_stats=1 pause=1 refresh=1 stock_zero=1 recovery_seconds=%.3f injected_stock_and_input=1 natural_pickup=UNTESTED save_resume=UNTESTED\n",squad.size(),phaseTime);
+            const auto formation=squad.size();const float recoverySeconds=phaseTime;
+            // Actual Appdown constructor revokes before resetting its heap.
+            // Do not read stage actors or fixture members after this boundary.
+            GameExitSection exit;
+            // Inspect only static binding state here, without touching even
+            // local strings that existed before App heap reset.
+            require(!pc_p2_spicy_save_roster_bound(),"actual GameExit retained stale save roster");
+            std::puts("P2_SPICY_SAVE_EXIT_CONTROL actual_GameExit_Appdown=1 roster_revoked_before_heap_reset=1 title_day_end_card_save=UNTESTED");
+            std::printf("P2_SPICY_RUNTIME_PASS formation=%zu actual_animation=1 source_stats=1 pause=1 refresh=1 stock_zero=1 recovery_seconds=%.3f injected_stock_and_input=1 natural_pickup=UNTESTED save_resume=UNTESTED\n",formation,recoverySeconds);
             std::fflush(nullptr);std::_Exit(0);
         }
         return result;

@@ -2,6 +2,7 @@
 #include <cstdlib>
 #include <cstring>
 #include "pc_randomizer.h"
+#include "pc_p2_sprays.h"
 #include "gameflow.h"
 #include "pc_bbft.h"
 
@@ -509,6 +510,9 @@ Texture* GameFlow::setLoadBanner(immut char* texPath)
  */
 void GameFlow::hardReset(BaseApp* baseApp)
 {
+#if defined(PIKI_PC_PORT)
+	pc_p2_spicy_save_roster_bind(nullptr);
+#endif
 	app  = baseApp;
 	_1D4 = 0; // never used again
 	PRINT("Doing HardReset!!\n");
@@ -654,6 +658,9 @@ void GameFlow::hardReset(BaseApp* baseApp)
  */
 void GameFlow::softReset()
 {
+#if defined(PIKI_PC_PORT)
+	pc_p2_spicy_save_roster_bind(nullptr);
+#endif
 #if PIKI_PC_PORT
 	// N3: the synchronous stage load below blocks GekkoNet pumping. The
 	// netplay hook opens the load guard's window and runs the test stall /

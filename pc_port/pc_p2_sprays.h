@@ -3,6 +3,7 @@
 class Piki;
 class PikiState;
 class Navi;
+class PikiMgr;
 namespace p2originalresource { class ResourceState; }
 // The original campaign owner binds its single authoritative inventory only
 // after resource/receiver installation; nullptr detaches before destruction.
@@ -13,5 +14,15 @@ bool pc_p2_sprays_input(Navi*);
 bool pc_p2_spicy_use(Navi*);
 bool pc_p2_spicy_accept(Piki*);
 bool pc_p2_spicy_active(const Piki*);
+// Read-only Party capture observation. Failure leaves both outputs unchanged.
+// SAVE must be held while pendingDope is true; remaining cannot resume Dope.
+bool pc_p2_spicy_save_observation(const Piki*, float& remaining, bool& pendingDope) noexcept;
+// No save format currently carries spicy continuation. Read the living roster
+// before capture/cache/card mutation; this check never grants SAVE admission.
+bool pc_p2_spicy_save_preflight(std::string& error);
+// The actual GameCore owner binds after initialization and revokes before
+// scene teardown or App heap reset. Global pikiMgr may remain stale afterward.
+void pc_p2_spicy_save_roster_bind(PikiMgr*) noexcept;
+bool pc_p2_spicy_save_roster_bound() noexcept;
 void pc_p2_spicy_tick(Piki*);
 PikiState* pc_p2_spicy_state();

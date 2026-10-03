@@ -1,4 +1,7 @@
 #include "GameExitSection.h"
+#if defined(PIKI_PC_PORT)
+#include "pc_p2_sprays.h"
+#endif
 
 #include "DebugLog.h"
 #include "FlowController.h"
@@ -20,6 +23,9 @@ DEFINE_PRINT("GameExit");
  */
 GameExitSection::GameExitSection()
 {
+#if defined(PIKI_PC_PORT)
+	pc_p2_spicy_save_roster_bind(nullptr);
+#endif
 	gsys->resetHeap(SYSHEAP_App, AYU_STACK_GROW_DOWN);
 	gsys->mCurrMemInfo = nullptr;
 	PRINT("clearing aram directory!\n");
