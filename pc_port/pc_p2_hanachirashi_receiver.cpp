@@ -15,29 +15,36 @@ std::map<Piki*,Pending> pikiPending;
 std::map<Navi*,Pending> naviPending;
 enum Phase { Hit, Fling, Koke, Timer, GetUp };
 struct WindPikiState : PikiState {
-    Vector3f direction; Phase phase=Hit; float timer=1; bool wither=true;
+    Vector3f direction; Phase phase=Hit; float timer=1; bool wither=true,whistled=false;
     WindPikiState():PikiState(PIKISTATE_HanachirashiBlow,"P2_HANA_BLOW"){}
     void init(Piki* p) override {
-        auto arg=pikiPending.at(p);direction=arg.direction;wither=arg.wither;pikiPending.erase(p); phase=Hit;timer=1;
+        auto arg=pikiPending.at(p);direction=arg.direction;wither=arg.wither;pikiPending.erase(p); phase=Hit;timer=1;whistled=false;
         p->endStickObject();p->mActiveAction->resume();p->mIsBeingDamaged=true;
         p->startMotion(PaniMotionInfo(PIKIANIM_JHit,p),PaniMotionInfo(PIKIANIM_JHit));
         p->mVelocity.y=direction.y*(1+.1f*gsys->getRand(1.f));
         p->mFaceDirection=roundAng(std::atan2(direction.x,direction.z)+PI);
         if(wither){p->mHappa=Leaf;p->setFlower(Leaf);}
     }
+    void observeWhistle(Piki* p) {
+        if(!p->mIsWhistlePending)return;
+        whistled=true;p->mIsWhistlePending=false;
+        if(phase>=Koke)timer=0;
+    }
     void exec(Piki* p) override {
+        observeWhistle(p);
         if(p->getStickObject())p->endStickObject();
         if(phase==Hit){p->mVelocity.x=direction.x;p->mVelocity.z=direction.z;}
         else if(phase==Fling){p->mVelocity.x*=.9f;p->mVelocity.z*=.9f;}
         else {p->mVelocity.set(0,0,0);p->mTargetVelocity.set(0,0,0);
-            if(phase==Timer){timer-=gsys->getFrameTime();if(timer<=0||p->mIsWhistlePending){phase=GetUp;p->startMotion(PaniMotionInfo(PIKIANIM_GetUp,p),PaniMotionInfo(PIKIANIM_GetUp));}}}
+            if(phase==Timer){timer-=gsys->getFrameTime();if(timer<=0){phase=GetUp;p->startMotion(PaniMotionInfo(PIKIANIM_GetUp,p),PaniMotionInfo(PIKIANIM_GetUp));}}}
     }
     void procBounceMsg(Piki* p,MsgBounce*) override {
-        if(phase>Fling)return;phase=Koke;timer=1;
+        if(phase>Fling)return;observeWhistle(p);phase=Koke;timer=1;
         if(!wither&&gsys->getRand(1.f)<.1f){p->mHappa=Leaf;p->setFlower(Leaf);}
         p->startMotion(PaniMotionInfo(PIKIANIM_JKoke,p),PaniMotionInfo(PIKIANIM_JKoke));
     }
     void procAnimMsg(Piki* p,MsgAnim* m) override {
+        observeWhistle(p);
         if(m->mKeyEvent->mEventType!=KEY_Finished)return;
         if(phase==Hit){phase=Fling;p->startMotion(PaniMotionInfo(PIKIANIM_JKoke,p),PaniMotionInfo(PIKIANIM_JKoke));}
         else if(phase==Fling)transit(p,PIKISTATE_Normal);
@@ -48,7 +55,7 @@ struct WindPikiState : PikiState {
         p->mIsBeingDamaged=false;
         if(!p->isAlive()||pikiPending.count(p))return;
         if(phase<Koke){if(p->mActiveAction->resumable())p->mActiveAction->restart();return;}
-        if(p->mIsWhistlePending){p->changeMode(PikiMode::FormationMode,p->mNavi);p->mIsWhistlePending=false;}
+        if(whistled||p->mIsWhistlePending){p->changeMode(PikiMode::FormationMode,p->mNavi);p->mIsWhistlePending=false;}
         else if(wither)p->changeMode(PikiMode::FreeMode,nullptr);
         else if(p->mActiveAction->resumable())p->mActiveAction->restart();
     }
@@ -73,8 +80,7 @@ struct WindNaviState : NaviState {
     void procAnimMsg(Navi* n,MsgAnim* m) override {
         if(m->mKeyEvent->mEventType!=KEY_Finished)return;
         if(phase==Hit){phase=Fling;n->startMotion(PaniMotionInfo(PIKIANIM_JKoke,n),PaniMotionInfo(PIKIANIM_JKoke));}
-        else if(phase==Fling){phase=Koke;n->startMotion(PaniMotionInfo(PIKIANIM_JKoke,n),PaniMotionInfo(PIKIANIM_JKoke));}
-        else if(phase==Koke){phase=Timer;if(!wither){n->mHealth-=damage;n->mLifeGauge.updValue(n->mHealth,C_NAVI_PARM(n,mHealth));}}
+        else if(phase==Koke){phase=Timer;if(!wither){n->mHealth-=damage;n->mLifeGauge.updValue(n->mHealth,C_NAVI_PARM(n,mHealth));if(n->mHealth<1){transit(n,NAVISTATE_Dead);return;}}}
         else if(phase==GetUp)transit(n,n->mHealth<=0?NAVISTATE_Dead:NAVISTATE_Walk);
     }
 };

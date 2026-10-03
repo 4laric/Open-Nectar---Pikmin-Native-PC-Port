@@ -37,3 +37,16 @@ Captain demo/upgrade gates, including Repugnant Appendage for wind, remain open.
 
 Actual native contact, animation interruption, ordinary gameplay and save/resume
 still require the family owner's20-Pikmin centered960x540 fixture qualification.
+
+Recovery correction: retail PikiBlowState onFlute records recovery before bounce;
+KokeDamage receives flag0x8000 with a one-second timer. A flute notification after
+bounce sets the Koke timer to zero. The native pending flag is consumed into a
+local recovery flag so a later notification is observable. Navi Fling JKoke END
+alone does not restart Koke or apply damage; bounce enters Koke, whose END applies
+ordinary damage once and enters Dead immediately below1HP (exact1 remains alive).
+
+The current ordinary captain HP path does not implement retail Navi::addDamage
+JusticeAlloy, active-game/demo, state/actor invincibility or damage effects gates.
+Native animation-assert interruption paths also remain unqualified. The engine
+doubles use a constant random value and identity roundAng: controls assert draw
+counts and caller arithmetic, not independent RNG draw ordering or angle wrapping.
