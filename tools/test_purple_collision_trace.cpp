@@ -197,5 +197,20 @@ int main() {
         for(int sample=-1;sample<=1;++sample){float sx=0,sz=0;check(PcPurplePoseEnvelope::rotatedOffset(*captured,sample*PcPurplePulseYawHalfArc,sx,sz),"envelope sample yaw");nearest=std::min(nearest,std::hypot(x-sx,z-sz));}
         check(nearest<=reserve-15.4f+.0001f,"sampled chord reserve covers admitted intermediate yaw");
     }
+    PcPurpleMotionPoseCatalog motion;
+    check(motion.select(1,2,3)&&motion.observe(1,4,5,1,14,2,10),"motion family first capture");
+    check(motion.select(1,4,3)&&motion.observe(1,4,5,1,14,2,4),"different compatible family capture");
+    check(motion.find(5,4)&&motion.find(5,4)->radius==4,"foreign animation extrema not applied to current family");
+    check(motion.select(1,2,3)&&motion.find(5,4)->radius==10,"same family history retained on return");
+    check(motion.observe(1,4,5,2,13,3,11)&&motion.find(5,4)->radius==11,"same family grows conservatively");
+    check(!motion.select(2,2,3)&&!motion.find(5,4),"foreign captain sticky refusal");
+    PcPurpleMotionPoseCatalog replacement;
+    check(replacement.select(1,0,0)&&replacement.observe(1,4,5,0,1,0,2),"part identity established");
+    check(replacement.select(1,1,0)&&!replacement.observe(1,6,5,0,1,0,2),"part replacement across motion refuses");
+    PcPurpleMotionPoseCatalog overflow;
+    for(int i=0;i<16;++i)check(overflow.select(1,i,0),"bounded16 motion families");
+    check(!overflow.select(1,16,0)&&!overflow.select(1,0,0),"motion overflow sticky refuses");
+    PcPurpleMotionPoseCatalog invalidMotion;
+    check(!invalidMotion.select(1,-1,0),"invalid native motion refuses");
     std::puts("Purple collision trace controls PASS");
 }

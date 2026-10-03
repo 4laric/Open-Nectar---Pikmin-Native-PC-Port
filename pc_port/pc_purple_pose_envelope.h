@@ -65,3 +65,31 @@ inline bool pcPurplePulseYawEligible(float yaw,float targetX,float targetZ,float
  // Tangent clamping cannot increase the one-tick cursor displacement.
  return std::isfinite(movement)&&std::isfinite(neutral)&&movement<=PcPurplePulseYawHalfArc&&neutral<=PcPurplePulseYawHalfArc;
 }
+
+// Retain compatible observed animation families rather than a lifetime union.
+// This remains captured evidence, not an unseen animation/transition proof.
+class PcPurpleMotionPoseCatalog {
+ struct Entry {int upper=-1,lower=-1;PcPurplePoseEnvelope poses;};
+ struct Identity {unsigned id=0;std::uintptr_t key=0;};
+ std::array<Entry,16> entries_{};std::array<Identity,32> identities_{};
+ unsigned count_=0,identityCount_=0,current_=0;std::uintptr_t owner_=0;bool selected_=false,failed_=false;
+ bool fail(){failed_=true;return false;}
+public:
+ bool select(std::uintptr_t owner,int upper,int lower){
+  if(failed_||!owner||upper<0||upper>=256||lower<0||lower>=256||(owner_&&owner_!=owner))return fail();
+  owner_=owner;
+  for(unsigned i=0;i<count_;++i)if(entries_[i].upper==upper&&entries_[i].lower==lower){current_=i;selected_=true;return true;}
+  if(count_==entries_.size())return fail();
+  current_=count_++;entries_[current_].upper=upper;entries_[current_].lower=lower;selected_=true;return true;
+ }
+ bool observe(std::uintptr_t owner,std::uintptr_t key,unsigned id,float x,float y,float z,float radius,float yaw=0){
+  if(failed_||!selected_||owner!=owner_||!key)return fail();
+  bool known=false;
+  for(unsigned i=0;i<identityCount_;++i)if(identities_[i].id==id){if(identities_[i].key!=key)return fail();known=true;break;}
+  if(!known){if(identityCount_==identities_.size())return fail();identities_[identityCount_++]={id,key};}
+  return entries_[current_].poses.observe(owner,key,id,x,y,z,radius,yaw)?true:fail();
+ }
+ const PcPurplePoseEnvelope::Part* find(unsigned id,std::uintptr_t key)const{
+  return failed_||!selected_?nullptr:entries_[current_].poses.find(id,key);
+ }
+};
