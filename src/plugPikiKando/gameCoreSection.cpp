@@ -125,6 +125,9 @@
 #include "MemStat.h"
 #include "Menu.h"
 #include "MoviePlayer.h"
+#if defined(PIKI_PC_PORT)
+#include "pc_p2_original_captain_damage.h"
+#endif
 #include "NaviMgr.h"
 #include "NaviState.h"
 #include "Omake.h"
@@ -551,6 +554,9 @@ void GameCoreSection::forceDayEnd()
 	PRINT("*********** FORCE DAY END =====================================\n");
 	seSystem->resetSystem();
 	playerState->setDayEnd(true);
+#if defined(PIKI_PC_PORT)
+ pc_p2_original_captain_main_game_left();
+#endif
 	PRINT("------------ forceDayEnd --------------\n");
 	mIsTimePastQuarter3 = true;
 	mIsTimePastNoon     = true;
@@ -727,6 +733,9 @@ void GameCoreSection::cleanupDayEnd()
 		}
 	}
 	playerState->setDayEnd(true);
+#if defined(PIKI_PC_PORT)
+ pc_p2_original_captain_main_game_left();
+#endif
 
 #if defined(PIKI_PC_PORT)
 	for (int ni = 0; ni < naviMgr->getNaviCount(); ni++) {
@@ -1009,6 +1018,9 @@ void GameCoreSection::prepareBadEnd()
  */
 void GameCoreSection::exitStage()
 {
+#if defined(PIKI_PC_PORT)
+ pc_p2_original_captain_main_game_left();
+#endif
 #if defined(PIKI_PC_PORT)
 	pc_demon_drop_scene_exit();
 	pc_demon_scene_exit();
@@ -1897,6 +1909,9 @@ void GameCoreSection::initStage()
 	}
 
 	naviMgr->getActiveNavi()->startKontroller();
+#if defined(PIKI_PC_PORT)
+ pc_p2_original_captain_main_game_entered();
+#endif
 	PRINT("init stage done\n");
 }
 

@@ -17,6 +17,9 @@
 #include "pc_p2_umimushi.h"
 #include "Navi.h"
 #if defined(PIKI_PC_PORT)
+#include "pc_p2_original_captain_damage.h"
+#endif
+#if defined(PIKI_PC_PORT)
 #include "audio/pc_audio_source.h"
 #endif
 #include "pc_randomizer.h"
@@ -1431,6 +1434,9 @@ void Navi::pcPinCursorFirstPerson()
 
 void Navi::update()
 {
+#if defined(PIKI_PC_PORT)
+ pc_p2_original_captain_actor_update(this);
+#endif
 #if defined(PIKI_PC_PORT)
 	PcAudioSource audioSource(mNaviID); // issue #1030: whose sounds these are
 #endif

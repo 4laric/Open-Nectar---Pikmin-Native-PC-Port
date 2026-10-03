@@ -1,3 +1,6 @@
+#if defined(PIKI_PC_PORT)
+#include "pc_p2_original_captain_damage.h"
+#endif
 #include "MoviePlayer.h"
 #include "pc_bbft.h"
 #include "netplay/pc_netplay_det.h"
@@ -168,6 +171,9 @@ MoviePlayer::MoviePlayer()
 {
 	mCurrentFrame = 0;
 	mIsActive     = false;
+#if defined(PIKI_PC_PORT)
+ pc_p2_original_captain_movie_ended(this);
+#endif
 	mIsPaused     = false;
 	mActorVisMask = 0;
 	mTargetViewpoint.set(0.0f, 0.0f, 0.0f);
@@ -196,6 +202,9 @@ void MoviePlayer::resetMovieList()
 		mMovieInfoList.add(info);
 	}
 	mIsActive = false;
+#if defined(PIKI_PC_PORT)
+ pc_p2_original_captain_movie_ended(this);
+#endif
 }
 
 /**
@@ -472,6 +481,9 @@ void MoviePlayer::startMovie(int movieIdx, int, Creature* target, immut Vector3f
 		return;
 	}
 	mIsActive = true;
+#if defined(PIKI_PC_PORT)
+ pc_p2_original_captain_movie_started(this);
+#endif
 	if (pc_netplay_deterministic()) {
 		std::printf("[netplay-det] movie start idx=%d tick=%u\n", translatedIdx, pc_netplay_tick());
 		std::fflush(stdout);
@@ -755,6 +767,9 @@ void MoviePlayer::update()
 
 			if (mPlayInfoList.getChildCount() == 0) {
 				mIsActive           = false;
+#if defined(PIKI_PC_PORT)
+ pc_p2_original_captain_movie_ended(this);
+#endif
 				gameflow.mDemoFlags = CinePlayerFlags::Empty;
 				if (gameflow.mGameInterface) {
 					gameflow.mGameInterface->message(MOVIECMD_ShowHUD, 0);
