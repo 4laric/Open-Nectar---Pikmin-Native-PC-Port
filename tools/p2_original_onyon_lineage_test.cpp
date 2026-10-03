@@ -87,6 +87,8 @@ int main(){
  check(l.depositBody(&body,bh,other,e)&&l.report().liveBodies==0,"actual crosscourse sameRGB deposit");
  check(l.retireBody(&body,bh,e),"postdeposit native body kill cleanup harmless");
  MemberRecord stored;check(l.peekStored(0,stored,e)==StockResult::Present&&stored.serial==1&&stored.state.maturity==2&&emissionSame(stored.origin,origin)&&stored.receiverRoot==other,"global stock retains birth origin and actual receiver");
+ std::array<std::uint64_t,3> counts{99,99,99};
+ check(l.storedCounts(0,counts)&&counts[0]==0&&counts[1]==0&&counts[2]==1,"typed stock count exposes actual retained maturity distribution");
  std::uint64_t wh=999;check(!l.withdrawStored(stored.serial,other,nullptr,wh,e)&&wh==999,"failed withdrawal allocation no transition");
  check(l.withdrawStored(stored.serial,r,&body,wh,e)&&wh!=bh,"successful withdrawal preserves serial");
  check(l.queryBody(&body,session,bodyRecord,queryHandle,e)==QueryResult::Present&&bodyRecord.serial==1&&bodyRecord.state.maturity==2&&emissionSame(bodyRecord.origin,origin),"withdrawn origin and maturity unchanged");
@@ -117,6 +119,7 @@ int main(){
  check(courses.peekStored(0,stored,e)==StockResult::Present&&stored.serial==1,"withinmaturity FIFO deliberate policy");
  check(!courses.withdrawStored(2,r,&body,h,e),"stale nonFIFO selection refused");
  check(courses.markUnknownStock(0,3,e)&&courses.peekStored(0,stored,e)==StockResult::Unavailable,"unknown count-only stock never fabricated");
+ counts={99,99,99};check(!courses.storedCounts(0,counts)&&counts[0]==99&&counts[1]==99&&counts[2]==99,"unknown stock counts refuse with output unchanged");
  check(!courses.withdrawStored(1,r,&body,h,e),"unknown stock cannot fallback to ordinary withdrawal");
  check(courses.report().unknownStock[0]==3&&courses.report().members.size()==8,"unknown marker not an invented member");
  check(courses.markUnknownStock(1,std::numeric_limits<std::uint64_t>::max(),e)&&!courses.markUnknownStock(1,1,e),"unknown count overflow refused");
