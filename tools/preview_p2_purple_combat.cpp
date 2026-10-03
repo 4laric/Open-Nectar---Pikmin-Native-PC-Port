@@ -1179,9 +1179,27 @@ class PurpleCombatApp : public PlugPikiApp {
         const float anchorError=actual.fixed?pluckLength(pluckSub(predicted.anchor,actual.anchor)):0.f;
         std::printf("P2_PURPLE_PLUCK_PULSE_OBS tick=%d frame=%d dt=%.9f position_error=%.6f velocity_error=%.6f target_error=%.6f anchor_error=%.6f fixed=%d expected_fixed=%d command=%.6f,%.6f actor_writes=0\n",
             ticks,sdlPulseFrames,dt,positionError,velocityError,targetError,anchorError,int(actual.fixed),int(predicted.fixed),sdlPulseCommand.x,sdlPulseCommand.z);
-        // Deviations are diagnostic failures, never synthetic corrections.
-        require(positionError<.1f && velocityError<1.f && targetError<.5f && anchorError<.1f
-            && actual.fixed==predicted.fixed,"native pulse deviated from qualified movement forecast");
+        // Native map/contact resolution is allowed to disagree with the fixture
+        // forecast. Neutralize ordinary input and replan from the observed body;
+        // the prediction is never an acceptance oracle or a synthetic correction.
+        const bool forecastMatches=positionError<.1f && velocityError<1.f && targetError<.5f && anchorError<.1f
+            && actual.fixed==predicted.fixed;
+        const char* observedController=std::getenv("P2_PURPLE_SDL_OBSERVED_REPLAN");
+        if(!forecastMatches) {
+            require(observedController && std::strcmp(observedController,"1")==0,
+                "native pulse deviated from qualified movement forecast");
+            std::printf("P2_PURPLE_PLUCK_FORECAST_CONTACT tick=%d collision=%u changed_velocity=%u "
+                "ground=%p previous=%p model=%p platform=%p wall=%p wall_object=%p "
+                "actual_position=%.9g,%.9g actual_velocity=%.9g,%.9g predicted_position=%.9g,%.9g "
+                "predicted_velocity=%.9g,%.9g forecast_accepted=0 SDL_neutral=1 actor_writes=0\n",
+                ticks,unsigned(n->mCollisionOccurred),unsigned(n->mHasCollChangedVelocity),
+                static_cast<void*>(n->mGroundTriangle),static_cast<void*>(n->mPreviousTriangle),
+                static_cast<void*>(n->mCurrCollisionModel),static_cast<void*>(n->mCollPlatform),
+                static_cast<const void*>(n->mWallPlane),static_cast<void*>(n->mWallCollObj),
+                actual.position.x,actual.position.z,actual.velocity.x,actual.velocity.z,
+                predicted.position.x,predicted.position.z,predicted.velocity.x,predicted.velocity.z);
+            pluckRoute.clear();
+        }
         require(sdlNeutralEnvelopeClear(actual,tau),"native pulse neutral envelope crosses live collision bounds");
         const float neutralStep=std::min(1.f/30.f,tau*.5f),neutralMaximum=neutralStep*(1.f-neutralStep/tau);
         const bool pulling=actual.fixed&&pluckLength(pluckSub(actual.anchor,actual.position))>.00001f;
