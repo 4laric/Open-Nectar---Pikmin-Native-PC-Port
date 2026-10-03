@@ -1,6 +1,7 @@
 #include "pc_p2_original_captain_motion.h"
 #include "pc_randomizer.h"
 #include "pc_p2_original_captain_rig.h"
+#include "pc_p2_original_captain_mod.h"
 #include "pc_p2_pose_bank.h"
 #include "pc_p2_pose_loader.h"
 #include "pc_p2_original_pelplant_geometry.h"
@@ -60,7 +61,7 @@ bool SourceBank::prepare(std::string& e){
    else {if(!get("motion/"+clipName+".bca",raw,e)||raw.size()<72||raw.compare(0,8,"J3D1bca1")||raw.compare(32,4,"ANF1"))return fail(e,"source captain BCA invalid");const auto& row=rows[id];if(row[1]!=clipName+".bca"||(row.size()-3)%2)return fail(e,"source captain source registry identity mismatch");std::vector<Key> keys;try{for(std::size_t at=2;at+1<row.size();at+=2){std::size_t x,y;int f=std::stoi(row[at],&x),t=std::stoi(row[at+1],&y);if(x!=row[at].size()||y!=row[at+1].size())return fail(e,"source captain source key malformed");keys.push_back({f,t});}}catch(...){return fail(e,"source captain source key malformed");}std::stable_sort(keys.begin(),keys.end(),[](Key a,Key b){return a.frame<b.frame;});if(keys!=clip.keys)return fail(e,"source captain source keys mismatch");}
    if(hash(raw)!=sourceSha||be16(raw,42)!=unsigned(duration)||be16(raw,44)!=11)return fail(e,"source captain animation source mismatch");closure+=sourceSha;
    int poses;if(!(in>>poses)||poses<1||poses>64)return fail(e,"source captain pose count invalid");for(int v=0;v<poses;++v){int frame;if(!(in>>frame)||frame<0||frame>=duration||(!clip.frames.empty()&&frame<=clip.frames.back()))return fail(e,"source captain pose frame invalid");clip.frames.push_back(frame);}if(clip.frames.front()!=0||clip.frames.back()!=duration-1)return fail(e,"source captain pose endpoints invalid");
-   for(int v=0;v<poses;++v){char suffix[16];std::snprintf(suffix,sizeof(suffix),"_%02d.mod",v);std::string poseRole="poses/"+name+"_"+clipName+suffix;if(!(in>>expected)||!get(poseRole,raw,e)||hash(raw)!=expected)return fail(e,"source captain exact pose bytes mismatch");total+=raw.size();if(total>96*1024*1024)return fail(e,"source captain bank byte bound exceeded");closure+=expected;std::vector<unsigned char> b(raw.begin(),raw.end());p2pose::Baked baked;if(!p2pose::decodeBaked(b,baked))return fail(e,"source captain flattened pose malformed");if(model.first.empty()){model.first=raw;model.topology=baked.topology;}else if(model.topology!=baked.topology)return fail(e,"source captain pose topology/resources mismatch");clip.poses.push_back(std::move(baked.pose));}
+   for(int v=0;v<poses;++v){char suffix[16];std::snprintf(suffix,sizeof(suffix),"_%02d.mod",v);std::string poseRole="poses/"+name+"_"+clipName+suffix;if(!(in>>expected)||!get(poseRole,raw,e)||hash(raw)!=expected)return fail(e,"source captain exact pose bytes mismatch");total+=raw.size();if(total>96*1024*1024)return fail(e,"source captain bank byte bound exceeded");closure+=expected;std::vector<unsigned char> b(raw.begin(),raw.end());p2pose::Baked baked;if(!sourceCaptainMod(raw)||!p2pose::decodeBaked(b,baked))return fail(e,"source captain flattened pose malformed");if(model.first.empty()){model.first=raw;model.topology=baked.topology;}else if(model.topology!=baked.topology)return fail(e,"source captain pose topology/resources mismatch");clip.poses.push_back(std::move(baked.pose));}
    model.clips.emplace(id,std::move(clip));
   }
  }
