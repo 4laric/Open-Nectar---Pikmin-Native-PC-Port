@@ -135,9 +135,10 @@ SourceRoomUnit unit(const Json& j){
  for(unsigned i=0;i<nt;++i){std::array<unsigned,3> triangle{};const auto& abc=array(ts[i],3);
   for(unsigned k=0;k<3;++k){triangle[k]=u32(raw,first+4+i*76+k*4);check(triangle[k]<nv&&integer(abc[k])==triangle[k],"room A/B/C differs");}
   check(triangle[0]!=triangle[1]&&triangle[1]!=triangle[2]&&triangle[0]!=triangle[2],"room repeated triangle vertex");
-  for(unsigned k=0;k<16;++k)floating(u32(raw,first+4+i*76+12+k*4));
+  std::array<std::uint32_t,16> planes{};
+  for(unsigned k=0;k<16;++k){planes[k]=u32(raw,first+4+i*76+12+k*4);floating(planes[k]);}
   const auto code=static_cast<unsigned char>(out.mapcodeBytes[i+4]);check(integer(codes[i],255)==code,"room mapcode differs");
-  out.triangles.push_back(triangle);out.mapcodes.push_back(code);}
+  out.triangles.push_back(triangle);out.sourcePlaneBits.push_back(planes);out.mapcodes.push_back(code);}
  const auto tail=first+4+std::size_t(nt)*76;
  bounds(j.at("source_unit_bounds_f32_bits"),raw,tail,out.sourceBounds);
  bounds(j.at("vertex_bounds_f32_bits"),{},0,out.vertexBounds);check(out.vertexBounds==extrema,"room vertex bounds differ");
@@ -147,6 +148,17 @@ SourceRoomUnit unit(const Json& j){
   bits(header.at("scale_x_f32_bits"))==u32(raw,tail+32)&&bits(header.at("scale_z_f32_bits"))==u32(raw,tail+36)&&
   floating(u32(raw,tail+32))>0&&floating(u32(raw,tail+36))>0,"room source divider header");
  check(integer(j.at("source_table_bytes"),1024*1024)==tail&&integer(j.at("retained_acceleration_bytes"),1024*1024)==raw.size()-tail,"room raw tail binding");
+ out.sourceGrid.maxX=nx;out.sourceGrid.maxZ=nz;
+ out.sourceGrid.serializedScaleBits={{u32(raw,tail+32),u32(raw,tail+36)}};
+ std::size_t cursor=tail+40;out.sourceGrid.cells.reserve(std::size_t(nx)*nz);
+ for(std::uint64_t cell=0;cell<std::uint64_t(nx)*nz;++cell){const auto count=u32(raw,cursor);cursor+=4;
+  check(cursor<=raw.size()&&count<=(raw.size()-cursor)/4,"room original cell list bound");
+  std::vector<unsigned> indices;indices.reserve(count);
+  for(unsigned index=0;index<count;++index){const auto triangle=u32(raw,cursor);cursor+=4;
+   check(triangle<nt,"room original cell triangle bound");indices.push_back(triangle);}
+  out.sourceGrid.cells.push_back(std::move(indices));
+ }
+ check(cursor==raw.size(),"room original grid trailing bytes");
  return out;
 }
 }

@@ -3,12 +3,22 @@
 #include <map>
 
 namespace p2retail {
+struct SourceUnitGrid {
+ unsigned maxX=0,maxZ=0;
+ std::array<std::uint32_t,2> serializedScaleBits{};
+ // Source z+x*maxZ storage; exact serialized list order, duplicates retained.
+ std::vector<std::vector<unsigned>> cells;
+};
 struct SourceRoomUnit {
  std::string name,archiveMember,archiveSha256,gridBytes,mapcodeBytes;
  std::vector<std::array<std::uint32_t,3>> vertexBits;
  std::vector<std::array<unsigned,3>> triangles;
+ // Original unit TriangleTable::readObject serializes four planes after ABC.
+ // Local getCurrTri/height/insideXZ use these bits, never rebuilt combined planes.
+ std::vector<std::array<std::uint32_t,16>> sourcePlaneBits;
  std::vector<unsigned char> mapcodes;
  std::array<std::uint32_t,6> sourceBounds{},vertexBounds{};
+ SourceUnitGrid sourceGrid;
 };
 struct SourceRoomInstance {
  unsigned iteration=0,roomIndex=0,unit=0,quarterTurn=0;

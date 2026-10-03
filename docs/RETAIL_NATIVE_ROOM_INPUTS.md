@@ -48,6 +48,17 @@ foun. Actual source PlatMgr, geometry and lifetime producers remain required.
 `parseSourceRoomCensus` verifies selected buffer/plan bindings and re-decodes
 retained original binary32 bits, A/B/C order, mapcodes, serialized unit bounds,
 vertex bounds and divider headers from the raw members. Signed zero is retained.
+Each original unit also retains the exact sixteen serialized binary32 plane
+fields per triangle (triangle plane and three edge planes). Source local
+getCurrTri/height/insideXZ query uses these original TriangleTable.readObject
+fields after actual inverse-room transformation; it must not substitute the
+recomputed planes of the combined movement mesh. Original divider queries and
+inverse transform arithmetic are still separate pending implementation.
+The original unit grid retains serialized counts/scales and every cell's
+ordered triangle-index list, including duplicates, in z+x*maxZ storage. Decode
+checks every count/index and exact file consumption. Actual GridDivider.read
+overwrites scales with abs(serializedBoundsMax-Min)/count; that source numeric
+step and clamped radius-zero query still belong to the actual query backend.
 The actual SceneRuntime adopts ordered immutable unit/room records and retains
 the original bytes. The declared iteration/index and makeOneRoom arguments are
 engineered development authoring, not original random RoomMgr generation.

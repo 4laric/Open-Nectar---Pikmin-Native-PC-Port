@@ -20,7 +20,15 @@ int main(int argc,char** argv){
   SourceRoomCensus legacyRooms;SourceWaterInputs legacyWater;
   assert(parseSourceRoomCensus(legacy,legacyRooms,error)&&parseSourceWaterInputs(legacy,legacyRooms,legacyWater,error));
   assert(census.units.size()==(floor==1?2:1));
-  unsigned vertices=0,triangles=0;for(const auto& room:census.rooms){const auto& unit=census.units.at(room.unit);vertices+=unit.vertexBits.size();triangles+=unit.triangles.size();}
+  unsigned vertices=0,triangles=0;for(const auto& room:census.rooms){const auto& unit=census.units.at(room.unit);vertices+=unit.vertexBits.size();triangles+=unit.triangles.size();
+   assert(unit.sourcePlaneBits.size()==unit.triangles.size());
+   assert(unit.sourceGrid.maxX&&unit.sourceGrid.maxZ&&unit.sourceGrid.cells.size()==unit.sourceGrid.maxX*unit.sourceGrid.maxZ);
+   for(unsigned t=0;t<unit.triangles.size();++t)for(unsigned k=0;k<16;++k){
+    const unsigned at=4+unsigned(unit.vertexBits.size())*12+4+t*76+12+k*4;std::uint32_t serialized=0;
+    for(unsigned b=0;b<4;++b)serialized=(serialized<<8)|static_cast<unsigned char>(unit.gridBytes[at+b]);
+    assert(unit.sourcePlaneBits[t][k]==serialized);
+   }
+  }
   assert(vertices==(floor==1?238u:800u));assert(triangles==(floor==1?352u:1414u));
   SourceRoomGeometry geometry;assert(adoptSourceRoomGeometry(census,geometry,error));
   assert(geometry.vertices.size()==vertices&&geometry.triangles.size()==triangles&&geometry.rooms.size()==census.rooms.size());
