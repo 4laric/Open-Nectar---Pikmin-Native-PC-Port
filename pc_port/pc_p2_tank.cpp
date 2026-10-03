@@ -277,12 +277,18 @@ bool pc_p2_tank_original_resources(unsigned source,std::string& error){
   }
  }else{
   p2poseload::Shared shared;size_t total=0;
+  p2posefamily::Bank staged("TANK");
+  std::map<std::string,std::vector<Shape*>> stagedShapes;
+  std::map<std::string,p2animation::Clip> stagedTiming;
   for(const auto& clip:banks[kind]){
-   if(!p2posefamily::loadFamilyClip(poseBank[kind],clip.name,std::string("tank_")+ids[kind]+"_"+clip.name,clip.count,clip.duration,clip.frames,shared,total,animated[kind][clip.name],error))return false;
-   const auto* physical=poseBank[kind].clip(clip.name);
-   if(!physical||physical->poses.size()!=size_t(clip.count)||animated[kind][clip.name].size()!=size_t(clip.count)){error="original Tank physical vectors/meshes incomplete";return false;}
-   timing[kind][clip.name]=clip;
+   if(!p2posefamily::loadFamilyClip(staged,clip.name,std::string("tank_")+ids[kind]+"_"+clip.name,clip.count,clip.duration,clip.frames,shared,total,stagedShapes[clip.name],error))return false;
+   const auto* physical=staged.clip(clip.name);
+   if(!physical||physical->poses.size()!=size_t(clip.count)||stagedShapes[clip.name].size()!=size_t(clip.count)){error="original Tank physical vectors/meshes incomplete";return false;}
+   stagedTiming[clip.name]=clip;
   }
+  // Publish only complete physical resources. Failed first-load attempts
+  // leave the resident tables empty so a corrected retry can proceed.
+  poseBank[kind]=std::move(staged);animated[kind]=std::move(stagedShapes);timing[kind]=std::move(stagedTiming);
  }
  if(!poseBank[kind].ready()||poseBank[kind].clipCount()!=7){error="original Tank physical pose bank not ready";return false;}
  for(const auto& clip:banks[kind]){const auto* physical=poseBank[kind].clip(clip.name);
