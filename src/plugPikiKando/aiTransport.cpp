@@ -87,7 +87,6 @@ void ActTransport::turnOver()
 void ActTransport::initWait()
 {
 	Pellet* pel = mPellet.getPtr();
-    if(Suckable* pod=pc_p2_cave_items_goal_for(pel)) {mGoal=pod;pel->mTargetGoal=pod;return;}
 	mState      = STATE_Wait;
 	mPiki->startLook(&pel->mSRT.t);
 	mPiki->startMotion(PaniMotionInfo(PIKIANIM_Wait), PaniMotionInfo(PIKIANIM_Wait));
@@ -1036,6 +1035,7 @@ int ActTransport::moveGuruGuru()
 void ActTransport::decideGoal(Creature* cargo)
 {
 	Pellet* pel = mPellet.getPtr();
+    if(Suckable* pod=pc_p2_cave_items_goal_for(pel)) {mGoal=pod;pel->mTargetGoal=pod;return;}
     if(Suckable* pod=pc_p2_preview_goal()) {mGoal=pod;pel->mTargetGoal=pod;return;}
 	PRINT("pellet type is %d\n", pel->mConfig->mPelletType());
 	if (pel->mConfig->mPelletType() == PELTYPE_UfoPart) {
