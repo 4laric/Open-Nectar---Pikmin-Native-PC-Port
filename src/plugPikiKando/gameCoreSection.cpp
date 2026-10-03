@@ -137,6 +137,9 @@
 #include "MemStat.h"
 #include "Menu.h"
 #include "MoviePlayer.h"
+#if defined(PIKI_PC_PORT)
+#include "pc_p2_original_captain_damage.h"
+#endif
 #include "NaviMgr.h"
 #include "NaviState.h"
 #include "Omake.h"
@@ -563,6 +566,9 @@ void GameCoreSection::forceDayEnd()
 	PRINT("*********** FORCE DAY END =====================================\n");
 	seSystem->resetSystem();
 	playerState->setDayEnd(true);
+#if defined(PIKI_PC_PORT)
+ pc_p2_original_captain_main_game_left();
+#endif
 	PRINT("------------ forceDayEnd --------------\n");
 	mIsTimePastQuarter3 = true;
 	mIsTimePastNoon     = true;
@@ -745,6 +751,9 @@ void GameCoreSection::cleanupDayEnd()
 		}
 	}
 	playerState->setDayEnd(true);
+#if defined(PIKI_PC_PORT)
+ pc_p2_original_captain_main_game_left();
+#endif
 
 #if defined(PIKI_PC_PORT)
 	for (int ni = 0; ni < naviMgr->getNaviCount(); ni++) {
@@ -1031,6 +1040,7 @@ void GameCoreSection::prepareBadEnd()
 void GameCoreSection::exitStage()
 {
 #if defined(PIKI_PC_PORT)
+ pc_p2_original_captain_main_game_left();
  // Normal day-end/cache writes precede scene exit. Release original groups
  // while their actual generators, actor pools and family resources are alive.
  std::string originalError;
@@ -2144,6 +2154,11 @@ void GameCoreSection::finalSetup()
     pc_p2_surface_save_scene_setup();
 	// Actor-lifetime (#397): mark the new scene ready for lifecycle fixtures.
 	pc_p2_scene_begin();
+#if defined(PIKI_PC_PORT)
+ // Both native roster bodies have now completed their actual init/reset.
+ // The canonical source descriptor must independently attest real binding.
+ pc_p2_original_captain_main_game_entered();
+#endif
 	PRINT("====================== FINAL SETUP DONE ======================\n");
 }
 

@@ -17,6 +17,13 @@
 #include "pc_p2_umimushi.h"
 #include "Navi.h"
 #if defined(PIKI_PC_PORT)
+#include "pc_p2_original_captain_damage.h"
+bool Navi::isAlive()
+{
+	bool alive;
+	if (pc_p2_original_captain_actor_lifetime(this, alive)) return alive;
+	return Creature::isAlive();
+}
 #include "pc_p2_original_piki_origin.h"
 #include "pc_p2_source_body.h"
 #include "pc_p2_original_piki_recruit.h"
@@ -59,7 +66,7 @@ static f32 pcNaviHurt(f32 damage)
 	if (pct != 100 && pct > 0) {
 		damage = damage * 100.0f / f32(pct);
 	}
-	return pc_hardmode_navi_damage(damage);
+	return pc_p2_equipment_damage(pc_hardmode_navi_damage(damage));
 }
 
 #else
@@ -1442,6 +1449,9 @@ void Navi::pcPinCursorFirstPerson()
 void Navi::update()
 {
 #if defined(PIKI_PC_PORT)
+ pc_p2_original_captain_actor_update(this);
+#endif
+#if defined(PIKI_PC_PORT)
 	PcAudioSource audioSource(mNaviID); // issue #1030: whose sounds these are
 #endif
 #if defined(PIKI_PC_PORT)
@@ -2705,11 +2715,11 @@ void Navi::makeVelocity(bool isSunset)
 				}
 			}
 
-			if (mPlateMgr->canNaviRunFast()) {
-				mTargetVelocity = (stickVec * NAVI_PARM(mRunSpeed)) * drag;
-			} else {
-				mTargetVelocity = (stickVec * NAVI_PARM(mMoveSpeed)) * drag;
-			}
+			f32 captainSpeed = mPlateMgr->canNaviRunFast() ? NAVI_PARM(mRunSpeed) : NAVI_PARM(mMoveSpeed);
+#if defined(PIKI_PC_PORT)
+            captainSpeed = pc_p2_equipment_speed(captainSpeed);
+#endif
+            mTargetVelocity = (stickVec * captainSpeed) * drag;
 #if defined(PIKI_PC_PORT)
             mTargetVelocity = mTargetVelocity * pc_randomizer_captain_movement_multiplier();
 #endif
@@ -3657,6 +3667,9 @@ bool InteractBury::actNavi(Navi* navi) immut
  */
 bool InteractWind::actNavi(Navi* navi) immut
 {
+#if defined(PIKI_PC_PORT)
+    if (pc_p2_equipment_has(p2equipment::RepugnantAppendage)) return false;
+#endif
 	NaviState* state = navi->mStateMachine->getNaviState(navi);
 	if (state->invincible(navi)) {
 		return false;
@@ -3673,18 +3686,25 @@ bool InteractWind::actNavi(Navi* navi) immut
  * P2 electric Navi receiver (#408). Source `InteractDenki::actNavi`
  * (native/pikmin2-research/src/plugProjectKandoU/interactNavi.cpp:85) flicks
  * the captain with the source force/direction unless Olimar has the Dream
- * Material. The port has no Dream Material gate, so this mirrors the existing
+ * Material. The selected original campaign's authenticated kit gates this
  * `InteractFire::actNavi`/`InteractBubble::actNavi` flick behavior.
  *
  * `__attribute__((used))` keeps it in the link until a denki emitter exists.
  */
 __attribute__((used)) bool InteractDenki::actNavi(Navi* navi) immut
 {
+#if defined(PIKI_PC_PORT)
+    if (pc_p2_equipment_has(p2equipment::DreamMaterial)) return false;
+#endif
 	if (navi->mStateMachine->getNaviState(navi)->invincible(navi)) {
 		return false;
 	}
 
+#if defined(PIKI_PC_PORT)
+	navi->mHealth -= pc_p2_equipment_damage(mDamage);
+#else
 	navi->mHealth -= mDamage;
+#endif
 	navi->mLifeGauge.updValue(navi->mHealth, C_NAVI_PARM(navi, mHealth));
 	navi->startDamageEffect();
 	rumbleMgr->start(RUMBLE_Unk1, 0, nullptr);
@@ -3745,6 +3765,11 @@ bool InteractSuck::actNavi(Navi* navi) immut
  */
 bool InteractAttack::actNavi(Navi* navi) immut
 {
+#if defined(PIKI_PC_PORT)
+	if (p2original::captain::selectedOriginal()) {
+		return bool(p2original::captain::attack(navi, mOwner, mDamage));
+	}
+#endif
 	if (navi->isDamaged()) {
 		return false;
 	}
@@ -3946,6 +3971,9 @@ bool InteractBubble::actNavi(Navi* navi) immut
  */
 bool InteractFire::actNavi(Navi* navi) immut
 {
+#if defined(PIKI_PC_PORT)
+    if (pc_p2_equipment_has(p2equipment::ForgedCourage)) return false;
+#endif
 	if (navi->mStateMachine->getNaviState(navi)->invincible(navi)) {
 		return false;
 	}

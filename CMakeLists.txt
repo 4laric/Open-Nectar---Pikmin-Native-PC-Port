@@ -281,6 +281,20 @@ set(PC_PORT_SOURCES
     pc_port/pc_p2_original_dispatch.cpp
     pc_port/pc_p2_original_course.cpp
     pc_port/pc_p2_original_captain_motion.cpp
+    pc_port/pc_p2_equipment.cpp
+    pc_port/pc_p2_original_captain_damage.cpp
+    pc_port/pc_p2_original_captain_runtime.cpp
+    pc_port/pc_p2_original_captain_control.cpp
+    pc_port/pc_p2_original_captain_walk.cpp
+    pc_port/pc_p2_original_captain_native_control.cpp
+    pc_port/pc_p2_original_captain_down_sequence.cpp
+    pc_port/pc_p2_original_captain_down.cpp
+    pc_port/pc_p2_original_captain_states.cpp
+    pc_port/pc_p2_original_captain_throw.cpp
+    pc_port/pc_p2_original_captain_actions_party.cpp
+    pc_port/pc_p2_original_captain_punch.cpp
+    pc_port/pc_p2_original_captain_pluck.cpp
+    pc_port/pc_p2_original_captain_dope.cpp
     pc_port/pc_p2_original_chappy.cpp
     pc_port/pc_p2_original_chappy_native.cpp
     pc_port/pc_p2_original_group_engine.cpp
@@ -3730,6 +3744,7 @@ target_include_directories(pc_p2_original_barrel_test PRIVATE pc_port)
 target_compile_options(pc_p2_original_barrel_test PRIVATE -UNDEBUG)
 add_test(NAME p2_original_barrel COMMAND pc_p2_original_barrel_test)
 
+<<<<<<< HEAD
 add_executable(pc_p2_retail_scene_input_test tools/p2_retail_scene_input_test.cpp)
 target_include_directories(pc_p2_retail_scene_input_test PRIVATE pc_port)
 target_compile_options(pc_p2_retail_scene_input_test PRIVATE -UNDEBUG)
@@ -3743,3 +3758,19 @@ target_link_libraries(pc_p2_retail_start_test PRIVATE p2_retail_cave_catalog)
 add_executable(pc_p2_retail_geometry_test tools/p2_retail_geometry_test.cpp pc_port/pc_p2_retail_geometry.cpp)
 target_include_directories(pc_p2_retail_geometry_test PRIVATE pc_port)
 target_compile_options(pc_p2_retail_geometry_test PRIVATE -UNDEBUG)
+=======
+# #1289 actual adapter TU with engine doubles: controls, not gameplay evidence.
+add_executable(p2_original_captain_damage_test tools/pc_p2_original_captain_damage_test.cpp
+ pc_port/pc_p2_original_captain_damage.cpp pc_port/pc_p2_equipment.cpp
+ pc_port/pc_p2_original_progress.cpp pc_port/pc_p2_original_actor.cpp
+ pc_port/pc_p2_original_catalog.cpp pc_port/pc_p2_original_spawn_plan.cpp)
+target_include_directories(p2_original_captain_damage_test BEFORE PRIVATE tools/captain_damage_stubs pc_port)
+target_compile_options(p2_original_captain_damage_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_original_captain_damage_test COMMAND p2_original_captain_damage_test)
+
+add_executable(p2_original_captain_runtime_test tools/pc_p2_original_captain_runtime_test.cpp
+ pc_port/pc_p2_original_captain_runtime.cpp)
+target_include_directories(p2_original_captain_runtime_test BEFORE PRIVATE tools/captain_damage_stubs pc_port)
+target_compile_options(p2_original_captain_runtime_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_original_captain_runtime_test COMMAND p2_original_captain_runtime_test)
+>>>>>>> 175f5a96847d0ec2e17cfae77a6a0b69c0c4dadc
