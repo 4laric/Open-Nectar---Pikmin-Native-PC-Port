@@ -399,6 +399,8 @@ set(PC_PORT_SOURCES
     pc_port/pc_p2_flora_actor.cpp
     pc_port/pc_p2_original_pelplant.cpp
     pc_port/pc_p2_original_pelplant_native.cpp
+    pc_port/pc_p2_original_foliage.cpp
+    pc_port/pc_p2_original_foliage_native.cpp
     pc_port/pc_p2_receipt_host.cpp
     pc_port/pc_p2_delivery_host.cpp
     pc_port/pc_p2_pom.cpp
@@ -3359,6 +3361,15 @@ add_library(p2_retail_cave_catalog STATIC pc_port/pc_p2_retail_cave_catalog.cpp)
 target_include_directories(p2_retail_cave_catalog PRIVATE pc_port)
 target_compile_options(p2_retail_cave_catalog PRIVATE ${NATIVE_COMPILE_OPTIONS} -O0)
 set_property(TARGET p2_retail_cave_catalog PROPERTY INTERPROCEDURAL_OPTIMIZATION FALSE)
+
+
+# Original decorative source91/88 (#1251); no asset payloads are committed.
+pikmin_add_ci_fixture(original_foliage tools/p2_original_foliage_runtime.cpp)
+add_executable(pc_p2_original_foliage_test tools/test_p2_original_foliage.cpp
+    pc_port/pc_p2_original_foliage.cpp pc_port/pc_p2_original_spawn_plan.cpp)
+target_include_directories(pc_p2_original_foliage_test PRIVATE pc_port)
+target_compile_options(pc_p2_original_foliage_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME pc_p2_original_foliage_test COMMAND pc_p2_original_foliage_test)
 get_property(p2_retail_catalog_consumers DIRECTORY PROPERTY BUILDSYSTEM_TARGETS)
 foreach(p2_retail_catalog_consumer IN LISTS p2_retail_catalog_consumers)
     if(NOT p2_retail_catalog_consumer STREQUAL "p2_retail_cave_catalog")
