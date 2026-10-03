@@ -131,6 +131,7 @@ QueryResult Lineage::query(const std::map<const void*,Binding>& bindings,const v
 QueryResult Lineage::queryHead(const void* p,const std::string& s,MemberRecord& r,std::uint64_t& h,std::string& e)const{return query(mHeads,p,s,r,h,e);}
 QueryResult Lineage::queryBody(const void* p,const std::string& s,MemberRecord& r,std::uint64_t& h,std::string& e)const{return query(mBodies,p,s,r,h,e);}
 bool Lineage::ownsBody(const void* p)const noexcept{return mBodies.find(p)!=mBodies.end();}
+bool Lineage::ownsHead(const void* p)const noexcept{return mHeads.find(p)!=mHeads.end();}
 bool Lineage::bodyHandle(const void* p,std::uint64_t& out)const noexcept{
  auto b=mBodies.find(p);if(b==mBodies.end())return false;out=b->second.handle;return true;
 }

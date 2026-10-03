@@ -90,6 +90,7 @@ public:
  // Persistent label readers never copy records/strings or allocate; ownership
  // is still true when authenticated record queries report Unavailable.
  bool ownsBody(const void*)const noexcept;
+ bool ownsHead(const void*)const noexcept;
  bool bodyHandle(const void*,std::uint64_t& out)const noexcept;
  // Actual teardown only, after party observers consume the living graph.
  // This is death/history retirement, never stock deposit or SAVE restoration.

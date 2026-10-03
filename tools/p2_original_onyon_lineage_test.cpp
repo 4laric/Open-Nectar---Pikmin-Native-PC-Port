@@ -74,10 +74,12 @@ int main(){
  check(l.queryHead(&head,session,seedRecord,queryHandle,e)==QueryResult::Present&&queryHandle==h&&seedRecord.state.maturity==0&&!seedRecord.state.wild&&!seedRecord.state.wasWild,"generated seed Leaf nonwild");
  auto origin=seedRecord.origin;MemberRecord untouched;untouched.serial=999;queryHandle=999;
  check(l.queryHead(&head,otherSession,untouched,queryHandle,e)==QueryResult::Unavailable&&untouched.serial==999&&queryHandle==999,"labelled wrongsession HEAD no ordinary fallback");
+ check(l.ownsHead(&head)&&!l.ownsHead(nullptr),"unavailable HEAD query preserves native ownership discriminator");
  check(l.queryBody(&ordinary,session,untouched,queryHandle,e)==QueryResult::Missing&&untouched.serial==999&&queryHandle==999,"ordinary body unaffected");
  check(!l.headToBody(&head,h+1,&body,bh,e)&&bh==999,"stale HEAD handle denied");
  check(!l.headToBody(&head,h,nullptr,bh,e)&&bh==999&&l.report().liveHeads==1,"null BODY allocation retains HEAD");
  check(l.headToBody(&head,h,&body,bh,e)&&l.report().liveHeads==0&&l.report().liveBodies==1,"HEAD->BODY before head retirement");
+ check(!l.ownsHead(&head),"successful conversion retires persistent HEAD discriminator");
  check(l.retireHead(&head,h,e)&&l.report().liveBodies==1,"postconversion head cleanup harmless");
  MemberRecord bodyRecord;check(l.queryBody(&body,session,bodyRecord,queryHandle,e)==QueryResult::Present&&emissionSame(bodyRecord.origin,origin),"BODY preserves full seed cause and serial");
  check(l.queryBody(&body,otherSession,untouched,queryHandle,e)==QueryResult::Unavailable,"labelled BODY wrong session unavailable");
