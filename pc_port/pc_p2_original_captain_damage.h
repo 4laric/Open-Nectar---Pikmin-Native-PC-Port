@@ -1,14 +1,15 @@
 #pragma once
 #include <cstdint>
 #include <string>
-class Creature; class Navi; class NaviState;
+#include <optional>
+class Creature; class Navi; class NaviState; class MoviePlayer;
 
 // #1289: source-owned contracts. Implementations must be actual loaded source
 // lifecycle/FSM owners. P1/AP flags, native state IDs and prepared assets are
 // not implementations of these interfaces. Doubles establish controls only.
 namespace p2original { namespace captain {
 enum class Phase { Loading, GameWorldActive, Inactive };
-enum class Demo { Absent, Inactive, Playing };
+enum class Demo { Unknown, Absent, Inactive, Playing };
 // Retail Game/NaviState.h identities, deliberately distinct from P1 IDs.
 enum class StateId { Walk=0, Follow=1, Punch=2, Change=3, Gather=4, Throw=5,
  ThrowWait=6, Dope=7, Nuku=8, NukuAdjust=9, Container=10, Absorb=11,
@@ -26,7 +27,7 @@ public:
  virtual bool sourceAlive(const Navi&) const=0;
  virtual bool sourceInvincible() const=0;
  // Actor-owned source mInvincibleTimer, never a P1 hurt/flick timer.
- virtual std::uint8_t actorInvincibleFrames(const Navi&) const=0;
+ virtual std::optional<std::uint8_t> actorInvincibleFrames(const Navi&) const=0;
  // Must preflight a genuine source Dead transition BEFORE HP mutation.
  virtual bool canEnterSourceDead(const Navi&) const=0;
  virtual void enterSourceDead(Navi&)=0;
@@ -41,6 +42,7 @@ public:
  virtual const std::string& selectedCampaign() const=0;
  virtual const std::string& selectedFingerprint() const=0;
  virtual const std::string& sourceCatalog() const=0;
+ virtual MoviePlayer* moviePlayer() const=0;
  virtual std::uint64_t incarnation() const=0;
  virtual Navi* captainAt(unsigned slot) const=0;
 };
@@ -58,7 +60,7 @@ public:
 };
 enum class Refusal { None, MissingWorld, WrongSession, InactiveWorld,
  MissingCaptain, MissingSourceState, InvalidHealth, InvalidDamage,
- DemoPlaying, NotAlive, StateInvincible, ActorInvincible, MissingDeadTransition,
+ MissingMovieAuthority, DemoPlaying, NotAlive, StateInvincible, MissingActorAuthority, ActorInvincible, MissingDeadTransition,
  NotReunited, MissingEnemy };
 struct DamageResult {
  Refusal refusal=Refusal::MissingWorld;
@@ -82,8 +84,8 @@ const p2original::captain::LoadedScene* pc_p2_original_captain_loaded_scene();
 // An absent/wrong selected LoadedScene refuses activation and actor writes.
 void pc_p2_original_captain_main_game_entered();
 void pc_p2_original_captain_main_game_left();
-void pc_p2_original_captain_movie_started();
-void pc_p2_original_captain_movie_ended();
+void pc_p2_original_captain_movie_started(MoviePlayer*);
+void pc_p2_original_captain_movie_ended(MoviePlayer*);
 void pc_p2_original_captain_actor_update(Navi*);
 // Query actor lifetime/iframes only for the exact live source scene roster.
 bool pc_p2_original_captain_actor_alive(const Navi*);
