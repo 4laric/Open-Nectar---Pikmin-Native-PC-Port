@@ -4247,6 +4247,8 @@ void GameCoreSection::updateAI()
         for (int color = 0; color < 3; ++color) {
             if (bbftColorGranted[color] || !pc_bbft_color_access(color)) continue;
             GoalItem* onion = itemMgr->getContainer(color);
+            bool originalBooted=false;
+            if (pc_p2_original_onyon_booted(onion,originalBooted)) continue;
             const bool booted = playerState->hasBootContainer(color);
             playerState->setContainer(color);
             if (onion && !booted) onion->startBoot();
