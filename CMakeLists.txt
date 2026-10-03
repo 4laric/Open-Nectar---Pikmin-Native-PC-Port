@@ -736,6 +736,13 @@ file(GLOB PLUGPIKI_YAMASHITA_SOURCES "src/plugPikiYamashita/*.cpp")
 set(PIKMIN_TARGET_SUFFIX "" CACHE STRING "Suffix for the game targets when the tree is added more than once")
 set(NECTAR_LEGACY pikmin_legacy${PIKMIN_TARGET_SUFFIX})
 set(NECTAR_GAME pikmin_pc${PIKMIN_TARGET_SUFFIX})
+# The cave provider owns the canonical source-consumer compatibility symbols.
+# A composed surface provider delegates its own narrowly scoped proof through
+# these symbols rather than defining weak or competing global callbacks.
+add_compile_definitions(PIKMIN_P2_CAVE_CAMPAIGN_PROVIDER=1)
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/pc_port/pc_p2_surface_save.cpp")
+    add_compile_definitions(PIKMIN_P2_SURFACE_SAVE_PROVIDER=1)
+endif()
 # Solo en Android: en escritorio el ejecutable PAL sigue saliendo como
 # `nectar` en su propio directorio de build y lo renombra el empaquetado.
 if(ANDROID AND PIKMIN_GAME_VERSION STREQUAL "VERSION_GPIP01_00")

@@ -3,6 +3,9 @@
 #include "pc_p2_cave_campaign_cache_engine.h"
 #include "pc_p2_cave_campaign_party_engine.h"
 #include "pc_p2_cave_survivor_permit.h"
+#if defined(PIKMIN_P2_SURFACE_SAVE_PROVIDER)
+#include "pc_p2_surface_save.h"
+#endif
 #include "pc_p2_cave_rooms_engine.h"
 #include "pc_p2_cave_geometry_engine.h"
 #include "pc_p2_cave_items_engine.h"
@@ -297,7 +300,13 @@ bool pc_p2_cave_campaign_restored_party(){return pc_randomizer_generated_cave()&
 bool pc_p2_cave_campaign_survivor_permit(const std::string& sourceKey,std::uint32_t recordUid,
     std::uint32_t attempt,std::uint64_t activation,const std::string& catalogFingerprint,
     std::uint64_t* generation,std::uint8_t sha[32]){
-    if(!pc_randomizer_generated_cave())return false;
+    if(!pc_randomizer_generated_cave()){
+#if defined(PIKMIN_P2_SURFACE_SAVE_PROVIDER)
+        return pc_p2_surface_save_survivor_permit(sourceKey,recordUid,attempt,activation,catalogFingerprint,generation,sha);
+#else
+        return false;
+#endif
+    }
     const auto& party=pc_randomizer_generated_cave_party();
     return p2CaveSurvivorPermit(party,detaching||restoringParty,permitGeneration,
         pc_randomizer_active_campaign_generation(),permitSha,sourceKey,recordUid,attempt,
@@ -327,7 +336,13 @@ void pc_p2_cave_campaign_before_day_cleanup(){
 bool pc_p2_cave_campaign_survivor_body(const std::string& sourceKey,std::uint32_t recordUid,
     std::uint32_t attempt,std::uint64_t activation,const std::string& catalogFingerprint,
     OriginalPikiBodyState& state,std::uint64_t* generation,std::uint8_t sha[32]){
-    if(!pc_randomizer_generated_cave())return false;
+    if(!pc_randomizer_generated_cave()){
+#if defined(PIKMIN_P2_SURFACE_SAVE_PROVIDER)
+        return pc_p2_surface_save_survivor_body(sourceKey,recordUid,attempt,activation,catalogFingerprint,state,generation,sha);
+#else
+        return false;
+#endif
+    }
     return p2CaveSurvivorBody(pc_randomizer_generated_cave_party(),detaching||restoringParty,
         permitGeneration,pc_randomizer_active_campaign_generation(),permitSha,
         sourceKey,recordUid,attempt,activation,catalogFingerprint,state,generation,sha);
