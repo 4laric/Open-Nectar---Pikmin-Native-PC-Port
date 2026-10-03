@@ -31,7 +31,7 @@ bool NativeDownEffects::tick(float seconds,std::string& e){if(!m->fx.ready()){e.
 std::size_t NativeDownEffects::particles()const{return m->fx.particles();}
 void NativeDownEffects::draw(Graphics& g,EffectColors primary,EffectColors environment){
  if(!m->attached||!g.mCamera||!particles())return;
- bool light=g.setLighting(false,nullptr);int blend=g.setCBlending(BLEND_Alpha);int cull=g.setCullFront(2);bool depth=g.setDepth(false);
+ bool light=g.setLighting(false,nullptr);int blend=g.setCBlending(BLEND_Alpha);int cull=g.mCullMode;g.setCullFront(2);bool depth=g.setDepth(false);
  g.useMatrix(g.mCamera->mLookAtMtx,0);g.useTexture(nullptr,0);GXLoadTexObj(&m->texture,GX_TEXMAP0);
  GXSetNumTevStages(1);GXSetNumTexGens(1);GXSetTexCoordGen2(GX_TEXCOORD0,GX_TG_MTX2X4,GX_TG_TEX0,GX_IDENTITY,GX_FALSE,GX_PTIDENTITY);
  GXSetTevOrder(GX_TEVSTAGE0,GX_TEXCOORD0,GX_TEXMAP0,GX_COLOR_NULL);GXSetNumIndStages(0);GXSetTevDirect(GX_TEVSTAGE0);GXSetTevDirect(GX_TEVSTAGE1);
@@ -57,7 +57,7 @@ void NativeDownEffects::draw(Graphics& g,EffectColors primary,EffectColors envir
    }GXEnd();
   }
  }
- g.useTexture(nullptr,0);g.setCullFront(cull);g.setDepth(depth);g.setCBlending(blend);g.setLighting(light,nullptr);
+ g.useTexture(nullptr,0);g.setCullFront(cull);g.setCBlending(blend);g.setDepth(depth);g.setLighting(light,nullptr);
 }
 } }
 void pc_p2_shijimi_effect_tick_all(float seconds){for(auto* fx:p2original::shijimi::effects()){std::string e;if(!fx->tick(seconds,e)){std::fprintf(stderr,"P2_ORIGINAL_SHIJIMI_FX refusal: %s\n",e.c_str());std::abort();}}}
