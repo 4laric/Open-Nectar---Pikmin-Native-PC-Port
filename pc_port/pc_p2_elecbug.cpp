@@ -597,6 +597,15 @@ bool pc_p2_elecbug_ground_press(Piki* piki) {
         if (!actor || !actor->isAlive() || entry.second.state < ELEC_WAIT
             || entry.second.state > ELEC_CHILDISCHARGE || !actor->mCollInfo
             || !actor->mCollInfo->hasInfo()) continue;
+        if (distXZ(actor->mSRT.t,piki->mSRT.t)<50.f) {
+            const Vector3f centre=piki->getCentre();
+            std::printf("P2_ELECBUG_GROUND_PARTS piki=%p root=%.6f,%.6f,%.6f centre=%.6f,%.6f,%.6f radius=%.6f state=%d actor=%.6f,%.6f,%.6f read_only=1\n",
+                static_cast<void*>(piki),piki->mSRT.t.x,piki->mSRT.t.y,piki->mSRT.t.z,
+                centre.x,centre.y,centre.z,piki->getSize(),piki->getState(),actor->mSRT.t.x,actor->mSRT.t.y,actor->mSRT.t.z);
+            for (u32 id:{u32('bod1'),u32('bod2')}) if (CollPart* part=actor->mCollInfo->getSphere(id))
+                std::printf("P2_ELECBUG_GROUND_PART id=%u centre=%.6f,%.6f,%.6f radius=%.6f read_only=1\n",id,part->mCentre.x,part->mCentre.y,part->mCentre.z,part->mRadius);
+            std::fflush(stdout);
+        }
         Vector3f ignored;
         if (actor->mCollInfo->checkCollision(piki, ignored)
             && flyingPress(actor, piki, "ground_bounce")) return true;
