@@ -45,7 +45,7 @@ namespace {
 using namespace p2original;
 using namespace p2original::pelplant;
 SDL_Joystick* pad=nullptr;
-bool refusal=false,naturalCombat=false,naturalDiagnostic=false;
+bool refusal=false,naturalCombat=false,naturalDiagnostic=false,manualPlay=false;
 void require(bool yes,const char* text){if(!yes){std::printf("FAIL P2_ORIGINAL_PELPLANT %s\n",text);std::fflush(nullptr);std::_Exit(1);}}
 void checked(bool yes,const std::string& error){if(!yes)std::fprintf(stderr,"P2_ORIGINAL_PELPLANT_ERROR %s\n",error.c_str());require(yes,"actual native provider call");}
 float distance(const Vector3f& a,const Vector3f& b){float x=a.x-b.x,z=a.z-b.z;return std::sqrt(x*x+z*z);}
@@ -102,7 +102,7 @@ class PelplantApp final:public PlugPikiApp {
   std::printf("P2_ORIGINAL_PELPLANT_POSITION stage=death_end amount=%u actor=%.3f,%.3f,%.3f pellet=%.3f,%.3f,%.3f flags=%08x dynamics=%d state=%d\n",found->amount,actor->mSRT.t.x,actor->mSRT.t.y,actor->mSRT.t.z,p->mSRT.t.x,p->mSRT.t.y,p->mSRT.t.z,unsigned(p->mCreatureFlags),int(p->isRealDynamics()),p->getState());
   found->release=p->mSRT.t;found->expectedSeeds=p->mConfig->mPelletColor()==Red?p->mConfig->mMatchingOnyonSeeds():p->mConfig->mNonMatchingOnyonSeeds();
   found->dead=true;
-  std::printf("P2_ORIGINAL_PELPLANT_RELEASE source=0 uid=%u ordinal=%u token=%u amount=%u same_pointer=1 captured=0 direct_damage_control=%d natural_combat=%d\n",source[found->row].enemy.uid,found->ordinal,found->token,found->amount,int(!naturalCombat),int(naturalCombat));
+  std::printf("P2_ORIGINAL_PELPLANT_RELEASE source=0 uid=%u ordinal=%u token=%u amount=%u same_pointer=1 captured=0 direct_damage_control=%d natural_combat=%d\n",source[found->row].enemy.uid,found->ordinal,found->token,found->amount,int(!naturalCombat&&!manualPlay),int(naturalCombat));
   if(!native->provider().release(actor,found->token,error))return false;
   if(!catalog.retire(actor,found->handle)){error="original fixture instance retirement failed";return false;}return true;
  }
@@ -121,6 +121,7 @@ class PelplantApp final:public PlugPikiApp {
   const bool physical=provider.preflight(source,error);
   if(refusal){require(!physical&&provider.size()==0&&tekiMgr->getSize()==rootsBefore&&pelletMgr->getSize()==pelletsBefore,"physical refusal before actor birth");std::puts("PASS P2_ORIGINAL_PELPLANT_RESOURCE_REFUSAL actor_births=0 owned_cleanup=1 gameplay=0");std::fflush(nullptr);std::_Exit(0);}
   checked(physical,error);
+  if(!manualPlay){
   checked(native->geometryOwnershipControl(error),error);
   for(int control=0;control<7;++control){auto invalid=source;
    if(control==0)invalid[0].enemy.generatorVersion="0002";
@@ -132,9 +133,11 @@ class PelplantApp final:public PlugPikiApp {
    if(control==6)invalid[0].enemy.generatorTail[1]="1.0";
    require(!provider.preflight(invalid,error)&&provider.size()==0&&tekiMgr->getSize()==rootsBefore&&pelletMgr->getSize()==pelletsBefore,"strict tail refusal without actor allocation");
   }
+  }
   checked(provider.preflight(source,error),error);checked(provider.reserve(source,error),error);
   // Genuine manager exhaustion AFTER reservation: full birth allocates the
   // real plant then capture must fail and clean up only its own allocation.
+  if(!manualPlay){
   std::vector<Pellet*> fill;const int available=pelletMgr->getMax()-pelletMgr->getSize();
   for(int i=0;i<available;++i){Pellet* p=pelletMgr->newNumberPellet(Red,0);require(p,"owned negative pool fill");p->init(onion->mSRT.t);p->startAI(0);fill.push_back(p);}
   require(!pelletMgr->newNumberPellet(Red,0),"pool genuinely exhausted");
@@ -145,6 +148,7 @@ class PelplantApp final:public PlugPikiApp {
   for(Pellet* owned:fill)owned->kill(false);
   require(pelletMgr->getSize()==pelletsBefore,"only owned negative cargo cleaned");
   std::puts("P2_ORIGINAL_PELPLANT_NEGATIVE_CONTROLS tail_refusals=7 before_birth=1 real_pool_exhaustion=1 after_allocation_cleanup=1");
+  }
   checked(catalog.install("1365d511318bebf4eb29adbff90891309460cbbd1bc6e5e99dfcb1dbe8588e5e",source,[](const CatalogRow& r,std::string& e){Initial out;return decode(r,out,e);},error),error);
   native->onDeath([this](Creature* a,std::string& e){return death(a,e);});
   native->onOnion([this](Pellet* p,unsigned token,bool duplicate){auto f=std::find_if(instances.begin(),instances.end(),[token](const Instance& i){return i.token==token;});require(f!=instances.end()&&f->pellet==p&&f->dead,"ordinary Onion exact cargo identity");if(duplicate)++f->duplicates;else{++f->receipts;f->delivered=true;}std::printf("P2_ORIGINAL_PELPLANT_ONION token=%u amount=%u duplicate=%d ordinary_hook=1\n",token,f->amount,int(duplicate));});
@@ -170,6 +174,7 @@ class PelplantApp final:public PlugPikiApp {
     require(catalog.query(actor,actualSource,actualToken,&identity)&&actualSource==0&&actualToken==i.token&&identity.generator==source[row].enemy.uid&&identity.ordinal==ordinal&&identity.epoch==1&&identity.activation==1,"actual original registry source0 identity");
     checked(provider.bind(source[row],actor,i.token,error),error);instances.push_back(i);
     auto* h=provider.lookup(actor);require(h&&h->row.enemy.source==0&&h->row.enemy.pelletSize==1,"literal source0 and unmodified common drop metadata");
+    if(manualPlay)instances.back().pellet=h->captured;
     require(distance(actor->mSRT.t,Vector3f(at.x,at.y,at.z))<.1f&&std::fabs(actor->mSRT.t.y-at.y)<.1f,"actual actor birth retains requested fixture position");
     std::printf("P2_ORIGINAL_PELPLANT_POSITION stage=birth row=%u ordinal=%u requested=%.3f,%.3f,%.3f actor=%.3f,%.3f,%.3f captured=%d pellet=%.3f,%.3f,%.3f\n",row,ordinal,at.x,at.y,at.z,actor->mSRT.t.x,actor->mSRT.t.y,actor->mSRT.t.z,int(h->captured!=nullptr),h->captured?h->captured->mSRT.t.x:0,h->captured?h->captured->mSRT.t.y:0,h->captured?h->captured->mSRT.t.z:0);
    }
@@ -177,7 +182,7 @@ class PelplantApp final:public PlugPikiApp {
   require(instances.size()==8&&provider.size()==8,"seven rows eight actual native births");
   // Small/Middle full-only damage control, followed by source farm-triggered
   // Middleâ†’Full growth with authentic runtime animation events.
-  if(!naturalCombat){auto& middle=instances[7];auto* h=provider.lookup(middle.actor);require(h&&h->state==State::Middle&&!h->captured,"actual10 initialMiddle");
+  if(!naturalCombat&&!manualPlay){auto& middle=instances[7];auto* h=provider.lookup(middle.actor);require(h&&h->state==State::Middle&&!h->captured,"actual10 initialMiddle");
    const float health=h->health;checked(provider.damage(middle.actor,100,"s__0",error),error);require(h->damage==0&&h->health==health,"Middle rejects damaging head-hit");checked(provider.farm(middle.actor,-1,error),error);}
   std::puts("P2_ORIGINAL_PELPLANT_READY rows=7 births=8 source0_distinguished=1 resources_before_birth=1 baseline=20 direct_initialization=1 original_positions=0");
  }
@@ -185,14 +190,23 @@ public:
  int idle() override {
   int result=PlugPikiApp::idle();Navi* n=naviMgr?naviMgr->getNavi():nullptr;
   bool initialized=n&&n->getCurrState();if(initialized)captainSeen=true;
-  require(!captainSeen||initialized,"initialized captain disappeared");
-  if(initialized)require(!GameStat::orimaDead&&!naviMgr->isNaviDead(n)&&n->getCurrState()->getID()!=NAVISTATE_Dead&&std::isfinite(n->mHealth)&&n->mHealth>0,"captain remains alive before pause/movie boundary");
-  require(++frame<12000,"bounded actual gameplay frame budget");
-  if(gameflow.mMoviePlayer&&gameflow.mMoviePlayer->mIsActive){gameflow.mMoviePlayer->requestSkip();return result;}
+  if(!manualPlay)require(!captainSeen||initialized,"initialized captain disappeared");
+  if(!manualPlay&&initialized)require(!GameStat::orimaDead&&!naviMgr->isNaviDead(n)&&n->getCurrState()->getID()!=NAVISTATE_Dead&&std::isfinite(n->mHealth)&&n->mHealth>0,"captain remains alive before pause/movie boundary");
+  if(!manualPlay)require(++frame<12000,"bounded actual gameplay frame budget");
+  if(gameflow.mMoviePlayer&&gameflow.mMoviePlayer->mIsActive){if(!manualPlay)gameflow.mMoviePlayer->requestSkip();return result;}
   if(!initialized||!pikiMgr||!tekiMgr||!pelletMgr||!itemMgr||!mapMgr||gameflow.mPauseAll||gameflow.mIsUIOverlayActive)return result;
   if(phase==0){if(n->getCurrState()->getID()!=NAVISTATE_Walk||++ready<45)return result;
    int live=0,red=0;Iterator it(pikiMgr);CI_LOOP(it){auto* p=static_cast<Piki*>(*it);if(p->isAlive()){++live;red+=p->mColor==Red;}}
-   require(live==20&&red==20,"actual20 fieldRed baseline");onion=itemMgr->getContainer(Red);require(onion,"real Red Onion, no pod receiver");setup();phase=1;}
+   require(live==20&&red==20,"actual20 fieldRed baseline");onion=itemMgr->getContainer(Red);require(onion,"real Red Onion, no pod receiver");setup();phase=1;
+   if(manualPlay){std::puts("P2_ORIGINAL_PELPLANT_MANUAL_READY human_input=1 automated_input=0 direct_damage=0 farm_control=0 diagnostic_birth=1 original_positions=0 save_resume=0");std::fflush(nullptr);}
+  }
+  if(manualPlay){
+   // Observe each real captured payload for the same-pointer death/Onion
+   // callbacks. The engine owns growth, attacks, release, AI and delivery;
+   // this branch never calls the fixture input or damage/farm controllers.
+   for(auto& instance:instances)if(!instance.dead){auto* h=native->provider().lookup(instance.actor);if(h&&h->captured)instance.pellet=h->captured;}
+   return result;
+  }
   ++age;auto& i=current();std::string error;
   if(!naturalCombat&&growthControl==0){auto& middle=instances[7];auto* h=native->provider().lookup(middle.actor);require(h,"source growth control actor retained");
    if(h->state==State::Small){const float hp=h->health;checked(native->provider().damage(middle.actor,100,"s__0",error),error);require(h->health==hp&&h->damage==0&&!h->captured,"Small rejects damaging head-hit after actual wither blend");checked(native->provider().farm(middle.actor,1,error),error);growthControl=1;std::puts("P2_ORIGINAL_PELPLANT_FULL_ONLY Small=1 Middle=1 actual_wither_blend=1");}}
@@ -266,14 +280,17 @@ public:
 };
 }
 int main(int argc,char**argv){
- for(int i=1;i<argc;++i){if(!std::strcmp(argv[i],"--refuse-resources"))refusal=true;if(!std::strcmp(argv[i],"--natural-combat"))naturalCombat=true;if(!std::strcmp(argv[i],"--natural-diagnostic"))naturalCombat=naturalDiagnostic=true;}
+ for(int i=1;i<argc;++i){if(!std::strcmp(argv[i],"--refuse-resources"))refusal=true;if(!std::strcmp(argv[i],"--natural-combat"))naturalCombat=true;if(!std::strcmp(argv[i],"--natural-diagnostic"))naturalCombat=naturalDiagnostic=true;if(!std::strcmp(argv[i],"--manual-play"))manualPlay=true;}
+ require(!manualPlay||(!refusal&&!naturalCombat),"manual play is separate from automated acceptance modes");
  SDL_setenv("SDL_AUDIODRIVER","dummy",1);SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS,"1");SDL_SetMainReady();pc_gpu_preference_apply();pc_bbft_init(argc,argv);
  require(pc_pikipelago_surface_course()&&!std::strcmp(pc_pikipelago_surface_course(),"tutorial")&&!pc_pikipelago_room_preview(),"ordinary tutorial lifecycle, not Pod preview");
  require(pc_window_init("P2 original Pelplant actual provider fixture",960,540),"window init");pc_settings_init();pc_window_set_control_mode(PC_CONTROL_CLASSIC);pc_window_set_display_mode(0);pc_window_set_window_size(960,540);pc_window_center();
  SDL_Window* w=SDL_GL_GetCurrentWindow();int width,height,x,y;SDL_GetWindowSize(w,&width,&height);SDL_GetWindowPosition(w,&x,&y);SDL_Rect b{};SDL_GetDisplayBounds(SDL_GetWindowDisplayIndex(w),&b);
  require(width==960&&height==540&&std::abs(x-(b.x+(b.w-width)/2))<=2&&std::abs(y-(b.y+(b.h-height)/2))<=2,"960x540 centered baseline");
+ if(!manualPlay){
  int device=SDL_JoystickAttachVirtual(SDL_JOYSTICK_TYPE_GAMECONTROLLER,SDL_CONTROLLER_AXIS_MAX,SDL_CONTROLLER_BUTTON_MAX,0);require(device>=0,"virtual SDL pad");
  char guid[64];SDL_JoystickGetGUIDString(SDL_JoystickGetDeviceGUID(device),guid,sizeof(guid));std::string mapping=std::string(guid)+",Pelplant fixture pad,a:b0,b:b1,x:b2,y:b3,back:b4,guide:b5,start:b6,leftstick:b7,rightstick:b8,leftshoulder:b9,rightshoulder:b10,dpup:b11,dpdown:b12,dpleft:b13,dpright:b14,leftx:a0,lefty:a1,rightx:a2,righty:a3,lefttrigger:a4,righttrigger:a5,";
  require(SDL_GameControllerAddMapping(mapping.c_str())>=0,"pad mapping");pad=SDL_JoystickOpen(device);require(pad,"pad open");pc_window_set_stick_invert(0);pc_window_set_cstick_invert(0);pc_window_set_gamepad_binding(PC_KEY_ACT_A,SDL_CONTROLLER_BUTTON_A);pc_window_set_gamepad_binding(PC_KEY_ACT_B,SDL_CONTROLLER_BUTTON_B);input();
+ }
  gsys->Initialise();pc_settings_p2d_init();nodeMgr=new NodeMgr();gsys->run(new PelplantApp());return 0;
 }
