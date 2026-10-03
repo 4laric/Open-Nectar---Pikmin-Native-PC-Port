@@ -2,13 +2,23 @@
 #include "pc_p2_original_actor.h"
 #include "pc_p2_original_progress.h"
 #include "pc_p2_equipment.h"
+#include "pc_p2_original_piki_origin.h"
+#include "pc_p2_original_source_uid.h"
+#include "pc_p2_original_piki_recruit.h"
 #include "Navi.h"
+#include "Piki.h"
 #include "NaviState.h"
 #include <cmath>
 extern const p2original::captain::World* pc_p2_original_captain_world() __attribute__((weak));
 extern bool pc_randomizer_original_session() __attribute__((weak));
 extern std::string pc_randomizer_original_campaign() __attribute__((weak));
 extern std::string pc_randomizer_session_fingerprint() __attribute__((weak));
+extern bool pc_p2_original_piki_body_handle(const Piki*,OriginalPikiBodyHandle&) __attribute__((weak));
+extern bool pc_p2_original_piki_body_current(const Piki*,std::uint64_t) noexcept __attribute__((weak));
+extern bool pc_p2_original_captain_actor_lifetime(const Navi*,bool&) __attribute__((weak));
+extern const p2original::captain::LoadedScene* pc_p2_original_captain_loaded_scene() __attribute__((weak));
+extern const std::string& pc_p2_original_piki_catalog_fingerprint() noexcept __attribute__((weak));
+extern bool pc_p2_original_piki_recruit_pair_ready() noexcept __attribute__((weak));
 namespace p2original { namespace captain {
 bool selectedOriginal(){return pc_randomizer_original_session&&pc_randomizer_original_session();}
 namespace {
@@ -99,8 +109,52 @@ Refusal flickAdmission(const Creature* enemy,const Navi* n) {
  return Refusal::None;
 }
 DamageResult attack(Navi* n,const Creature* source,float raw){
- const auto admitted=flickAdmission(source,n);
- if(admitted!=Refusal::None){DamageResult result;result.refusal=admitted;return result;}
- return startDamage(n,raw);
+ DamageResult result;const World* world=nullptr;
+ result.refusal=worldFor(n,world);if(result.refusal!=Refusal::None)return result;
+ const auto* scene=pc_p2_original_captain_loaded_scene?pc_p2_original_captain_loaded_scene():nullptr;
+ if(!scene||!scene->captainAt(0)||!scene->captainAt(1)||scene->captainAt(0)==scene->captainAt(1)
+  ||scene->incarnation()!=world->incarnation()||scene->selectedCampaign()!=world->selectedCampaign()
+  ||scene->selectedFingerprint()!=world->selectedFingerprint()||scene->sourceCatalog()!=world->sourceCatalog()
+  ||scene->captainAt(0)!=world->captainAt(0)||scene->captainAt(1)!=world->captainAt(1)){
+  result.refusal=Refusal::MissingWorld;return result;
+ }
+ const auto& progress=originalProgress();
+ if(!progress.ready()||progress.context().campaign!=world->selectedCampaign()){result.refusal=Refusal::WrongSession;return result;}
+ if(!progress.context().reunited){result.refusal=Refusal::NotReunited;return result;}
+ const auto* piki=dynamic_cast<const Piki*>(source);OriginalPikiBodyHandle body;
+ if(piki){
+  if(!pc_p2_original_piki_body_handle||!pc_p2_original_piki_body_current
+   ||!pc_p2_original_piki_catalog_fingerprint||!pc_p2_original_piki_recruit_pair_ready
+   ||!pc_p2_original_piki_recruit_pair_ready()
+   ||!pc_p2_original_piki_body_handle(piki,body)||!body.nativeLifetime
+   ||!pc_p2_original_piki_body_current(piki,body.nativeLifetime)
+   ||pc_p2_original_piki_catalog_fingerprint().empty()||body.body.origin.catalogFingerprint!=pc_p2_original_piki_catalog_fingerprint()
+   ||body.body.origin.sourceKey.empty()||!body.body.origin.activation
+   ||body.body.origin.recordUid!=originalSourceCatalogUid(body.body.origin.sourceKey)
+   ||body.body.state.species>5||(body.body.state.wild&&!body.body.state.wasWild)){
+   result.refusal=Refusal::MissingActorAuthority;return result;
+  }
+ }else {
+  result.refusal=flickAdmission(source,n);if(result.refusal!=Refusal::None)return result;
+ }
+ // Literal interactNavi.cpp:300: reunion, Navi::invincible(), then Piki raw=0
+ // and startDamage. Zero damage never bypasses any source immunity authority.
+ if(world->demo()==Demo::Unknown){result.refusal=Refusal::MissingMovieAuthority;return result;}
+ if(world->demo()==Demo::Playing){result.refusal=Refusal::DemoPlaying;return result;}
+ auto* native=n->getCurrState();auto* state=dynamic_cast<State*>(native);
+ if(!state||state->nativeState()!=native){result.refusal=Refusal::MissingSourceState;return result;}
+ const auto frames=state->actorInvincibleFrames(*n);
+ if(!frames){result.refusal=Refusal::MissingActorAuthority;return result;}
+ if(*frames){result.refusal=Refusal::ActorInvincible;return result;}
+ if(state->sourceInvincible()){result.refusal=Refusal::StateInvincible;return result;}
+ if(piki&&!pc_p2_original_piki_body_current(piki,body.nativeLifetime)){result.refusal=Refusal::MissingActorAuthority;return result;}
+ result=startDamage(n,piki?0.0f:raw);
+ result.interactionAccepted=bool(result);
+ if(result.refusal==Refusal::NotAlive){
+  bool alive=true;
+  if(pc_p2_original_captain_actor_lifetime&&pc_p2_original_captain_actor_lifetime(n,alive)&&!alive)result.interactionAccepted=true;
+  else result.refusal=Refusal::MissingActorAuthority;
+ }
+ return result;
 }
 } }
