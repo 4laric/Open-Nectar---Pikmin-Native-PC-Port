@@ -136,7 +136,11 @@ struct Native::Impl final:Engine {
   if(!services.gasEffect(h.creature,false,services.surfaceStory(),e))return false;
   std::vector<Creature*> attached;Stickers stickers(h.creature);Iterator it(&stickers);CI_LOOP(it)attached.push_back(*it);
   for(auto* p:attached){InteractFlick flick(h.creature,0,0,-1000);p->stimulate(flick);}
-  i->second->collision.detach(static_cast<BTeki*>(h.creature));tracks.erase(i);h.creature->kill(false);return true;
+  auto* actor=static_cast<BTeki*>(h.creature);
+  i->second->collision.detach(actor);tracks.erase(i);
+  // Source unload is not gameplay death. Creature::kill normally invokes
+  // detachGenerator()->informDeath; GroupCourse owns this teardown instead.
+  actor->mGenerator=nullptr;actor->kill(false);return true;
  }
  void follow(Host& h){auto& t=*tracks.at(h.creature);const auto& m=motions[t.motion];float frame=std::min(t.frame,float(m.duration-1));std::size_t a=0;while(a+1<m.joints.size()&&m.joints[a+1].frame<=frame)++a;std::size_t b=std::min(a+1,m.joints.size()-1);float w=a==b?0:(frame-m.joints[a].frame)/float(m.joints[b].frame-m.joints[a].frame);
   Matrix4f local,root,world;local.makeIdentity();for(int r=0;r<3;++r)for(int c=0;c<4;++c)local.mMtx[r][c]=(1-w)*m.joints[a].joint.mMtx[r][c]+w*m.joints[b].joint.mMtx[r][c];
