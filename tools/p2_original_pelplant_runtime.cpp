@@ -36,6 +36,7 @@
 #include "pc_window.h"
 #include "pc_gpu_preference.h"
 #include "pc_p2_original_pelplant_native.h"
+#include "pc_p2_original_pelplant_code.h"
 #include "pc_p2_original_actor.h"
 #include "settings/pc_settings.h"
 #include "settings/pc_settings_p2d.h"
@@ -201,8 +202,8 @@ public:
      baseline=rewards();carried=nearGoal=false;travel=0;settled=0;phaseStart=age;
      std::puts("P2_ORIGINAL_PELPLANT_NATURAL_BEGIN amount=1 direct_damage=0 farm_control=0 diagnostic_birth=1 ordinary_SDL=1");}
     Iterator attackers(pikiMgr);CI_LOOP(attackers){auto* p=static_cast<Piki*>(*attackers);if(!p->isAlive()||p->getStickObject()!=i.actor||!p->getStickPart())continue;
-     const char* code=p->getStickPart()->getCode().mStringID;const bool head=code[3]=='0';
-     if(!naturalStick||(head&&!naturalHeadStick))std::printf("P2_ORIGINAL_PELPLANT_NATURAL_CONTACT piki=1 attached_to_actual_actor=1 part=%s head=%d\n",code,int(head));
+     const unsigned id=p->getStickPart()->getCode().mId;const auto code=sourceCode(id);const bool head=id==0x735f5f30u;
+     if(!naturalStick||(head&&!naturalHeadStick))std::printf("P2_ORIGINAL_PELPLANT_NATURAL_CONTACT piki=1 attached_to_actual_actor=1 part=%s native_id=%08x head=%d\n",code.data(),id,int(head));
      naturalStick=true;naturalHeadStick|=head;
     }
     if(h->health<naturalInitialHealth){if(!naturalHealthLoss)std::printf("P2_ORIGINAL_PELPLANT_NATURAL_HEALTH before=%.3f after=%.3f head_contact=%d direct_damage=0\n",naturalInitialHealth,h->health,int(naturalHeadStick));naturalHealthLoss=true;}
