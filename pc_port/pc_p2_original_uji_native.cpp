@@ -45,7 +45,9 @@ struct Native::Impl final:Engine {
   actor->mPersonality->mNestPosition.set(p.x,p.y,p.z);actor->mPersonality->mFaceDirection=facing;
   actor->mGenerator=host.generator;actor->reset();
   actor->mSRT.r.set(0,facing,0);actor->mSRT.s.set(1,1,1);actor->mFaceDirection=facing;
-  actor->mRebirthDay=host.generator->getRebirthDay();
+  // Original GenObjectOriginalEnemy has no P1 mGenType. Respawn belongs to
+  // the original lifecycle; its literal interval is mirrored on Generator.
+  actor->mRebirthDay=host.generator->mRespawnInterval;
   // Bind before any frame can run the borrowed Kabekui AI. reset initializes
   // the real chassis animation/collider; its strategy startAI is unnecessary.
   if(!pc_p2_uji_original_birth(actor,host.row.enemy.source,e))return false;
