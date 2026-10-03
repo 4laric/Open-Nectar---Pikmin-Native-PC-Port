@@ -226,3 +226,23 @@ origin comparison is bitwise32 (including signed zero), and pending callbacks
 must stay inside the reachable numeric outcome closure admitted before RNG.
 Controls reject signed-zero tampering and a beginOne/generateFive mismatch;
 these are journal callback policies, not synthetic physical gameplay evidence.
+
+NumberFloorRoots now provides the concrete cave root resolver, borrowing the
+actual nonconstructable SceneContext. It captures selected campaign/session,
+revision, native serial and floor; checks the committed owner before dereference;
+and obtains full retained NativeFloor birth provenance through Scene930's
+pc_p2_retail_scene_known_source_birth. The producer fingerprint remains the
+physical layout hash. Literal descriptor source/catalog hashes are authenticated
+separately, including row kind, source16/37, authored instance and full ordinal,
+epoch and activation. Natural parent retirement does not discard that proof.
+No live-parent fallback, source UID reconstruction or gameplay activity grant is
+introduced. The scene owner must outlive this borrower.
+
+This adapter depends on Scene930 getter184e26ab (owner intake6f0e19b4); the old
+standalone lane has no scene implementation. Canonical composition adds
+egg_number_floor_roots.cpp with the actual scene owner; it is not added to this
+old harness or installed by a factory. Strict GCC object compilation passed
+against exact getter headers, with evidence under ignored
+output/original-resources-1252-floor-roots26.json. Scene930 reviewed the actual
+adapter and dependency. Production link, positive selected birth/parent-death
+controls, Services installation and gameplay remain open.
