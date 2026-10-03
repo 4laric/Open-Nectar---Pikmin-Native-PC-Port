@@ -470,6 +470,9 @@ struct QuittingGameModeState : public ModeState {
 		// force transit to next section (if we're not already)
 		if (!gsys->mSoftResetPending) {
 			PRINT("sending softreset!\n");
+#if defined(PIKI_PC_PORT)
+            sDayendObservedSection = nullptr;
+#endif
 			gamecore->exitStage();
 			gameflow.mNextOnePlayerSectionID       = mParentSection->mPendingOnePlayerSectionID;
 			gameflow.mNextOnePlayerSectionOnDayEnd = ONEPLAYER_MapSelect;
@@ -675,6 +678,8 @@ PcDayendSnapshot pc_dayend_observe()
     if (const auto* day = dynamic_cast<DayOverModeState*>(section->mCurrentModeState)) out.dayOverPhase = day->mState;
     out.tutorial = gameflow.mIsTutorialTextActive;
     out.pauseAll = gameflow.mPauseAll;
+    out.uiOverlayActive = gameflow.mIsUIOverlayActive;
+    out.dvdError = gsys->mDvdErrorCode;
     out.currentFade = section->mCurrentFade;
     out.targetFade = section->mTargetFade;
     out.fadeSpeed = section->mFadeSpeed;

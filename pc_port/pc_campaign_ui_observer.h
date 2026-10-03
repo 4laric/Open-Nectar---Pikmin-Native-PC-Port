@@ -61,6 +61,8 @@ struct PcDayendSnapshot {
     int dayOverPhase = -1;
     bool tutorial = false;
     bool pauseAll = false;
+    bool uiOverlayActive = false;
+    int dvdError = 0;
     bool movieAvailable = false;
     bool movieActive = false;
     bool moviePaused = false;
