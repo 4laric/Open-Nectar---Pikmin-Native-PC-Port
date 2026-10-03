@@ -341,6 +341,7 @@ class PurpleCombatApp : public PlugPikiApp {
     SdlPluckForceSample sdlPreviousForceSample;
     bool sdlPulseActive=false;
     int sdlPulseFrames=0;
+    float sdlPulseYawStart=0;
     SdlPluckState sdlPulseBefore;
     SdlPluckPoint sdlPulseCommand;
     bool sdlPoseProbeActive=false;
@@ -411,8 +412,12 @@ class PurpleCombatApp : public PlugPikiApp {
                     const auto* envelope=capturedCaptainPoses.find(unsigned(captain->getID().mId),reinterpret_cast<std::uintptr_t>(captain));
                     float reserve=0;
                     require(envelope && PcPurplePoseEnvelope::projectedRadius(*envelope,part->mCentre.y-n->mSRT.t.y,part->mRadius,reserve),"captured pose envelope invalid");
-                    if(reserve>0)pluckAdmissionObstacles.push_back({Vector3f(part->mCentre.x,n->mSRT.t.y,part->mCentre.z),reserve});
-                    if(ticks%30==0)std::printf("P2_PURPLE_PLUCK_POSE_ADMISSION tick=%d captain_id=%u violet_id=%u captured_horizontal=%.6f captured_low=%.6f captured_high=%.6f captured_radius=%.6f admission_radius=%.6f captured_all_yaw=1 future_animation_sweep_proven=0 current_guard_unchanged=1 read_only=1 actor_writes=0\n",ticks,unsigned(captain->getID().mId),unsigned(part->getID().mId),envelope->horizontal,envelope->low,envelope->high,envelope->radius,reserve);
+                    if(reserve>0)for(int sample=-1;sample<=1;++sample){
+                        float ox=0,oz=0;
+                        require(PcPurplePoseEnvelope::rotatedOffset(*envelope,n->mSRT.r.y+sample*PcPurplePulseYawHalfArc,ox,oz),"captured local pose rotation invalid");
+                        pluckAdmissionObstacles.push_back({Vector3f(part->mCentre.x-ox,n->mSRT.t.y,part->mCentre.z-oz),reserve});
+                    }
+                    if(ticks%30==0)std::printf("P2_PURPLE_PLUCK_POSE_ADMISSION tick=%d captain_id=%u violet_id=%u captured_horizontal=%.6f captured_low=%.6f captured_high=%.6f captured_radius=%.6f admission_radius=%.6f captured_local_box=1 yaw_half_arc_degrees=22.5 future_animation_sweep_proven=0 current_guard_unchanged=1 read_only=1 actor_writes=0\n",ticks,unsigned(captain->getID().mId),unsigned(part->getID().mId),envelope->horizontal,envelope->low,envelope->high,envelope->radius,reserve);
                 }
             }
         }
@@ -427,7 +432,7 @@ class PurpleCombatApp : public PlugPikiApp {
         pluckObstacles.clear();pluckAdmissionObstacles.clear();
         if(sdlAcquisitionMode())for(CollPart* part:captainParts) {
             const Vector3f offset=part->mCentre-n->mSRT.t;
-            require(capturedCaptainPoses.observe(reinterpret_cast<std::uintptr_t>(n),reinterpret_cast<std::uintptr_t>(part),unsigned(part->getID().mId),offset.x,offset.y,offset.z,part->mRadius),"captain pose identity/finite/bound invalid");
+            require(capturedCaptainPoses.observe(reinterpret_cast<std::uintptr_t>(n),reinterpret_cast<std::uintptr_t>(part),unsigned(part->getID().mId),offset.x,offset.y,offset.z,part->mRadius,n->mSRT.r.y),"captain pose identity/finite/bound invalid");
         }
         collectPluckObstacles(violet->mCollInfo->getBoundingSphere(),n,captainParts);
         if(sdlAcquisitionMode())pluckAdmissionObstacles.insert(pluckAdmissionObstacles.end(),pluckObstacles.begin(),pluckObstacles.end());
@@ -455,7 +460,7 @@ class PurpleCombatApp : public PlugPikiApp {
         refreshPluckObstacles(n,violet);
         pluckTrace("plan_begin",n,head,violet);
         auditBody("captain_route",n);
-        for(const auto& obstacle:(sdlAcquisitionMode()?pluckAdmissionObstacles:pluckObstacles)) std::printf("P2_PURPLE_PLUCK_OBSTACLE xyz=%.3f,%.3f,%.3f radius=%.3f admission_union=1 future_animation_sweep_proven=0\n",
+        for(const auto& obstacle:(sdlAcquisitionMode()?pluckAdmissionObstacles:pluckObstacles)) std::printf("P2_PURPLE_PLUCK_OBSTACLE xyz=%.3f,%.3f,%.3f radius=%.3f admission_local_yaw_union=1 future_animation_sweep_proven=0\n",
             obstacle.centre.x,obstacle.centre.y,obstacle.centre.z,obstacle.radius);
         std::vector<Vector3f> nodes{n->mSRT.t};std::vector<bool> goal{false};
         auto addNode=[&](Vector3f p,bool isGoal) {
@@ -1156,6 +1161,7 @@ class PurpleCombatApp : public PlugPikiApp {
     void sdlObservePulse(Navi* n,PikiHeadItem* head,Pom* violet,float tau,float dt) {
         if(sdlCancelOwnedCollision(n,tau)) return;
         (void)head;(void)violet;sdlPulseModel(n,tau);
+        require(std::isfinite(n->mSRT.r.y)&&std::fabs(std::remainder(n->mSRT.r.y-sdlPulseYawStart,6.283185307f))<=PcPurplePulseYawHalfArc+.0001f,"native pulse left admitted yaw arc");
         SdlPluckState predicted=sdlPulseBefore;require(pluckPulseStep(predicted,sdlPulseCommand,dt,tau),"invalid pulse observation step");
         const SdlPluckState actual=sdlPulseSnapshot(n);
         const float positionError=pluckLength(pluckSub(predicted.position,actual.position));
@@ -1183,6 +1189,12 @@ class PurpleCombatApp : public PlugPikiApp {
     }
     bool sdlBeginPulse(Navi* n,PikiHeadItem* head,Pom*,const Vector3f& waypoint,float tau,float dt,float range) {
         const SdlPluckInputModel model=sdlPulseModel(n,tau);const SdlPluckState start=sdlPulseSnapshot(n);
+        require(pc_window_get_control_mode()==PC_CONTROL_CLASSIC && !n->mPcLockTarget && !pc_first_person_active()
+            && pc_window_get_mouse_cursor_delta_x()==0.f && pc_window_get_mouse_cursor_delta_y()==0.f
+            && !n->isCreatureFlag(CF_DisableAutoFaceDir),"pulse yaw requires unpinned classic cursor");
+        require(std::isfinite(n->mSRT.r.y)&&std::isfinite(n->mFaceDirection)
+            &&std::fabs(std::remainder(n->mSRT.r.y-n->mFaceDirection,6.283185307f))<.001f,"pulse yaw model/current pose mismatch");
+        const float faceAdjust=n->mProps->mCreatureProps.mFaceDirAdjust(),cursorSpeed=C_NAVI_PARM(n,mCursorMoveSpeed);
         const float oldDistance=pluckLength(pluckSub(start.position,sdlPoint(waypoint)));
         int bestX=0,bestY=0;float bestScore=std::numeric_limits<float>::infinity();SdlPluckState bestEnd;
         const float limit=1.f/30.f,step=std::min(limit,tau*.5f),maximum=step*(1.f-step/tau);
@@ -1190,6 +1202,7 @@ class PurpleCombatApp : public PlugPikiApp {
             const float angle=bearing*6.283185307f/144.f;
             const int x=int(std::lround(power*std::cos(angle))),y=int(std::lround(power*std::sin(angle)));
             const SdlPluckPoint target=pluckInputTarget(x,y,model);if(pluckLength(target)<.01f)continue;
+            if(!pcPurplePulseYawEligible(n->mSRT.r.y,target.x,target.z,n->mCursorPosition.x,n->mCursorPosition.z,cursorSpeed,faceAdjust,1.f/30.f))continue;
             // Qualified prospective bound for one input tick followed by neutral,
             // for any next dt in (0,1/30]. This is CURRENT-pose geometry, not
             // proof about future animation/camera/contact. Captured-pose reserve
@@ -1215,7 +1228,7 @@ class PurpleCombatApp : public PlugPikiApp {
                 {bestScore=score;bestX=x;bestY=y;bestEnd=trial;}
         }
         if(!std::isfinite(bestScore))return false;
-        sdlPulseBefore=start;sdlPulseCommand=pluckInputTarget(bestX,bestY,model);sdlPulseFrames=0;sdlPulseActive=true;
+        sdlPulseBefore=start;sdlPulseCommand=pluckInputTarget(bestX,bestY,model);sdlPulseFrames=0;sdlPulseActive=true;sdlPulseYawStart=n->mSRT.r.y;
         acquisitionInput(0,bestX,bestY);
         std::printf("P2_PURPLE_PLUCK_PULSE_BEGIN tick=%d raw=%d,%d target=%.6f,%.6f predicted_landing=%.6f,%.6f dt=%.9f tau=%.6f "
             "dead_zone=%d sampled=%d,%d camera_axis=%.9g,%.9g bin_degrees=%.9g native_fix_position=1 actor_writes=0\n",
@@ -1376,8 +1389,10 @@ class PurpleCombatApp : public PlugPikiApp {
                     // Replan ONCE from the observed rest point; the nearby-node
                     // exclusion prevents endlessly selecting that same corner.
                     if(!planPluckRoute(n,head,violet,pluckRange)) {sdlProbePose(n,violet,pluckTau);return false;}
-                    require(!pluckRoute.empty() && sdlBeginPulse(n,head,violet,pluckRoute[0],pluckTau,pluckDt,pluckRange),
-                        "no eligible quantized pulse after stopped route replan");
+                    require(!pluckRoute.empty(),"stopped route replan has no waypoints");
+                    if(!sdlBeginPulse(n,head,violet,pluckRoute[0],pluckTau,pluckDt,pluckRange)) {
+                        sdlProbePose(n,violet,pluckTau);return false;
+                    }
                 }
                 return false;
             }
