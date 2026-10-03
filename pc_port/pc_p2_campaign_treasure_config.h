@@ -3,6 +3,7 @@
 #include "netplay/pc_netplay_sha256.h"
 #include <fstream>
 #include <map>
+#include <cstdlib>
 namespace p2treasureplacements {
 constexpr std::size_t MaxBytes = 65536;
 struct Row { int stage=-1; std::uint32_t cargo=0, receiver=0; std::string id, modelHash, generatorHash; };
@@ -51,5 +52,23 @@ inline bool parse(const std::string& bytes,const p2treasure::Catalog& catalog,Co
 }
 inline bool read(const p2treasure::Catalog& catalog,Config& out) {
     std::string bytes;return bounded("p2-treasure-placements.txt",MaxBytes,bytes)&&parse(bytes,catalog,out);
+}
+// Bootstrap/card selection calls this before binding state. All staged physical
+// inputs are verified, not just the mutable descriptor. Publication is atomic.
+inline bool load_verified(p2treasure::Catalog& catalog,Config& config) {
+    p2treasure::Catalog nextCatalog;Config next;
+    const char* path=std::getenv("PIKMIN_P2_TREASURE_CATALOG");
+    if(!nextCatalog.load_retail(path&&path[0]?path:"p2-treasure-catalog.txt")||!read(nextCatalog,next))return false;
+    std::string bytes;
+    if(!bounded("assets/dataDir/courses/pikmin2treasures/pod.mod",32u*1024u*1024u,bytes)||hash(bytes)!=next.podHash)return false;
+    const char* folders[]={"practice","stage1","stage2","stage3","last"};
+    std::set<int> verifiedStages;
+    for(const auto& row:next.rows) {
+        if(!bounded("assets/dataDir/courses/pikmin2treasures/"+row.id+".mod",32u*1024u*1024u,bytes)||hash(bytes)!=row.modelHash)return false;
+        if(verifiedStages.insert(row.stage).second) {
+            if(!bounded(std::string("assets/dataDir/stages/")+folders[row.stage]+"/default.gen",4u*1024u*1024u,bytes)||hash(bytes)!=row.generatorHash)return false;
+        }
+    }
+    catalog=std::move(nextCatalog);config=std::move(next);return true;
 }
 }
