@@ -559,9 +559,18 @@ class PurpleKochappyApp:public PlugPikiApp {
    require(p->getCurrState()&&p->getState()==PIKISTATE_Normal&&p->mMode==PikiMode::FormationMode
     &&p->mNavi==n&&!p->isStickTo()&&!pc_p2_is_purple(p)&&!p->mP2White&&p->mColor==Red,
     "catchup original owned Normal Formation roster lost");
-   require(rvfinite({p->mSRT.t.x,p->mSRT.t.y,p->mSRT.t.z})&&p->mInWaterTimer==0
-    &&p->mGroundTriangle&&std::isfinite(p->mGroundTriangle->mTriangle.mNormal.y)
-    &&p->mGroundTriangle->mTriangle.mNormal.y>.5f,"catchup original body contact/hazard changed");
+   const bool finiteBody=rvfinite({p->mSRT.t.x,p->mSRT.t.y,p->mSRT.t.z});
+   const bool dryBody=p->mInWaterTimer==0,groundBody=p->mGroundTriangle!=nullptr;
+   const float normalY=groundBody?p->mGroundTriangle->mTriangle.mNormal.y:0.f;
+   const bool finiteNormal=groundBody&&std::isfinite(normalY),safeSlope=finiteNormal&&normalY>.5f;
+   const bool safeContact=finiteBody&&dryBody&&groundBody&&finiteNormal&&safeSlope;
+   if(!safeContact){
+    std::printf("P2_PURPLE_KOCHAPPY_CONTACT_REFUSAL age=%d frame=%u slot=%d generator=%u xyz=%.4f,%.4f,%.4f water_timer=%d ground=%d normal_y=%.6f finite_body=%d dry=%d finite_normal=%d slope_gt_half=%d read_only=1 actor_writes=0\n",
+     age,unsigned(gsys->mEngineFrames),slot,unsigned(p->mGenerator->_70),p->mSRT.t.x,p->mSRT.t.y,p->mSRT.t.z,
+     int(p->mInWaterTimer),int(groundBody),normalY,int(finiteBody),int(dryBody),int(finiteNormal),int(safeSlope));
+    std::fflush(nullptr);
+   }
+   require(safeContact,"catchup original body contact/hazard changed");
    const float d=distance(n->mSRT.t,p->mSRT.t);require(std::isfinite(d),"catchup finite roster lag");
    require(d<512.f,"catchup original body outside verified route clearance");
    lag=std::max(lag,d);
