@@ -86,14 +86,20 @@ Teki* find(unsigned token){
         if(t&&t->mGenerator&&t->mGenerator->_70==token)return t;}
     return nullptr;
 }
-Vector3f pressAim(Teki* enemy,Teki* partner){
+Vector3f pressAim(Navi* n,Teki* enemy,Teki* partner){
     Vector3f goal=enemy->mSRT.t;
     if(!std::strcmp(mode,"red-electric")){
-        Vector3f away=goal-partner->mSRT.t;away.y=0;away.normalise();
-        // The outside-face aim missed the fitted receiver before grounding.
-        // Move the ordinary cursor slightly through the endpoint so the
-        // descending body reaches physical contact earlier in the throw.
-        goal=goal-away*6.f;
+        // Aim at the actual fitted rear body, clear of the arc endpoint.
+        // The Flying model centre trails its root by about six units; ordinary
+        // cursor aim passes that centre so the body, not just the root, lands.
+        CollPart* rear=enemy->mCollInfo&&enemy->mCollInfo->hasInfo()
+            ?enemy->mCollInfo->getSphere('bod2'):nullptr;
+        require(rear&&std::isfinite(rear->mCentre.x)&&std::isfinite(rear->mCentre.z),
+                "actual rear collision part for Red aim");
+        goal=rear->mCentre;
+        Vector3f direction=goal-n->mSRT.t;direction.y=0;
+        require(direction.length()>1.f,"distinct Red aim target");
+        direction.normalise();goal=goal+direction*6.f;
     }
     return goal;
 }
@@ -396,12 +402,12 @@ public:
             const bool discharging=!std::strcmp(state,"discharge")||!std::strcmp(state,"childdischarge");
             if(held&&desiredSpecies()==P2SpeciesWhite&&pc_p2_species(held)==P2SpeciesWhite)require(held==acquiredWhite,"held White must be acquired witness");
             if(held&&(pc_p2_species(held)!=desiredSpecies()||(stagedRgb&&held!=stagedRgb))){
-                aHeld=true;point(n,pressAim(enemy,partner),false,KBBTN_A|(age%6==0?KBBTN_DPAD_RIGHT:0));return result;
+                aHeld=true;point(n,pressAim(n,enemy,partner),false,KBBTN_A|(age%6==0?KBBTN_DPAD_RIGHT:0));return result;
             }
             bool pending=false;for(const auto& entry:flight)if(entry.second>=2)pending=true;
             if(!aHeld&&pending){input();return result;}
-            if(!held&&!aHeld){aHeld=true;point(n,pressAim(enemy,partner),false,KBBTN_A);return result;}
-            if(aHeld&&!discharging){point(n,pressAim(enemy,partner),false,KBBTN_A);return result;}
+            if(!held&&!aHeld){aHeld=true;point(n,pressAim(n,enemy,partner),false,KBBTN_A);return result;}
+            if(aHeld&&!discharging){point(n,pressAim(n,enemy,partner),false,KBBTN_A);return result;}
             if(aHeld){
                 input();for(auto& entry:flight)if(entry.second==1){entry.second=2;releasedAt[entry.first]=frame;witness(entry.first,"released");}
                 aHeld=false;return result;
@@ -409,7 +415,7 @@ public:
             if(pending){input();return result;}
         }
         const int cycle=throwTicks++%45;
-        if(cycle<22){aHeld=true;point(n,pressAim(enemy,partner),false,KBBTN_A);}
+        if(cycle<22){aHeld=true;point(n,pressAim(n,enemy,partner),false,KBBTN_A);}
         else {
             input();
             if(aHeld)for(auto& entry:flight)if(entry.second==1){entry.second=2;releasedAt[entry.first]=frame;witness(entry.first,"released");}
