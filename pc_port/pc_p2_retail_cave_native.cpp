@@ -164,6 +164,10 @@ FloorPhase NativeFloor::phase()const noexcept{
  if(m->prepared||m->scenePreparationOwned)return FloorPhase::Preparing;
  return FloorPhase::Empty;
 }
+bool NativeFloor::ownsResources(const SceneIdentity& scene)const noexcept{
+ return m->context.scene==scene&&(m->prepared||m->scenePreparationOwned||m->begun||m->committed||
+  m->cleaning||m->releasing||!m->actors.empty()||!m->sources.empty());
+}
 bool NativeFloor::bindingFacts(Snapshot& out,std::uint64_t& epoch,FloorPhase& outPhase,std::string& error)const{
  const auto currentPhase=phase();
  if((currentPhase!=FloorPhase::Installing&&currentPhase!=FloorPhase::Committed)||!m->prepared||!m->begun||
@@ -292,4 +296,8 @@ bool NativeFloor::release(std::string& error){
 bool pc_p2_retail_cave_native_retired(Creature* actor,std::string& error){
  for(auto* owner:p2retail::owners())if(!owner->retired(actor,error))return false;
  error.clear();return true;
+}
+bool pc_p2_retail_cave_native_scene_owned(const p2retail::SceneIdentity& scene)noexcept{
+ for(auto* owner:p2retail::owners())if(owner->ownsResources(scene))return true;
+ return false;
 }

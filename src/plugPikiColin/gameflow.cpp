@@ -2,6 +2,9 @@
 #include <cstdlib>
 #include <cstring>
 #include "pc_randomizer.h"
+#if defined(PIKI_PC_PORT)
+#include "pc_p2_retail_scene.h"
+#endif
 #include "gameflow.h"
 #include "pc_bbft.h"
 
@@ -739,6 +742,15 @@ void GameFlow::softReset()
 		gsys->getHeap(gsys->getHeapNum())->setAllocType(AYU_STACK_GROW_UP);
 	}
 
+#if defined(PIKI_PC_PORT)
+    {
+        std::string error;
+        if (!pc_p2_retail_scene_release_map(error)) {
+            std::fprintf(stderr,"P2_RETAIL_MAP_HEAP_RESET_REFUSED %s\n",error.c_str());
+            std::abort();
+        }
+    }
+#endif
 	gsys->resetHeap(SYSHEAP_App, AYU_STACK_GROW_UP);
 
 	gsys->getHeap(SYSHEAP_App)->setAllocType(AYU_STACK_GROW_UP);

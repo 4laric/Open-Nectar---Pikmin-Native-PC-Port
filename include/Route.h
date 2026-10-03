@@ -248,6 +248,8 @@ public:
 	WayPoint* pickRouteStart(immut Vector3f& pos, WayPoint* a, WayPoint* b, int destWPIdx, bool avoidWater);
 #endif
 	void construct(MapMgr* map);
+	// Actual selected-scene owner calls after all route consumers retire.
+	void disposeOwned();
 	void initLinks();
 	void refresh(Graphics& gfx);
 
@@ -333,6 +335,7 @@ public:
 	};
 
 	PathFinder(RouteMgr::Group& group);
+	void disposeOwned(); // Clients' buffers are borrowed and are not freed.
 
 	u32 findASync(Buffer* buf, int startWPIdx, int destWPIdx, bool includeBlockedPaths);
 	int checkASync(u32 handle);

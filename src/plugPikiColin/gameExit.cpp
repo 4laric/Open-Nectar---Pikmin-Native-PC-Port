@@ -4,6 +4,11 @@
 #include "FlowController.h"
 #include "gameflow.h"
 #include "system.h"
+#if defined(PIKI_PC_PORT)
+#include "pc_p2_retail_scene.h"
+#include <cstdio>
+#include <cstdlib>
+#endif
 
 /**
  * @note UNUSED Size: 00009C
@@ -20,6 +25,13 @@ DEFINE_PRINT("GameExit");
  */
 GameExitSection::GameExitSection()
 {
+#if defined(PIKI_PC_PORT)
+    std::string error;
+    if (!pc_p2_retail_scene_release_map(error)) {
+        std::fprintf(stderr,"P2_RETAIL_MAP_GAME_EXIT_REFUSED %s\n",error.c_str());
+        std::abort();
+    }
+#endif
 	gsys->resetHeap(SYSHEAP_App, AYU_STACK_GROW_DOWN);
 	gsys->mCurrMemInfo = nullptr;
 	PRINT("clearing aram directory!\n");
