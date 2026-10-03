@@ -67,7 +67,7 @@ target_include_directories(p2_original_honey_identity_policy PRIVATE "${SENTINEL
 target_compile_options(p2_original_honey_identity_policy PRIVATE -Wall -Wextra -Werror -UNDEBUG)
 add_test(NAME original_honey_identity_policy COMMAND p2_original_honey_identity_policy)
 
-foreach(control p2_original_piki_origin_test p2_original_honey_save_policy
+foreach(control pc_p2_original_foliage_test p2_original_piki_origin_test p2_original_honey_save_policy
  p2_original_contents_save_policy p2_original_resource_state_policy
  p2_original_resource_save_policy p2_original_egg_contents_policy)
  set_target_properties(${control} PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
