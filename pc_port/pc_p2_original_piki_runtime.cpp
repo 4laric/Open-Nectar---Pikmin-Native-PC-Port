@@ -153,7 +153,7 @@ static bool initializeImpl(Piki* p,std::string& e){
  Entry x;x.handle={p,b.nativeLifetime};x.scene=services->scene().incarnation();
  x.pikiBytes=services->pikiParameterBytes();x.naviBytes=services->naviParameterBytes();
  float g=0;if(!services->gravity(g,e)||!parseParameters(x.pikiBytes,x.naviBytes,g,x.params,e))return false;
- for(auto m:{Motion::Wait,Motion::Walk,Motion::Run2,Motion::Hang,Motion::RollJump,Motion::Notice})if(!services->supports(x.handle,m,e))return false;
+ for(auto m:{Motion::Wait,Motion::Walk,Motion::Run2,Motion::Hang,Motion::RollJump,Motion::Notice,Motion::Yawn,Motion::Chat,Motion::Search,Motion::Irritated,Motion::Sit,Motion::Sleep})if(!services->supports(x.handle,m,e))return false;
  // Allocate/register a pending owner BEFORE any animation/effect callback.
  // Failure leaves an owned cleanup record; an uncommitted entry is never a
  // callable runtime handle. emplace cannot fail after body fields were written.
@@ -216,7 +216,7 @@ static bool animateImpl(Handle h,float dt,std::string& e){auto* x=current(h,e);r
 bool animationKey(Handle h,unsigned type,std::string& e){
  ReadOperation op;auto* x=current(h,e);if(!x||!op.complete(true,e))return false;
  if(x->runtime.state==State::LookAt&&type==1000)x->runtime.lookSubState=2;
- return true;
+ return brainAnimationKey(h,x->runtime,*services,type,e)&&op.complete(true,e);
 }
 static bool moveVelocityImpl(Handle h,float dt,std::string& e){
  auto* x=current(h,e);if(!x||!std::isfinite(dt)||dt<0)return false;
@@ -261,6 +261,10 @@ static bool whistleImpl(Handle h,Navi* n,std::string& e){
  float random=0;if(!services->random(random,e)||!std::isfinite(random)||random<0||random>1)return false;
  x->runtime.state=State::LookAt;x->runtime.lookSubState=0;x->runtime.lookWaitTime=0.3f*random;
  return services->calledSound(h,e);
+}
+static bool gatherImpl(Handle h,const Vector3f& goal,float radius,std::string& e){
+ auto* x=current(h,e);if(!x||x->runtime.state!=State::Walk)return fail(e,"source Gather requires actual Walk");
+ return brainGather(h,x->runtime,*services,goal,radius,e);
 }
 static bool launchImpl(Handle h,Navi* n,const Vector3f& cursor,std::string& e){
  auto* x=current(h,e);if(!x||!finite(cursor)||h.body->mNavi!=n||x->runtime.brain.action!=Action::Formation
@@ -385,6 +389,7 @@ bool moveVelocity(Handle h,float dt,std::string& e){OwnerOperation op(e);return 
 bool applyGravity(Handle h,float dt,std::string& e){OwnerOperation op(e);return op.admitted()&&op.complete(applyGravityImpl(h,dt,e),e);}
 bool position(Handle h,const Vector3f& v,std::string& e){OwnerOperation op(e);return op.admitted()&&op.complete(positionImpl(h,v,e),e);}
 bool whistle(Handle h,Navi* n,std::string& e){OwnerOperation op(e);return op.admitted()&&op.complete(whistleImpl(h,n,e),e);}
+bool gather(Handle h,const Vector3f& goal,float radius,std::string& e){OwnerOperation op(e);return op.admitted()&&op.complete(gatherImpl(h,goal,radius,e),e);}
 bool launch(Handle h,Navi* n,const Vector3f& v,std::string& e){OwnerOperation op(e);return op.admitted()&&op.complete(launchImpl(h,n,v,e),e);}
 bool bounce(Handle h,std::string& e){OwnerOperation op(e);return op.admitted()&&op.complete(bounceImpl(h,e),e);}
 bool collision(Handle h,const CollEvent& event,std::string& e){OwnerOperation op(e);return op.admitted()&&op.complete(collisionImpl(h,event,e),e);}

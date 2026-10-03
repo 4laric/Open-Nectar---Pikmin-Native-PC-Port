@@ -10,7 +10,7 @@ class CollEvent;
 namespace p2original { namespace captain { class LoadedScene; } }
 namespace p2original { namespace piki {
 enum class State { Walk, GoHang, Hanged, Flying, LookAt };
-enum class Motion { Wait, Walk, Run2, Hang, RollJump, Notice };
+enum class Motion { Wait, Walk, Run2, Hang, RollJump, Notice, Step, Escape, Yawn, Chat, Search, Irritated, Sit, Sleep };
 enum class Action { Free, Formation, None };
 enum class FreeSearch { Execute, Probe };
 struct Handle { Piki* body=nullptr; std::uint64_t lifetime=0; };
@@ -67,13 +67,26 @@ public:
  virtual bool slotPosition(Handle,Navi*,int,Vector3f&,std::string&)const=0;
  virtual bool formed(Handle,Navi*,std::string&)=0;
  virtual bool sortSlot(Handle,Navi*,int,unsigned happa,std::string&)=0;
- // Actual source invokeAIFree/Bore/Gather remain distinct unfinished actions.
- // An absent action is an error, not "no nearby task" or a P1 delegate.
- virtual bool invokeFree(Handle,FreeSearch,bool& available,std::string&)=0;
- virtual bool startBore(Handle,std::string&)=0;
- virtual bool execBore(Handle,int& result,std::string&)=0;
- virtual bool finishBore(Handle,std::string&)=0;
+ // Actual source entity census/action admission. Absence is an error, never
+ // fabricated "no nearby task"; source actor producers own this query.
+ // This query is read-only: Execute applies the real update-context gate and
+ // checks a target; Probe tests action!=ACT_NULL. Brain refuses unsupported
+ // task actions before any foreign Brain/body mutation.
+ virtual bool freeTaskAvailable(Handle,FreeSearch,bool& available,std::string&)const=0;
+ // Actual source animator primitives; Brain owns Bore/Gather actions.
+ virtual bool animationStatus(Handle,Motion&,float& speed,bool& completed,std::string&)const=0;
+ virtual bool animationSpeed(Handle,float,std::string&)=0;
+ virtual bool finishMotion(Handle,std::string&)=0;
+ virtual bool loopStart(Handle,std::string&)=0;
+ // Producer applies actual PSM scene akubiOK and sound-object voice routing.
+ virtual bool boreVoice(Handle,bool sleep,std::string&)=0;
  virtual bool random(float&,std::string&)=0;
+};
+struct BoreState {
+ std::uint8_t behavior=1,restState=0;
+ Motion oneshot=Motion::Yawn;
+ float oneshotTimer=0,forceTimer=0,restTimer=0;
+ bool finished=false,forced=false,animFinished=false,idle=false,interruptible=false;
 };
 struct BrainState {
  Action action=Action::Free;
@@ -83,6 +96,8 @@ struct BrainState {
  std::uint16_t distanceType=5,oldDistanceType=5;
  float lostTimer=0,tripDistance=0;
  bool releasedSlot=false;
+ Vector3f gatherGoal;float gatherRadius=0,gatherTimer=0;
+ BoreState bore;
  // A newly acquired slot remains owned through a failed old-action cleanup.
  Navi* pendingNavi=nullptr;int pendingSlot=-1;
 };
@@ -113,6 +128,8 @@ bool applyGravity(Handle,float delta,std::string&);
 // Called from real native floor bounce, not a scripted landing assertion.
 bool bounce(Handle,std::string&);
 bool whistle(Handle,Navi*,std::string&);
+// Actual ActFreeArg/ActGather dismissal after genuine PartySource selection.
+bool gather(Handle,const Vector3f& goal,float radius,std::string&);
 bool launch(Handle,Navi*,const Vector3f& cursor,std::string&);
 bool position(Handle,const Vector3f&,std::string&);
 bool ignoreAtari(Handle,const Creature*,bool&);

@@ -4,9 +4,10 @@
 namespace p2original { namespace piki {
 namespace {
 bool fail(std::string& e,const char* why){e=why;return false;}
-float speed(const Piki& body,const Parameters& p,unsigned species){
+float speed(const Piki& body,const Parameters& p,unsigned species,float multiplier=1){
  float base=body.mHappa==2?p.flowerRun:body.mHappa==1?p.budRun:p.run;
  // Source getSpeed(1), with source scaleValue(1) unchanged, no AP multiplier.
+ base=multiplier*(base-p.walk)+p.walk;
  if(species==4)base*=p.whiteMultiplier;else if(species==3)base*=p.purpleMultiplier;
  return base;
 }
@@ -16,6 +17,87 @@ void face(Piki& p,const Vector3f& navi){
  while(angle<-3.14159265358979323846f)angle+=6.28318530717958647692f;
  p.mFaceDirection+=0.3f*angle;
 }
+bool random(Services& s,float& value,std::string& e){
+ return s.random(value,e)&&std::isfinite(value)&&value>=0&&value<1;
+}
+bool sourceSpecies(Handle h,unsigned& species,std::string& e){
+ PcP2SourceBody source;if(pc_p2_source_body_query(h.body,source)!=PcP2SourceBodyKind::GenPiki)return fail(e,"source action needs actual GenPiki body");
+ OriginalPikiBodyHandle current;if(!pc_p2_original_piki_body_handle(h.body,current)||current.nativeLifetime!=h.lifetime)return fail(e,"source action lifetime changed");
+ species=source.state.species;return true;
+}
+bool sitDown(Handle h,BoreState& b,Services& s,std::string& e){
+ if(b.restState==0){b.restState=1;return s.motion(h,Motion::Sit,e);}
+ if(b.restState==1){b.restState=3;return s.motion(h,Motion::Sleep,e);}
+ return true;
+}
+bool standUp(Handle h,BoreState& b,Services& s,std::string& e){
+ if(b.restState>=1){b.idle=true;return s.finishMotion(h,e);}return true;
+}
+bool startBoreAction(Handle h,BoreState& b,Services& s,std::string& e){
+ float v=0;
+ if(b.oneshotTimer<2)b.behavior=1;
+ b.forced=false;b.animFinished=false;b.idle=false;b.interruptible=false;
+ if(b.behavior==0){
+  b.restState=0;if(!sitDown(h,b,s,e)||!random(s,v,e))return false;
+  b.restTimer=v*4+5;if(!s.animationSpeed(h,30,e))return false;
+ }else{
+  if(!random(s,v,e))return false;
+  // Actual KandoLib cumulative weights; the final choice owns remainder.
+  b.oneshot=v<.05f?Motion::Yawn:v<.4f?Motion::Chat:v<.8f?Motion::Search:Motion::Irritated;
+  if(!s.motion(h,b.oneshot,e))return false;
+ }
+ if(!random(s,v,e))return false;
+ b.forceTimer=v*6+6;return true;
+}
+bool startBore(Handle h,BoreState& b,Services& s,std::string& e){
+ float v=0;if(!random(s,v,e))return false;b=BoreState{};b.behavior=static_cast<unsigned>(v*2);
+ return startBoreAction(h,b,s,e);
+}
+bool finishBoreAction(Handle h,BoreState& b,Services& s,std::string& e){
+ b.forced=true;if(!s.animationSpeed(h,60,e))return false;
+ return b.behavior==0||s.finishMotion(h,e);
+}
+bool execRest(Handle h,BoreState& b,Services& s,float dt,int& result,std::string& e){
+ result=1;if(b.interruptible){result=0;return true;}
+ h.body->mTargetVelocity.set(0,0,0);
+ Motion motion;float rate=0;bool completed=false;
+ if(!s.animationStatus(h,motion,rate,completed,e))return false;
+ if(rate==0&&!s.animationSpeed(h,30,e))return false;
+ if(motion!=Motion::Sit&&motion!=Motion::Sleep){result=2;return true;}
+ if(b.forced){
+  if(!b.idle){if(b.restState>=1)return standUp(h,b,s,e);result=0;return true;}
+  if(completed){b.idle=false;if(b.restState==3){b.restState=1;if(!s.motion(h,Motion::Sit,e)||!s.loopStart(h,e))return false;}}
+  return true;
+ }
+ b.restTimer-=dt;
+ if(!b.idle&&b.restTimer<0){
+  float v=0;if(b.restState<=1){if(!random(s,v,e))return false;}
+  if(b.restState<=1&&v>.5f){if(!sitDown(h,b,s,e))return false;}
+  else if(b.restState>=1&&!standUp(h,b,s,e))return false;
+  if(!random(s,v,e))return false;
+  b.restTimer=v*2+3;
+ }
+ return true;
+}
+bool execBore(Handle h,BoreState& b,Services& s,float dt,int& result,std::string& e){
+ if(b.oneshotTimer<2)b.oneshotTimer+=dt;
+ int sub=1;
+ if(b.behavior==0){if(!execRest(h,b,s,dt,sub,e))return false;}
+ else{
+  h.body->mTargetVelocity.set(0,0,0);
+  if(b.forced||b.animFinished)sub=0;
+  else{Motion motion;if(!s.currentMotion(h,motion,e))return false;if(motion!=b.oneshot)sub=2;}
+ }
+ result=1;
+ if(sub==0||sub==2){
+  if(b.finished){result=0;return true;}
+  float v=0;if(!random(s,v,e))return false;b.behavior=static_cast<unsigned>(v*2);
+  return startBoreAction(h,b,s,e);
+ }
+ b.forceTimer-=dt;if(b.forceTimer<=0)return finishBoreAction(h,b,s,e);
+ return true;
+}
+
 }
 bool brainCleanup(Handle h,RuntimeState& r,Services& s,std::string& e){
  if(r.brain.action==Action::None)return true;
@@ -38,6 +120,27 @@ bool brainFree(Handle h,RuntimeState& r,Services& s,std::string& e){
  if(!brainCleanup(h,r,s,e)||!s.motion(h,Motion::Wait,e)||!s.freeEffects(h,true,e))return false;
  r.brain=BrainState{};
  h.body->mNavi=nullptr;h.body->mTargetVelocity.set(0,0,0);
+ return true;
+}
+bool brainGather(Handle h,RuntimeState& r,Services& s,const Vector3f& goal,float radius,std::string& e){
+ if(!std::isfinite(radius)||radius<0||!std::isfinite(goal.x)||!std::isfinite(goal.y)||!std::isfinite(goal.z))return fail(e,"invalid actual source Gather geometry");
+ if(!s.supports(h,Motion::Walk,e)||!brainFree(h,r,s,e))return false;
+ r.brain.freeState=1;r.brain.gatherGoal=goal;r.brain.gatherRadius=radius*.6f;r.brain.gatherTimer=5;
+ return s.motion(h,Motion::Walk,e);
+}
+bool brainAnimationKey(Handle h,RuntimeState& r,Services& s,unsigned key,std::string& e){
+ auto& b=r.brain.bore;
+ if(r.brain.action!=Action::Free||r.brain.freeState!=2)return true;
+ if(b.behavior==1){
+  if(key==1000)b.animFinished=true;
+  if(key==200&&b.oneshot==Motion::Yawn)return s.boreVoice(h,false,e);
+ }else{
+  if(key==200)return s.boreVoice(h,true,e);
+  if(key==1000&&b.idle){
+   if(b.restState==1){b.idle=false;b.restState=0;b.interruptible=true;}
+   else if(b.restState==3){b.idle=false;b.restState=1;if(!s.motion(h,Motion::Sit,e)||!s.loopStart(h,e))return false;}
+  }
+ }
  return true;
 }
 bool brainFormation(Handle h,RuntimeState& r,Services& s,Navi* n,std::string& e){
@@ -63,19 +166,29 @@ bool brainExec(Handle h,RuntimeState& r,Services& s,const Parameters& p,float dt
  auto& b=r.brain;auto* body=h.body;
  if(b.action==Action::None)return fail(e,"source Walk has no current Brain action");
  if(b.action==Action::Free){
+  if(b.freeState==1){
+   Vector3f direction=b.gatherGoal-body->mSRT.t;float distance=direction.normalise();
+   if(!std::isfinite(distance))return fail(e,"nonfinite actual source Gather distance");
+   b.gatherTimer-=dt;
+   if(distance<b.gatherRadius||b.gatherTimer<=0){
+    body->mTargetVelocity.set(0,0,0);float v=0;if(!random(s,v,e))return false;
+    b.freeState=0;b.delayTimer=150+static_cast<unsigned>(30*v);
+   }else{unsigned species=0;if(!sourceSpecies(h,species,e))return false;body->mTargetVelocity=direction*speed(*body,p,species,.6f);}
+   return true;
+  }
   if(b.freeState==2){
-   int result=1;if(!s.execBore(h,result,e))return false;
-   bool available=false;if(!s.invokeFree(h,FreeSearch::Probe,available,e))return false;
-   if(available&&!s.finishBore(h,e))return false;
+   int result=1;if(!execBore(h,b.bore,s,dt,result,e))return false;
+   bool available=false;if(!s.freeTaskAvailable(h,FreeSearch::Probe,available,e))return false;
+   if(available){if(!finishBoreAction(h,b.bore,s,e))return false;b.bore.finished=true;}
    if(result==0||result==2){b.freeState=0;b.delayTimer=90;}
    return true;
   }
   body->mTargetVelocity.set(0,0,0);
-  bool started=false;if(!s.invokeFree(h,FreeSearch::Execute,started,e))return false;
+  bool started=false;if(!s.freeTaskAvailable(h,FreeSearch::Execute,started,e))return false;
   if(started)return fail(e,"source Free task-action transition not ported in this Brain");
   if(b.delayTimer){--b.delayTimer;return true;}
   float random=0;if(!s.random(random,e)||!std::isfinite(random)||random<0||random>1)return false;
-  if(random>0.5f){if(!s.startBore(h,e))return false;b.freeState=2;}
+  if(random>0.5f){b.freeState=2;if(!startBore(h,b.bore,s,e))return false;}
   return true;
  }
  if(b.touchCooldown)--b.touchCooldown;
