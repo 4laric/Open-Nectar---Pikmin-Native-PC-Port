@@ -1,9 +1,11 @@
 #include "pc_p2_retail_rooms.h"
 #include "pc_p2_retail_height.h"
 #include "pc_p2_retail_start.h"
+#include "pc_p2_retail_route_state.h"
 #include <cassert>
 #include <fstream>
 #include <iostream>
+#include <algorithm>
 static std::string file(const std::string& path){std::ifstream f(path,std::ios::binary);assert(f);return {std::istreambuf_iterator<char>(f),{}};}
 static std::string hash(const std::string& bytes){unsigned char d[32];pc_netplay_sha::sha256(bytes.data(),bytes.size(),d);return pc_netplay_sha::hex(d,32);}
 int main(int argc,char** argv){
@@ -103,6 +105,34 @@ int main(int argc,char** argv){
    input.selection.version=4;input.bytes[9]=file(std::string(argv[5])+"/floor"+std::to_string(floor)+"/p2-retail-source-routes.json");input.selection.sha256[9]=hash(input.bytes[9]);
    SourceRouteInputs routes;assert(parseSourceRouteInputs(input,census,water,parameters,routes,error));
    assert(routes.points.size()==(floor==1?6u:23u)&&routes.units.size()==census.units.size());
+   struct InputMap final:SourceRouteMap {
+    SourceHeightInputs& input;InputOwner& owner;
+    InputMap(SourceHeightInputs& actual,InputOwner& actualOwner):input(actual),owner(actualOwner){}
+    bool current(std::string& e)override{return owner.current(input.rooms,e);}
+    bool minY(p2originalnumber::roomHeight::Vec3 point,float& out,std::string& e)override{return p2originalnumber::roomHeight::minY(input.rooms,owner,point,out,e);}
+   } inputMap(*heightInputs,heightOwner);
+   heightOwner.available=true;std::unique_ptr<SourceRouteState> graph;
+   assert(adoptSourceRouteState(census,geometry,routes,inputMap,graph,error)&&graph->points.size()==routes.points.size());
+   for(unsigned index=0;index<graph->points.size();++index){const auto& point=graph->points[index];
+    assert(point.flags==0x80&&point.from==routes.points[index].fromLinks&&point.radius==routes.points[index].radius&&point.rooms==routes.points[index].rooms);
+    assert(point.toCount<=8);if(floor==1)assert(point.toCount==0);
+    for(unsigned slot=point.toCount;slot<8;++slot)assert(point.to[slot]==-1);
+    for(unsigned slot=0;slot<point.toCount;++slot){const auto origin=unsigned(point.to[slot]);assert(origin<graph->points.size());
+     const auto& from=graph->points[origin];assert(std::find(from.from.begin(),from.from.begin()+from.fromCount,int(index))!=from.from.begin()+from.fromCount);
+     assert(std::find(point.from.begin(),point.from.begin()+point.fromCount,int(origin))==point.from.begin()+point.fromCount);}
+   }
+   for(bool visited:graph->visited)assert(!visited);
+   const unsigned visit=floor==1?1:0;for(auto& point:graph->points)point.flags=static_cast<unsigned char>(point.flags|1);
+   assert(openSourceRoom(*graph,visit,error)&&graph->visited[visit]);
+   for(const auto& point:graph->points){const bool belongs=std::find(point.rooms.begin(),point.rooms.end(),visit)!=point.rooms.end();
+    assert(point.flags==(belongs?1:0x81));}
+   assert(openSourceRoom(*graph,visit,error));
+   assert(!openSourceRoom(*graph,unsigned(graph->visited.size()),error));
+   auto* retainedGraph=graph.get();heightOwner.available=false;
+   assert(!adoptSourceRouteState(census,geometry,routes,inputMap,graph,error)&&graph.get()==retainedGraph);
+   heightOwner.available=true;
+   unsigned inverseCount=0;for(const auto& point:graph->points)inverseCount+=point.toCount;
+   std::cout<<"floor="<<floor<<" grounded source graph PASS points="<<graph->points.size()<<" inverse_links="<<inverseCount<<" room flags preserve Closed; pure input owner, no actual room-phase/runtime grant\n";
    if(floor==1){assert(routes.roomIndices==std::vector<std::vector<unsigned>>({{0,1,2},{0,3},{3,4,5}}));
     assert(routes.points[0].radius==85&&routes.points[3].radius==60&&routes.points[0].rooms==std::vector<unsigned>({0,1}));
     assert(routes.points[3].rooms==std::vector<unsigned>({1,2}));}
@@ -118,7 +148,7 @@ int main(int argc,char** argv){
    for(unsigned index=0;index<9;++index){bad=input;bad.bytes[index]+="tamper";routeRefuse(bad);}
    for(const char* label:{"from_links","radius_f32_bits","room_memberships","bytes_base64","ground_heights_provided","inverse_links_provided"}){
     bad=input;const auto at=bad.bytes[9].find(label);assert(at!=std::string::npos);bad.bytes[9][at]='X';bad.selection.sha256[9]=hash(bad.bytes[9]);routeRefuse(bad);}
-   std::cout<<"floor="<<floor<<" original routes PASS points="<<routes.points.size()<<" full8slots refusals="<<routeNegatives<<"; ground/inverse/visit unavailable\n";
+   std::cout<<"floor="<<floor<<" original routes PASS points="<<routes.points.size()<<" full8slots refusals="<<routeNegatives<<"; no native route/visit runtime grant\n";
   }
  }
 }

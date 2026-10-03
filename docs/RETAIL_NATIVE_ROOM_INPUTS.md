@@ -132,3 +132,25 @@ teardown; original storage survives until checked map release. The real Stage
 query path is implemented and compiles, but has not been executed in a full
 native Stage fixture. Both authentic inputs prove all20 authored positions with
 a pure fixture input owner, not a fake SceneContext/runtime admission.
+
+Version4 now also builds the actual Scene-owned source route state during map
+installation. First-created local points use their actual source room matrix;
+door Y is0 and other points query the owned original height provider. Radius
+and memberships remain first-created/source ordered. makeInvertLinks performs
+real source linkable height samples before reverse-From lookup, retains full
+eight slots/counts and refuses To overflow. Fresh flags0 are then setCloseAll
+to Unvisited0x80; fresh room visited flags are false. Failed construction
+publishes no graph and keeps public height/support queries unregistered.
+
+The current const source graph getter requires genuine context/serial/revision,
+owned selected route inputs and registered height/map state. It is distinct
+from native routes.ini/P1 openness. The Scene room writer accepts the actual
+Navi/room only during Root's private NativeTrace room phase, authenticated by
+strong pc_p2_original_captain_room_visit_current; no accepting stub exists.
+It rejects reentry with a private scoped mutation guard, stages openRoom flags,
+revalidates Root/Scene before publishing, preserves original graph addresses,
+clears only0x80 for matching RoomList memberships and then marks that room
+visited. Closed0x01 is retained. This happens in the caller's source terrain-
+then-room-before-bounce/wall/Plat phase. Genuine Root phase composition and
+actual runtime acceptance remain open; pure bit/graph controls alone grant
+neither a native room callback nor platforms/SAVE.
