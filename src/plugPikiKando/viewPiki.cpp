@@ -810,7 +810,7 @@ void ViewPiki::refresh(Graphics& gfx)
 
 	mCollInfo->updateInfo(gfx, false);
 #if defined(PIKI_PC_PORT)
-    if (!pc_netplay_present_two_pass_active() || pc_render_is_authoritative())
+    if (pc_render_is_authoritative())
         pc_p2_elecbug_piki_geometry(this);
 #endif
 	demoDraw(gfx, nullptr);

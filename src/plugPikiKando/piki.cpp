@@ -1,4 +1,5 @@
 #if defined(PIKI_PC_PORT)
+#include "pc_p2_elecbug.h"
 #include "pc_p2_captive_navi_policy.h"
 #include "pc_p2_original_piki_init.h"
 #include "pc_p2_original_piki_origin.h"
@@ -1936,7 +1937,6 @@ void Piki::stickToCallback(Creature*)
 void Piki::bounceCallback()
 {
 #if defined(PIKI_PC_PORT)
-#include "pc_p2_elecbug.h"
     const bool wasFlying = getState() == PIKISTATE_Flying;
 #endif
 	MsgBounce msg(Vector3f(0.0f, 1.0f, 0.0f));
