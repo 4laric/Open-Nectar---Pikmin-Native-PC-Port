@@ -91,4 +91,8 @@ const std::string& pc_p2_original_piki_catalog_fingerprint() noexcept;
 // A fresh process resolves saved durable ancestry to its new native handles.
 struct OriginalPikiBodyHandle {OriginalPikiBody body;std::uint64_t nativeLifetime=0;};
 bool pc_p2_original_piki_body_handle(const Piki*,OriginalPikiBodyHandle&);
+// Exact committed canonical association, without copying source strings or
+// invoking a consumer. Used immediately after birth to retain cleanup identity
+// before any fallible ancestry snapshot. Failed output remains unchanged.
+bool pc_p2_original_piki_body_lifetime(const Piki*,std::uint64_t&)noexcept;
 bool pc_p2_original_piki_body_current(const Piki*,std::uint64_t)noexcept;

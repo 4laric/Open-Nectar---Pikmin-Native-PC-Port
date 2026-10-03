@@ -163,3 +163,8 @@ bool pc_p2_original_piki_body_handle(const Piki* p,OriginalPikiBodyHandle& out){
 bool pc_p2_original_piki_body_current(const Piki* p,std::uint64_t lifetime)noexcept{
  auto i=bodies.find(p);return lifetime&&i!=bodies.end()&&i->second.hasState&&i->second.committed&&i->second.nativeLifetime==lifetime;
 }
+bool pc_p2_original_piki_body_lifetime(const Piki* p,std::uint64_t& out)noexcept{
+ auto i=bodies.find(p);
+ if(i==bodies.end()||!i->second.hasState||!i->second.committed||!i->second.nativeLifetime)return false;
+ out=i->second.nativeLifetime;return true;
+}
