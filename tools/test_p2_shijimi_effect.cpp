@@ -20,7 +20,10 @@ int main(int argc,char** argv){try{
  CHECK(fx.tick(1.f/30,visible,e));CHECK(fx.emitters().at(1).births==2);
  CHECK(fx.emitters().at(1).particles[0].position.x>999); // next birth does chase
  CHECK(!fx.load(argv[1],e));CHECK(!fx.tick(std::numeric_limits<float>::quiet_NaN(),visible,e));
- CHECK(fx.fade(1,e)&&fx.fade(2,e)&&fx.fade(3,e));CHECK(fx.tick(2,visible,e));
+ CHECK(fx.fade(1,e)&&fx.fade(2,e)&&fx.fade(3,e));
+ CHECK(!fx.create(1,{0,0,0},Color::Yellow,7,e));
+ CHECK(fx.create(5,{40,50,60},Color::Yellow,11,e)&&fx.tick(1.f/30,visible,e));
+ CHECK(fx.emitters().at(5).births==1&&fx.fade(5,e));CHECK(fx.tick(2,visible,e));
  CHECK(fx.particles()==0&&fx.emitters().empty());CHECK(fx.load(argv[1],e));
  CHECK(fx.create(4,{0,0,0},Color::Yellow,10,e));
  auto hidden=[](std::uint64_t,p2original::Position,float r){CHECK(r==30);return true;};
@@ -31,4 +34,3 @@ int main(int argc,char** argv){try{
  std::cout<<"PASS genuine21/22/23 colors first/fractional emission 30Hz birth-only chase gravity fade/drain refusal; gameplay=0\n";
  return 0;
  }catch(const std::exception& ex){std::cerr<<ex.what()<<'\n';return 1;}}
-

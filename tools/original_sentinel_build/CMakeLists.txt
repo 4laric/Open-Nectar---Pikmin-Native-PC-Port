@@ -10,6 +10,8 @@ add_subdirectory("${SENTINEL_SOURCE}/tools/original_resource_build" resources)
 set_target_properties(pc_p2_original_shijimi_group_test PROPERTIES
  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 target_sources(pikmin_pc PRIVATE
+ "${SENTINEL_SOURCE}/pc_port/pc_p2_shijimi_effect.cpp"
+ "${SENTINEL_SOURCE}/pc_port/pc_p2_shijimi_effect_native.cpp"
  "${SENTINEL_SOURCE}/pc_port/pc_p2_original_shijimi_native.cpp"
  "${SENTINEL_SOURCE}/pc_port/pc_p2_original_shijimi_bank.cpp"
  "${SENTINEL_SOURCE}/pc_port/pc_p2_original_shijimi_state.cpp"

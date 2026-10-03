@@ -134,5 +134,10 @@ follow the body for later births; existing particles remain independent.
 Actual scene clipping is injected at the source30 radius after emission, so
 previous clipping suppresses births and current clipping suppresses drawing.
 A restart after fade requires a fresh emitter handle while old particles drain.
-This helper does not supply the actual GX renderer, Hit24 or physical scene
-ownership; its genuine-resource controls are source evidence only.
+The private composition additionally links `NativeDownEffects`, a distinct GX
+rotating-billboard renderer with the genuine64x64 I8 texture, source additive
+SRCALPHA/ONE, alpha>10, LEQUAL/no depth writes, source color/global color mixing
+and source30 clipping. The ordinary Teki manager advances it once per step,
+including detached drain. Native syntax passes; actual linked rendering and
+scene ownership remain unqualified. Hit24 and the physical provider remain
+open. The genuine-resource controls are source evidence only.
