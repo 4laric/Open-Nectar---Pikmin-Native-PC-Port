@@ -251,6 +251,9 @@ class CaveMixedRouteApp final : public PlugPikiApp {
             Piki* actual=grab->mHeldThrowPiki?grab->mHeldThrowPiki:grab->mPendingThrowPiki;
             if(actual)require(actual->isAlive()&&pc_p2_species(actual)==species,"wrong pending electric throw species");}
         if(!throwTick){
+            // Native Idle consumes A to finish its animation, then returns to
+            // Walk. Wake through input; start the actual throw only in Walk.
+            if(state==NAVISTATE_Idle){aimAt(n,x,z,KeyConfig::_instance->mThrowKey.mBind);return;}
             if(state!=NAVISTATE_Walk){fixturePad(0);return;}
             if(pc_preferred_throw_color_for(n)!=preferred){aimAt(n,x,z,(observed-phaseTick)%30<2?KBBTN_DPAD_RIGHT:0);return;}
             Piki* preview=n->mNextThrowPiki;
