@@ -19,6 +19,7 @@ std::map<const Pellet*,Binding> bindings;
 std::map<unsigned,PelletConfig*> configs;
 std::map<unsigned,ObjCollInfo*> collisionNodes;
 std::unique_ptr<p2original::CorpseLedger> ledger;
+std::unique_ptr<p2original::CorpseDeathPolicy> deathPolicy;
 std::string ledgerCatalog;
 [[noreturn]] void fault(const std::string& e){std::fprintf(stderr,"P2_ORIGINAL_CORPSE_FAIL %s\n",e.c_str());std::abort();}
 bool fail(std::string& e,const char* s){e=s;return false;}
@@ -52,15 +53,18 @@ bool pc_p2_original_corpse_resources(unsigned source,std::string& e){
  config(*p);e.clear();return true;
 }
 bool pc_p2_original_corpse_leaves(BTeki* actor,bool ordinary){
- unsigned source=0;if(!pc_p2_original_actor_source(actor,source))return ordinary;
+ unsigned source=0,token=0;p2original::InstanceIdentity id;
+ if(!p2original::originalActors().query(actor,source,token,&id))return ordinary;
  if(p2original::corpseDisabled(source))return false;
  std::string e;if(!pc_p2_original_corpse_resources(source,e))fault(e);
- return true;
+ ensureLedger(id.catalog);return deathPolicy->ordinaryAllowed(id);
 }
 PelletConfig* pc_p2_original_corpse_config(PelletView* view,PelletConfig* ordinary){
- unsigned source=0;if(!pc_p2_original_actor_source(creature(view),source))return ordinary;
+ unsigned source=0,token=0;p2original::InstanceIdentity id;
+ if(!p2original::originalActors().query(creature(view),source,token,&id))return ordinary;
  std::string e;if(p2original::corpseDisabled(source))fault("no-corpse original source attempted to birth a corpse");
  if(!pc_p2_original_corpse_resources(source,e))fault(e);
+ ensureLedger(id.catalog);if(!deathPolicy->ordinaryAllowed(id))fault("StoneShatter original activation attempted a normal corpse birth");
  return config(*p2original::corpseProfile(source));
 }
 void pc_p2_original_corpse_born(Pellet* pellet,PelletView* view){
@@ -132,7 +136,8 @@ bool pc_p2_original_corpse_new_session(const std::string& catalog,std::string& e
  if(!bindings.empty())return fail(e,"original corpses still own native bodies");
  p2original::CorpseSnapshot empty;empty.catalog=catalog;std::vector<std::uint8_t> bytes;
  if(!p2original::encodeCorpseSnapshot(empty,bytes,e))return false;
- ledger=std::make_unique<p2original::CorpseLedger>(catalog);ledgerCatalog=catalog;e.clear();return true;
+ ledger=std::make_unique<p2original::CorpseLedger>(catalog);
+ deathPolicy=std::make_unique<p2original::CorpseDeathPolicy>(catalog);ledgerCatalog=catalog;e.clear();return true;
 }
 bool pc_p2_original_corpse_snapshot(p2original::CorpseSnapshot& out,std::string& e){
  if(!ledger)return fail(e,"original corpse ledger has no explicit catalog session");
@@ -143,4 +148,18 @@ bool pc_p2_original_corpse_unload(std::string& e){
  // Remaining configs/descriptors live on SYSHEAP_Sys and contain only literal
  // values. The ledger contains identities/receipts, never App-heap addresses.
  e.clear();return true;
+}
+bool pc_p2_original_corpse_set_death_cause(BTeki* actor,p2original::CorpseDeathCause cause,std::string& e){
+ unsigned source=0,token=0;p2original::InstanceIdentity id;
+ if(!p2original::originalActors().query(actor,source,token,&id))return fail(e,"death cause requires an actual original activation");
+ if(cause!=p2original::CorpseDeathCause::StoneShatter)return fail(e,"unknown original corpse death cause");
+ if(!p2original::corpseProfile(source)&&!p2original::corpseDisabled(source))return fail(e,"death cause source is unaudited");
+ if(!p2original::validCorpseIdentity(id,id.catalog))return fail(e,"death cause activation identity is invalid");
+ if(ledger&&ledgerCatalog!=id.catalog&&!bindings.empty())return fail(e,"death cause crosses a live native corpse session");
+ ensureLedger(id.catalog);
+ for(const auto& body:bindings){p2original::CorpseRecord record;
+  if(ledger->lookup(body.first,body.second.handle,record)&&record.identity==id)
+   return fail(e,"original corpse death cause cannot change after body birth");
+ }
+ return deathPolicy->select(id,cause,e);
 }
