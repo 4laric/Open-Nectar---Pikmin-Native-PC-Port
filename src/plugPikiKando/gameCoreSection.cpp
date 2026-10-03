@@ -27,6 +27,7 @@
 #include "pc_randomizer_campaign_catalog.h"
 #endif
 #include "BuildingItem.h"
+#include "pc_p2_original_gate_native.h"
 #include "CPlate.h"
 #include "KusaItem.h"
 #include "Generator.h"
@@ -3181,7 +3182,7 @@ static void randomizerObserveWorld()
         pc_randomizer_observe_color_population(color, std::max(0, GameStat::allPikis[color] - specialAliases[color]), true);
     if (flowCont.mCurrentStage) {
         auto observe = [](Creature* obj, int kind, bool complete) {
-            if (!obj || !obj->mGenerator) return;
+            if (!obj || !obj->mGenerator || pc_p2_original_gate_owned(obj)) return;
             const Vector3f pos = obj->mGenerator->mGenPosition + obj->mGenerator->mGenOffset;
             pc_randomizer_observe_obstacle(flowCont.mCurrentStage->mStageID, kind, pos.x, pos.z, complete, true);
         };

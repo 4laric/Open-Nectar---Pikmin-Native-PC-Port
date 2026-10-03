@@ -275,6 +275,10 @@ set(PC_PORT_SOURCES
     pc_port/pc_p2_original_drop.cpp
     pc_port/pc_p2_original_drop_engine.cpp
     pc_port/pc_p2_original_gen_object.cpp
+    pc_port/pc_p2_original_gate.cpp
+    pc_port/pc_p2_original_gate_state.cpp
+    pc_port/pc_p2_original_gate_cache.cpp
+    pc_port/pc_p2_original_gate_native.cpp
     pc_port/pc_p2_campaign_goal_probe.cpp
     pc_port/pc_bbft.cpp
     pc_port/pc_p2_surface_topology.cpp
@@ -3312,3 +3316,8 @@ add_executable(p2_campaign_economy_test tools/test_p2_campaign_economy.cpp)
 target_include_directories(p2_campaign_economy_test PRIVATE pc_port)
 target_compile_options(p2_campaign_economy_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
 add_test(NAME p2_campaign_economy_test COMMAND p2_campaign_economy_test)
+
+add_executable(pc_p2_original_gate_test tools/test_p2_original_gate.cpp pc_port/pc_p2_original_gate.cpp pc_port/pc_p2_original_gate_state.cpp pc_port/pc_p2_original_gate_cache.cpp)
+target_include_directories(pc_p2_original_gate_test PRIVATE "${PROJECT_SOURCE_DIR}/pc_port")
+
+pikmin_add_ci_fixture(original_gate tools/p2_original_gate_runtime.cpp)
