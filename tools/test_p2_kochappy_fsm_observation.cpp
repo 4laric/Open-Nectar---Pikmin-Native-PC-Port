@@ -218,6 +218,10 @@ int main(){
  PcKochappyGuidePulse slipStall;
  for(int i=0;i<90;++i)CHECK(slipStall.observe(0,8.f,true)!=PcKochappyGuideInput::Refuse);
  CHECK(slipStall.observe(0,8.f,true)==PcKochappyGuideInput::Refuse);
+ const int retainedElapsed=slipCadence.elapsed,retainedLastProgress=slipCadence.lastProgress;
+ const float retainedBest=slipCadence.best;
+ slipCadence.cancelBurst();
+ CHECK(slipCadence.walk==0&&slipCadence.neutral==0&&slipCadence.elapsed==retainedElapsed&&slipCadence.lastProgress==retainedLastProgress&&slipCadence.best==retainedBest);
  PcKochappyGuidePulse guideStall;
  for(int i=0;i<90;++i)CHECK(guideStall.observe(0,10)!=PcKochappyGuideInput::Refuse);
  CHECK(guideStall.observe(0,10)==PcKochappyGuideInput::Refuse);

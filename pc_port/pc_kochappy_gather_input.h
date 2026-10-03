@@ -195,6 +195,7 @@ enum class PcKochappyGuideInput { Walk, Neutral, Refuse };
 struct PcKochappyGuidePulse {
  int guide=-1,walk=0,neutral=0,elapsed=0,lastProgress=0,pulses=0;
  float best=-1;
+ void cancelBurst(){walk=neutral=0;} // Catch-up never carries a walking edge. Progress clocks are retained.
  PcKochappyGuideInput observe(int currentGuide,float remaining,bool slipping=false){
   using I=PcKochappyGuideInput;
   if(currentGuide<0||currentGuide>=128||!std::isfinite(remaining)||remaining<0||remaining>=512)return I::Refuse;

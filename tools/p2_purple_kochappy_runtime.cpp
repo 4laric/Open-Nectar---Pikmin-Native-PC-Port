@@ -863,6 +863,7 @@ public:
    const float radius=C_NAVI_PARM(n,mCursorMaxRadius);
    require(std::isfinite(radius)&&radius>20,"loaded cursor radius permits ordinary approach");
    if(routeCatchup.active){
+    guidePulse.cancelBurst();
     receiverObservedClearance(n,routeCatchup.guide,age);
     if(catchupRoute(n,radius))return result;
    }
@@ -929,7 +930,7 @@ public:
      require(routeCatchup.begin(receiverWaypoint-1),"catchup visited-guide transition invalid");
      break;
     }
-    if(routeCatchup.active&&catchupRoute(n,radius))return result;
+    if(routeCatchup.active){guidePulse.cancelBurst();if(catchupRoute(n,radius))return result;}
     if(receiverWaypoint<ReceiverRouteCount){
      const auto& w=ReceiverRoute[receiverWaypoint];const Vector3f goal(w.x,0.f,w.z);
      if(age%30==0)std::printf("P2_PURPLE_KOCHAPPY_ROUTE_TARGET age=%d waypoint=%d total=%d target_xz=%.4f,%.4f distance=%.4f reach=%.4f followers=%d live=%d SDL_walk=1 actor_writes=0\n",age,receiverWaypoint,ReceiverRouteCount,w.x,w.z,distance(n->mSRT.t,goal),ReceiverRouteReach,n->getPlatePikis(),live);
