@@ -289,6 +289,7 @@ set(PC_PORT_SOURCES
     pc_port/pc_p2_original_onyon_lineage.cpp
     pc_port/pc_p2_original_number_profile.cpp
     pc_port/pc_p2_original_number_geometry.cpp
+    pc_port/pc_p2_original_number_animation.cpp
     pc_port/pc_p2_original_number_ledger.cpp
     pc_port/pc_p2_original_resource_contents.cpp
     pc_port/pc_p2_original_piki_spawn.cpp
@@ -3501,6 +3502,10 @@ add_executable(p2_original_number_geometry_test tools/p2_original_number_geometr
 target_include_directories(p2_original_number_geometry_test PRIVATE pc_port)
 target_compile_options(p2_original_number_geometry_test PRIVATE -Wall -Wextra -Werror -UNDEBUG)
 add_test(NAME p2_original_number_geometry COMMAND p2_original_number_geometry_test)
+add_executable(p2_original_number_animation_test tools/p2_original_number_animation_native_test.cpp pc_port/pc_p2_original_number_animation.cpp)
+target_include_directories(p2_original_number_animation_test PRIVATE pc_port)
+target_compile_options(p2_original_number_animation_test PRIVATE -Wall -Wextra -Werror -UNDEBUG)
+add_test(NAME p2_original_number_animation COMMAND p2_original_number_animation_test)
 
 pikmin_add_ci_fixture(surface_campaign_sdl tools/p2_surface_campaign_sdl_fixture.cpp)
 

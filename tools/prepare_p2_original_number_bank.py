@@ -105,6 +105,7 @@ def prepare(iso, repo_root, requested):
     sys.path.insert(0, str(repo_root))
     from experimental.pikmin2_assets import disc_files, archive_files
     from experimental.pikmin2_convert import decode, write_model
+    from p2_original_number_animation import parse_verified
 
     catalog = disc_files(iso)
     source_hashes = {}
@@ -128,6 +129,8 @@ def prepare(iso, repo_root, requested):
                 source_hashes[path + ":" + name] = MEMBERS[name]
     if set(members) != set(MEMBERS):
         raise ValueError("Incomplete original numeric source closure")
+    animations = {number: parse_verified(members[profile["animation"]])
+                  for number, profile in PROFILES.items()}
     # Decode every required model before any output or prospective native RNG.
     for number, profile in PROFILES.items():
         decoded = decode(members[profile["model"]], approximate_materials=True, bake_rigid=True)
@@ -156,19 +159,43 @@ def prepare(iso, repo_root, requested):
                                 rgba=list(rgba), mod=name, mod_sha256=sha(model_bytes),
                                 report=path.with_suffix(".json").name, report_sha256=sha(report_bytes),
                                 reparsed=check_mod(model_bytes, report)))
-    manifest = dict(schema=1, bank="original_p2_number_one_five_static", disc="GPVE01", revision=0,
+    animation_records = []
+    for number, animation in animations.items():
+        descriptor = animation.descriptor()
+        if animation.number != number or descriptor["source_animmgr_loop"] != dict(start=10, end=30):
+            raise ValueError("Number animation/source AnimMgr mismatch")
+        lines = ["P2_ORIGINAL_NUMBER_ANIMATION_1", f"number {number}",
+                 "source " + animation.source_sha256, f"duration {animation.duration}",
+                 f"angle_scale {animation.rotation_scale}", "loop 10 30", "tracks 9"]
+        for track in descriptor["tracks"]:
+            lines.append(f"track {track['name']} {len(track['source_keys'])}")
+            for key in track["source_keys"]:
+                lines.append(" ".join(format(key[name], ".9g") for name in
+                                      ("time", "value", "inTangent", "outTangent")))
+        reject_links(output)
+        animation_path = output / f"number{number}_carry.txt"
+        animation_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        animation_bytes = animation_path.read_bytes()
+        total += len(animation_bytes)
+        if len(animation_bytes) > 32 * 1024 or total > MAX_OUTPUT:
+            raise ValueError("Number animation bank exceeds byte bound")
+        animation_records.append(dict(number=number, file=animation_path.name,
+                                      sha256=sha(animation_bytes), source_sha256=animation.source_sha256,
+                                      descriptor=descriptor))
+    manifest = dict(schema=2, bank="original_p2_number_one_five", disc="GPVE01", revision=0,
                     source_sha256=source_hashes, profiles=PROFILES, resources=records,
+                    animations=animation_records,
                     native_rng_used=False, source_closure_validated_before_conversion=True,
                     converter_policy=dict(approximate_materials=True, bake_rigid=True, y_offset=0.0,
                                           pose="identity bind / BCK frame-zero rest pose",
                                           material="source geometry/textures with explicit audited RGBA; original TEV not reproduced"),
-                    limitations=["BCK carry animation unsupported; static initial/rest pose only.",
+                    limitations=["Original BCK keys exported; native player/animation acceptance not yet qualified.",
                                  "No native factory admission, gameplay, save/resume or SAVE proof."],
                     generated_bytes=total)
     reject_links(output)
     receipt = output / "manifest.json"
     receipt.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    if receipt.stat().st_size > 32 * 1024:
+    if receipt.stat().st_size > 64 * 1024:
         raise ValueError("Numeric manifest exceeds byte bound")
     return dict(output=str(output), models=len(records), manifest_sha256=sha(receipt.read_bytes()), generated_bytes=total)
 
