@@ -278,6 +278,8 @@ set(PC_PORT_SOURCES
     pc_port/pc_p2_original_drop.cpp
     pc_port/pc_p2_original_drop_engine.cpp
     pc_port/pc_p2_original_gen_object.cpp
+    pc_port/pc_p2_original_bridge.cpp
+    pc_port/pc_p2_original_bridge_native.cpp
     pc_port/pc_p2_campaign_goal_probe.cpp
     pc_port/pc_bbft.cpp
     pc_port/pc_p2_surface_topology.cpp
@@ -3135,6 +3137,14 @@ pikmin_add_ci_fixture(captain_reentry tools/p2_captain_reentry_runtime.cpp)
 # #1079 local native card save/resume acceptance, built only on CI.
 pikmin_add_ci_fixture(captain_campaign_resume tools/p2_captain_campaign_resume_runtime.cpp)
 pikmin_add_ci_fixture(original_pelplant tools/p2_original_pelplant_runtime.cpp)
+pikmin_add_ci_fixture(original_bridge tools/p2_original_bridge_runtime.cpp)
+if(DEFINED P2_CHALLENGE_GUARD_INCLUDE_DIR)
+    target_include_directories(pikmin_ci_fixture_original_bridge PRIVATE ${P2_CHALLENGE_GUARD_INCLUDE_DIR})
+endif()
+add_executable(pc_p2_original_bridge_test tools/test_p2_original_bridge.cpp pc_port/pc_p2_original_bridge.cpp)
+target_include_directories(pc_p2_original_bridge_test PRIVATE pc_port)
+target_compile_options(pc_p2_original_bridge_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME pc_p2_original_bridge_test COMMAND pc_p2_original_bridge_test)
 add_executable(pc_p2_original_pelplant_test tools/test_p2_original_pelplant.cpp
     pc_port/pc_p2_original_pelplant.cpp pc_port/pc_p2_original_spawn_plan.cpp)
 target_include_directories(pc_p2_original_pelplant_test PRIVATE pc_port)
