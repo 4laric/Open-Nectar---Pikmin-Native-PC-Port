@@ -119,11 +119,17 @@ bool pc_p2_catfish_source_corpse_clip(const BTeki* a,const char*& clip,float& ph
  const auto& motion=at->second.corpseMotion.motion();clip=motion.clip();phase=motion.frame()/float(registration(CarryAnim).duration-1);return true;
 }
 bool pc_p2_catfish_source_carry_start(BTeki* a,bool restart){
- auto at=actors.find(a);if(at==actors.end()||!at->second.escaped||!a->mPellet||a->mDeadState!=2)return false;
+ // Pellet::init invokes its view before becomePellet assigns mPellet and
+ // dieSoon sets dead-state2. The escaped marker owns that pending lifecycle.
+ auto at=actors.find(a);if(at==actors.end()||!at->second.escaped)return false;
  at->second.corpseMotion.start(restart);return true;
 }
+bool pc_p2_catfish_source_carry_stop(BTeki* a){
+ auto at=actors.find(a);if(at==actors.end()||!at->second.escaped)return false;
+ at->second.corpseMotion.stop();return true;
+}
 bool pc_p2_catfish_source_carry_finish(BTeki* a){
- auto at=actors.find(a);if(at==actors.end()||!at->second.escaped||!a->mPellet||a->mDeadState!=2)return false;
+ auto at=actors.find(a);if(at==actors.end()||!at->second.escaped)return false;
  at->second.corpseMotion.finish();return true;
 }
 void pc_p2_catfish_source_forget(BTeki* a){if(actors.erase(a))pc_p2_catfish_mouth_forget(a);}

@@ -71,6 +71,7 @@ class CorpseMotion {
 public:
  void prepare(){mMotion.start(CarryAnim);mRunning=false;}
  void start(bool restart=false){if(restart)mMotion.start(CarryAnim);mRunning=true;}
+ void stop(){mRunning=false;}
  void finish(){mMotion.finish();}
  void advance(float delta){if(mRunning)mMotion.advance(delta);}
  const Motion& motion()const{return mMotion;}
