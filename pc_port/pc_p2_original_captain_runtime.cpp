@@ -75,6 +75,7 @@ void pc_p2_original_captain_actor_update(Navi* n){
  if(runtime.frames[slot])--runtime.frames[slot];
 }
 bool pc_p2_original_captain_actor_alive(const Navi* n){const int slot=runtime.slot(n);return slot>=0&&runtime.alive[slot];}
+bool pc_p2_original_captain_actor_lifetime(const Navi* n,bool& out){const int slot=runtime.slot(n);if(slot<0)return false;out=runtime.alive[slot];return true;}
 bool pc_p2_original_captain_actor_frames(const Navi* n,std::uint8_t& out){const int slot=runtime.slot(n);if(slot<0)return false;out=runtime.frames[slot];return true;}
 bool pc_p2_original_captain_damaged_cleanup(Navi* n){
  if(!ownedState(n,StateId::Damaged))return false;runtime.frames[runtime.slot(n)]=60;return true;

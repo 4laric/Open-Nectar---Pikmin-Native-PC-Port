@@ -35,6 +35,8 @@ std::string pc_randomizer_session_fingerprint(){return fingerprint;}
 int main(){
  Navi a,b,outsider;SourceState state;NaviState p1;scene.navis[0]=&a;scene.navis[1]=&b;a.current=&state;b.current=&state;
  std::uint8_t frames=99;
+ bool life=true;
+ check(!pc_p2_original_captain_actor_lifetime(&a,life)&&life);
  check(!pc_p2_original_captain_world());pc_p2_original_captain_main_game_entered();check(!pc_p2_original_captain_world());
  check(!pc_p2_original_captain_actor_frames(&a,frames)&&frames==99);
  loaded=&scene;check(!pc_p2_original_captain_world()); // loaded alone is not game-active
@@ -45,6 +47,7 @@ int main(){
  pc_p2_original_captain_main_game_entered();auto* world=pc_p2_original_captain_world();check(world&&world->phase()==Phase::GameWorldActive&&world->demo()==Demo::Absent);
  // Actor lifetime initializes independently of native HP; zero does not kill.
  a.mHealth=0;check(pc_p2_original_captain_actor_alive(&a));check(pc_p2_original_captain_actor_alive(&b));
+ check(pc_p2_original_captain_actor_lifetime(&a,life)&&life);
  check(pc_p2_original_captain_actor_frames(&a,frames)&&frames==0);
  check(!pc_p2_original_captain_actor_frames(&outsider,frames));
  check(pc_p2_original_captain_damaged_cleanup(&a));check(pc_p2_original_captain_actor_frames(&a,frames)&&frames==60);
@@ -53,6 +56,7 @@ int main(){
  b.current=&p1;check(!pc_p2_original_captain_damaged_cleanup(&b));check(!pc_p2_original_captain_dead_entered(&b));b.current=&state;
  state.id=StateId::KokeDamage;check(!pc_p2_original_captain_damaged_cleanup(&a));state.id=StateId::Dead;
  check(pc_p2_original_captain_dead_entered(&a));check(!pc_p2_original_captain_actor_alive(&a)&&pc_p2_original_captain_actor_alive(&b));
+ check(pc_p2_original_captain_actor_lifetime(&a,life)&&!life);
  pc_p2_original_captain_main_game_left();check(pc_p2_original_captain_world()->phase()==Phase::Inactive);
  // Changed incarnation is refused even when all addresses are reused.
  scene.epoch=2;check(!pc_p2_original_captain_world());check(!pc_p2_original_captain_actor_frames(&a,frames));

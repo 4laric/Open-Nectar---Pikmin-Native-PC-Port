@@ -89,6 +89,9 @@ void pc_p2_original_captain_movie_ended(MoviePlayer*);
 void pc_p2_original_captain_actor_update(Navi*);
 // Query actor lifetime/iframes only for the exact live source scene roster.
 bool pc_p2_original_captain_actor_alive(const Navi*);
+// Distinguishes a source actor with CF_IsAlive clear from an absent source
+// actor. On refusal the output is unchanged; never infer source life from HP.
+bool pc_p2_original_captain_actor_lifetime(const Navi*,bool&);
 bool pc_p2_original_captain_actor_frames(const Navi*,std::uint8_t&);
 // Source state owners call these at actual Damaged::cleanup/Dead::init; both
 // verify the current genuine State identity. Unsupported states cannot write.

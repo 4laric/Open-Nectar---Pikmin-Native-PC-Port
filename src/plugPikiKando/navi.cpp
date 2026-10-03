@@ -18,6 +18,12 @@
 #include "Navi.h"
 #if defined(PIKI_PC_PORT)
 #include "pc_p2_original_captain_damage.h"
+bool Navi::isAlive()
+{
+	bool alive;
+	if (pc_p2_original_captain_actor_lifetime(this, alive)) return alive;
+	return Creature::isAlive();
+}
 #endif
 #if defined(PIKI_PC_PORT)
 #include "audio/pc_audio_source.h"
