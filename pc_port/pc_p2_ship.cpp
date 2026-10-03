@@ -3,6 +3,8 @@
 #include "pc_p2_purple.h"
 #include "pc_p2_white.h"
 #include "pc_p2_white_campaign_policy.h"
+#include "pc_p2_white_treasure_policy.h"
+#include "pc_p2_campaign_economy.h"
 #include "pc_randomizer.h"
 #include "Piki.h"
 #include "PikiMgr.h"
@@ -72,8 +74,14 @@ void pc_p2_ship_tick(Navi* navi, bool active) {
         std::printf("P2_SHIP_CHOICE captain=%d species=%d\n",captain,choice[captain]);
     }
     if (whiteLoaded) {
-        char title[192];const auto& counts=p2ship::stock.counts[choice[captain]-3];
-        std::snprintf(title,sizeof(title),"Pikipelago Ship: %s (%d leaf/%d bud/%d flower) | F10 withdraw, Shift+F10 deposit, Ctrl+F10 species",choice[captain]==4?"White":"Purple",counts[0],counts[1],counts[2]);
+        std::string economy;
+        if (pc_randomizer_white_treasure_campaign()) {
+            static p2treasure::Catalog catalog;
+            static const bool catalogReady = catalog.load_retail("p2-treasure-catalog.txt");
+            economy = p2economy::ship_summary(p2whitetreasure::ledger.delivered, catalogReady ? &catalog : nullptr) + " | ";
+        }
+        char title[320];const auto& counts=p2ship::stock.counts[choice[captain]-3];
+        std::snprintf(title,sizeof(title),"Pikipelago Ship: %s%s (%d leaf/%d bud/%d flower) | F10 withdraw, Shift+F10 deposit, Ctrl+F10 species",economy.c_str(),choice[captain]==4?"White":"Purple",counts[0],counts[1],counts[2]);
         if(SDL_Window* window=SDL_GetKeyboardFocus())SDL_SetWindowTitle(window,title);
     }
     if (!pressed || keys[SDL_SCANCODE_LCTRL] || keys[SDL_SCANCODE_RCTRL]) return;
