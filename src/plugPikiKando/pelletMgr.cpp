@@ -177,13 +177,14 @@ void PelletView::becomePellet(u32 id, Vector3f NRef pos, f32 direction)
 		return;
 	}
 
-	f32 minY = mapMgr->getMinY(pos.x, pos.z, true);
-	f32 maxY = mapMgr->getMaxY(pos.x, pos.z, true);
-
-	if (absF(pos.y - maxY) < absF(pos.y - minY)) {
-		pos.y = maxY;
-	} else {
-		pos.y = minY;
+	if (!pc_p2_original_corpse_profile(pellet)) {
+		f32 minY = mapMgr->getMinY(pos.x, pos.z, true);
+		f32 maxY = mapMgr->getMaxY(pos.x, pos.z, true);
+		if (absF(pos.y - maxY) < absF(pos.y - minY)) {
+			pos.y = maxY;
+		} else {
+			pos.y = minY;
+		}
 	}
 
 	pc_p2_original_corpse_position(pellet,pos,direction);
