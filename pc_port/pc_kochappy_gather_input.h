@@ -106,6 +106,16 @@ inline PcKochappyPrefixContact pc_kochappy_prefix_contact(bool finiteBody,bool d
     if(!ground || normalY<=.5f)return I::Wait;
     return I::Admit;
 }
+// Temporary loss of contact may settle through ordinary neutral input only
+// while the actual body remains immediately above a safe native floor.
+inline bool pc_kochappy_air_contact_wait(bool finiteBody,bool dry,bool ground,
+    float normalY,float floorY,float floorNormalY,float bodyY,float groundOffset,float radius) {
+    if(!finiteBody||!dry||ground||!std::isfinite(normalY)||!std::isfinite(floorY)
+       ||!std::isfinite(floorNormalY)||floorNormalY<=.5f||!std::isfinite(bodyY)
+       ||!std::isfinite(groundOffset)||!std::isfinite(radius)||radius<=0)return false;
+    const float height=bodyY-groundOffset-floorY;
+    return std::isfinite(height)&&height>=0&&height<=radius;
+}
 struct PcKochappyPrefixContactGate {
     int waits=0;
     PcKochappyPrefixContact observe(bool allContact) {

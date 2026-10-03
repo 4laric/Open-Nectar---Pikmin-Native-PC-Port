@@ -238,4 +238,21 @@ int main(){
  CHECK(!pc_kochappy_enemy_path_clear(0,0,0,0,120,0,-1,8.5));
  CHECK(!pc_kochappy_enemy_path_clear(0,0,0,0,120,0,NAN,8.5));
  CHECK(!pc_kochappy_enemy_path_clear(0,0,0,0,NAN,0,95,8.5));
+ CHECK(pc_kochappy_air_contact_wait(true,true,false,0,40,.9f,48.5f,0,8.5f));
+ CHECK(pc_kochappy_air_contact_wait(true,true,false,0,40,.9f,44,0,8.5f));
+ CHECK(!pc_kochappy_air_contact_wait(true,true,false,0,40,.9f,48.5001f,0,8.5f));
+ CHECK(!pc_kochappy_air_contact_wait(true,true,false,0,40,.9f,39.9f,0,8.5f));
+ CHECK(!pc_kochappy_air_contact_wait(true,false,false,0,40,.9f,44,0,8.5f));
+ CHECK(!pc_kochappy_air_contact_wait(true,true,false,0,40,.5f,44,0,8.5f));
+ CHECK(!pc_kochappy_air_contact_wait(true,true,true,.9f,40,.9f,44,0,8.5f));
+ CHECK(!pc_kochappy_air_contact_wait(true,true,false,0,NAN,.9f,44,0,8.5f));
+ CHECK(!pc_kochappy_air_contact_wait(true,true,false,0,40,.9f,NAN,0,8.5f));
+ PcKochappyRouteCatchup airWait;CHECK(airWait.begin(34));
+ for(int i=0;i<90;++i){CHECK(airWait.observe(true,20,59.99f,0,false)==PcKochappyCatchupInput::Hold);CHECK(airWait.stable==0);}
+ CHECK(airWait.observe(true,20,59.99f,0,false)==PcKochappyCatchupInput::Refuse);
+ PcKochappyRouteCatchup landed;CHECK(landed.begin(34));
+ CHECK(landed.observe(true,20,59.99f,0,false)==PcKochappyCatchupInput::Hold);
+ CHECK(landed.observe(true,20,59.99f,0,true)==PcKochappyCatchupInput::Hold);
+ CHECK(landed.observe(true,20,59.99f,0,true)==PcKochappyCatchupInput::Hold);
+ CHECK(landed.observe(true,20,59.99f,0,true)==PcKochappyCatchupInput::Continue);
 }

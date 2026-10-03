@@ -681,7 +681,7 @@ class PurpleKochappyApp:public PlugPikiApp {
  }
  bool catchupRoute(Navi* n,float radius) {
   require(routeCatchup.active,"catchup requires an actually visited guide");
-  bool present[20]={};int count=0;float lag=0,targetError=0;bool allSettled=true,allSafeFormed=true;
+  bool present[20]={};int count=0;float lag=0,targetError=0;bool allSettled=true,allSafeFormed=true,allContact=true;
   Vector3f centroid(0,0,0);
   Iterator bodies(pikiMgr);CI_LOOP(bodies){Piki* p=static_cast<Piki*>(*bodies);
    if(!p)continue;
@@ -704,7 +704,19 @@ class PurpleKochappyApp:public PlugPikiApp {
      int(p->mInWaterTimer),int(groundBody),normalY,int(finiteBody),int(dryBody),int(finiteNormal),int(safeSlope));
     std::fflush(nullptr);
    }
-   require(safeContact,"catchup original body contact/hazard changed");
+   bool contactWait=false;
+   if(!safeContact&&finiteBody&&dryBody&&!groundBody){
+    auto* floor=mapMgr->getCurrTri(p->mSRT.t.x,p->mSRT.t.z,true);
+    const float floorY=mapMgr->getMinY(p->mSRT.t.x,p->mSRT.t.z,true);
+    const float offset=p->isCreatureFlag(CF_EnableGroundOffset)?p->mGroundOffset:0.f;
+    contactWait=floor&&pc_kochappy_air_contact_wait(finiteBody,dryBody,groundBody,normalY,
+      floorY,floor->mTriangle.mNormal.y,p->mSRT.t.y,offset,p->mCollisionRadius);
+    std::printf("P2_PURPLE_KOCHAPPY_CONTACT_WAIT age=%d generator=%u floor_y=%.6f floor_normal=%.6f body_y=%.6f offset=%.6f radius=%.6f admitted_wait=%d actual_contact=0 actor_writes=0\n",
+      age,unsigned(p->mGenerator->_70),floorY,floor?floor->mTriangle.mNormal.y:0.f,
+      p->mSRT.t.y,offset,p->mCollisionRadius,int(contactWait));
+   }
+   require(safeContact||contactWait,"catchup original body contact/hazard changed");
+   allContact=allContact&&safeContact;
    centroid=centroid+p->mSRT.t;
    receiverWallCache();const double pr=p->mCollisionRadius,po=p->isCreatureFlag(CF_EnableGroundOffset)?p->mGroundOffset:0.;
    receiverCheckSphere({p->mSRT.t.x,p->mSRT.t.y-po+pr,p->mSRT.t.z},pr,"catchup-current-body",initialGeneratorIds[slot],routeCatchup.guide,-1,true);
@@ -730,6 +742,12 @@ class PurpleKochappyApp:public PlugPikiApp {
   }
   bool roster=initialBodyCount==20&&count==20;
   for(int i=0;i<initialBodyCount;++i)roster=roster&&present[i];
+  if(!allContact){
+   const auto wait=routeCatchup.observe(roster,targetError,std::nextafter(60.f,0.f),
+      std::sqrt(n->mVelocity.x*n->mVelocity.x+n->mVelocity.z*n->mVelocity.z),false);
+   require(wait==PcKochappyCatchupInput::Hold,"bounded ordinary contact settling stalled/invalid");
+   input();return true;
+  }
   const float whistle=C_NAVI_PARM(n,mWhistleMaxRadius);
   require(pc_kochappy_gather_input(0,radius,whistle,C_NAVI_PARM(n,mNeutralStickThreshold),
     C_NAVI_PARM(n,mCursorMoveStickThreshold))==PcKochappyGatherInput::Cursor,
