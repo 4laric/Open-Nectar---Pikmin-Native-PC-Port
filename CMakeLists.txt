@@ -3365,3 +3365,8 @@ add_executable(pc_p2_hanachirashi_source_test tools/test_p2_hanachirashi_source.
 target_include_directories(pc_p2_hanachirashi_source_test PRIVATE pc_port)
 target_compile_options(pc_p2_hanachirashi_source_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
 add_test(NAME pc_p2_hanachirashi_source_test COMMAND pc_p2_hanachirashi_source_test)
+# Actual shared receiver compiled with small observable engine doubles.
+add_executable(pc_p2_source_flick_receiver_test tools/test_p2_source_flick_receiver.cpp pc_port/pc_p2_hanachirashi_receiver.cpp)
+target_include_directories(pc_p2_source_flick_receiver_test BEFORE PRIVATE tools/source_flick_stubs pc_port)
+target_compile_options(pc_p2_source_flick_receiver_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME pc_p2_source_flick_receiver_test COMMAND pc_p2_source_flick_receiver_test)
