@@ -3269,3 +3269,6 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
 endif()
 
 endif()
+
+# Real native factory/cache transport fixture; synthetic zero-birth admission only.
+pikmin_add_ci_fixture(original_gen_object tools/p2_original_gen_object_runtime.cpp)
