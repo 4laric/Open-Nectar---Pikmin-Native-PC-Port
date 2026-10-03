@@ -20,7 +20,7 @@ def main():
 static_assert(p2originalpod::sourceType==3 && p2originalpod::sourceObject==1);
 bool observe(Pellet* p,Suckable* r,const p2retail::SceneIdentity& scene) {
  p2retail::Snapshot floor;
- return pc_p2_original_pod_completed(p,r,scene)
+ return pc_p2_original_pod_owned() && pc_p2_original_pod_completed(p,r,scene)
      && pc_p2_original_pod_context(r,scene,floor);
 }
 '''),
