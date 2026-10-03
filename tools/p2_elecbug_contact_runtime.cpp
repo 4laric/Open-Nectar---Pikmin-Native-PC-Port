@@ -20,6 +20,8 @@
 #include "Piki.h"
 #include "PikiState.h"
 #include "PikiMgr.h"
+#include "PelletMgr.h"
+#include "Pellet.h"
 #include "PikiHeadItem.h"
 #include "ItemMgr.h"
 #include "Boss.h"
@@ -331,6 +333,15 @@ public:
         }
         // Only virtual-pad input. Gather, approach, aim during A hold, release.
         if(age<90){input(KBBTN_B);return result;}
+        if(electric()&&desiredSpecies()!=P2SpeciesWhite&&!aHeld&&pelletMgr){
+            bool nearPart=false;
+            Iterator parts(pelletMgr);CI_LOOP(parts){
+                Pellet* part=static_cast<Pellet*>(*parts);
+                if(part->mConfig->mPelletType()==PELTYPE_UfoPart&&part->onGround()&&part->getState()==0
+                    &&distance(n->mSRT.t,part->mSRT.t)<=part->getBottomRadius()+40.f)nearPart=true;
+            }
+            if(nearPart){neutralThrowTicks=0;point(n,enemy->mSRT.t,true);return result;}
+        }
         if(distance(n->mSRT.t,enemy->mSRT.t)>140.f){
             if(aHeld){for(const auto& entry:flight)witness(entry.first,"invalidated");flight.clear();aHeld=false;}
             neutralThrowTicks=0;
