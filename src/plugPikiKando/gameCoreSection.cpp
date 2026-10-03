@@ -139,6 +139,14 @@
 #include "MoviePlayer.h"
 #if defined(PIKI_PC_PORT)
 #include "pc_p2_original_captain_damage.h"
+#include "pc_p2_original_captain_scene.h"
+#include "pc_p2_retail_scene.h"
+#include "pc_p2_retail_scene_input.h"
+#include "pc_p2_retail_scene_bodies.h"
+namespace { bool pcRetailSelected(); }
+#endif
+#if !defined(PIKI_PC_PORT)
+namespace { bool pcRetailSelected(); }
 #endif
 #include "NaviMgr.h"
 #include "NaviState.h"
@@ -776,7 +784,7 @@ void GameCoreSection::cleanupDayEnd()
 	}
 
 	PRINT("STEP (1) : Save Generators\n");
-	if (!playerState->isChallengeMode()) {
+	if (!isRetailSourceStage() && !playerState->isChallengeMode()) {
 		generatorCache->beginSave(flowCont.mCurrentStage->mStageIndex);
 		int gens      = 0;
 		int creatures = 0;
@@ -1040,6 +1048,14 @@ void GameCoreSection::prepareBadEnd()
 void GameCoreSection::exitStage()
 {
 #if defined(PIKI_PC_PORT)
+ if(isRetailSourceStage()){
+  std::string retailError;
+  // Cargo/receiver preflight is observational. The physical scene owner keeps
+  // its context through actual Party/captain/path retirement on release.
+  if(!pc_p2_retail_scene_can_release(retailError)||!pc_p2_retail_scene_release(retailError)){
+   std::fprintf(stderr,"P2_RETAIL_EXIT_REFUSED %s\n",retailError.c_str());std::abort();
+  }
+ }
  pc_p2_original_captain_main_game_left();
  // Normal day-end/cache writes precede scene exit. Release original groups
  // while their actual generators, actor pools and family resources are alive.
@@ -1047,7 +1063,7 @@ void GameCoreSection::exitStage()
  if(!pc_p2_original_course_finish(originalError)) {
   std::fprintf(stderr,"P2_ORIGINAL_COURSE_EXIT_FAIL %s\n",originalError.c_str());std::abort();
  }
-    pc_p2_surface_save_scene_exit();
+    if(!isRetailSourceStage()) pc_p2_surface_save_scene_exit();
     pc_p2_source_body_scene_exit_external();
     pc_p2_original_piki_recruit_unbind();
     pc_p2_original_piki_origin_scene_exit();
@@ -1472,8 +1488,31 @@ static void pcVsSetupBases(MapMgr* map)
 }
 #endif
 
+#if defined(PIKI_PC_PORT)
+namespace {
+bool pcRetailSelected(){
+ return pc_randomizer_original_session()&&pc_randomizer_original_has_input(p2retail::developmentFloorRole);
+}
+const p2retail::SceneContext* pcRetailScene(MapMgr* actualMap,bool retained=false){
+ if(!retained&&!pcRetailSelected())return nullptr;
+ const auto* scene=pc_p2_retail_scene_prepared();
+ if(!scene||scene->map()!=actualMap||scene->stage()!=flowCont.mCurrentStage||scene->routes()!=routeMgr){
+  std::fprintf(stderr,"P2_RETAIL_STARTUP_SELECTED_MAP_OWNER_MISSING\n");std::abort();
+ }
+ return scene;
+}
+}
+#else
+namespace { bool pcRetailSelected(){return false;} }
+#endif
+
 void GameCoreSection::initStage()
 {
+#if defined(PIKI_PC_PORT)
+ const auto* retailScene=pcRetailScene(mMapMgr,isRetailSourceStage());
+#else
+ const bool retailScene=false;
+#endif
 #if defined(VERSION_PIKIDEMO)
 #else
 	STACK_PAD_VAR(2);
@@ -1532,7 +1571,7 @@ void GameCoreSection::initStage()
 	playerState->initCourse();
 
 #if defined(PIKI_PC_PORT)
- if(const char* originalDirectory=pc_randomizer_original_session()?pc_randomizer_original_catalog_root():std::getenv("PIKMIN_P2_ORIGINAL_CATALOG")) {
+ if(!retailScene) if(const char* originalDirectory=pc_randomizer_original_session()?pc_randomizer_original_catalog_root():std::getenv("PIKMIN_P2_ORIGINAL_CATALOG")) {
   std::string originalError;
   // The immutable catalog must exist before native cache/factory decoding.
   if(!pc_p2_original_course_boot(originalDirectory,pc_pikipelago_surface_course(),originalError)) {
@@ -1549,7 +1588,7 @@ void GameCoreSection::initStage()
 	// room's mStageID (STAGE_Practice = 0; the stage-list mStageIndex for chal0
 	// has no GeneratorCache entry). The ramMode Generator::read here restores the
 	// SLT1 spawn-slot uid that ordinary birth then re-resolves.
-	if (pc_pikipelago_room_preview() && std::getenv("PIKMIN_P2_CACHE_RESUME")) {
+	if (!retailScene && pc_pikipelago_room_preview() && std::getenv("PIKMIN_P2_CACHE_RESUME")) {
 		std::ifstream in("p2-gencache.bin", std::ios::binary | std::ios::ate);
 		if (in) {
 			std::streamsize size = in.tellg();
@@ -1573,9 +1612,9 @@ void GameCoreSection::initStage()
 #else
 		flowCont.mCurrentStage->mStageIndex;
 #endif
-	const bool hasAuthoritativeStageCache = generatorCache->preload(genCacheStage);
+	const bool hasAuthoritativeStageCache = retailScene ? false : generatorCache->preload(genCacheStage);
 #if defined(PIKMIN_RANDOMIZER_TEST_HOOKS)
-	if (pc_pikipelago_room_preview() && std::getenv("PIKMIN_P2_CACHE_RESUME")) {
+	if (!retailScene && pc_pikipelago_room_preview() && std::getenv("PIKMIN_P2_CACHE_RESUME")) {
 		Generator* g;
 		FOREACH_NODE_REUSE(Generator, generatorList->mGenListHead->mChild, g) {
 			std::printf("P2_GENCACHE_DUMP _70=%u uid=%u alive=%d day=%d ram=%d\n",
@@ -1601,8 +1640,10 @@ void GameCoreSection::initStage()
 	mNavi->mSeedCollectionCount = flowCont.mNaviSeedCount;
 
 	memStat->start("routeMgr");
-	routeMgr = new RouteMgr;
-	routeMgr->construct(mMapMgr);
+	if (!retailScene) {
+	 routeMgr = new RouteMgr;
+	 routeMgr->construct(mMapMgr);
+	}
 	if (routeMgr->getPathFinder('test') == nullptr) {
 		PRINT("finder is NULL\n");
 	}
@@ -1632,6 +1673,36 @@ void GameCoreSection::initStage()
 	gameflow.addGenNode("pikiMgr", pikiMgr);
 	PRINT("done2\n");
 
+	bool useDefault = false;
+	bool useDay     = false;
+	bool useInit    = false;
+	bool usePlant   = false;
+#if defined(PIKMIN_RANDOMIZER_TEST_HOOKS)
+	// lane-03 (#439): on a room cache-resume boot, the generator list already
+	// came from preload; skipping the default.gen disk read avoids duplicate
+	// room actors binding the same _70.
+	const bool resumeRoomCache = pc_pikipelago_room_preview() && std::getenv("PIKMIN_P2_CACHE_RESUME");
+#else
+	const bool resumeRoomCache = false;
+
+#endif
+	const bool livingSurfaceCache = !retailScene && pc_p2_surface_save_living_scene();
+	if(livingSurfaceCache&&!hasAuthoritativeStageCache){
+        std::fprintf(stderr,"Living surface checkpoint lost its authoritative stage cache\n");std::abort();
+    }
+#if defined(PIKI_PC_PORT)
+ if(retailScene){
+  // Actual floor dispatch owns its census; no surface calendar/card import.
+ }else if(pc_randomizer_original_session()){
+  // This loader uses the authenticated literal calendar and native files only.
+  std::string error;
+  if(livingSurfaceCache||hasAuthoritativeStageCache){std::fprintf(stderr,"P2_ORIGINAL_TYPED_CACHE_GRAPH_UNQUALIFIED\n");std::abort();}
+  if(!pc_p2_original_course_read_plan(useDefault,useDay,useInit,usePlant,error)){std::fprintf(stderr,"P2_ORIGINAL_NATIVE_PLAN_FAIL %s\n",error.c_str());std::abort();}
+  mNavi->reset();
+  if(mNavi2){Vector3f side(cosf(mNavi->mFaceDirection),0,-sinf(mNavi->mFaceDirection));mNavi2->mSRT.t=mNavi->mSRT.t+side*30;mNavi2->mLastPosition=mNavi2->mSRT.t;mNavi2->mDayEndPosition=mNavi2->mSRT.t;mNavi2->mFaceDirection=mNavi->mFaceDirection;mNavi2->mSRT.r=mNavi->mSRT.r;mNavi2->reset();}
+ }else
+#endif
+ {
 	char path[PATH_MAX];
 	strcpy(path, flowCont.mCurrStageFilePath);
 	u8* tmp;
@@ -1648,34 +1719,6 @@ void GameCoreSection::initStage()
 	*tmp++ = '/';
 	*tmp++ = '\0';
 	char path2[PATH_MAX];
-	bool useDefault = false;
-	bool useDay     = false;
-	bool useInit    = false;
-	bool usePlant   = false;
-#if defined(PIKMIN_RANDOMIZER_TEST_HOOKS)
-	// lane-03 (#439): on a room cache-resume boot, the generator list already
-	// came from preload; skipping the default.gen disk read avoids duplicate
-	// room actors binding the same _70.
-	const bool resumeRoomCache = pc_pikipelago_room_preview() && std::getenv("PIKMIN_P2_CACHE_RESUME");
-#else
-	const bool resumeRoomCache = false;
-
-#endif
-	const bool livingSurfaceCache = pc_p2_surface_save_living_scene();
-	if(livingSurfaceCache&&!hasAuthoritativeStageCache){
-        std::fprintf(stderr,"Living surface checkpoint lost its authoritative stage cache\n");std::abort();
-    }
-#if defined(PIKI_PC_PORT)
- if(pc_randomizer_original_session()){
-  // This loader uses the authenticated literal calendar and native files only.
-  std::string error;
-  if(livingSurfaceCache||hasAuthoritativeStageCache){std::fprintf(stderr,"P2_ORIGINAL_TYPED_CACHE_GRAPH_UNQUALIFIED\n");std::abort();}
-  if(!pc_p2_original_course_read_plan(useDefault,useDay,useInit,usePlant,error)){std::fprintf(stderr,"P2_ORIGINAL_NATIVE_PLAN_FAIL %s\n",error.c_str());std::abort();}
-  mNavi->reset();
-  if(mNavi2){Vector3f side(cosf(mNavi->mFaceDirection),0,-sinf(mNavi->mFaceDirection));mNavi2->mSRT.t=mNavi->mSRT.t+side*30;mNavi2->mLastPosition=mNavi2->mSRT.t;mNavi2->mDayEndPosition=mNavi2->mSRT.t;mNavi2->mFaceDirection=mNavi->mFaceDirection;mNavi2->mSRT.r=mNavi->mSRT.r;mNavi2->reset();}
- }else
-#endif
- {
 	sprintf(path2, "%sdefault.gen", path);
 	// On a room cache-resume boot, skip the disk default.gen entirely (the
 	// generator list already came from GeneratorCache::preload); do not even
@@ -1811,7 +1854,7 @@ void GameCoreSection::initStage()
 	pc_dev_console_reserve_host_types();
 #if defined(PIKI_PC_PORT)
  std::string originalModelError;
- if(!pc_p2_original_course_use_models(originalModelError)) {
+ if(!retailScene && !pc_p2_original_course_use_models(originalModelError)) {
   std::fprintf(stderr,"P2_ORIGINAL_COURSE_MODEL_FAIL %s\n",originalModelError.c_str());std::abort();
  }
 #endif
@@ -1842,13 +1885,14 @@ void GameCoreSection::initStage()
 
 	memStat->start("bobby");
 #if defined(PIKI_PC_PORT)
- if(pc_p2_original_course_prepared()) {
+ if(!retailScene && pc_p2_original_course_prepared()) {
   std::string originalError;
   if(!pc_p2_original_course_start(generatorList,originalError)) {
    std::fprintf(stderr,"P2_ORIGINAL_COURSE_START_FAIL %s\n",originalError.c_str());std::abort();
   }
  }
 #endif
+ if(!retailScene){
 	playerState->reconcileBbftParts(); // Before generators/cache can recreate checked parts.
 	if (useDefault) {
 		PRINT("*** GEN1\n");
@@ -1884,6 +1928,7 @@ void GameCoreSection::initStage()
   std::string error;if(!pc_p2_original_course_loaded(error)){std::fprintf(stderr,"P2_ORIGINAL_CALENDAR_COMMIT_FAIL %s\n",error.c_str());std::abort();}
  }
 #endif
+ }
 	memStat->end("bobby");
 
 	Iterator it(pikiMgr);
@@ -1930,7 +1975,7 @@ void GameCoreSection::initStage()
 
 #if defined(VERSION_PIKIDEMO)
 #else
-	if (!playerState->isChallengeMode())
+	if (!retailScene && !playerState->isChallengeMode())
 #endif
 	{
 		StageInf* inf = &flowCont.mCurrentStage->mStageInf;
@@ -1986,7 +2031,7 @@ void GameCoreSection::initStage()
 	GameStat::minPikis = GameStat::allPikis;
 	PRINT("*** START WITH %d PIKIS\n", GameStat::minPikis);
 
-	RandomAccessStream* data2 = gsys->openFile("ghost/record.gst");
+	RandomAccessStream* data2 = retailScene ? nullptr : gsys->openFile("ghost/record.gst");
 	if (data2) {
 		data2->getPending();
 		// int pend = ;
@@ -2004,6 +2049,11 @@ void GameCoreSection::initStage()
  */
 void GameCoreSection::finalSetup()
 {
+#if defined(PIKI_PC_PORT)
+ const auto* retailScene=pcRetailScene(mMapMgr,isRetailSourceStage());
+#else
+ const bool retailScene=false;
+#endif
 	PRINT("======================= FINAL SETUP ==============================\n");
 	BUGPRINT("final setup!\n");
 	routeMgr->initLinks();
@@ -2029,7 +2079,7 @@ void GameCoreSection::finalSetup()
 	PRINT("********* BONUS PIKI CHECK\n");
 	GameStat::dump();
 
-	if (!pc_p2_surface_save_living_scene() && playerState->mHasExtinctionDemoPlayed == false && !playerState->isTutorial() PC_NOT_VS
+	if (!retailScene && !pc_p2_surface_save_living_scene() && playerState->mHasExtinctionDemoPlayed == false && !playerState->isTutorial() PC_NOT_VS
 	    && ((GameStat::allPikis[Blue] == 0 && playerState->hasContainer(Blue))
 	        || (GameStat::allPikis[Red] == 0 && playerState->hasContainer(Red))
 	        || (GameStat::allPikis[Yellow] == 0 && playerState->hasContainer(Yellow)))) {
@@ -2042,6 +2092,7 @@ void GameCoreSection::finalSetup()
 		}
 	}
 
+ if(!retailScene){
 	if (!playerState->isTutorial() && !playerState->isChallengeMode()) {
 		PRINT("========== NAVI STARTING STATE START \n");
 		Navi* navi = naviMgr->getNavi();
@@ -2117,6 +2168,7 @@ void GameCoreSection::finalSetup()
 		}
 	}
 
+ }
 	if (bossMgr) {
 		bossMgr->finalSetup();
 	}
@@ -2129,6 +2181,7 @@ void GameCoreSection::finalSetup()
 		workObjectMgr->finalSetup();
 	}
 
+ if(!retailScene){
 	pc_p2_kurage_teki_setup();
 	pc_p2_onikurage_teki_setup();
 	pc_p2_bombsarai_teki_setup();
@@ -2152,12 +2205,22 @@ void GameCoreSection::finalSetup()
     }
 	pc_p2_snow_campaign_setup();
     pc_p2_surface_save_scene_setup();
+ }
 	// Actor-lifetime (#397): mark the new scene ready for lifecycle fixtures.
 	pc_p2_scene_begin();
 #if defined(PIKI_PC_PORT)
  // Both native roster bodies have now completed their actual init/reset.
  // The canonical source descriptor must independently attest real binding.
- pc_p2_original_captain_main_game_entered();
+ if(retailScene){
+  std::string error;
+  // Actual Body owner must install its 20 source actors here before admitting
+  // the physical floor. An ordinary P1 field count cannot satisfy this query.
+  if(!pc_p2_original_captain_scene_reset(error)||
+     !pc_p2_retail_scene_bodies_admitted(*retailScene,error)||!pc_p2_retail_scene_boot(error)||
+     !pc_p2_original_captain_scene_activate(error)){
+   std::fprintf(stderr,"P2_RETAIL_STARTUP_REFUSED %s\n",error.c_str());std::abort();
+  }
+ }else pc_p2_original_captain_main_game_entered();
 #endif
 	PRINT("====================== FINAL SETUP DONE ======================\n");
 }
@@ -2218,6 +2281,9 @@ GameCoreSection::GameCoreSection(Controller* controller, MapMgr* mgr, Camera& ca
 
 	mController = controller;
 	mMapMgr     = mgr;
+#if defined(PIKI_PC_PORT)
+ mRetailSourceStage=pcRetailScene(mgr)!=nullptr;
+#endif
 
 	memStat->start("gui");
 	containerWindow = new zen::DrawContainer();
@@ -2332,15 +2398,20 @@ GameCoreSection::GameCoreSection(Controller* controller, MapMgr* mgr, Camera& ca
 	// because the request defaults off. Upstream local co-op owns the second
 	// Navi slot when it is active, so the P2 opt-in path only runs without it.
 	const bool pcCoop = pc_coop_active();
-	int naviCapacity  = pcCoop ? 2 : pc_p2_captain::navi_capacity();
-	if (!pcCoop && naviCapacity > 1 && !pc_p2_captain::prepare_second_captain_assets(naviMgr)) {
+	const bool originalRoster=isRetailSourceStage();
+	int naviCapacity  = originalRoster || pcCoop ? 2 : pc_p2_captain::navi_capacity();
+	if (!originalRoster && !pcCoop && naviCapacity > 1 && !pc_p2_captain::prepare_second_captain_assets(naviMgr)) {
 		naviCapacity = 1;
 	}
 	naviMgr->create(naviCapacity);
 	mNavi = static_cast<Navi*>(naviMgr->birth());
 	// mNaviID 1 -> Kontroller(2) -> pad 1 (segundo mando, fase 0).
-	mNavi2 = pcCoop ? static_cast<Navi*>(naviMgr->birth()) : nullptr;
-	if (!pcCoop && naviCapacity > 1) pc_p2_captain::birth_second_captain(naviMgr);
+	Navi* originalPartner=originalRoster?static_cast<Navi*>(naviMgr->birth()):nullptr;
+	mNavi2 = originalRoster ? nullptr : pcCoop ? static_cast<Navi*>(naviMgr->birth()) : nullptr;
+	if(originalRoster&&(!mNavi||!originalPartner||mNavi==originalPartner||naviMgr->getNaviCount()!=2)){
+	 std::fprintf(stderr,"P2_ORIGINAL_TWO_NATIVE_CAPTAINS_REQUIRED\n");std::abort();
+	}
+	if (!originalRoster && !pcCoop && naviCapacity > 1) pc_p2_captain::birth_second_captain(naviMgr);
 	// Lane 12 (#130): bind the live slot-0 captain/squad adapter now that the
 	// Navi object exists, so a captor family can resolve target identity and
 	// claim/release through pc_p2_captain against the real NaviMgr/PikiMgr.
@@ -2431,7 +2502,9 @@ GameCoreSection::GameCoreSection(Controller* controller, MapMgr* mgr, Camera& ca
 	memStat->end("mapMgr");
 
 	mNavi->mNaviCamera = &camera;
-	mNavi->init();
+	// The source scene owner performs the single final Creature::init/reset.
+	// Repeating init would register the search context twice.
+	if(!isRetailSourceStage()) mNavi->init();
 #if defined(PIKI_PC_PORT)
 	if (mNavi2) {
 		// Fase 1: cámara única que sigue a P1; P2 comparte la misma cámara.
@@ -4382,7 +4455,7 @@ void GameCoreSection::updateAI()
     // endSave) and writes the whole cache via saveCard to p2-gencache.bin, then
     // exits. TEST_HOOKS + room-preview + env-gated so no exit path ships in a
     // production build.
-    if (pc_pikipelago_room_preview() && std::getenv("PIKMIN_P2_CACHE_SAVE") && generatorList) {
+    if (!isRetailSourceStage() && pc_pikipelago_room_preview() && std::getenv("PIKMIN_P2_CACHE_SAVE") && generatorList) {
         static bool saved = false;
         if (!saved) {
             saved = true;

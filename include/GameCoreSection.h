@@ -46,6 +46,18 @@ enum {
  * @brief TODO
  */
 struct GameCoreSection : public Node {
+    bool isRetailSourceStage() const {
+#if defined(PIKI_PC_PORT)
+        return mRetailSourceStage;
+#else
+        return false;
+#endif
+    }
+#if defined(PIKI_PC_PORT)
+    // Captured from the actual installed stage owner; selection expiry cannot
+    // turn this scene's cleanup or cache paths into a legacy surface dispatch.
+    bool mRetailSourceStage = false;
+#endif
 	GameCoreSection(Controller*, MapMgr*, Camera&);
 
 	virtual void update();        // _10
