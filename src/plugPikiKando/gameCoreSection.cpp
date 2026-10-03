@@ -1992,9 +1992,6 @@ void GameCoreSection::initStage()
 	}
 
 	naviMgr->getActiveNavi()->startKontroller();
-#if defined(PIKI_PC_PORT)
- pc_p2_original_captain_main_game_entered();
-#endif
 	PRINT("init stage done\n");
 }
 
@@ -2153,6 +2150,11 @@ void GameCoreSection::finalSetup()
     pc_p2_surface_save_scene_setup();
 	// Actor-lifetime (#397): mark the new scene ready for lifecycle fixtures.
 	pc_p2_scene_begin();
+#if defined(PIKI_PC_PORT)
+ // Both native roster bodies have now completed their actual init/reset.
+ // The canonical source descriptor must independently attest real binding.
+ pc_p2_original_captain_main_game_entered();
+#endif
 	PRINT("====================== FINAL SETUP DONE ======================\n");
 }
 
