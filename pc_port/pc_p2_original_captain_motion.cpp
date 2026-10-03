@@ -20,6 +20,8 @@
 #include <regex>
 #include <sstream>
 #include <locale>
+#include <stdexcept>
+#include <cstring>
 namespace p2original { namespace captain {
 namespace {
 bool fail(std::string& e,const char* why){e=why;return false;}
@@ -36,12 +38,33 @@ const char* names26[]={"akubi","asibumi","chatting","damage","dead","fue","furim
 const char* models[]={"orima1","orima3","syatyou"};
 bool locomotion(Motion m){return m==Motion::Walk||m==Motion::Run2||m==Motion::Nigeru;}
 struct Model {std::string sourceSha;rig::Model rig;Shape* shape=nullptr;std::map<unsigned,Clip> clips;std::string first;std::vector<unsigned char> topology;};
+// Native Shapes do not destroy their nested arrays/textures. One fixed cache
+// owns all three models (including partial failure) until process shutdown.
+// Sys-heap texture registrations survive ordinary App-heap resets. No Shape
+// destructor runs after the graphics system has gone away.
+struct NativeModels {
+ enum class Phase {Empty,Initializing,Ready,Failed};Phase phase=Phase::Empty;
+ const void* system=nullptr;std::string closure;std::array<Shape*,3> shapes{};
+ std::array<std::string,3> names;
+};
+NativeModels nativeModels;
+class CheckedRam final:public RamStream {
+public:explicit CheckedRam(const std::string& bytes):RamStream(const_cast<char*>(bytes.data()),int(bytes.size())){}
+ void read(void* dest,int size)override{if(size<0||mPosition<0||mPosition>mLength||size>mLength-mPosition)throw std::runtime_error("source captain native MOD overread");RamStream::read(dest,size);}
+ void setPosition(int pos)override{if(pos<0||pos>mLength)throw std::runtime_error("source captain native MOD seek");mPosition=pos;}
+ void setLength(int len)override{if(len!=mLength)throw std::runtime_error("source captain native MOD length mutation");}
+ void write(immut void*,int)override{throw std::runtime_error("source captain native MOD write");}
+};
+struct NativeScope {
+ int heap;Shape* previous;NativeScope():heap(gsys->setHeap(SYSHEAP_Sys)),previous(gsys->mCurrentShape){}
+ ~NativeScope(){gsys->mCurrentShape=previous;gsys->setHeap(heap);}
+};
 struct Actor {Model* model=nullptr;std::unique_ptr<pelplant::Geometry> geometry;std::array<MotionState,2> state;std::array<Listener,2> listener{};std::array<std::size_t,2> next{};std::array<bool,2> advancing{};bool down=false;int boundLock=-1;float downFrame=0;};
 std::vector<std::vector<std::string>> registry(const std::string& b){std::string clean;bool comment=false;for(char c:b){if(c=='#')comment=true;if(c=='\n')comment=false;if(!comment)clean+=c;}std::istringstream in(clean);in.imbue(std::locale::classic());int count;std::string word;std::vector<std::vector<std::string>> out;if(!(in>>count)||count!=67)return out;for(int i=0;i<count;++i){if(!(in>>word)||word!="{")return {};std::vector<std::string> row;while(in>>word&&word!="}")row.push_back(word);if(word!="}"||row.size()<3||row.back()!="-1")return {};out.push_back(std::move(row));}if(in>>word)return {};return out;}
 bool number(const std::string& b,const char* key,float& out){std::regex pattern(std::string("\\{")+key+"\\}\\s+4\\s+([-+0-9.eE]+)");auto begin=std::sregex_iterator(b.begin(),b.end(),pattern);if(begin==std::sregex_iterator())return false;auto match=*begin;if(++begin!=std::sregex_iterator())return false;std::istringstream in(match[1].str());in.imbue(std::locale::classic());std::string extra;return bool(in>>out)&&!(in>>extra)&&std::isfinite(out);}
 }
 struct SourceBank::Impl {
- bool prepared=false,bound=false;std::uint64_t generation=0;std::string fingerprint;std::array<std::string,5> sources;SourceParameters parameters;
+ bool prepared=false,bound=false;std::uint64_t selectionRevision=0;std::uint64_t generation=0;std::string fingerprint;std::array<std::string,5> sources;SourceParameters parameters;
  std::array<Model,3> model;std::map<unsigned,rig::Clip> joints;std::map<const Navi*,Actor> actors;
  bool sample(Actor& a,std::string& e){if(!a.geometry)return fail(e,"source captain native geometry absent");unsigned self=a.down?1000:unsigned(a.state[0].motion),bound=a.down?1000:unsigned(a.state[1].motion);auto sc=joints.find(self),bc=joints.find(bound);if(sc==joints.end()||bc==joints.end())return fail(e,"source captain joint clips absent");std::array<rig::Matrix,11> matrices;p2pose::Pose pose;if(!rig::joints(a.model->rig,sc->second,a.down?a.downFrame:a.state[0].frame,bc->second,a.down?a.downFrame:a.state[1].frame,a.down,matrices)||!rig::pose(a.model->rig,matrices,pose)||!p2pose::write(a.geometry->shape,pose))return fail(e,"source captain actual joint pose failed");e.clear();return true;}
 
@@ -49,7 +72,7 @@ struct SourceBank::Impl {
 SourceBank::SourceBank():m(new Impl){}SourceBank::~SourceBank()=default;
 bool SourceBank::prepare(std::string& e){
  if(m->prepared)return true;if(!pc_randomizer_original_session()||!gsys)return fail(e,"source captain bank requires actual selected session/system");
- auto next=std::make_unique<Impl>();const char* sourceRoles[]={"naviParms.txt","animmgr.txt","navicoll.txt","down/demo.stb","down/s03_dead1.bck"};for(unsigned i=0;i<5;++i)if(!get(sourceRoles[i],next->sources[i],e))return false;
+ auto next=std::make_unique<Impl>();next->selectionRevision=pc_randomizer_original_selection_revision();if(!next->selectionRevision)return fail(e,"source captain authenticated selection revision absent");const char* sourceRoles[]={"naviParms.txt","animmgr.txt","navicoll.txt","down/demo.stb","down/s03_dead1.bck"};for(unsigned i=0;i<5;++i)if(!get(sourceRoles[i],next->sources[i],e))return false;
  if(!number(next->sources[0],"p050",next->parameters.maximumHealth)||!number(next->sources[0],"p004",next->parameters.moveSpeed)||!number(next->sources[0],"p043",next->parameters.neutralStick)||!number(next->sources[0],"p044",next->parameters.cursorStick)||next->parameters.maximumHealth<=0||next->parameters.moveSpeed<=0||next->parameters.neutralStick<0||next->parameters.cursorStick<=next->parameters.neutralStick||next->parameters.cursorStick>1)return fail(e,"source captain parameters invalid");next->parameters.rawSourceSha=hash(next->sources[0]);
  auto rows=registry(next->sources[1]);if(rows.size()!=67)return fail(e,"source captain registry malformed");
  std::string bytes;if(!get("bank.txt",bytes,e))return false;std::string closure=bytes;for(const auto& b:next->sources)closure+=hash(b);std::istringstream in(bytes);in.imbue(std::locale::classic());std::string word,registrySha;int nmodel,nclip;if(!(in>>word>>registrySha>>nmodel>>nclip)||word!="P2_SOURCE_CAPTAIN_BANK_1"||registrySha!=hash(next->sources[1])||nmodel!=3||(nclip!=20&&nclip!=26))return fail(e,"source captain bank header invalid");
@@ -72,6 +95,20 @@ bool SourceBank::prepare(std::string& e){
  // independent self/bound clocks and root4 joint composition are implemented.
  // Retained verified source buffers do not grant runtime readiness.
  next->fingerprint=hash(closure);next->prepared=true;m=std::move(next);e.clear();return true;
+}
+bool SourceBank::prepareNativeModels(std::string& e){
+ if(!m->prepared||!gsys||!m->selectionRevision||m->selectionRevision!=pc_randomizer_original_selection_revision())return fail(e,"source captain native models require current prepared selection/system");
+ auto& cache=nativeModels;
+ if(cache.phase==NativeModels::Phase::Ready){if(cache.system!=gsys||cache.closure!=m->fingerprint)return fail(e,"source captain native model cache belongs to another closure/system");for(unsigned j=0;j<3;++j)m->model[j].shape=cache.shapes[j];e.clear();return true;}
+ if(cache.phase!=NativeModels::Phase::Empty)return fail(e,"source captain native model initialization failed or reentered");
+ for(const auto& model:m->model)if(!sourceCaptainMod(model.first))return fail(e,"source captain native model retained bytes invalid");
+ cache.phase=NativeModels::Phase::Initializing;cache.system=gsys;cache.closure=m->fingerprint;
+ try{NativeScope scope;for(unsigned j=0;j<3;++j){cache.names[j]="p2-source-captain-"+std::string(models[j])+"-"+cache.closure;cache.shapes[j]=new Shape;auto* shape=cache.shapes[j];shape->mName=cache.names[j].c_str();gsys->mCurrentShape=shape;CheckedRam stream(m->model[j].first);shape->read(stream);if(stream.getPending()!=0)throw std::runtime_error("source captain native MOD trailing bytes");
+ // Every texture is embedded and prevalidated. resolveTextureNames would
+ // borrow ambient/path-cache textures whose App ownership is unsuitable.
+ shape->initialise();shape->initIni(false);shape->optimize();if(!pelplant::Geometry::admits(*shape))throw std::runtime_error("source captain native static model unsupported");}}
+ catch(const std::exception& ex){cache.phase=NativeModels::Phase::Failed;e=ex.what();return false;}catch(...){cache.phase=NativeModels::Phase::Failed;return fail(e,"source captain native model initialization exception");}
+ cache.phase=NativeModels::Phase::Ready;for(unsigned j=0;j<3;++j)m->model[j].shape=cache.shapes[j];e.clear();return true;
 }
 bool SourceBank::parameters(SourceParameters& out,std::string& e)const{if(!m->prepared)return fail(e,"source captain parameters not prepared");out=m->parameters;e.clear();return true;}
 bool SourceBank::sourceBytes(SourceResource r,std::string& out,std::string& e)const{unsigned i=unsigned(r);if(!m->prepared||i>=m->sources.size())return fail(e,"source captain retained source unavailable");out=m->sources[i];e.clear();return true;}

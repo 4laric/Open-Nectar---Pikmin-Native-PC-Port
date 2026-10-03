@@ -22,6 +22,10 @@ class SourceBank {
 public:
  SourceBank();~SourceBank();
  bool prepare(std::string&);
+ // Allocate at most three process-owned native models from retained verified
+ // bytes. Reuses only the identical closure/system; never loads ambient paths.
+ // This does not bind actors or grant scene/world readiness.
+ bool prepareNativeModels(std::string&);
  bool parameters(SourceParameters&,std::string&)const;
  // Retained exact descriptor-selected source bytes; no ambient path getter.
  bool sourceBytes(SourceResource,std::string& out,std::string&)const;
