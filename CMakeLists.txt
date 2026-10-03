@@ -3741,6 +3741,16 @@ add_executable(pc_p2_original_foliage_test tools/test_p2_original_foliage.cpp
 target_include_directories(pc_p2_original_foliage_test PRIVATE pc_port)
 target_compile_options(pc_p2_original_foliage_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
 add_test(NAME pc_p2_original_foliage_test COMMAND pc_p2_original_foliage_test)
+
+if(PIKMIN_ORIGINAL_SENTINEL)
+    # Pure producer/journal controls only; test main never enters game sources.
+    add_executable(pc_p2_original_shijimi_group_test
+        tools/test_p2_original_shijimi_group.cpp
+        pc_port/pc_p2_original_shijimi_group.cpp)
+    target_include_directories(pc_p2_original_shijimi_group_test PRIVATE pc_port)
+    target_compile_options(pc_p2_original_shijimi_group_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+    add_test(NAME pc_p2_original_shijimi_group_test COMMAND pc_p2_original_shijimi_group_test)
+endif()
 get_property(p2_retail_catalog_consumers DIRECTORY PROPERTY BUILDSYSTEM_TARGETS)
 foreach(p2_retail_catalog_consumer IN LISTS p2_retail_catalog_consumers)
     if(NOT p2_retail_catalog_consumer STREQUAL "p2_retail_cave_catalog")
