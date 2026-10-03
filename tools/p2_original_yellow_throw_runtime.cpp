@@ -59,13 +59,17 @@ void stage(Navi* captain){
     const unsigned uid=p2original::originalSourceCatalogUid(key);
     std::string error;
     require(pc_p2_original_piki_origin_install(fingerprint,{{key,uid,20,2}},error),"scoped fixture catalog");
-    require(p2original::originalProgress().initialize("yellow1263-fixture",error),"scoped fixture progress");
-    require(pc_p2_original_piki_recruit_bind("yellow1263-fixture",fingerprint,error),"paired fixture recruitment");
+    const std::string campaign="7e98c5bed07d3b4c39c3a3a0765b129bf2f90e22d652b1bb3bbe514b932c1bad";
+    require(p2original::originalProgress().initialize(campaign,error),"scoped fixture progress");
+    // This placed debug member is outside original story/day-zero acquisition.
+    auto context=p2original::originalProgress().context();context.story=false;
+    require(p2original::originalProgress().restoreContext(context,error),"disclosed non-story fixture context");
+    require(pc_p2_original_piki_recruit_bind(campaign,fingerprint,error),"paired fixture recruitment");
     OriginalPikiBody body{{key,uid,0,1,fingerprint},{2,false,false}};
     const auto& pos=captain->mSRT.t;
     require(pc_p2_original_piki_physical_birth(body,{{pos.x+12,pos.y,pos.z}},yellow,error)==p2original::PikiBirthResult::Born,"disclosed staged Yellow birth");
     require(live()==20&&pc_p2_original_rgb_throw_species(yellow)==2,"exact Yellow authority/population");
-    std::puts("ORIGINAL_YELLOW_THROW_STAGED live=20 reds=19 yellow=1 catalog_fixture=1 relocated_debug_member=1 acquisition=0 campaign=0");
+    std::puts("ORIGINAL_YELLOW_THROW_STAGED live=20 reds=19 yellow=1 catalog_fixture=1 relocated_debug_member=1 non_story_fixture=1 acquisition=0 campaign=0");
     std::fflush(nullptr);
 }
 class ThrowApp:public PlugPikiApp {
