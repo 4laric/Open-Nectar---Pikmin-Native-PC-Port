@@ -24,8 +24,8 @@
 //     the eater for each consumed White Pikmin while preserving the normal
 //     InteractKill death/corpse.
 //   * Catfish ships no waitact1 clip (the KochappyBase Turn motion), so the Turn
-//     state reuses wait1. The Eat motion (waitact2) is not entered because the
-//     bite and swallow both live in the single attack clip.
+//     state reuses wait1. Original actors enter the Eat motion (waitact2) when
+//     the bite captures no prey; legacy AP actors retain the attack clip.
 //   * Target detection accepts the nearest Navi or Pikmin; the source view angle
 //     is treated as a full hemisphere because the Catfish general block does not
 //     override it. The attack sweep angle is a P1-host ~45 deg; turn rate and the
@@ -346,7 +346,7 @@ void transition(Catfish& s, State state, const char* clip, unsigned generator) {
 // Source StateAttack KEYEVENT_2: attackNavi + eatPikmin. The P1 host resolves
 // eatPikmin as a two-slot nearest-first capture inside the source attack sweep;
 // the captured Pikmin are consumed exactly once at the banked swallow event.
-void biteEvent(BTeki* actor, Catfish& s, unsigned generator, int frame) {
+int biteEvent(BTeki* actor, Catfish& s, unsigned generator, int frame) {
     const Vector3f pos = actor->getPosition();
     for (Navi* navi : pc_p2_navis()) {
         if (!navi->isAlive()) continue;
@@ -384,6 +384,7 @@ void biteEvent(BTeki* actor, Catfish& s, unsigned generator, int frame) {
                     generator, frame, slot);
     }
     std::fflush(stdout);
+    return count;
 }
 
 // Source StateAttack KEYEVENT_3: swallowPikmin. Each captured Pikmin is killed
@@ -770,12 +771,21 @@ void pc_p2_catfish_update(BTeki* actor) {
         // exactly once per crossing, in source frame order.
         for (const p2catfishevents::Dispatched& event : s.events.advance(dt)) {
             if (event.action == p2catfishevents::Action::Bite) {
-                biteEvent(actor, s, generator, event.frame);
+                const int captured = biteEvent(actor, s, generator, event.frame);
+                if (s.original && !captured) {
+                    // Retail StateAttack KEY2 switches motion when eatPikmin
+                    // captures no prey. Cancel any later events already queued
+                    // from this attack crossing before entering the Eat clip.
+                    s.clip = "waitact2";
+                    s.stateTime = 0.0f;
+                    s.events.start(clips.at(s.clip).sampled, s.clip);
+                    break;
+                }
             } else if (event.action == p2catfishevents::Action::Swallow) {
                 swallowEvent(actor, s, generator);
             }
         }
-        if (s.stateTime >= clipDuration("attack")) {
+        if (s.stateTime >= clipDuration(s.original ? s.clip : "attack")) {
             for (int i = 0; i < p2catfish::kMouthSlots; ++i) s.slots[i] = nullptr;
             Creature* target = nearestTarget(pos);
             if (target && attackable(s, pos, target)) {
