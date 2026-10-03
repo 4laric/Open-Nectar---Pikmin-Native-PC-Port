@@ -65,6 +65,8 @@ or rebind cargo; the floor owner retires actors after accepted release. This
 permits original leave-behind semantics once the owning retention is qualified.
 A read-only, versioned pending snapshot preserves every unfinished cargo's
 full source/floor/scene/birth identity, including quiescent ground cargo.
+Unexpected kills revoke pool-address ownership immediately and preserve only
+typed source/scene tombstones. Reused native pool addresses are not Pod cargo.
 It grants no SAVE authority. Pending cargo must continue to refuse card writes
 until the SAVE owner can atomically compose cargo, Pod and the canonical ledger.
 

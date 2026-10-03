@@ -96,9 +96,11 @@ public:
 };
 enum class Phase {Bound,Sucking,Completed,Lost};
 struct Cargo {p2retail::BirthIdentity birth;p2retail::SceneIdentity scene;CompletedCallback callback;Phase phase=Phase::Bound;};
+struct LostCargo {p2retail::BirthIdentity birth;p2retail::SceneIdentity scene;};
 Config config;ContextProvider contextProvider;Shape* shape=nullptr;Pod* pod=nullptr;
 CreatureNode* node=nullptr;MeltingPotMgr* manager=nullptr;
 std::map<Pellet*,Cargo> cargo;
+std::vector<LostCargo> lostCargo; // Identity tombstones never own recycled pool addresses.
 bool prepared=false,committed=false,everSucked=false,retaining=false;Pellet* completing=nullptr;
 struct RetainScope {RetainScope(){retaining=true;}~RetainScope(){retaining=false;}};
 bool current(p2retail::Snapshot* out=nullptr){
@@ -114,7 +116,7 @@ bool moving(Pellet* actor,const Cargo& c){
 }
 void clear(){
  if(pod)pod->live=false;if(node){node->del();node->mCreature=nullptr;}
- pod=nullptr;node=nullptr;manager=nullptr;shape=nullptr;cargo.clear();contextProvider={};
+ pod=nullptr;node=nullptr;manager=nullptr;shape=nullptr;cargo.clear();lostCargo.clear();contextProvider={};
  config={};prepared=committed=everSucked=false;completing=nullptr;
  // App-heap resources share the floor lifetime, never free borrowed textures.
 }
@@ -171,6 +173,7 @@ bool pc_p2_original_pod_bind_cargo(Pellet* p,const p2retail::BirthIdentity& birt
  if(!config.births->expectedBirth(*c,config.floor.floor,scene,birth.row,birth.ordinal,expected,e)
   ||!(birth==expected))return reject(e,"pod_cargo_unverified_epoch_activation");
  for(const auto& row:cargo)if(row.second.birth.instance==birth.instance)return reject(e,"pod_duplicate_cargo_incarnation");
+ for(const auto& lost:lostCargo)if(lost.scene==scene&&lost.birth.instance==birth.instance)return reject(e,"pod_lost_original_cargo_requires_recovery");
  cargo.emplace(p,Cargo{birth,scene,std::move(callback),Phase::Bound});e.clear();return true;
 }
 bool pc_p2_original_pod_owns(const Pellet* p){return cargo.count(const_cast<Pellet*>(p))!=0;}
@@ -180,11 +183,12 @@ bool pc_p2_original_pod_completed(Pellet* p,Suckable* receiver,const p2retail::S
  return completing==p&&it!=cargo.end()&&it->second.phase==Phase::Sucking&&it->second.scene==scene
   &&p->getState()==PELSTATE_Goal&&p->mTargetGoal==receiver&&pc_p2_original_pod_context(receiver,scene,out);
 }
-unsigned pc_p2_original_pod_pending(){unsigned n=(completing||retaining)?1:0;for(const auto& row:cargo)if(moving(row.first,row.second))++n;return n;}
+unsigned pc_p2_original_pod_pending(){unsigned n=static_cast<unsigned>(lostCargo.size())+((completing||retaining)?1:0);for(const auto& row:cargo)if(moving(row.first,row.second))++n;return n;}
 bool pc_p2_original_pod_snapshot(const p2retail::SceneIdentity& scene,p2originalpod::Snapshot& out){
  if(!pod||!committed||completing||!(scene==config.floor.scene)||!current())return false;
  p2originalpod::Snapshot capture;capture.floor=config.floor;capture.unit=config.unit;capture.slot=config.slot;capture.committed=true;
  for(const auto& row:cargo)if(row.second.phase!=Phase::Completed)capture.pending.push_back({row.second.birth,static_cast<unsigned>(row.second.phase),moving(row.first,row.second)});
+ for(const auto& lost:lostCargo)capture.pending.push_back({lost.birth,static_cast<unsigned>(Phase::Lost),true});
  out=std::move(capture);return true;
 }
 bool pc_p2_original_pod_release(std::string& e){
@@ -236,6 +240,8 @@ bool P2OriginalPodNativeSeam::done(Pellet* p,const PelletGoalState& state){
 void P2OriginalPodNativeSeam::cleanup(Pellet* p){auto it=cargo.find(p);if(it!=cargo.end()&&it->second.phase==Phase::Sucking)it->second.phase=Phase::Bound;}
 void pc_p2_original_pod_forget_pellet(Pellet* p){
  auto it=cargo.find(p);if(it==cargo.end())return;
- if(it->second.phase==Phase::Completed)cargo.erase(it);
- else it->second.phase=Phase::Lost; // Lost cargo cannot silently permit unload/SAVE.
+ if(it->second.phase!=Phase::Completed)lostCargo.push_back({it->second.birth,it->second.scene});
+ // Revoke the native pool-address claim even on loss. The identity tombstone
+ // still blocks unload/SAVE, while an unrelated recycled Pellet is unowned.
+ cargo.erase(it);
 }
