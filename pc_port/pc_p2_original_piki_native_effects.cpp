@@ -1,5 +1,6 @@
 #include "pc_p2_original_piki_native_effects.h"
 #include "pc_p2_original_piki_native_facts.h"
+#include "pc_p2_original_captain_scene.h"
 #include "pc_p2_piki_jpa_native.h"
 #include "pc_p2_piki_jpa_render_scope.h"
 #include "pc_p2_retail_scene.h"
@@ -7,7 +8,6 @@
 #include <array>
 #include <list>
 #include <memory>
-#include <sstream>
 #include <thread>
 #include <cmath>
 #include <exception>
@@ -50,6 +50,9 @@ struct Owner final:NativeEffects {
    ||binding.scene->incarnation()!=binding.incarnation||binding.scene->selectedCampaign()!=binding.campaign
    ||binding.scene->selectedFingerprint()!=binding.fingerprint||binding.scene->sourceCatalog()!=binding.catalog
    ||binding.scene->captainAt(0)!=binding.captains[0]||binding.scene->captainAt(1)!=binding.captains[1])return nullptr;
+  try{std::string error;
+   if(!pc_p2_original_captain_piki_jpa_current(manager->bank().selected(),error))return nullptr;
+  }catch(...){return nullptr;}
   return binding.scene;
  }
  const captain::LoadedScene& scene()const override{
@@ -71,7 +74,7 @@ struct Owner final:NativeEffects {
   return true;
  }
  bool action(std::string& e)const {
-  if(!exact(e))return false;
+  if(!exact(e)||!pc_p2_original_captain_piki_jpa_current(manager->bank().selected(),e))return false;
   const auto* world=pc_p2_original_captain_world();
   if(!world||(world->phase()!=captain::Phase::Loading&&world->phase()!=captain::Phase::GameWorldActive))
    return fail(e,"Piki effect creation requires actual Loading or Active World");
@@ -192,7 +195,7 @@ bool Owner::nudgeRumble(Handle h,Navi*,std::string& e){
  return fail(e,"P2_PIKI_RUMBLE_UNAVAILABLE: actual source rumble owner required");
 }
 bool RenderScene::selectedCurrent(const pikiJPA::SelectedIdentity& s,std::string& e)const {
- if(!o.exact(e))return false;
+ if(!o.exact(e)||!pc_p2_original_captain_piki_jpa_current(s,e))return false;
  if(s.campaignSHA!=o.binding.campaign||s.packetSHA!=o.packet||s.session!=o.stamp)
   return fail(e,"Piki JPA full selected effect-owner stamp differs");
  e.clear();return true;
@@ -225,7 +228,8 @@ bool RenderScene::endHaloDraw(Graphics& g,std::string& e){return o.exact(e)&&o.r
 bool prepareNativeEffects(const p2retail::SceneContext& stage,std::string& e){
  auto& o=owner();Operation op(o);if(!op.entered)return op.finish(false,e);
  if(o.stage){
-  if(o.stage==&stage&&o.prepared)return op.finish(o.exact(e),e);
+  if(o.stage==&stage&&o.prepared)return op.finish(o.exact(e)
+   &&pc_p2_original_captain_piki_jpa_current(o.manager->bank().selected(),e),e);
   return fail(e,"Piki effects retain preceding or partial manager; checked retirement required");
  }
  SceneBinding binding;
@@ -238,29 +242,25 @@ bool prepareNativeEffects(const p2retail::SceneContext& stage,std::string& e){
  const auto initialSerial=stage.nativeSerial(),initialRevision=stage.selectionRevision();
  const auto initialPhase=stage.phase();
  try{
-  const auto packet=pc_randomizer_session_fingerprint();
-  // Full tuple of this real owner, not a guessed hash/session identifier.
-  std::ostringstream stamp;stamp<<"piki-effects-1:"<<binding.fingerprint<<':'<<binding.catalog<<':'
-   <<std::hex<<initialSerial<<':'<<initialRevision<<':'<<binding.incarnation;
-  pikiJPA::Bank bank;std::vector<pikiJPA::SelectedBytes> inputs;std::size_t count=0;
-  const auto* roles=pikiJPA::resourceRoles(count);
-  for(std::size_t i=0;i<count;++i){std::string bytes;
-   if(!pc_randomizer_original_input(std::string("p2-original/piki-jpa/")+roles[i].role,bytes,e))return false;
-   pikiJPA::SelectedBytes b;b.role=roles[i].role;b.archiveMember=pikiJPA::sourceArchive;b.archiveSHA=pikiJPA::sourceArchiveSHA;
-   b.memberOffset=roles[i].offset;b.memberBytes=roles[i].bytes;b.bytes.assign(bytes.begin(),bytes.end());inputs.push_back(std::move(b));
-   if(o.reentered||pc_p2_retail_scene_prepared()!=&stage||!nativeSceneCurrent(binding,false,e)
-    ||stage.nativeSerial()!=initialSerial||stage.selectionRevision()!=initialRevision||stage.phase()!=initialPhase
-    ||pc_randomizer_session_fingerprint()!=packet)return fail(e,"Piki selected input observation changed authority");
-  }
-  if(!bank.load({binding.campaign,packet,stamp.str()},inputs,e))return false;
+  const auto* selected=pc_p2_original_captain_piki_jpa_bank(e);
+  if(!selected)return false;
+  // The canonical Captain scene owns selected17 inputs and the complete,
+  // lossless session representation. This consumer only retains its bank.
+  const pikiJPA::Bank bank=*selected;
+  const auto identity=bank.selected();
+  if(identity.campaignSHA!=binding.campaign||identity.packetSHA!=binding.fingerprint)
+   return fail(e,"Piki canonical selected bank differs from retained Body binding");
+  if(!pc_p2_original_captain_piki_jpa_current(identity,e))return false;
   if(o.reentered||pc_p2_retail_scene_prepared()!=&stage||stage.nativeSerial()!=initialSerial
-   ||stage.selectionRevision()!=initialRevision||stage.phase()!=initialPhase||!nativeSceneCurrent(binding,false,e))
+   ||stage.selectionRevision()!=initialRevision||stage.phase()!=initialPhase||!nativeSceneCurrent(binding,false,e)
+   ||pc_p2_original_captain_piki_jpa_bank(e)!=selected
+   ||!pc_p2_original_captain_piki_jpa_current(identity,e))
    return fail(e,"Piki selected manager birth changed full Stage tuple");
   std::unique_ptr<pikiJPA::Manager> fresh;
   if(!o.manager)fresh=std::make_unique<pikiJPA::Manager>(bank); // actual first manager constructor0
   else if(!o.manager->rebindSelectedBank(bank,e))return false; // preserves frontier across scene reset
   o.binding=binding;o.serial=initialSerial;o.revision=initialRevision;
-  o.stamp=stamp.str();o.packet=packet;o.thread=std::this_thread::get_id();
+  o.stamp=identity.session;o.packet=identity.packetSHA;o.thread=std::this_thread::get_id();
   if(fresh)o.manager=std::move(fresh);
   o.stage=&stage; // retain before native renderer construction
   o.halo=std::make_unique<pikiJPA::NativeEffects>(o.view);
@@ -269,7 +269,8 @@ bool prepareNativeEffects(const p2retail::SceneContext& stage,std::string& e){
  }catch(const std::exception& x){e=std::string("Piki effects resource birth exception: ")+x.what();return false;}
 }
 NativeEffects* nativeEffects(const captain::LoadedScene& scene,std::string& e){
- auto& o=owner();if(!o.prepared||!o.halo||o.binding.scene!=&scene||!o.exact(e)){
+ auto& o=owner();if(!o.prepared||!o.halo||o.binding.scene!=&scene||!o.exact(e)
+  ||!pc_p2_original_captain_piki_jpa_current(o.manager->bank().selected(),e)){
   fail(e,"Piki effects concrete composition remains unavailable or partial");return nullptr;}
  e.clear();return &o;
 }
