@@ -249,8 +249,10 @@ bool pc_p2_original_number_update(Pellet* p){
  trace.hardIntersect=false;
  if(!pc_p2_original_number_trace_platforms(p,trace,nullptr,contacts,e))fault(e);
  if(!sameBinding())return true;
- // Source MoveInfo points at the actual velocity by the platform/bounce phase.
- // First-floor callbacks observe the traced velocity, before floor forces.
+ // UNQUALIFIED candidate: the P1 map/Plat helper above does not preserve
+ // source MoveInfo's live body-velocity pointer across platform callbacks.
+ // Actual scene/body providers must supply that bridge before admission.
+ // This publication supplies traced velocity only to the candidate bounce.
  p->mVelocity.set(trace.velocity.x,trace.velocity.y,trace.velocity.z);
  // Source first-floor bounce callback precedes floor assignment and force.
  if(contacts.floor&&!previousFloor){p->bounceCallback();if(!sameBinding())return true;}
