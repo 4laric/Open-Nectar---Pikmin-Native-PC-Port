@@ -101,6 +101,14 @@ class PelplantApp final:public PlugPikiApp {
   if(!catalog.retire(actor,found->handle)){error="original fixture instance retirement failed";return false;}return true;
  }
  void setup(){
+  // PlugPikiApp::idle clears the active heap before returning. This fixture
+  // admits engine resources and births after that return, so use the same
+  // App heap as ordinary course initialization and restore the caller's heap.
+  struct HeapScope {
+   int previous;
+   HeapScope():previous(gsys->setHeap(SYSHEAP_App)){}
+   ~HeapScope(){gsys->setHeap(previous);}
+  } heapScope;
   source=rows();const int rootsBefore=tekiMgr->getSize(),pelletsBefore=pelletMgr->getSize();
   native=std::make_unique<Native>([](unsigned color){return color<3&&playerState&&playerState->hasContainer(int(color));});
   auto& provider=native->provider();std::string error;
