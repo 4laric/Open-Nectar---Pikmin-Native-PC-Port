@@ -405,6 +405,8 @@ set(PC_PORT_SOURCES
     pc_port/pc_p2_flora_actor.cpp
     pc_port/pc_p2_original_pelplant.cpp
     pc_port/pc_p2_original_pelplant_native.cpp
+    pc_port/pc_p2_original_foliage.cpp
+    pc_port/pc_p2_original_foliage_native.cpp
     pc_port/pc_p2_receipt_host.cpp
     pc_port/pc_p2_delivery_host.cpp
     pc_port/pc_p2_pom.cpp
@@ -3389,3 +3391,11 @@ add_executable(p2_equipment_projection_test tools/pc_p2_equipment_projection_tes
 target_include_directories(p2_equipment_projection_test BEFORE PRIVATE tools/equipment_stubs pc_port)
 target_compile_options(p2_equipment_projection_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
 add_test(NAME p2_equipment_projection_test COMMAND p2_equipment_projection_test)
+
+# Original decorative source91/88 (#1251); no asset payloads are committed.
+pikmin_add_ci_fixture(original_foliage tools/p2_original_foliage_runtime.cpp)
+add_executable(pc_p2_original_foliage_test tools/test_p2_original_foliage.cpp
+    pc_port/pc_p2_original_foliage.cpp pc_port/pc_p2_original_spawn_plan.cpp)
+target_include_directories(pc_p2_original_foliage_test PRIVATE pc_port)
+target_compile_options(pc_p2_original_foliage_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME pc_p2_original_foliage_test COMMAND pc_p2_original_foliage_test)
