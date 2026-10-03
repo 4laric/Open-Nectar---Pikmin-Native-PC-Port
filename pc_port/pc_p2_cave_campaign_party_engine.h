@@ -8,6 +8,9 @@ bool pc_p2_cave_campaign_party_capture(P2CaveCampaignParty& party,bool inside);
 void pc_p2_cave_campaign_party_restore(const P2CaveCampaignParty& party);
 class Piki;
 void pc_p2_cave_campaign_party_forget(Piki* body);
+// Read-only diagnostics; census never allocates/adopts body identities.
+void pc_p2_cave_campaign_party_observe();
+void pc_p2_cave_campaign_party_died(Piki* body);
 void pc_p2_cave_campaign_party_scene_exit();
 // Original source owner supplies actual source record/attempt/activation only
 // after a successful native birth. No pointer/position identity inference.

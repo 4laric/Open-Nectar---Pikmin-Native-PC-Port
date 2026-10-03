@@ -125,6 +125,7 @@ public:int idle()override{
     SDL_JoystickSetVirtualAxis(pad,SDL_CONTROLLER_AXIS_LEFTY,Sint16(-int(sy)*256));SDL_JoystickUpdate();
     if(frames%30==0&&n){std::printf("CAVE_VISIBLE_OBSERVER frame=%d stage=%d floor=%d ready=%d living=%d formation=%d xyz=%.3f,%.3f,%.3f UI=%d\n",
         frames,stage,boundary.floor,int(ready),living,formation,n->mSRT.t.x,n->mSRT.t.y,n->mSRT.t.z,int(choice.active));std::fflush(nullptr);}
+    if(frames%30==0&&n&&pikiMgr)pc_p2_cave_campaign_party_observe();
     if(std::chrono::steady_clock::now()-start>std::chrono::seconds(85)){std::puts("P2_CAVE_VISIBLE_RUNTIME TIMEOUT");finish(2);}
     ++frames;return PlugPikiApp::idle();
 }};
