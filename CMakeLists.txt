@@ -338,6 +338,7 @@ set(PC_PORT_SOURCES
     pc_port/pc_p2_campaign_treasure.cpp
     pc_port/pc_p2_campaign_treasure_held.cpp
     pc_port/pc_p2_retail_treasure_engine.cpp
+    pc_port/pc_p2_original_pod.cpp
     pc_port/pc_p2_captain.cpp
     pc_port/pc_p2_second_captain.cpp
     pc_port/pc_p2_economy.cpp
