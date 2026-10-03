@@ -1,4 +1,5 @@
 #include "pc_p2_ship.h"
+#include "pc_p2_original_onyon_native.h"
 #include "pc_dev_console.h"
 #include "pc_p2_ship_store.h"
 #include "pc_p2_purple.h"
@@ -3240,6 +3241,8 @@ static void randomizerApplyMaturity()
         for (int color = 0; color < 3; ++color) {
             const int tier = pc_randomizer_maturity(color);
             GoalItem* onion = itemMgr->getContainer(color);
+            bool originalBooted=false;
+            if (pc_p2_original_onyon_booted(onion,originalBooted)) continue;
             for (int happa = Leaf; happa < tier; ++happa) {
                 grown += pikiInfMgr.mPikiCounts[color][happa];
                 pikiInfMgr.mPikiCounts[color][tier] += pikiInfMgr.mPikiCounts[color][happa];
@@ -4211,6 +4214,8 @@ void GameCoreSection::updateAI()
         for (int color = 0; color < 3; ++color) {
             if (bbftColorGranted[color] || !pc_bbft_color_access(color)) continue;
             GoalItem* onion = itemMgr->getContainer(color);
+            bool originalBooted=false;
+            if (pc_p2_original_onyon_booted(onion,originalBooted)) continue;
             const bool booted = playerState->hasBootContainer(color);
             playerState->setContainer(color);
             if (onion && !booted) onion->startBoot();

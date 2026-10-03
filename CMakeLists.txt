@@ -274,6 +274,8 @@ set(PC_PORT_SOURCES
     pc_port/pc_p2_original_drop.cpp
     pc_port/pc_p2_original_drop_engine.cpp
     pc_port/pc_p2_original_gen_object.cpp
+    pc_port/pc_p2_original_onyon.cpp
+    pc_port/pc_p2_original_onyon_native.cpp
     pc_port/pc_p2_campaign_goal_probe.cpp
     pc_port/pc_bbft.cpp
     pc_port/pc_p2_surface_topology.cpp
@@ -3294,3 +3296,7 @@ endif()
 # Real native factory/cache transport fixture; synthetic zero-birth admission only.
 pikmin_add_ci_fixture(original_gen_object tools/p2_original_gen_object_runtime.cpp)
 pikmin_add_ci_fixture(original_piki_init tools/p2_original_piki_init_runtime.cpp)
+pikmin_add_ci_fixture(original_onyon tools/p2_original_onyon_runtime.cpp)
+
+add_executable(pc_p2_original_onyon_test tools/test_p2_original_onyon.cpp pc_port/pc_p2_original_onyon.cpp)
+target_include_directories(pc_p2_original_onyon_test PRIVATE "${PROJECT_SOURCE_DIR}/pc_port")
