@@ -267,6 +267,8 @@ set(PC_PORT_SOURCES
     pc_port/pc_p2_original_catalog.cpp
     pc_port/pc_p2_original_actor.cpp
     pc_port/pc_p2_original_lifecycle.cpp
+    pc_port/pc_p2_original_armor.cpp
+    pc_port/pc_p2_original_armor_native.cpp
     pc_port/pc_p2_original_group.cpp
     pc_port/pc_p2_original_group_engine.cpp
     pc_port/pc_p2_original_piki_init.cpp
@@ -408,6 +410,8 @@ set(PC_PORT_SOURCES
     pc_port/pc_p2_kurage_receiver.cpp
     pc_port/pc_p2_sokkuri.cpp
     pc_port/pc_p2_uji.cpp
+    pc_port/pc_p2_original_uji.cpp
+    pc_port/pc_p2_original_uji_native.cpp
     pc_port/pc_p2_armor.cpp
     pc_port/pc_p2_otakara.cpp
     pc_port/pc_p2_otakara_fx.cpp
@@ -3134,6 +3138,12 @@ add_executable(pc_p2_original_pelplant_test tools/test_p2_original_pelplant.cpp
 target_include_directories(pc_p2_original_pelplant_test PRIVATE pc_port)
 target_compile_options(pc_p2_original_pelplant_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
 add_test(NAME pc_p2_original_pelplant_test COMMAND pc_p2_original_pelplant_test)
+add_executable(pc_p2_original_uji_test tools/test_p2_original_uji.cpp
+    pc_port/pc_p2_original_uji.cpp pc_port/pc_p2_original_spawn_plan.cpp
+    pc_port/pc_p2_original_drop.cpp pc_port/pc_p2_original_catalog.cpp)
+target_include_directories(pc_p2_original_uji_test PRIVATE pc_port)
+target_compile_options(pc_p2_original_uji_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME pc_p2_original_uji_test COMMAND pc_p2_original_uji_test)
 pikmin_add_ci_fixture(captain_onion_owner_sdl tools/p2_captain_onion_owner_sdl_fixture.cpp)
 if(TARGET pikmin_ci_fixture_captain_onion_owner_sdl)
     target_include_directories(pikmin_ci_fixture_captain_onion_owner_sdl PRIVATE ${P2_CHALLENGE_GUARD_INCLUDE_DIR})
@@ -3294,3 +3304,13 @@ endif()
 # Real native factory/cache transport fixture; synthetic zero-birth admission only.
 pikmin_add_ci_fixture(original_gen_object tools/p2_original_gen_object_runtime.cpp)
 pikmin_add_ci_fixture(original_piki_init tools/p2_original_piki_init_runtime.cpp)
+
+# Original retail Armor source-15 provider contract; no engine/gameplay substitute.
+add_executable(pc_p2_original_armor_test tools/pc_p2_original_armor_test.cpp
+ pc_port/pc_p2_original_armor.cpp pc_port/pc_p2_original_spawn_plan.cpp
+ pc_port/pc_p2_original_drop.cpp pc_port/pc_p2_original_catalog.cpp)
+target_include_directories(pc_p2_original_armor_test PRIVATE pc_port)
+target_compile_options(pc_p2_original_armor_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME pc_p2_original_armor_test COMMAND pc_p2_original_armor_test)
+
+pikmin_add_ci_fixture(original_armor tools/p2_original_armor_runtime.cpp)
