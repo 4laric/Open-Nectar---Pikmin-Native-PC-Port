@@ -149,6 +149,8 @@ P2CaveCacheBanks generatedCaveCache;
 P2SurfaceSession surfaceSession;
 std::string originalCampaign, treasureSource;
 std::string originalCatalogRoot;
+p2originalsession::Bundle originalInputs;
+std::uint64_t originalSelectionRevision=0;
 p2original::SourceCalendar originalCalendar;
 bool originalStandalone=false;
 p2treasure::Catalog verifiedTreasureCatalog;
@@ -819,7 +821,10 @@ bool pc_randomizer_init(int argc, char** argv) {
         if(!p2original::originalProgress().initialize(originalCampaign,error)||!pc_p2_original_incarnation_initialize(originalCampaign,error))fail("original source authority initialization failed");
         directory=std::filesystem::absolute(bootstrap).parent_path();campaignDirectory=directory.parent_path().parent_path()/"campaign";saveRoot=(campaignDirectory/"card").generic_string();
         if(std::filesystem::exists(directory/"hello.txt")||std::filesystem::exists(directory/"checks.txt"))fail("original run directory already used");
-        originalStandalone=true;schema=1;checkCount=0;loadCampaignCheckpoint();enabled=true;pc_randomizer_update();
+        originalStandalone=true;schema=1;checkCount=0;loadCampaignCheckpoint();
+        originalInputs=std::move(bundle);
+        if(originalSelectionRevision==UINT64_MAX)fail("original session selection revision exhausted");
+        ++originalSelectionRevision;enabled=true;pc_randomizer_update();
         std::ofstream hello(directory/"hello.txt");hello<<"ORIGINAL_P2_HELLO 1 "<<token<<' '<<fingerprint<<" original-campaign-state-v1 p2-second-captain-v1";
         if(!treasureSource.empty())hello<<" source-treasure-state-v1";hello<<" END\n";hello.close();if(!hello)fail("cannot publish original native handshake");
         return true;
@@ -2451,6 +2456,16 @@ bool pc_randomizer_second_captain() { return enabled && secondCaptain; }
 bool pc_randomizer_resumed() { return enabled && campaignResumed; }
 std::string pc_randomizer_original_campaign(){return originalCampaign;}
 bool pc_randomizer_original_session(){return originalStandalone;}
+std::uint64_t pc_randomizer_original_selection_revision() noexcept {
+    return enabled&&originalStandalone?originalSelectionRevision:0;
+}
+bool pc_randomizer_original_has_input(const std::string& role) noexcept {
+    // Every stored key was validated by immutable Bundle parsing. Looking up
+    // the exact key allocates nothing and deliberately never opens its file.
+    return pc_randomizer_original_selection_revision()!=0
+        &&originalInputs.campaign==originalCampaign&&hex64(fingerprint)
+        &&originalInputs.files.find(role)!=originalInputs.files.end();
+}
 const char* pc_randomizer_original_catalog_root(){return originalStandalone?originalCatalogRoot.c_str():nullptr;}
 bool pc_randomizer_original_calendar_plan(const std::string& course,const p2original::CalendarState& flags,std::vector<p2original::CalendarLoad>& out,std::string& error){
     if(!originalStandalone||!p2original::originalProgress().context().story){error="original story calendar is inactive";return false;}
@@ -2458,6 +2473,12 @@ bool pc_randomizer_original_calendar_plan(const std::string& course,const p2orig
 }
 std::string pc_randomizer_campaign_treasure_source(){return treasureSource;}
 std::string pc_randomizer_session_fingerprint(){return hex64(fingerprint)&&enabled?fingerprint:std::string{};}
+bool pc_randomizer_original_input(const std::string& role,std::string& bytes,std::string& error){
+    if(!enabled||!originalStandalone||originalInputs.campaign!=originalCampaign||!p2originalsession::path(role)){
+        error="original immutable input authority is inactive or path invalid";return false;
+    }
+    return p2originalsession::input(originalInputs,role,bytes,error);
+}
 bool pc_randomizer_load_campaign(void* destination) {
     if (!pc_randomizer_resumed()) return false;
     std::memcpy(destination, campaignBlock.data(), 32768);

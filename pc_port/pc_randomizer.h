@@ -30,11 +30,22 @@ bool pc_randomizer_init(int argc, char** argv);
 // Explicit authenticated bootstrap selections; empty for historical sessions.
 std::string pc_randomizer_original_campaign();
 bool pc_randomizer_original_session();
+// Nonallocating current immutable selection identity. Zero before successful
+// authenticated initialization and for ordinary/AP sessions. This is neither
+// a native scene serial nor a selected card generation/proof.
+std::uint64_t pc_randomizer_original_selection_revision() noexcept;
+// Exact role membership in the retained authenticated selection. False before
+// successful OriginalSession initialization; does not read or authenticate
+// current file bytes. A selected role MUST still use original_input, and a
+// failed read must never be treated as an absent optional role.
+bool pc_randomizer_original_has_input(const std::string& relativeRole) noexcept;
 const char* pc_randomizer_original_catalog_root();
 bool pc_randomizer_original_calendar_plan(const std::string& course,const p2original::CalendarState& actualCacheFlags,std::vector<p2original::CalendarLoad>& out,std::string& error);
 std::string pc_randomizer_campaign_treasure_source();
 // Stable selected immutable descriptor fingerprint; never a process token.
 std::string pc_randomizer_session_fingerprint();
+// Reverify exact retained selected-role bytes at every native read.
+bool pc_randomizer_original_input(const std::string&,std::string&,std::string&);
 bool pc_randomizer_enabled();
 // SAVE1229 supplies this verified ORIGINAL_P2_CAMPAIGN bootstrap boundary.
 // Terrain, typed engineering fixtures and AP seeds do not enable it.
