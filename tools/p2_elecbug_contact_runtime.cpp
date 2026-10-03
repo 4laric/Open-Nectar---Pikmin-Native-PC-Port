@@ -22,7 +22,6 @@
 #include "PikiMgr.h"
 #include "PikiHeadItem.h"
 #include "ItemMgr.h"
-#include "UfoItem.h"
 #include "Boss.h"
 #include "Pom.h"
 #include "pc_p2_white.h"
@@ -220,7 +219,8 @@ public:
         if(!initialized||!pikiMgr||!tekiMgr||gameflow.mPauseAll||gameflow.mIsUIOverlayActive){
             if(frame%60==0){std::printf("P2_ELECBUG_WAIT frame=%d initialized=%d pause=%d overlay=%d captain_state=%d buttons=%08x\n",frame,int(initialized),int(gameflow.mPauseAll),int(gameflow.mIsUIOverlayActive),initialized?n->getCurrState()->getID():-1,initialized?n->mKontroller->mCurrentInput:0);std::fflush(nullptr);}
             if(initialized&&gameflow.mIsUIOverlayActive&&electric()&&desiredSpecies()!=P2SpeciesWhite){
-                input(frame%30<5?KBBTN_A:0);aHeld=false;uiResumeTicks=15;
+                // Ordinary B first reveals the message, then advances it.
+                input(frame%8<4?KBBTN_B:0);aHeld=false;uiResumeTicks=15;
             }
             return result;
         }
@@ -330,13 +330,6 @@ public:
         }
         // Only virtual-pad input. Gather, approach, aim during A hold, release.
         if(age<90){input(KBBTN_B);return result;}
-        UfoItem* ship=itemMgr?itemMgr->getUfo():nullptr;
-        if(electric()&&desiredSpecies()!=P2SpeciesWhite&&!aHeld&&ship
-            &&distance(n->mSRT.t,ship->mSRT.t)<=75.f){
-            // The ordinary A action opens ship information within50 units.
-            // Walk clear before the throw click rather than bypassing its UI.
-            neutralThrowTicks=0;point(n,enemy->mSRT.t,true);return result;
-        }
         if(distance(n->mSRT.t,enemy->mSRT.t)>140.f){
             if(aHeld){for(const auto& entry:flight)witness(entry.first,"invalidated");flight.clear();aHeld=false;}
             neutralThrowTicks=0;
