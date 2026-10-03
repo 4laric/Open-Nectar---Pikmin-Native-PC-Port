@@ -73,23 +73,56 @@ PartySource* source(Navi* n,std::string& error){
   ||world->selectedCampaign()!=scene->selectedCampaign()||world->selectedFingerprint()!=scene->selectedFingerprint()
   ||world->sourceCatalog()!=scene->sourceCatalog()
   ||!scene->captainAt(0)||!scene->captainAt(1)||scene->captainAt(0)==scene->captainAt(1)
+  ||world->captainAt(0)!=scene->captainAt(0)||world->captainAt(1)!=scene->captainAt(1)
   ||(n!=scene->captainAt(0)&&n!=scene->captainAt(1))){fail(error,"missing actual source party scene/roster");return nullptr;}
  return const_cast<PartySource*>(p);
 }
 Navi* other(const PartySource& p,Navi* n){return p.scene().captainAt(p.scene().captainAt(0)==n?1:0);}
 }
-bool whistleCaptain(Navi* n,Navi* caller,bool combine,bool newToParty,std::string& e){
+bool invokeWhistleCaptain(Navi* n,Navi* caller,bool combine,bool newToParty,WhistleOutcome& out,std::string& e){
+ e.clear();
  (void)combine; // Retail actNavi does not inspect mDoCombine; Piki receiver does.
  auto* p=source(n,e);if(!p||caller!=other(*p,n))return fail(e,"whistle caller not other actual source captain");
+ auto* callerSource=source(caller,e);if(!callerSource)return false;
+ const auto* scene=pc_p2_original_captain_loaded_scene();const auto* world=pc_p2_original_captain_world();
+ const auto epoch=scene->incarnation();const auto campaign=scene->selectedCampaign();
+ const auto fingerprint=scene->selectedFingerprint(),catalog=scene->sourceCatalog();
+ auto* receiverState=n->getCurrState();auto* callerState=caller->getCurrState();
+ auto valid=[&](){
+  if(pc_p2_original_captain_loaded_scene()!=scene||pc_p2_original_captain_world()!=world
+   ||scene->incarnation()!=epoch||scene->selectedCampaign()!=campaign||scene->selectedFingerprint()!=fingerprint||scene->sourceCatalog()!=catalog
+   ||source(n,e)!=p||source(caller,e)!=callerSource||n->getCurrState()!=receiverState||caller->getCurrState()!=callerState)
+   return fail(e,"source captain whistle callback expired scene/provider/state");
+  auto* recipient=dynamic_cast<State*>(receiverState);auto* sender=dynamic_cast<State*>(callerState);
+  if(!recipient||recipient->nativeState()!=receiverState||!sender||sender->nativeState()!=callerState)
+   return fail(e,"source captain whistle lacks exact typed current actors");
+  return true;
+ };
+ if(!valid())return false;
  WorldFacts w;CaptainFacts c;Vec3 position;
- if(!p->world(w,e)||!p->captain(*n,c,position,e))return false;
- // Already-Follow is NOT callable in retail; do not invent a no-op success.
- if(!whistleAllowed(w,c))return fail(e,"source captain whistle not admitted");
- if(!enterFollow(n,newToParty,e))return false;
- std::vector<Member> members;if(!p->members(*n,members,e))return false;
- // Snapshot BEFORE stimuli mutate the CPlate, exactly as source actNavi.
- for(const auto& m:members)if(!p->whistleMember(*caller,m.handle,true,true,e))return false;
- return true;
+ if(!p->world(w,e)||!valid()||!p->captain(*n,c,position,e)||!valid())return false;
+ bool alive=false;
+ if(!pc_p2_original_captain_actor_lifetime(n,alive)||!valid()||!w.active||c.alive!=alive
+  ||c.state!=dynamic_cast<State*>(receiverState)->sourceStateId()||!finite(position))
+  return fail(e,"source captain whistle observation lacks actual actor identity/lifetime");
+ // Already-Follow, controlled/dead and day-zero reunion guards are normal
+ // receiver rejection. Source Navi::callPikis ignores this accepted-result.
+ if(!whistleAllowed(w,c)){out={false};return true;}
+ if(!valid()||!enterFollow(n,newToParty,e))return false;
+ receiverState=n->getCurrState();
+ if(!valid()||dynamic_cast<State*>(receiverState)->sourceStateId()!=StateId::Follow)
+  return fail(e,"source captain whistle did not enter genuine Follow");
+ std::vector<Member> members;if(!p->members(*n,members,e)||!valid())return false;
+ // Snapshot AFTER Follow init and BEFORE stimuli mutate the CPlate, exactly
+ // as retail actNavi. Typed Piki invocation semantics are a separate producer.
+ for(const auto& m:members){
+  if(!valid()||!p->whistleMember(*caller,m.handle,true,true,e)||!valid())return false;
+ }
+ out={true};return true;
+}
+bool whistleCaptain(Navi* n,Navi* caller,bool combine,bool newToParty,std::string& e){
+ WhistleOutcome outcome;
+ return invokeWhistleCaptain(n,caller,combine,newToParty,outcome,e)&&outcome.accepted;
 }
 bool dismissCaptain(Navi* n,std::string& e){
  auto* p=source(n,e);if(!p)return false;CaptainFacts c;Vec3 pos;

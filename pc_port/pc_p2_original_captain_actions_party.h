@@ -62,6 +62,11 @@ public:
  virtual bool followPunch(Navi&,EnemyHandle,Vec3 target,std::string&)=0;
 };
 // Actual source native bridge: rechecks roster/world on every operation.
+struct WhistleOutcome {bool accepted=false;};
+// true means an authenticated receiver invocation completed. A normal retail
+// rejection reports accepted=false; missing/stale authority leaves out intact.
+bool invokeWhistleCaptain(Navi* recipient,Navi* caller,bool combine,bool newToParty,WhistleOutcome& out,std::string&);
+// Compatibility wrapper retaining the retail accepted-result bool.
 bool whistleCaptain(Navi* recipient,Navi* caller,bool combine,bool newToParty,std::string&);
 bool dismissCaptain(Navi*,std::string&);
 bool releasePikis(Navi*,bool& released,std::string&);
