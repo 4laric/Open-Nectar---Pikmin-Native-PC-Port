@@ -80,7 +80,7 @@ bool Plate::publish(Group& live,Group& next,bool cleanup,std::string& e){
  }
  if(!validate(live,cleanup,e)||mReentered)return false;
  // Retail swap/release move references/listeners, not ordinal geometry.
- for(unsigned i=0;i<next.slots.size();++i){next.slots[i].relative=live.slots[i].relative;next.slots[i].position=live.slots[i].position;}
+ for(unsigned i=0;i<next.slots.size();++i){next.slots[i].relative=live.slots[i].relative;next.slots[i].position=live.slots[i].position;next.slots[i].geometryKnown=live.slots[i].geometryKnown;}
  // Only nonthrowing assignments follow a successful listener commit. Strings,
  // bindings and parameters are immutable through every mapping operation.
  if(!changes.empty()&&!slotsChanged(changes,e))return false;
@@ -132,6 +132,7 @@ bool Plate::slotPosition(Handle h,Navi* n,int slot,Vector3f& out,std::string& e)
  const Group* g=nullptr;for(const auto& candidate:mGroups)if(candidate.captain==n)g=&candidate;
  if(!g||!validate(*g,false,e)||slot<0||static_cast<unsigned>(slot)>=g->count
  ||!same(g->slots[slot].handle,h))return fail(e,"source CPlate slot position unavailable");
+ if(!g->positionKnown||!g->slots[slot].geometryKnown)return fail(e,"source CPlate position not yet evaluated");
  Vector3f next=g->slots[slot].position+g->baseOffset;
  if(!finite(next)||!operation.complete())return fail(e,"source CPlate position nonfinite/reentrant");
  out=next;return true;
@@ -162,12 +163,11 @@ bool Plate::formed(Handle h,Navi* n,std::string& e){
  if(!mSource.setFormed(h,n,e)||mReentered)return false;
  return validate(*g,false,e)&&!mReentered;
 }
-bool Plate::geometry(Group& g,const PlatePose& pose,std::string& e){
- if(!finite(pose.position)||!finite(pose.velocity)||!std::isfinite(pose.angle)||!std::isfinite(pose.scale)
- ||pose.scale<=0||!std::isfinite(pose.moveStrength))return fail(e,"source CPlate pose unavailable");
- float strength=std::max(0.0f,std::min(1.0f,pose.moveStrength));
+bool Plate::geometry(Group& g,float moveStrength,std::string& e){
+ if(!std::isfinite(moveStrength))return fail(e,"source CPlate move strength unavailable");
+ float strength=std::max(0.0f,std::min(1.0f,moveStrength));
  float size=g.parameters.maxPositionSize*(g.shrinkTimer?0.5f:1.0f);
- g.activeCount=g.count;g.maxRadius=(2.0f+0.1f)*size*std::sqrt(static_cast<float>(g.count)/pi);
+ g.activeCount=g.count;g.maxRadiusKnown=true;g.maxRadius=(2.0f+0.1f)*size*std::sqrt(static_cast<float>(g.count)/pi);
  float small=(2.0f-0.1f)*size,large=g.maxRadius;
  float factor=std::max(small,large),lower=std::min(small,large);
  g.moveRadius=strength*-(factor-lower)+factor;
@@ -184,29 +184,45 @@ bool Plate::geometry(Group& g,const PlatePose& pose,std::string& e){
   width=std::max(0,width);if(strength<0.1f&&width==0&&g.activeCount-count>1)width=1;
   float x=direction*width*size*2,step=direction*size*2;
   for(int i=width*2+1;i>0;--i){if(count<g.activeCount){auto& s=g.slots[count++];
-    s.relative.set(x,0,radius);s.position.set(cosine*x+sine*radius,0,-sine*x+cosine*radius);}x-=step;}
+    s.relative.set(x,0,radius);s.position.set(cosine*x+sine*radius,0,-sine*x+cosine*radius);s.geometryKnown=true;}x-=step;}
   radius+=size*2;direction=-direction;
  }
- float offset=g.parameters.startingOffset*pose.scale;
- if(std::sqrt(g.velocity.x*g.velocity.x+g.velocity.z*g.velocity.z)>5)offset=0;
- float currentRadius=g.baseRadius+offset;
- g.baseOffset=pose.position+Vector3f(currentRadius*std::sin(pose.angle),0,currentRadius*std::cos(pose.angle));
- g.maxPositionOffset=pose.position+Vector3f(g.maxRadius*std::sin(pose.angle),0,g.maxRadius*std::cos(pose.angle));
- if(!pose.gray)g.angle=pose.angle;
- g.velocity=pose.velocity;
- if(!finite(g.baseOffset)||!finite(g.maxPositionOffset)||!std::isfinite(g.baseRadius)||!std::isfinite(g.moveRadius))return fail(e,"nonfinite source CPlate geometry");
+ if(!std::isfinite(g.baseRadius)||!std::isfinite(g.moveRadius)||!std::isfinite(g.maxRadius))return fail(e,"nonfinite source CPlate geometry");
  return true;
 }
-bool Plate::refresh(Navi* n,std::string& e){
+bool Plate::refresh(Navi* n,int count,float strength,std::string& e){
+ Operation operation(*this,e);if(!operation.ok())return false;Group* g=nullptr;
+ if(!group(n,false,g,e))return false;
+ // Genuine Navi calls refresh(mSlotCount,strength). A different census must
+ // first retire its actual listeners; never discard live references by count.
+ if(count<0||static_cast<unsigned>(count)!=g->count)return fail(e,"source CPlate refresh census differs from retained slots");
+ Group next=*g;if(!geometry(next,strength,e)||!validate(*g,false,e)||mReentered)return false;
+ g->slots=next.slots;g->activeCount=next.activeCount;g->baseRadius=next.baseRadius;
+ g->moveRadius=next.moveRadius;g->maxRadius=next.maxRadius;g->maxRadiusKnown=true;
+ return true;
+}
+bool Plate::position(Navi* n,bool gray,std::string& e){
  Operation operation(*this,e);if(!operation.ok())return false;Group* g=nullptr;
  if(!group(n,false,g,e))return false;
  PlatePose pose;
- if(!mSource.readPose(n,pose,e)||mReentered||!validate(*g,false,e)||mReentered)return false;
- Group next=*g;if(!geometry(next,pose,e))return false;
- g->slots=next.slots;g->activeCount=next.activeCount;g->baseRadius=next.baseRadius;
- g->moveRadius=next.moveRadius;g->maxRadius=next.maxRadius;g->angle=next.angle;
- g->baseOffset=next.baseOffset;g->maxPositionOffset=next.maxPositionOffset;g->velocity=next.velocity;return true;
+ if(!mSource.readPose(n,pose,e)||mReentered||!finite(pose.position)||!finite(pose.velocity)
+ ||!std::isfinite(pose.angle)||!std::isfinite(pose.scale)||pose.scale<=0||pose.gray!=gray
+ ||!validate(*g,false,e)||mReentered)return fail(e,"source CPlate evaluated SetPos pose unavailable");
+ float offset=g->parameters.startingOffset*pose.scale;
+ // Literal source reads PREVIOUS mVelocity before assigning the new velocity.
+ if(std::sqrt(g->velocity.x*g->velocity.x+g->velocity.z*g->velocity.z)>5)offset=0;
+ float radius=g->baseRadius+offset;
+ const Vector3f base=pose.position+Vector3f(radius*std::sin(pose.angle),0,radius*std::cos(pose.angle));
+ const Vector3f maximum=pose.position+Vector3f(g->maxRadius*std::sin(pose.angle),0,g->maxRadius*std::cos(pose.angle));
+ if(!finite(base)||(g->maxRadiusKnown&&!finite(maximum)))return fail(e,"nonfinite source CPlate SetPos geometry");
+ g->baseOffset=base;g->velocity=pose.velocity;g->positionKnown=true;g->scaleKnown=true;g->scale=pose.scale;
+ if(!gray)g->angle=pose.angle;
+ g->maxPositionKnown=g->maxRadiusKnown;
+ if(g->maxPositionKnown)g->maxPositionOffset=maximum;
+ return true;
 }
+bool Plate::setPos(Navi* n,std::string& e){return position(n,false,e);}
+bool Plate::setPosGray(Navi* n,std::string& e){return position(n,true,e);}
 bool Plate::rearrange(Navi* n,const Vector3f& target,std::string& e){
  Operation operation(*this,e);if(!operation.ok())return false;Group* g=nullptr;
  if(!finite(target)||!group(n,false,g,e))return false;
@@ -246,7 +262,9 @@ bool Plate::state(Navi* n,PlateState& out,std::string& e)const{
  PlateState next;next.count=g->count;next.activeCount=g->activeCount;next.shrinkTimer=g->shrinkTimer;
  next.happaCounts=g->happaCounts;next.baseRadius=g->baseRadius;next.moveRadius=g->moveRadius;
  next.maxRadius=g->maxRadius;next.angle=g->angle;next.baseOffset=g->baseOffset;
- next.maxPositionOffset=g->maxPositionOffset;next.velocity=g->velocity;out=next;return true;
+ next.maxPositionOffset=g->maxPositionOffset;next.velocity=g->velocity;
+ next.positionKnown=g->positionKnown;next.maxRadiusKnown=g->maxRadiusKnown;next.maxPositionKnown=g->maxPositionKnown;
+ next.scaleKnown=g->scaleKnown;next.scale=g->scale;out=next;return true;
 }
 bool Plate::reset(std::string& e){Operation op(*this,e);if(!op.ok())return false;
  for(const auto& g:mGroups)if(g.count)return fail(e,"CPlate reset would discard live source slots");

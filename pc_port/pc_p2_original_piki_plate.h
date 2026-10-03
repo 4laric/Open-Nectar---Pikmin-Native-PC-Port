@@ -14,6 +14,8 @@ struct PlatePose {
 struct PlateState {
  unsigned count=0,activeCount=0,shrinkTimer=0;
  std::array<unsigned,3> happaCounts{};
+ bool positionKnown=false,maxRadiusKnown=false,maxPositionKnown=false,scaleKnown=false;
+ float scale=0;
  float baseRadius=0,moveRadius=0,maxRadius=0,angle=0;
  Vector3f baseOffset,maxPositionOffset,velocity;
 };
@@ -39,7 +41,11 @@ public:
  bool slotPosition(Handle,Navi*,int,Vector3f&,std::string&)const;
  bool sortSlot(Handle,Navi*,int,int happa,std::string&);
  bool formed(Handle,Navi*,std::string&);
- bool refresh(Navi*,std::string&);
+ // Literal source calls: Refresh consumes current owned slot count/strength,
+ // without reading pose. Captain evaluates timer/pose before SetPos separately.
+ bool refresh(Navi*,int formationSize,float moveStrength,std::string&);
+ bool setPos(Navi*,std::string&);
+ bool setPosGray(Navi*,std::string&);
  bool rearrange(Navi*,const Vector3f&,std::string&);
  bool shrink(Navi*,std::string&);
  bool update(Navi*,std::string&);
@@ -52,11 +58,13 @@ public:
  unsigned retainedSlots()const noexcept;
  unsigned retainedListeners()const noexcept{return retainedSlots();}
 private:
- struct Slot {Handle handle;unsigned species=0,happa=0;Vector3f relative,position;};
+ struct Slot {Handle handle;unsigned species=0,happa=0;Vector3f relative,position;bool geometryKnown=false;};
  struct Group {
   SceneBinding binding;Navi* captain=nullptr;PlateParameters parameters;
   std::array<Slot,100> slots{};std::array<unsigned,3> happaCounts{};
   unsigned count=0,activeCount=0,shrinkTimer=0;
+  bool positionKnown=false,maxRadiusKnown=false,maxPositionKnown=false,scaleKnown=false;
+  float scale=0;
   float baseRadius=10,moveRadius=10,maxRadius=0,angle=0;
   Vector3f baseOffset,maxPositionOffset,velocity;
  };
@@ -66,6 +74,7 @@ private:
  bool group(Navi*,bool cleanup,Group*&,std::string&);
  bool validate(const Group&,bool cleanup,std::string&)const;
  bool publish(Group&,Group&,bool cleanup,std::string&);
- static bool geometry(Group&,const PlatePose&,std::string&);
+ static bool geometry(Group&,float,std::string&);
+ bool position(Navi*,bool gray,std::string&);
 };
 } }
