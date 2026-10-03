@@ -104,11 +104,15 @@ class ContactApp:public PlugPikiApp {
         Iterator actors(pikiMgr);actors.first();auto* replace=static_cast<Piki*>(*actors);
         require(replace&&replace->isAlive(),"owned baseline replacement exists");
         replace->setEraseKill();replace->kill(false);
-        const std::string key="tutorial/initgen.txt#2";
-        const std::string fingerprint="b8a4fb5a39f8371a879eec4ece9025bee75977a4b4394111d5825e6ec79c0bbf";
+        const int species=desiredSpecies();
+        // Red is an explicitly synthetic control identity, never a relabelled
+        // original Yellow record. Both fixtures exclude acquisition claims.
+        const std::string key=species==P2SpeciesYellow?"tutorial/initgen.txt#2":"fixture-red-control/initgen.txt#0";
+        const std::string fingerprint=species==P2SpeciesYellow
+            ?"b8a4fb5a39f8371a879eec4ece9025bee75977a4b4394111d5825e6ec79c0bbf"
+            :"8926e466ec3c5d6fb8b9db2f93a7164cf5ff87d4719b5454a61eb9688ae368b3";
         const unsigned uid=p2original::originalSourceCatalogUid(key);
         std::string error;
-        const int species=desiredSpecies();
         require(pc_p2_original_piki_origin_install(fingerprint,{{key,uid,20,species}},error),"RGB fixture catalog");
         const std::string campaign="6a012015368158125b7b88bdd14000ed2a10613f02474b0f08830d9a3b5ec029";
         require(p2original::originalProgress().initialize(campaign,error),"RGB fixture progress");
@@ -119,7 +123,7 @@ class ContactApp:public PlugPikiApp {
         const auto& pos=captain->mSRT.t;
         require(pc_p2_original_piki_physical_birth(body,{{pos.x+12,pos.y,pos.z}},stagedRgb,error)==p2original::PikiBirthResult::Born,"disclosed RGB replacement");
         require(pc_p2_original_rgb_throw_species(stagedRgb)==species,"canonical staged RGB");
-        std::printf("P2_ELECBUG_%s_STAGED piki=%p species=%d relocated_debug_member=1 non_story_fixture=1 acquisition=0 campaign=0\n",species==P2SpeciesYellow?"YELLOW":"RED",static_cast<void*>(stagedRgb),species);
+        std::printf("P2_ELECBUG_%s_STAGED piki=%p species=%d relocated_debug_member=1 non_story_fixture=1 acquisition=0 campaign=0 synthetic_control=%d catalog_key=%s fingerprint=%s\n",species==P2SpeciesYellow?"YELLOW":"RED",static_cast<void*>(stagedRgb),species,int(species==P2SpeciesRed),key.c_str(),fingerprint.c_str());
     }
     std::map<Piki*,int> observedSpecies;
     void guardCaptains(){
