@@ -9,12 +9,14 @@ namespace {
 InstanceIdentity parent{"actual-catalog",0x1234,0,2,3};
 struct TestEngine final:Engine {
  bool available=true,spicy=false,bitter=false,nullHoney=false;
+ float leaderSelection=0.15f,selection=0.15f;
  unsigned draws=0,discard=0,honeyBirths=0;
  int failed=-1,initFailure=-1;unsigned aborts=0;std::set<unsigned> born;
  std::vector<std::string> events;
  bool parent(const InstanceIdentity& id,unsigned source,std::string&)override{return id==::parent&&(source==50||source==87);}
+ bool emission(const Group& g,std::string&)override{return g.origin.x==1&&g.origin.z==3&&g.origin.y==(g.plantSource==50?87:72);}
  bool managerAvailable()const override{return available;}
- float randFloat()override{events.push_back("rng");++draws;return 0.15f;}
+ float randFloat()override{events.push_back("rng");++draws;return draws==4?leaderSelection:selection;}
  void discardRand()override{events.push_back("discard");++discard;}
  bool birth(Child& c,void*& out,std::string&)override{
   events.push_back("birth"+std::to_string(c.identity.child));out=nullptr;
@@ -29,8 +31,8 @@ struct TestEngine final:Engine {
   randFloat();randFloat();return true;
  }
  bool leaderInit(Child&,void*,std::string&)override{events.push_back("leader-init");return true;}
- bool leaderColor(Child& c,void*,std::string&)override{assert(c.color==Color::Purple);events.push_back("leader-color");return true;}
- bool appear(Child& c,void*,std::string&)override{assert(c.color==Color::Purple&&c.appearance==Color::Purple);events.push_back("appear"+std::to_string(c.identity.child));return true;}
+ bool leaderColor(Child& c,void*,std::string&)override{assert(c.color==(leaderSelection<0.5f?Color::Purple:Color::Red));events.push_back("leader-color");return true;}
+ bool appear(Child& c,void*,std::string&)override{assert(c.color==c.appearance);events.push_back("appear"+std::to_string(c.identity.child));return true;}
  bool abort(const Group&,std::string&)override{++aborts;born.clear();return true;}
  bool sprayMade(Color c)const override{return c==Color::Red?spicy:bitter;}
  bool honey(const Child&,const Position& p,const Position& v,bool& out,std::string&)override{
@@ -60,7 +62,7 @@ int main(){
  bad=saved;bad[0].children[2].color=Color::Red;assert(!malformed.restore(bad,engine,e));
  // Source intentionally tolerates every subset of failed follower births.
  for(int failed=0;failed<5;++failed){TestEngine partial;partial.failed=failed;PlantGroups p;
-  assert(p.touch(parent,87,{1,2,3},85,partial,g,e));
+  assert(p.touch(parent,87,{1,2,3},70,partial,g,e));
   assert(!g.children[unsigned(failed)].born&&g.complete);
   assert(partial.draws==(failed==0?0:20));assert(partial.discard==unsigned(failed!=0));
   assert(g.sourceGroupCount==unsigned(failed==0?0:failed==4?3:4));
@@ -78,5 +80,17 @@ int main(){
  assert(!failedGroups.touch(parent,50,{1,2,3},85,failedInit,g,e)&&failedInit.aborts==1&&failedInit.born.empty());
  auto draws=failedInit.draws;assert(!failedGroups.touch(parent,50,{1,2,3},85,failedInit,g,e)&&failedInit.draws==draws);
  PlantGroups pendingRestore;assert(!pendingRestore.restore(failedGroups.snapshot(),failedInit,e));
+ std::string encoded;assert(groups.encode(engine,encoded,e));PlantGroups decoded;
+ assert(decoded.decode(encoded,engine,e)&&engine.draws==25);
+ std::string roundTrip;assert(decoded.encode(engine,roundTrip,e)&&roundTrip==encoded);
+ PlantGroups trailing;assert(!trailing.decode(encoded+"extra",engine,e)&&trailing.snapshot().empty());
+ auto originBad=saved;originBad[0].origin.y=100;PlantGroups originRejected;assert(!originRejected.restore(originBad,engine,e));
+ assert(!failedGroups.encode(failedInit,roundTrip,e));
+ for(float roll:{0.05f,0.15f,0.9f}){TestEngine variants;variants.selection=roll;variants.leaderSelection=0.9f;variants.spicy=true;PlantGroups v;
+  assert(v.touch(parent,50,{1,2,3},85,variants,g,e)&&g.children[0].color==Color::Red);
+  const auto expected=roll<0.1f?Color::Red:roll<0.2f?Color::Purple:Color::Yellow;
+  for(unsigned n=1;n<5;++n)assert(g.children[n].appearance==expected&&g.children[n].color==Color::Yellow);
+  assert(v.drop(g.children[0].identity,{0,10,0},0,false,variants,e)&&variants.honeyBirths==1&&variants.draws==25);
+ }
  std::puts("P2_ORIGINAL_SHIJIMI_GROUP_TEST PASS source-order partial-birth one-shot gated-drop no-init-restore");
 }

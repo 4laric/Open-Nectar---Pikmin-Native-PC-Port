@@ -35,6 +35,10 @@ public:
  virtual ~Engine()=default;
  // Consult the independent original registry/catalog, not a saved self-claim.
  virtual bool parent(const InstanceIdentity&,unsigned source,std::string&)=0;
+ // Independent SourceCatalog/floor authority must check the parent's literal
+ // sentinel fields and actual birth origin (including its own source fp27).
+ // This must also work for a retired/absent parent in a selected saved graph.
+ virtual bool emission(const Group&,std::string&)=0;
  virtual bool managerAvailable()const=0;
  virtual float randFloat()=0;
  virtual void discardRand()=0; // literal rand() in createGroup, even unused
@@ -71,6 +75,8 @@ public:
  // Logical emission journal only; restoring physical FSM bodies requires the
  // separate no-init native checkpoint provider. This never births or rolls RNG.
  bool restore(const std::vector<Group>&,Engine&,std::string&);
+ bool encode(Engine&,std::string& bytes,std::string&);
+ bool decode(const std::string& bytes,Engine&,std::string&);
 private:
  std::map<InstanceIdentity,Group> mGroups;
  Child* find(const Identity&);
