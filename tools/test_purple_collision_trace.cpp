@@ -248,5 +248,19 @@ int main() {
     PcPurpleSaveBudget engineeringLate(true);check(!engineeringLate.acquired(90,true),"engineering acquisition hard90 refuses");
     PcPurpleSaveBudget defaultBudget;check(!defaultBudget.acquired(60,true),"default acquisition hard60 unchanged");
     PcPurpleSaveBudget engineeringReset(true);check(engineeringReset.acquired(80,true)&&!engineeringReset.acquired(81,true),"engineering cannot reset phase fence");
+    const float extreme=std::numeric_limits<float>::max();
+    check(pcPurpleSegmentCircleClear(0,0,10,0,5,2,1,.05f),"ordinary segment safely outside margin");
+    check(!pcPurpleSegmentCircleClear(0,0,10,0,5,1,1,.05f),"margin intersection still refuses");
+    check(pcPurpleSegmentCircleClear(0,0,10,0,5,1.05f,1,.05f),"exact tangent reserve boundary unchanged");
+    check(!pcPurpleSegmentCircleClear(0,0,10,0,5,0,1,.05f),"crossing circle refuses");
+    check(pcPurpleSegmentCircleClear(0,0,0,0,2,0,1,.05f),"stationary clear segment admits");
+    check(!pcPurpleSegmentCircleClear(-extreme,0,extreme,0,0,0,1,.05f),"finite delta overflow refuses");
+    check(!pcPurpleSegmentCircleClear(0,0,extreme,0,0,0,1,.05f),"finite squared segment overflow refuses");
+    check(!pcPurpleSegmentCircleClear(0,0,100,0,extreme,0,1,.05f),"finite numerator overflow refuses");
+    check(!pcPurpleSegmentCircleClear(0,0,1,0,0,0,extreme,extreme),"finite circle sum overflow refuses");
+    check(!pcPurpleCursorYawBound(0,extreme,extreme,0,1.f/30.f,cursorArc),"finite cursor radius overflow refuses yaw admission");
+    check(!pcPurpleCursorStep(extreme,extreme,1,0,1,1.f/30.f,extreme,nextX,nextZ),"finite cursor length overflow refuses predicted step");
+    auto extremePart=*captured;extremePart.radius=extreme;
+    check(!PcPurplePoseEnvelope::projectedRadius(extremePart,14,extreme,reserve),"finite projected radius sum overflow refuses");
     std::puts("Purple collision trace controls PASS");
 }

@@ -1104,23 +1104,21 @@ class PurpleCombatApp : public PlugPikiApp {
     }
     bool sdlPulseSegmentClear(SdlPluckPoint a,SdlPluckPoint b,float margin=0.f) const {
         if(!pluckFinite(a)||!pluckFinite(b)||!std::isfinite(margin)||margin<0.f)return false;
-        const auto delta=pluckSub(b,a);const float square=delta.x*delta.x+delta.z*delta.z;
+        // Validate segment arithmetic even when the obstacle list is empty.
+        if(!pcPurpleSegmentCircleClear(a.x,a.z,b.x,b.z,a.x,a.z,0.f,0.f))return false;
         for(const auto& obstacle:pluckObstacles) {
-            if(!sdlFinitePoint(obstacle.centre)||!std::isfinite(obstacle.radius)||obstacle.radius<0.f)return false;
-            const auto offset=pluckSub(sdlPoint(obstacle.centre),a);
-            const float t=square>0.f?std::max(0.f,std::min(1.f,(offset.x*delta.x+offset.z*delta.z)/square)):0.f;
-            if(pluckLength(pluckSub(pluckAdd(a,pluckScale(delta,t)),sdlPoint(obstacle.centre)))<obstacle.radius+margin)return false;
+            if(!sdlFinitePoint(obstacle.centre)||!pcPurpleSegmentCircleClear(a.x,a.z,b.x,b.z,
+                obstacle.centre.x,obstacle.centre.z,obstacle.radius,margin))return false;
         }
         return true;
     }
     bool sdlAdmissionSegmentClear(SdlPluckPoint a,SdlPluckPoint b,float margin=0.f) const {
         if(!pluckFinite(a)||!pluckFinite(b)||!std::isfinite(margin)||margin<0.f)return false;
-        const auto delta=pluckSub(b,a);const float square=delta.x*delta.x+delta.z*delta.z;
+        // Validate segment arithmetic even when the obstacle list is empty.
+        if(!pcPurpleSegmentCircleClear(a.x,a.z,b.x,b.z,a.x,a.z,0.f,0.f))return false;
         for(const auto& obstacle:pluckAdmissionObstacles) {
-            if(!sdlFinitePoint(obstacle.centre)||!std::isfinite(obstacle.radius)||obstacle.radius<0.f)return false;
-            const auto offset=pluckSub(sdlPoint(obstacle.centre),a);
-            const float t=square>0.f?std::max(0.f,std::min(1.f,(offset.x*delta.x+offset.z*delta.z)/square)):0.f;
-            if(pluckLength(pluckSub(pluckAdd(a,pluckScale(delta,t)),sdlPoint(obstacle.centre)))<obstacle.radius+margin)return false;
+            if(!sdlFinitePoint(obstacle.centre)||!pcPurpleSegmentCircleClear(a.x,a.z,b.x,b.z,
+                obstacle.centre.x,obstacle.centre.z,obstacle.radius,margin))return false;
         }
         return true;
     }

@@ -115,3 +115,20 @@ public:
   return failed_||!selected_?nullptr:entries_[current_].poses.find(id,key);
  }
 };
+
+// Fail closed on finite-input float overflow in fixture segment admission.
+inline bool pcPurpleSegmentCircleClear(float ax,float az,float bx,float bz,float cx,float cz,float radius,float margin){
+ if(!std::isfinite(ax)||!std::isfinite(az)||!std::isfinite(bx)||!std::isfinite(bz)||!std::isfinite(cx)||!std::isfinite(cz)
+   ||!std::isfinite(radius)||radius<0||!std::isfinite(margin)||margin<0)return false;
+ const float dx=bx-ax,dz=bz-az,ox=cx-ax,oz=cz-az,sum=radius+margin;
+ if(!std::isfinite(dx)||!std::isfinite(dz)||!std::isfinite(ox)||!std::isfinite(oz)||!std::isfinite(sum))return false;
+ const float square=dx*dx+dz*dz,numerator=ox*dx+oz*dz;
+ if(!std::isfinite(square)||square<0||!std::isfinite(numerator))return false;
+ const float ratio=square>0?numerator/square:0;
+ if(!std::isfinite(ratio))return false;
+ const float t=std::max(0.f,std::min(1.f,ratio)),x=ax+dx*t,z=az+dz*t;
+ const float ex=x-cx,ez=z-cz;
+ if(!std::isfinite(x)||!std::isfinite(z)||!std::isfinite(ex)||!std::isfinite(ez))return false;
+ const float distance=std::hypot(ex,ez);
+ return std::isfinite(distance)&&distance>=sum;
+}
