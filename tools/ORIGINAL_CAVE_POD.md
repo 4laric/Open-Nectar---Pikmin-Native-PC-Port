@@ -55,8 +55,16 @@ than silently destroying uncredited cargo. Completion checks the actual current
 goal state, finished progress, finished wait and live exact receiver. Consumer
 code cannot invoke the private native completion seam or forge an event token.
 
-All unfinished or unexpectedly lost cargo prevents release. A read-only,
-versioned pending snapshot preserves full source/floor/scene/birth identity.
+Plain release refuses all unfinished cargo. Active carry, suction, a lost
+binding or an outstanding receipt blocks every release. Uncollected ground
+treasures are distinct: `release_uncollected` requires an explicit quiescent
+boundary callback from the floor/cargo/SAVE owner to retain their actual native
+graph, without marking them consumed or changing the ledger. Its absence or
+failure leaves the receiver/bindings unchanged. The callback must not destroy
+or rebind cargo; the floor owner retires actors after accepted release. This
+permits original leave-behind semantics once the owning retention is qualified.
+A read-only, versioned pending snapshot preserves every unfinished cargo's
+full source/floor/scene/birth identity, including quiescent ground cargo.
 It grants no SAVE authority. Pending cargo must continue to refuse card writes
 until the SAVE owner can atomically compose cargo, Pod and the canonical ledger.
 

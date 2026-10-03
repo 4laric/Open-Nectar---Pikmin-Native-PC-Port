@@ -105,6 +105,12 @@ bool current(p2retail::Snapshot* out=nullptr){
  if(!prepared||!contextProvider||!contextProvider(config.floor.scene,actual)||!source(actual)||!same(actual,config.floor))return false;
  if(out)*out=actual;return true;
 }
+bool moving(Pellet* actor,const Cargo& c){
+ if(c.phase==Phase::Completed)return false;
+ if(c.phase!=Phase::Bound)return true;
+ return !actor||!actor->isAlive()||actor->getState()!=PELSTATE_Normal
+  ||actor->mCarrierCounter>0||actor->getPickOffset()!=0;
+}
 void clear(){
  if(pod)pod->live=false;if(node){node->del();node->mCreature=nullptr;}
  pod=nullptr;node=nullptr;manager=nullptr;shape=nullptr;cargo.clear();contextProvider={};
@@ -173,15 +179,36 @@ bool pc_p2_original_pod_completed(Pellet* p,Suckable* receiver,const p2retail::S
  return completing==p&&it!=cargo.end()&&it->second.phase==Phase::Sucking&&it->second.scene==scene
   &&p->getState()==PELSTATE_Goal&&p->mTargetGoal==receiver&&pc_p2_original_pod_context(receiver,scene,out);
 }
-unsigned pc_p2_original_pod_pending(){unsigned n=0;for(const auto& row:cargo)if(row.second.phase!=Phase::Completed)++n;return n;}
+unsigned pc_p2_original_pod_pending(){unsigned n=completing?1:0;for(const auto& row:cargo)if(moving(row.first,row.second))++n;return n;}
 bool pc_p2_original_pod_snapshot(const p2retail::SceneIdentity& scene,p2originalpod::Snapshot& out){
  if(!pod||!committed||completing||!(scene==config.floor.scene)||!current())return false;
  p2originalpod::Snapshot capture;capture.floor=config.floor;capture.unit=config.unit;capture.slot=config.slot;capture.committed=true;
- for(const auto& row:cargo)if(row.second.phase!=Phase::Completed)capture.pending.push_back({row.second.birth,static_cast<unsigned>(row.second.phase)});
+ for(const auto& row:cargo)if(row.second.phase!=Phase::Completed)capture.pending.push_back({row.second.birth,static_cast<unsigned>(row.second.phase),moving(row.first,row.second)});
  out=std::move(capture);return true;
 }
 bool pc_p2_original_pod_release(std::string& e){
- if(completing||pc_p2_original_pod_pending())return reject(e,"pod_pending_cargo");
+ if(completing||pc_p2_original_pod_pending())return reject(e,"pod_pending_transaction");
+ for(const auto& row:cargo)if(row.second.phase!=Phase::Completed)return reject(e,"pod_uncollected_cargo_requires_owner_retention");
+ clear();e.clear();return true;
+}
+bool pc_p2_original_pod_release_uncollected(const p2retail::SceneIdentity& scene,RetainUncollected retain,std::string& e){
+ if(!pod||!committed||completing||!(scene==config.floor.scene)||!retain||!current())return reject(e,"pod_boundary_identity");
+ if(pc_p2_original_pod_pending())return reject(e,"pod_pending_transaction");
+ std::vector<UncollectedCargo> loose;
+ for(const auto& row:cargo)if(row.second.phase!=Phase::Completed){
+  const auto* c=p2retail::descriptor(config.floor.cave);p2retail::BirthIdentity expected;
+  if(!c||!config.births->expectedBirth(*c,config.floor.floor,scene,row.second.birth.row,row.second.birth.ordinal,expected,e)
+   ||!(expected==row.second.birth))return reject(e,"pod_boundary_origin_changed");
+  loose.push_back({row.first,row.second.birth});
+ }
+ // No state is changed on a failed capture. The callback must retain/verify,
+ // not retire/rebind actors or grant any consumed/seen/Poko receipt.
+ if(!retain(config.floor,loose,e))return false;
+ unsigned unfinished=0;for(const auto& row:cargo)if(row.second.phase!=Phase::Completed)++unfinished;
+ if(!current()||pc_p2_original_pod_pending()||loose.size()!=unfinished)return reject(e,"pod_boundary_changed_during_retention");
+ for(const auto& row:loose){auto it=cargo.find(row.actor);
+  if(it==cargo.end()||!(it->second.birth==row.birth))return reject(e,"pod_boundary_binding_changed");}
+ for(const auto& row:loose)if(row.actor->mTargetGoal==pod)row.actor->mTargetGoal=nullptr;
  clear();e.clear();return true;
 }
 void P2OriginalPodNativeSeam::begin(Pellet* p){

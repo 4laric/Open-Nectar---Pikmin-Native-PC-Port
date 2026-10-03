@@ -32,9 +32,14 @@ using CompletedCallback=std::function<bool(Pellet*,Suckable*,std::string&)>;
 // Read-only graph capture. No ledger copy, synthetic consumption or save
 // authority. Until SAVE provides an atomic cargo/ledger transaction, pending
 // entries must continue to reject card writes and floor exits.
-struct PendingCargo {p2retail::BirthIdentity birth;unsigned phase=0;};
+struct PendingCargo {p2retail::BirthIdentity birth;unsigned phase=0;bool transaction=false;};
 struct Snapshot {unsigned version=1;p2retail::Snapshot floor;unsigned unit=0,slot=0;
  std::vector<PendingCargo> pending;bool committed=false;};
+struct UncollectedCargo {Pellet* actor=nullptr;p2retail::BirthIdentity birth;};
+// Floor/cargo/SAVE owner verifies and retains the actual uncollected native
+// graph before authorizing boundary release. No implicit success provider.
+using RetainUncollected=std::function<bool(const p2retail::Snapshot&,
+                        const std::vector<UncollectedCargo>&,std::string&)>;
 }
 // Additive API; never activates implicitly or creates an economy ledger.
 bool pc_p2_original_pod_preflight(const p2originalpod::Config&,
@@ -55,9 +60,14 @@ Suckable* pc_p2_original_pod_goal_for(Pellet*);
 // True only within the callback emitted by native completed suction. There is
 // no caller-supplied integer event token. Verify before committing the ledger.
 bool pc_p2_original_pod_completed(Pellet*,Suckable*,const p2retail::SceneIdentity&);
-// All unfinished bound cargo blocks unload, not only cargo currently sucking.
+// Active carry/suction/lost bindings and receipt commits are transactions.
+// Ground cargo is captured separately; it is never a consumed receipt.
 unsigned pc_p2_original_pod_pending();
 bool pc_p2_original_pod_snapshot(const p2retail::SceneIdentity&,p2originalpod::Snapshot&);
+// Plain release still refuses any unfinished cargo. This explicit boundary
+// variant admits only quiescent ground cargo retained by the owning floor.
+bool pc_p2_original_pod_release_uncollected(const p2retail::SceneIdentity&,
+                                          p2originalpod::RetainUncollected,std::string&);
 bool pc_p2_original_pod_release(std::string&);
 
 // Only the actual native goal state may issue receipt authority. Consumers
