@@ -137,7 +137,9 @@ bool pc_p2_catfish_source_gate(const BTeki* a,P2CatfishSourceGate& out){
  unsigned source=0,token=0;p2original::InstanceIdentity identity;
  if(!at->second.token||!p2original::originalActors().query(a,source,token,&identity)||source!=26||token!=at->second.token)return false;
  const auto& s=at->second;out={};out.identity=identity;out.token=token;
- out.dead=s.state==Dead||s.escaped;out.alive=!out.dead;out.health=a->mHealth;
+ // Source isDead is the health predicate; EB_Alive becomes false only in
+ // deathProcedure. Keep both flags distinct during the lethal-update window.
+ out.dead=a->mHealth<=0;out.alive=s.state!=Dead&&!s.escaped;out.health=a->mHealth;
  // Catfish has no EB_BitterImmune override. Invulnerability is a distinct
  // damage gate, never a substitute for bitter immunity or Stone state.
  out.invulnerable=a->getTekiOption(TEKIOPT_Invincible);out.noInterrupt=s.nonStone.noInterrupt();
