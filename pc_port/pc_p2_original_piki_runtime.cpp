@@ -440,24 +440,47 @@ bool retired(std::string& e){ReadOperation op;if(!op.complete(true,e))return fal
 bool canRetireScene(std::string& e){
  ReadOperation op;ObservationScope observation;
  if(ownerMutationActive)return fail(e,"SourcePiki retirement preflight refused during in-flight owner operation");
- // Empty is an observation of this concrete registry only, not a physical
- // factory/body/bank acceptance fallback or a source readiness grant.
+ // Empty observes only this concrete registry, never factory/Shape readiness.
  if(actors.empty())return op.complete(true,e);
- auto* scene=pc_p2_original_captain_loaded_scene();
- if(!services||!scene||&services->scene()!=scene||!scene->incarnation())
+ auto* scene=pc_p2_original_captain_loaded_scene();auto* world=pc_p2_original_captain_world();
+ if(!services||!scene||&services->scene()!=scene||!world||!scene->incarnation())
   return fail(e,"SourcePiki retirement preflight lost canonical live scene");
- try{
-  for(const auto& actor:actors){const auto& entry=actor.second;OriginalPikiBodyHandle live;
-   if(entry.sceneOwner!=scene||entry.scene!=scene->incarnation()||!pc_p2_original_piki_body_handle(entry.handle.body,live)||live.nativeLifetime!=entry.handle.lifetime)
-    return fail(e,"SourcePiki retirement preflight found stale native lifetime");
-   const auto& brain=entry.runtime.brain;
-   if((brain.freeEffectsOwned||brain.action==Action::Free)&&!services->canRemoveFreeEffects(entry.handle,e))return false;
-   if((entry.runtime.throwEffectsOwned||entry.runtime.state==State::Flying)&&!services->canRemoveThrowEffects(entry.handle,e))return false;
-   if(brain.action==Action::Formation&&brain.slot>=0&&!services->canReleaseSlot(entry.handle,brain.navi,brain.slot,e))return false;
-   if(brain.pendingSlot>=0&&!services->canReleaseSlot(entry.handle,brain.pendingNavi,brain.pendingSlot,e))return false;
+ const auto incarnation=scene->incarnation();
+ const auto campaign=scene->selectedCampaign(),fingerprint=scene->selectedFingerprint(),catalog=scene->sourceCatalog();
+ Navi* captains[2]={scene->captainAt(0),scene->captainAt(1)};
+ std::vector<Handle> retained;retained.reserve(actors.size());
+ for(const auto& actor:actors)retained.push_back(actor.second.handle);
+ auto validate=[&](){
+  // Compare pointer identity before dereferencing an old descriptor. Source
+  // reference callbacks cannot move this snapshot onto a replacement scene.
+  if(pc_p2_original_captain_loaded_scene()!=scene||pc_p2_original_captain_world()!=world||&services->scene()!=scene
+    ||scene->incarnation()!=incarnation||world->incarnation()!=incarnation
+    ||scene->selectedCampaign()!=campaign||world->selectedCampaign()!=campaign
+    ||scene->selectedFingerprint()!=fingerprint||world->selectedFingerprint()!=fingerprint
+    ||scene->sourceCatalog()!=catalog||world->sourceCatalog()!=catalog)
+   return fail(e,"SourcePiki readonly retirement callback changed canonical scene authority");
+  for(unsigned k=0;k<2;++k)if(scene->captainAt(k)!=captains[k]||world->captainAt(k)!=captains[k])
+   return fail(e,"SourcePiki readonly retirement callback changed captain lifetime binding");
+  if(actors.size()!=retained.size())return fail(e,"SourcePiki readonly retirement callback changed owner registry");
+  for(auto h:retained){auto i=actors.find(h.body);OriginalPikiBodyHandle live;
+   if(i==actors.end()||i->second.sceneOwner!=scene||i->second.scene!=incarnation||i->second.handle.lifetime!=h.lifetime
+      ||!pc_p2_original_piki_body_handle(h.body,live)||live.nativeLifetime!=h.lifetime)
+    return fail(e,"SourcePiki readonly retirement callback changed a retained native lifetime");
   }
+  return op.complete(true,e);
+ };
+ try{
+  if(!validate())return false;
+  for(auto h:retained){const auto& entry=actors.find(h.body)->second;const auto& brain=entry.runtime.brain;
+   if((brain.freeEffectsOwned||brain.action==Action::Free)&&(!services->canRemoveFreeEffects(h,e)||!validate()))return false;
+   if((entry.runtime.throwEffectsOwned||entry.runtime.state==State::Flying)&&(!services->canRemoveThrowEffects(h,e)||!validate()))return false;
+   if(brain.action==Action::Formation&&brain.slot>=0&&(!services->canReleaseSlot(h,brain.navi,brain.slot,e)||!validate()))return false;
+   if(brain.pendingSlot>=0&&(!services->canReleaseSlot(h,brain.pendingNavi,brain.pendingSlot,e)||!validate()))return false;
+   // Every entry and the complete pass are checked after all callbacks too.
+   if(!validate())return false;
+  }
+  return validate();
  }catch(...){return fail(e,"SourcePiki readonly retirement preflight callback threw");}
- return op.complete(true,e);
 }
 bool readOwnership(Ownership& out,std::string& e){
  ReadOperation op;Ownership observed;observed.inFlightOwnerOperations=ownerMutationActive?1:0;
