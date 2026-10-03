@@ -73,6 +73,7 @@ class FoliageApp final:public PlugPikiApp {
  std::array<InstanceIdentity,2> firstIdentity;
  std::array<Vector3f,2> collisionCentre;
  std::array<std::array<Vector3f,5>,2> partCentres;
+ std::array<Vector3f,2> brownLargeChildCentre;
  std::array<float,2> health{};
  int ready=0,phase=0,age=0,pelletBaseline=0,rewardBaseline=0,tekiBaseline=0;
  bool captainSeen=false;
@@ -111,6 +112,8 @@ class FoliageApp final:public PlugPikiApp {
    require(actor->mCollInfo->getBoundingSphere()->getChildCount()==int(parts-1),"literal source collider child topology");
    for(unsigned j=0;j<parts;++j){auto* part=actor->mCollInfo->getSphere(0x66303030u+j);require(part,"literal source collider part identity");partCentres[i][j]=part->mCentre;
     if(source==46)require(part->mRadius==(j==0?50.f:j==1?25.f:20.f),"Dandelion literal root and leaf sphere radii");}
+   if(source==92){auto* root=actor->mCollInfo->getSphere(0x66303030u);auto* child=actor->mCollInfo->getSphere(0x66303031u);
+    require(root&&child&&root->getChildCount()==1&&root->mRadius==50&&child->mRadius==35,"brown large literal static root50 child35");brownLargeChildCentre[i]=child->mCentre;}
    std::printf("ORIGINAL_FOLIAGE_BIRTH source=%u uid=%u ordinal=%u epoch=%llu activation=%llu reentry=%d\n",source,identity.generator,identity.ordinal,(unsigned long long)identity.epoch,(unsigned long long)identity.activation,int(reentry));
   }
   require(actors[0]&&actors[1],"both literal variants physically admitted");checkEconomy();
@@ -123,7 +126,12 @@ class FoliageApp final:public PlugPikiApp {
   // plants on the east approach used by the successfully surveyed walk.
   Position a{n->mSRT.t.x+90,0,n->mSRT.t.z},b{n->mSRT.t.x+90,0,n->mSRT.t.z+70};
   a.y=mapMgr->getMinY(a.x,a.z,true);b.y=mapMgr->getMinY(b.x,b.z,true);require(std::isfinite(a.y)&&std::isfinite(b.y),"actual native arena floor");
-  if(batch=="forest"){
+  if(batch=="brown-large"){
+   // Literal Last #0 uses source object0004's constructor birthType0 default.
+   // Startup now decodes this version explicitly. Only positions are moved;
+   // these controls establish neither Last-course nor cave placement.
+   rows={literal(92,0,1390080862u,a,0,"last"),literal(91,0,1390538979u,b,0,"tutorial")};
+  }else if(batch=="forest"){
    // Actual forest/plantsgen.txt literals #23 (Clover47) and #0 (Ooinu_s49),
    // decoded in forest47-49-source-records.json. Only positions are relocated
    // to the same surveyed tutorial arena; this is not forest-course admission.
@@ -159,6 +167,7 @@ class FoliageApp final:public PlugPikiApp {
  void checkStatic(){for(unsigned i=0;i<2;++i){auto* actor=actors[i];const auto* h=native->provider().lookup(actor);require(h&&actor->mHealth==health[i]&&actor->isAlive(),"native foliage remains invulnerable");
    const auto& centre=actor->mCollInfo->getBoundingSphere()->mCentre;const auto& before=collisionCentre[i];require(std::fabs(centre.x-before.x)<.01f&&std::fabs(centre.y-before.y)<.01f&&std::fabs(centre.z-before.z)<.01f,"animated pose does not move static source collider");
    for(unsigned j=0;j<(h->row.enemy.source==46?5u:2u);++j){const auto* part=actor->mCollInfo->getSphere(0x66303030u+j);require(part,"retained source collider part");const auto& old=partCentres[i][j];require(std::fabs(part->mCentre.x-old.x)<.01f&&std::fabs(part->mCentre.y-old.y)<.01f&&std::fabs(part->mCentre.z-old.z)<.01f,"all source leaf collider centres remain static during touch");}
+   if(h->row.enemy.source==92){const auto* child=actor->mCollInfo->getSphere(0x66303031u);require(child&&child->mRadius==35,"brown large child retained");const auto& old=brownLargeChildCentre[i];require(std::fabs(child->mCentre.x-old.x)<.01f&&std::fabs(child->mCentre.y-old.y)<.01f&&std::fabs(child->mCentre.z-old.z)<.01f,"brown large child remains static through touch");}
    require(actor->mVelocity.x==0&&actor->mVelocity.y==0&&actor->mVelocity.z==0,"native scenery remains constrained");}
   checkEconomy();
  }
@@ -209,6 +218,7 @@ int main(int argc,char** argv){
  if(const char* selected=std::getenv("P2_ORIGINAL_FOLIAGE_BATCH"))batch=selected;else if(std::getenv("P2_ORIGINAL_FOLIAGE_FOREST"))batch="forest";
  if(batch=="tutorial")sourceIDs={91,88},sourcePair="91,88";
  else if(batch=="forest")sourceIDs={47,49},sourcePair="47,49";
+ else if(batch=="brown-large")sourceIDs={92,91},sourcePair="92,91";
  else if(batch=="dandelion")sourceIDs={46,80},sourcePair="46,80";
  else if(batch=="shoots")sourceIDs={51,52},sourcePair="51,52";
  else if(batch=="horsetails")sourceIDs={90,88},sourcePair="90,88";

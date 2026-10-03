@@ -74,6 +74,37 @@ visible fixture do not prove fully culled animation scheduling: retail
 `isCullingOff()` depends on nearby Pikmin, and an equivalent native predicate
 remains unproved. Plain frustum visibility must not be substituted for it.
 
+Brown large Figwort92 is tracked separately in
+[issue1279](https://github.com/4laric/pikmin-randomizer/issues/1279). Select
+`--batch brown-large` in the Linux supervisor, or
+`P2_ORIGINAL_FOLIAGE_BATCH=brown-large` for direct fixture launch. The batch
+pairs92/91 at the same surveyed east tutorial points. Existing tutorial91/88
+and forest47/49 selections are preserved; no generic foliage batch dependency
+is required.
+
+The92 representative is literal `last/plantsgen.txt#0`, UID1390080862, index0,
+facing0, count1, reserved0, respawn0 and zero offset. Its source object version
+`0004` retains the constructor's birthType0 default, as decoded explicitly by
+startup; generator version is still `????` with an empty tail. All remaining
+common/drop fields stay literal. Its genuine model is `KareOoinu_l`, with stem
+`flora_KareOoinu_l_karaooinu_l`; the source animation's `karao` spelling is kept.
+
+The fixture checks92's static root50/child35 collision radii and both centres
+through touch animation, normal60-frame motion ending at59, equivalent native
+leaf-touch sound, invulnerability, no rewards, owned cleanup and disc cache
+reentry. PASS markers identify `sources=92,91`. It still launches tutorial with
+20Red Pikmin and a centered960x540 window under bounded60-second supervision.
+These representative controls do not qualify original Last positions, full
+Last-course admission, cave placement or RAM saved-creature loading.
+
+Cave integration uses `foliage::Native::provider()` through the existing
+`GroupProvider` preflight/reserve/birth/bind/release interface. A caller outside
+the global `GroupCourse` must keep each actual Generator alive until its actors
+release, then explicitly retire its original registry associations. Global
+native retirement scans the global course; it does not retire a separate cave
+owner's bindings. Keep source92 identity and resource admission independent of
+the allocation chassis and test the actual cave path before gameplay sign-off.
+
 Human test (set `P2_ORIGINAL_FOLIAGE_HUMAN=1`; fixture remains open10minutes):
 
 1. Confirm centered960x540 gameplay and20Red Pikmin. Walk toward each of the two

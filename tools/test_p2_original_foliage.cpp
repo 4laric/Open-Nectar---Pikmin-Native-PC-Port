@@ -24,9 +24,9 @@ struct ControlledEngine final:Engine {
 };
 CatalogRow row(unsigned uid,unsigned source=91,unsigned count=1){CatalogRow r;r.course="tutorial";r.member="plantsgen.txt";r.sourceKey="literal-source:"+std::to_string(uid);r.index=uid;r.enemy.uid=uid;r.enemy.source=source;r.enemy.count=count;return r;}
 void identityAndResources(){
- std::string e;for(auto source:{46u,47u,49u,51u,52u,80u,88u,90u,91u})CHECK(supported(source));CHECK(!supported(50));
+ std::string e;for(auto source:{46u,47u,49u,51u,52u,80u,88u,90u,91u,92u})CHECK(supported(source));CHECK(!supported(50));
  auto literal=row(1);CHECK(decode(literal,e));
- for(auto source:{0u,48u,50u,53u,81u,89u,92u}){auto bad=literal;bad.enemy.source=source;CHECK(!decode(bad,e));}
+ for(auto source:{0u,48u,50u,53u,81u,89u,93u}){auto bad=literal;bad.enemy.source=source;CHECK(!decode(bad,e));}
  for(auto version:{"0000","0001","?????"}){auto bad=literal;bad.enemy.generatorVersion=version;CHECK(!decode(bad,e));}
  auto bad=literal;bad.enemy.generatorTail={"0"};CHECK(!decode(bad,e));bad=literal;bad.enemy.uid=0;CHECK(!decode(bad,e));
  bad=literal;bad.enemy.pelletColor=0;bad.enemy.pelletSize=1;CHECK(!decode(bad,e));
@@ -99,6 +99,19 @@ void literalCylinderPlanes(){
  auto foxtail=sourceCylinder(88,{10,20,30},0,4,8);CHECK(foxtail.bottom.x==10&&foxtail.bottom.y==20&&foxtail.bottom.z==-20);
  foxtail=sourceCylinder(88,{10,20,30},1.57079632679f,4,8);CHECK(std::fabs(foxtail.bottom.x+40)<.001f&&std::fabs(foxtail.bottom.z-30)<.001f);
 }
+void brownLargeIdentityAndEnd(){
+ ControlledEngine engine;Provider p(engine);std::string e;const unsigned sources[]={47,49,88,91,92};std::vector<CatalogRow> zeros;
+ for(auto source:sources){auto literal=row(100+source,source,0);CHECK(decode(literal,e));auto sentinel=literal;sentinel.enemy.pelletColor=0;sentinel.enemy.pelletSize=1;CHECK(!decode(sentinel,e));zeros.push_back(literal);}
+ CHECK(p.preflight(zeros,e));for(auto source:sources){CHECK(engine.resourceCalls[source]==1);}
+ CHECK(p.reserve(zeros,e)&&engine.reserved==0&&engine.allocations==0);
+ auto large=row(92,92),small=row(91,91);CHECK(p.preflight({large,small},e));auto alias=large;alias.enemy.source=91;CHECK(!p.reserve({alias,small},e));
+ auto tail=large;tail.enemy.generatorTail={"0"};CHECK(!decode(tail,e));auto version=large;version.enemy.generatorVersion="0004";CHECK(!decode(version,e));
+ engine.bank.duration=60;CHECK(p.preflight({large,small},e)&&p.reserve({large,small},e));Generator generator;Creature collider;Creature* actor=nullptr;
+ CHECK(p.birth(large,&generator,0,{},0,actor,e)&&p.lookup(actor)->row.enemy.source==92);CHECK(!p.bind(small,actor,92,e));CHECK(p.bind(large,actor,92,e));
+ CHECK(p.collision(actor,&collider,true,false,0,2,0,true,e));auto* h=p.lookup(actor);CHECK(h->active&&h->touched&&engine.sounds==1);
+ CHECK(p.tick(actor,1.9f,true,e)&&h->active&&std::fabs(h->frame-57)<.001f);CHECK(p.tick(actor,.1f,true,e)&&!h->active&&!h->touched&&h->frame==59);
+ CHECK(p.release(actor,92,e)&&p.size()==0);CHECK(p.preflight(zeros,e)&&p.reserve(zeros,e));
+}
 void touchAndTiming(unsigned source){
  ControlledEngine engine;Provider p(engine);std::string e;auto r=row(1,source);CHECK(p.preflight({r},e)&&p.reserve({r},e));Generator g;Creature collider;Creature* actor=nullptr;
  CHECK(p.birth(r,&g,0,{0,10,0},0,actor,e));Host* h=p.lookup(actor);CHECK(h&&!h->active&&!h->touched&&h->frame==0);
@@ -124,4 +137,4 @@ void touchAndTiming(unsigned source){
  CHECK(p.tick(actor,0.1f,false,e)&&h->frame==6);engine.cleanupFails=false;
  CHECK(p.release(actor,0,e));CHECK(!p.tick(actor,0,true,e)&&!p.earthquake(actor,e));
 }
-int main(){try{identityAndResources();reservationAndCleanup();forestIdentityAndResources();allNineOwnership();literalCylinderPlanes();for(auto source:{46u,47u,49u,51u,52u,80u,88u,90u,91u})touchAndTiming(source);std::cout<<"Foliage sources46,47,49,51,52,80,88,90,91 literal identities, distinct banks, zero resource rows, lifecycle, cylinder planes and touch timing controls PASS; native gameplay not claimed\n";}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}
+int main(){try{identityAndResources();reservationAndCleanup();forestIdentityAndResources();allNineOwnership();brownLargeIdentityAndEnd();literalCylinderPlanes();for(auto source:{46u,47u,49u,51u,52u,80u,88u,90u,91u,92u})touchAndTiming(source);std::cout<<"Foliage sources46,47,49,51,52,80,88,90,91 literal identities, distinct banks, zero resource rows, lifecycle, cylinder planes and touch timing controls PASS; native gameplay not claimed\n";}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}
