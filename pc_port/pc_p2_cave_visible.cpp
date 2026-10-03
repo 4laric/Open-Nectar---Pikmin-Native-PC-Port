@@ -14,7 +14,6 @@
 #include "MapCode.h"
 #include "Graphics.h"
 #include "Dolphin/gx.h"
-#include "gl/pc_gfx.h"
 #include "Camera.h"
 #include "MapMgr.h"
 #include "MoviePlayer.h"
@@ -22,7 +21,6 @@
 #include "system.h"
 #include <algorithm>
 #include <cstdio>
-extern "C" int pc_gfx_fog_allowed();
 
 // The qualified source line may ship before the optional cave provider. A
 // composed provider enables this only after linking the real transition owner.
@@ -73,14 +71,14 @@ void mesh(Graphics& gfx,const P2CaveVisibleBoundary& a){
     for(int i=0;i<segments;++i){
         const float t=i*tau/segments,u=(i+1)*tau/segments;
         const float r=48.f+(i%3)*3.f,s=48.f+((i+1)%3)*3.f;
-        const float h=27.f+(i%4)*2.f,k=27.f+((i+1)%4)*2.f;
-        auto inner=ring(a,t,30,14),next=ring(a,u,30,14);
+        const float h=17.f+(i%4)*.6f,k=17.f+((i+1)%4)*.6f;
+        auto inner=ring(a,t,36,15),next=ring(a,u,36,15);
         auto outer=ring(a,t,r,h),outNext=ring(a,u,s,k);
-        const Colour stone(i%2?Colour(139,123,99,255):Colour(166,149,118,255));
+        const Colour stone(i%2?Colour(160,164,170,255):Colour(188,192,194,255));
         tri(gfx,inner,next,outNext,stone);tri(gfx,inner,outNext,outer,stone);
-        tri(gfx,outer,outNext,ring(a,u,s+7,1),Colour(89,78,61,255));
-        tri(gfx,outer,ring(a,u,s+7,1),ring(a,t,r+7,1),Colour(89,78,61,255));
-        tri(gfx,Vector3f(a.x,a.y+13,a.z),next,inner,Colour(17,21,27,255));
+        tri(gfx,outer,outNext,ring(a,u,s+7,1),Colour(91,97,105,255));
+        tri(gfx,outer,ring(a,u,s+7,1),ring(a,t,r+7,1),Colour(91,97,105,255));
+        tri(gfx,Vector3f(a.x,a.y+14,a.z),next,inner,Colour(17,21,27,255));
         if(a.returning){
             auto low=ring(a,t,16,5),lowNext=ring(a,u,16,5);
             auto high=ring(a,t,8,104),highNext=ring(a,u,8,104);
@@ -163,7 +161,6 @@ void pc_p2_cave_visible_draw(Graphics& gfx){
     const Colour color=gfx.mPrimaryColour,aux=gfx.mAuxiliaryColour;
     const int blend=gfx.setCBlending(BLEND_Alpha),cull=gfx.mCullMode;
     gfx.setCullFront(2);
-    const int fogAllowed=pc_gfx_fog_allowed();pc_gfx_set_fog_allowed(0);
     const bool depth=gfx.setDepth(true);
     Texture* texture=gfx.mActiveTexture[0];const bool light=gfx.setLighting(false,nullptr);
     gfx.setPerspective(gfx.mCamera->mPerspectiveMatrix.mMtx,gfx.mCamera->mFov,
@@ -186,7 +183,6 @@ void pc_p2_cave_visible_draw(Graphics& gfx){
     gfx.useMatrix(gfx.mCamera->mLookAtMtx,0);
     gfx.setColour(color,true);gfx.mAuxiliaryColour=aux;gfx.setCBlending(blend);
     gfx.useTexture(texture,0);gfx.setLighting(light,nullptr);gfx.setDepth(depth);gfx.setCullFront(cull);
-    pc_gfx_set_fog_allowed(fogAllowed);
 }
 #else
 bool pc_p2_cave_visible_interact(Navi*){return false;}

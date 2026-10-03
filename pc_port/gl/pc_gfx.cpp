@@ -6700,9 +6700,6 @@ void pc_gfx_set_fog(int enabled, float startZ, float endZ, float nearZ, float fa
 }
 
 void pc_gfx_set_fog_allowed(int allowed) { sFogAllowed = allowed != 0; }
-// Internal read-only companion for a scoped authored world-overlay draw. Keep
-// the player's override intact when temporarily drawing an unfogged landmark.
-extern "C" int pc_gfx_fog_allowed() { return sFogAllowed; }
 
 static bool filesel_debug_enabled()
 {
