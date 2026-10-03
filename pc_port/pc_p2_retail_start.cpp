@@ -153,7 +153,7 @@ void unitDefinition(const Json& json,const Unit& unit){
   require(copied.at("id").numeric(actual.id)&&copied.at("direction").numeric(actual.direction)&&copied.at("offset").numeric(actual.offset)&&copied.at("waypoint").numeric(actual.waypoint),"start/source door identity");
   const auto& links=copied.at("links");require(links.kind==Json::Array&&links.array.size()==actual.links.size(),"start/source door links");
   for(unsigned l=0;l<actual.links.size();++l){const auto& link=actual.links[l];const auto& record=links.array[l];
-   require(record.kind==Json::Array&&record.array.size()==3&&record.array[0].numeric(link.distance)&&record.array[1].numeric(link.door)&&record.array[2].numeric(link.teki),"start/source door link values");}
+   require(record.at("distance").numeric(link.distance)&&record.at("door").numeric(link.door)&&record.at("enemy_flag").numeric(link.teki),"start/source door link values");}
  }
 }
 } // namespace
