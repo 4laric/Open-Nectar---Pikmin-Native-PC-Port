@@ -18,6 +18,7 @@ int main(){
  for(const auto& r:rows){assert(uji::decode(r,e));assert(uji::nativeType(r.enemy.source)==int(r.enemy.source)+6);}
  auto invalid=a;invalid.enemy.source=3;assert(!uji::decode(invalid,e));invalid=a;invalid.enemy.generatorVersion="0000";assert(!uji::decode(invalid,e));invalid=a;invalid.enemy.generatorTail={"0"};assert(!uji::decode(invalid,e));
  Engine engine;uji::Provider p(engine);auto bad=rows;bad.back()=invalid;assert(!p.preflight(bad,e)&&engine.resourcesCalled==0);
+ assert(!p.preflight({},e)&&engine.resourcesCalled==0);bad=rows;bad.back().enemy.source=2;assert(!p.preflight(bad,e)&&engine.resourcesCalled==0);
  for(unsigned variant=0;variant<5;++variant){bad=rows;auto& r=bad.back();
   if(variant==0)r.enemy.uid^=1;
   if(variant==1)r.sourceKey+="changed";
@@ -43,5 +44,6 @@ int main(){
  engine.nullBirth=true;assert(p.birth(b,&gen,0,pos,1.25f,actor,e)&&!actor);assert(!p.birth(b,&gen,0,pos,1.25f,actor,e));
  engine.nullBirth=false;engine.partialFailure=true;assert(!p.birth(b,&gen,1,pos,1.25f,actor,e)&&actor&&p.lookup(actor));assert(engine.killed==1);assert(p.release(actor,0,e)&&engine.killed==2);
  engine.partialFailure=false;assert(p.birth(c,&gen,0,pos,1.25f,actor,e));p.retired(actor);assert(!p.birth(c,&gen,0,pos,1.25f,actor,e)); // address retirement never authorizes ordinal reuse
+ assert(!p.reserve(rows,e));assert(!p.birth(c,&gen,0,pos,1.25f,actor,e)); // repeated reservation cannot reopen attempts
  std::cout<<"original Uji source/tail admission, whole-row reservation, grouped births and failed-bind cleanup passed\n";
 }

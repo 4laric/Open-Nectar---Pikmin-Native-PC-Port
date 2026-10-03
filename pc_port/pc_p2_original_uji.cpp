@@ -35,8 +35,9 @@ bool Provider::preflight(const std::vector<CatalogRow>& rows,std::string& e){
  if(!mHosts.empty())return refuse(e,"cannot replace original Uji resources with live actors");
  mPrepared=mReserved=false;mRows.clear();mRemaining.clear();mAttempts.clear();
  std::map<unsigned,CatalogRow> admitted;
+ if(rows.empty())return refuse(e,"empty original Uji admission request");
  // Decode all rows before resource callbacks, so a bad later tail is atomic.
- for(const auto& row:rows){if(!species(row.enemy.source))continue;
+ for(const auto& row:rows){if(!species(row.enemy.source))return refuse(e,"non-Uji row supplied to original Uji provider");
   if(!decode(row,e))return false;
   if(!admitted.emplace(row.enemy.uid,row).second)return refuse(e,"duplicate original Uji generator UID");
  }
@@ -44,9 +45,9 @@ bool Provider::preflight(const std::vector<CatalogRow>& rows,std::string& e){
  mRows=std::move(admitted);mPrepared=true;e.clear();return true;
 }
 bool Provider::reserve(const std::vector<CatalogRow>& rows,std::string& e){
- if(!mPrepared||!mHosts.empty())return refuse(e,"original Uji reservation requires completed preflight");
+ if(!mPrepared||mReserved||!mHosts.empty()||rows.empty())return refuse(e,"original Uji reservation requires one completed nonempty preflight");
  mReserved=false;mRemaining.clear();mAttempts.clear();unsigned count=0;std::map<unsigned,unsigned> remaining;
- for(const auto& row:rows){if(!species(row.enemy.source))continue;
+ for(const auto& row:rows){if(!species(row.enemy.source))return refuse(e,"non-Uji row supplied to original Uji reservation");
   auto admitted=mRows.find(row.enemy.uid);
   if(admitted==mRows.end()||!same(admitted->second,row)||!remaining.emplace(row.enemy.uid,row.enemy.count-row.enemy.deathCount).second)return refuse(e,"Uji reservation differs from admitted original rows");
   count+=row.enemy.count-row.enemy.deathCount;
