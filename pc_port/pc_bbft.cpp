@@ -51,6 +51,7 @@ static const char* p2Courses[] = {"tutorial", "forest", "yakushima", "last"};
 static const char* p2Stages[] = {"stages/p2_tutorial.ini", "stages/p2_forest.ini", "stages/p2_yakushima.ini", "stages/p2_last.ini"};
 bool pc_pikipelago_surface_campaign() { return p2SurfaceCampaign; }
 int pc_pikipelago_surface_index() { return p2SurfaceIndex; }
+const char* pc_pikipelago_surface_stage_for(int id) {return id>=0 && id<4 ? p2Stages[id] : nullptr;}
 bool pc_pikipelago_surface_select(int id, const char* path) {
     if (!p2SurfaceCampaign || id < 0 || id >= 4 || !path || std::strcmp(path,p2Stages[id])) return false;
     p2SurfaceIndex=id;
