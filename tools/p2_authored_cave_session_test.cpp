@@ -10,9 +10,13 @@ std::string image(){
     assert(P2CaveCacheBanks::imageValid(b));return b;
 }
 int main(){
-    P2AuthoredCaveRoute route;route.present=true;route.seed=42;route.token=std::string(32,'a');route.routeSha=std::string(64,'b');
+    P2AuthoredCaveRoute route;route.present=true;route.seed=42;route.token=std::string(32,'a');route.routeSha=std::string(64,'b');route.pikiGeneratorsSha=std::string(64,'e');
     route.surface={1,1,"stages/forest.ini",std::string(64,'c'),{1.25f,30,2.5f}};
     route.floor={1,1,"stages/generated-forest.ini",std::string(64,'d'),{3.5f,30,4.75f}};route.exit={10,20,30};assert(route.valid());
+    std::ostringstream selected;route.write(selected);auto legacyRoute=selected.str();
+    const auto versionAt=legacyRoute.find("AUTHORED_CAVE_ROUTE 2");assert(versionAt!=std::string::npos);
+    legacyRoute[versionAt+std::string("AUTHORED_CAVE_ROUTE ").size()]='1';
+    P2AuthoredCaveRoute decoded;std::istringstream oldRoute(legacyRoute);assert(!decoded.read(oldRoute));
     P2CaveSeedBinding binding;binding.seed=42;binding.token=route.token;assert(route.matches(binding));++binding.seed;assert(!route.matches(binding));
     P2CaveCacheBanks banks;assert(banks.enter(image()));assert(banks.captureFloor(image()));
     P2AuthoredCaveSession saved;saved.present=true;saved.route=route;saved.day=0;saved.party.present=true;saved.party.inside=true;saved.party.nextKey=21;
@@ -29,11 +33,12 @@ int main(){
         std::istringstream in(bad);assert(!loaded.read(in));std::ostringstream after;loaded.write(after);assert(after.str()==original);
     }
     auto other=route;other.token[0]='e';assert(!saved.matches(other,banks));other=route;other.floor.mapSha[0]='e';assert(!saved.matches(other,banks));
+    other=route;other.pikiGeneratorsSha[0]='f';assert(!saved.matches(other,banks));
     other=route;other.surface.file="stages/../forest.ini";assert(!other.valid());other=route;other.floor.index=2;assert(!other.valid());
     auto corrupt=banks;corrupt.floor[8]='x';assert(corrupt.valid()&&!saved.matches(route,corrupt)&&!saved.activeCacheMatches(corrupt.floor));
     auto cross=saved;cross.activeCacheSha=cross.surfaceCacheSha;assert(!cross.activeCacheMatches(banks.floor));
     auto down=saved;down.party.captains[1].health=0;assert(!down.valid());
     auto wrong=saved;wrong.party.inside=false;assert(!wrong.matches(route,banks));
     P2AuthoredCaveSession empty;std::ostringstream noLiving;empty.write(noLiving);std::istringstream emptyInput(noLiving.str());assert(loaded.read(emptyInput)&&!loaded.present);
-    std::cout<<"PASS authored route/session roundtrip20 twoCaptains prospective refusal bank binding; no gameplay\n";
+    std::cout<<"PASS authored Route2/catalog binding session roundtrip20 twoCaptains prospective refusal bank binding; no gameplay\n";
 }
