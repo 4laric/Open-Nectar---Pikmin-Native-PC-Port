@@ -283,7 +283,18 @@ void GameSetupSection::update()
             }
             stage = selected;
             if (pc_pikipelago_surface_campaign()) {
-                for(int id=0;id<4;++id) gameflow.mPlayState.openStage(id);
+                int counts[4]={0,0,0,0};
+                for(StageInfo* candidate=static_cast<StageInfo*>(flowCont.mStageList.mChild); candidate;
+                    candidate=static_cast<StageInfo*>(candidate->mNext)) {
+                    const char* path=pc_pikipelago_surface_stage_for(candidate->mStageID);
+                    if(!path || std::strcmp(path,candidate->mFileName) || ++counts[candidate->mStageID]!=1) {
+                        std::fprintf(stderr,"P2 campaign requires exactly four unique surface stages\n");std::exit(2);
+                    }
+                }
+                for(int id=0;id<4;++id) {
+                    if(counts[id]!=1) {std::fprintf(stderr,"Missing P2 campaign surface stage\n");std::exit(2);}
+                    gameflow.mPlayState.openStage(id);
+                }
             }
         } else if (pc_pikipelago_challenge_level() >= 0) {
             char target[64]; std::snprintf(target,sizeof(target),"stages/chal%d.ini",pc_pikipelago_challenge_level());

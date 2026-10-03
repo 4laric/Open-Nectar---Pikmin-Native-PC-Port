@@ -45,3 +45,5 @@ const char* pc_pikipelago_surface_stage();
 bool pc_pikipelago_surface_campaign();
 int pc_pikipelago_surface_index();
 bool pc_pikipelago_surface_select(int stageId, const char* stagePath);
+
+const char* pc_pikipelago_surface_stage_for(int stageId);
