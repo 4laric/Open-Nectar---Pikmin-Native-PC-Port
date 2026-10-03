@@ -32,7 +32,7 @@ struct Native::Impl final:Engine {
   // no carryable corpse and must not require its borrowed Mar pellet config.
   // This family owns a source-mesh body fit; actual latch mechanics still
   // require gameplay qualification. Register before the visual bank fit.
-  pc_p2_body_coll_manage("flying|Hanachirashi");
+  // Source55 binds its own nine authored joint colliders after visual birth.
   return pc_p2_original_drop_resources(row,e)&&pc_p2_batch3_original_resources(row.enemy.source,e)&&pc_p2_hanachirashi_original_resources(row.enemy.source,e);
  }
  bool reserve(const std::vector<CatalogRow>& rows,unsigned count,std::string& e)override{

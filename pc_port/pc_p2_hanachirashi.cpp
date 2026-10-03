@@ -1,3 +1,4 @@
+#include "pc_p2_hanachirashi_source.h"
 // Family-owned flying-remainder source behavior for the batch-3 P1 Puffy
 // Blowhog placement vehicle: Withering Blowhog (Hanachirashi, EnemyID 55).
 // Implements a bounded slice of source HanachirashiState.cpp: Wait (hover/
@@ -326,14 +327,16 @@ void setPhase(Hana& s) {
 }
 
 void pc_p2_hanachirashi_reset() {
+    if(p2hana::active()){std::fprintf(stderr,"P2_ORIGINAL_HANACHIRASHI reset with live source actor\n");std::abort();}
     for(const auto& actor:actors) if(actor.second.original) {std::fprintf(stderr,"P2_ORIGINAL_HANACHIRASHI reset with live actor\n");std::abort();}
     actors.clear();
     clips.clear();
     ready = false;
 }
-void pc_p2_hanachirashi_forget(BTeki* actor) { actors.erase(static_cast<PelletView*>(actor)); pc_p2_original_hanachirashi_forget(actor); }
+void pc_p2_hanachirashi_forget(BTeki* actor) { p2hana::forget(actor); actors.erase(static_cast<PelletView*>(actor)); pc_p2_original_hanachirashi_forget(actor); }
 
 float pc_p2_hanachirashi_param_f(const BTeki* actor, int idx, float fallback) {
+    if (p2hana::has(actor)) { if(idx==TPF_Life)return 1800; if(idx==TPF_LifeRecoverRate)return 0; return fallback; }
     if (!ready || !actors.count(static_cast<PelletView*>(const_cast<BTeki*>(actor)))) return fallback;
     if (idx == TPF_Life) return LIFE;
     if (idx == TPF_LifeRecoverRate) return 0.0f;
@@ -354,6 +357,7 @@ float pc_p2_hanachirashi_param_f(const BTeki* actor, int idx, float fallback) {
 }
 
 bool pc_p2_hanachirashi_clip(const BTeki* actor, const char*& name, float& phase) {
+    if(p2hana::clip(actor,name,phase))return true;
     if (!ready) return false;
     auto it = actors.find(static_cast<PelletView*>(const_cast<BTeki*>(actor)));
     if (it == actors.end()) return false;
@@ -433,25 +437,16 @@ bool loadClips(std::string& error) {
 }
 bool pc_p2_hanachirashi_original_resources(unsigned source,std::string& error){
  if(source!=55){error="invalid original Hanachirashi source";return false;}
- for(const auto& actor:actors)if(!actor.second.original){error="original Hanachirashi cannot reuse AP/family actors";return false;}
+ if(!actors.empty()){error="original Hanachirashi cannot reuse AP/family actors";return false;}
  std::ifstream authored("p2-flying-bank.txt");if(!p2original::hanachirashi::validateBank(authored,error))return false;
- if(!actors.empty()){error.clear();return true;}
- clips.clear();return loadClips(error);
+ return p2hana::resources(error);
 }
 bool pc_p2_hanachirashi_original_birth(BTeki* actor,unsigned source,unsigned uid,unsigned ordinal,std::string& error){
- (void)ordinal;
- if(!actor||source!=55||!uid||actor->mTekiType!=TEKI_Mar||actors.count(static_cast<PelletView*>(actor))||clips.empty()){error="invalid or unprepared original Hanachirashi birth";return false;}
- Hana s;s.original=true;s.token=uid;s.home=actor->getPosition();s.heading=actor->getDirection();s.moveTarget=s.home;
- for(const auto& event:clips.at("attack").events)if(event.second==2){s.attackFrame=event.first;break;}
- enter(s,HANA_WAIT,"move1");actors.emplace(static_cast<PelletView*>(actor),s);
- actor->mHealth=actor->mMaxHealth=LIFE;ready=true;error.clear();return true;
+ if(source!=55){error="invalid original Hanachirashi source";return false;}
+ return p2hana::birth(actor,uid,ordinal,error);
 }
-bool pc_p2_hanachirashi_original_registry(BTeki* actor,unsigned token,std::string& error){
- auto found=actors.find(static_cast<PelletView*>(actor));
- if(found==actors.end()||!found->second.original||!token||pc_p2_original_actor_token(actor)!=token){error="original Hanachirashi registry token mismatch";return false;}
- found->second.token=token;error.clear();return true;
-}
-bool pc_p2_hanachirashi_suppress_ai(const BTeki* actor){return ready&&actors.count(static_cast<PelletView*>(const_cast<BTeki*>(actor)));}
+bool pc_p2_hanachirashi_original_registry(BTeki* actor,unsigned token,std::string& error){return p2hana::registry(actor,token,error);}
+bool pc_p2_hanachirashi_suppress_ai(const BTeki* actor){return p2hana::has(actor)||(ready&&actors.count(static_cast<PelletView*>(const_cast<BTeki*>(actor))));}
 void pc_p2_hanachirashi_setup() {
     if(pc_p2_original_hanachirashi_admitted()) return;
     pc_p2_hanachirashi_reset();
@@ -517,6 +512,7 @@ void pc_p2_hanachirashi_setup() {
 }
 
 void pc_p2_hanachirashi_update(BTeki* actor) {
+    if(p2hana::update(actor))return;
     if (!ready) return;
     auto it = actors.find(static_cast<PelletView*>(actor));
     if (it == actors.end()) return;
