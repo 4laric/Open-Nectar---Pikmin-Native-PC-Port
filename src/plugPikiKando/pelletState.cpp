@@ -248,7 +248,7 @@ PelletGoalState::PelletGoalState()
 void PelletGoalState::init(Pellet* pelt)
 {
 	const bool originalPod=pc_p2_original_pod_owns(pelt);
-	if(originalPod)pc_p2_original_pod_suction_begin(pelt);
+	if(originalPod)P2OriginalPodNativeSeam::begin(pelt);
 	mTargetIsShip = false;
 	if (pelt->mTargetGoal->mObjType == OBJTYPE_Ufo) {
 		mTargetIsShip = true;
@@ -298,7 +298,7 @@ void PelletGoalState::init(Pellet* pelt)
 	pelt->disableGravity();
 	pelt->mVelocity.y = 0.0f;
 
-	if (pelt->mTargetGoal->mObjType != OBJTYPE_Ufo) {
+	if (!originalPod && pelt->mTargetGoal->mObjType != OBJTYPE_Ufo) {
 		Vector3f pos = pelt->mTargetGoal->getGoalPos();
 		EffectParm parm(pos);
 		utEffectMgr->cast(KandoEffect::Goal, parm);
@@ -360,7 +360,7 @@ void PelletGoalState::exec(Pellet* pelt)
 	mSuckSpeed += gsys->getFrameTime() * 720.0f;
 
 	if (mSuckProgress >= 1.0f) {
-		if (pc_p2_original_pod_suction_done(pelt)) {
+		if (P2OriginalPodNativeSeam::done(pelt,*this)) {
 			// Original cave receiver emits the canonical callback only here.
 		} else if (pc_p2_preview_deliver(pelt)) {
 			// Private treasure receipt; no Onion seeds or ship repair side effects.
@@ -381,7 +381,7 @@ void PelletGoalState::exec(Pellet* pelt)
  */
 void PelletGoalState::cleanup(Pellet* pellet)
 {
-	pc_p2_original_pod_suction_cleanup(pellet);
+	P2OriginalPodNativeSeam::cleanup(pellet);
 	PRINT("pelletGoalState * CLEAN UP\n");
 	if (mTargetIsShip) {
 		utEffectMgr->kill(KandoEffect::UfoSuck);
