@@ -56,3 +56,28 @@ or manufactures a selected-packet fingerprint. Existing Red schema and tests
 remain supported. Run the actual native fixture with the TSV as its sole argument.
 This tests constructors and cleanup only. Full source FSM motion coverage,
 selected Body/Scene adoption, effects, impact/poison gameplay and SAVE remain open.
+
+
+### Separate full registered motion source successor
+
+`import_p2_piki_motion_sources.py` retains all 67 registered genuine BCA files,
+the authenticated species BMD, Piki parameters and original `animmgr.txt`.
+Its bounded scan permits genuine authored zero scale, while checking framing,
+skeleton, track offsets/lengths and finite values. This raw source closure has
+71 roles and grants no native animator, normal history or Scene authority.
+
+`import_p2_piki_source_bank.py --coverage registered` converts 65 clips with the
+unchanged strict decoder, producing 770 sampled MODs per species. It retains
+raw IDs19 GrowUp2 and63 Suwareru with an explicit unconverted reason. Purple's
+untextured body uses the genuine TEV register0 base color; materials still use
+the established simplified pipeline. The default fourteen-clip/171-model bank
+and its constructor input schema remain unchanged.
+
+GrowUp2 frame12 has three triangles affected by a singular direct draw matrix
+that retain nonzero area. Omitting these triangles or inventing normals is
+invalid. Retail J3D swaps normal destinations per actual native viewport draw;
+its exact-zero determinant inverse transpose leaves the destination unchanged.
+The actual Body animator must own those two buffers through each actor lifetime,
+including motion transitions, before claiming live support for both zero-scale
+clips. Offline sampled geometry cannot establish current-camera lighting,
+complete animation/FSM, gameplay or SAVE acceptance.

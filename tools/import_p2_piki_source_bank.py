@@ -7,11 +7,6 @@ complete source FSM/effects, selected Scene authority or gameplay acceptance.
 import argparse
 from pathlib import Path
 import hashlib,json,struct,math,re
-from experimental.pikmin2_assets import disc_files,archive_files
-from experimental.pikmin2_convert import blocks,decode,write_model,convert
-from experimental.pikmin2_purple import bca_pose
-from experimental.pikmin2_skinning import draw_matrices
-from experimental.pikmin2_rigid import joint_matrices
 MODELS={
  "purple":("piki_p2_black.bmd","d54d31dbf568d476861a3f02b6392eb0d405b0cb75d66101921fd074e9474770",3),
  "white":("piki_p2_white.bmd","a971c6ac48e04a6f99333cacc1f57faf1ebfa13db71c5a31e93c6ce293bb376d",4),
@@ -22,7 +17,12 @@ MOTION_SOURCE = {'wait': {'sha256': 'a6d37d0f572e21b0016e235e7b398b4bc6b0a30a276
 def require(value):
  if not value:raise ValueError("genuine species bank source/closure mismatch")
 
-def generate(iso,species,out):
+def generate(iso,species,out,coverage="baseline"):
+ from experimental.pikmin2_assets import disc_files,archive_files
+ from experimental.pikmin2_convert import blocks,decode,write_model,convert
+ from experimental.pikmin2_purple import bca_pose
+ from experimental.pikmin2_skinning import draw_matrices
+ from experimental.pikmin2_rigid import joint_matrices
  model_name,model_sha,source_species=MODELS[species]
  files=disc_files(iso);key='user/Kando/piki/pikis.szs';offset,size=files[key]
  with iso.open('rb') as f:
@@ -40,12 +40,28 @@ def generate(iso,species,out):
  receipt={'activated':False,'gameplay':False,'source_species':source_species,'species':species,'baseline':'Red171 fourteen-motion counterpart; not complete FSM',
   'source':{key:{'offset':offset,'bytes':size,'sha256':hashlib.sha256(raw).hexdigest()},pkey:{'offset':po,'bytes':ps,'sha256':hashlib.sha256(params).hexdigest()},tkey:{'offset':to,'bytes':ts,'sha256':hashlib.sha256(texts).hexdigest()}},
   'source_model_member':'piki_model/'+model_name,'source_model_sha256':model_sha,'joints':joints,'motions':{},'files':{}}
+ entries=re.findall(r'\{([^{}]+)\}',registry.decode('shift_jis'));require(len(entries)==67)
+ names=['wait','run2','hang','rolljmp','kizuku','walk','asibumi','nigeru','akubi','chatting','sagasu2','iraira','suwaru','neru']
+ if coverage=="registered":
+  names=[row.split()[1][:-4] for id,row in enumerate(entries) if id not in (19,63)]
+  receipt['baseline']='65 strict converted registered clips; authored-zero 19/63 raw only, not complete animator'
+  receipt['unconverted_source_clips']=[{'id':id,'name':entries[id].split()[1][:-4],'reason':'authored zero-scale requires actual retail render normal destinations'} for id in (19,63)]
+ receipt['coverage']=coverage
  lines=['P2_SOURCE_PIKI_BANK_1 '+model_sha+' '+hashlib.sha256(params).hexdigest()];anchors={}
- for name in ['wait','run2','hang','rolljmp','kizuku','walk','asibumi','nigeru','akubi','chatting','sagasu2','iraira','suwaru','neru']:
+ if species=="purple" and coverage=="registered":
+  # Actual untextured Purple body base comes from its TEV register0. This
+  # preserves its source hue in the existing simplified material pipeline.
+  material=skeleton['MAT3'];names_at=struct.unpack_from('>I',material,20)[0]
+  labels=[material[names_at+struct.unpack_from('>H',material,names_at+6+4*i)[0]:].split(b'\0',1)[0] for i in range(struct.unpack_from('>H',material,names_at)[0])]
+  require(labels==[b'body1',b'eye1'])
+  body_color=struct.unpack_from('>4h',material,struct.unpack_from('>I',material,80)[0]);require(all(0<=v<=255 for v in body_color))
+  material_colors=[body_color,(255,255,255,255)];receipt['source_body_color']=list(body_color)
+ else:material_colors=None
+ for name in names:
   clip=archive['motion/'+name+'.bca'];(out/(name+'.bca')).write_bytes(clip);duration,_=bca_pose(clip,0,joints,True);frames=sorted(set(round(i*(duration-1)/min(11,duration-1)) for i in range(min(12,duration))));motion={'duration':duration,'frames':frames,'source_sha256':hashlib.sha256(clip).hexdigest(),'happa':[]};lines.append(f'clip {name} {duration} {motion["source_sha256"]} {len(frames)} '+' '.join(map(str,frames)))
   anchors[name]=[]
   for index,frame in enumerate(frames):
-   _,pose=bca_pose(clip,frame,joints,True);matrices=draw_matrices(skeleton,pose);target=out/f'{species}_{name}_{index:02}.mod';write_model(decode(model.read_bytes(),True,bake_rigid=True,draw_matrices=matrices),target,str(model));world=joint_matrices(skeleton,pose);motion['happa'].append(world[8]);anchors[name].append({'frame':frame,'joints':world})
+   _,pose=bca_pose(clip,frame,joints,True);matrices=draw_matrices(skeleton,pose);target=out/f'{species}_{name}_{index:02}.mod';write_model(decode(model.read_bytes(),True,bake_rigid=True,draw_matrices=matrices),target,str(model),material_colors=material_colors);world=joint_matrices(skeleton,pose);motion['happa'].append(world[8]);anchors[name].append({'frame':frame,'joints':world})
   for index,matrix in enumerate(motion['happa']):lines.append('happa '+name+' '+str(index)+' '+' '.join(format(v,'.9g') for row in matrix for v in row))
   receipt['motions'][name]=motion;print(name,duration,len(frames),flush=True)
  for growth,name in enumerate(['leaf','bud','flower']):
@@ -69,11 +85,17 @@ def generate(iso,species,out):
  for name in ['animmgr.txt','motion-registry.json']:
   file=out/name;receipt['files'][name]={'bytes':file.stat().st_size,'sha256':hashlib.sha256(file.read_bytes()).hexdigest()}
  (out/'receipt-with-registry.json').write_text(json.dumps(receipt,indent=2))
- print('AUTHENTIC_REGISTRY_PASS',len(source),source,flush=True)
- require(len(receipt['files'])==365 and len(list(out.glob('*.mod')))==171)
+ print('AUTHENTIC_REGISTRY_PASS',len(source),flush=True)
+ if coverage=="registered":
+  for id in (19,63):
+   name=entries[id].split()[1];data=archive['motion/'+name];(out/name).write_bytes(data)
+   receipt['files'][name]={'bytes':len(data),'sha256':hashlib.sha256(data).hexdigest()}
+  receipt['registered_clips']=67;receipt['converted_clips']=65;receipt['model_count']=len(list(out.glob('*.mod')))
+  (out/'receipt-with-registry.json').write_text(json.dumps(receipt,indent=2))
+ else:require(len(receipt['files'])==365 and len(list(out.glob('*.mod')))==171)
  return receipt
 
 if __name__=='__main__':
  parser=argparse.ArgumentParser(description=__doc__)
- parser.add_argument('--iso',type=Path,required=True);parser.add_argument('--species',choices=MODELS,required=True);parser.add_argument('--output',type=Path,required=True)
- args=parser.parse_args();generate(args.iso,args.species,args.output)
+ parser.add_argument('--coverage',choices=['baseline','registered'],default='baseline');parser.add_argument('--iso',type=Path,required=True);parser.add_argument('--species',choices=MODELS,required=True);parser.add_argument('--output',type=Path,required=True)
+ args=parser.parse_args();generate(args.iso,args.species,args.output,args.coverage)
