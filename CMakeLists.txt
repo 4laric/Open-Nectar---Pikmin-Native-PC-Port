@@ -355,6 +355,7 @@ set(PC_PORT_SOURCES
     pc_port/pc_p2_cave.cpp
     pc_port/pc_p2_cave_campaign_cache_engine.cpp
     pc_port/pc_p2_campaign_flush.cpp
+    pc_port/pc_p2_original_piki_origin.cpp
     pc_port/pc_p2_cave_campaign_party_engine.cpp
     pc_port/pc_p2_surface_save.cpp
     pc_port/pc_p2_cave_dialog_window.cpp
@@ -3307,3 +3308,8 @@ add_executable(p2_cave_campaign_party_test tools/test_p2_cave_campaign_party.cpp
 target_include_directories(p2_cave_campaign_party_test PRIVATE pc_port)
 target_compile_options(p2_cave_campaign_party_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
 add_test(NAME p2_cave_campaign_party COMMAND p2_cave_campaign_party_test)
+
+add_executable(p2_original_piki_origin_test tools/pc_p2_original_piki_origin_test.cpp pc_port/pc_p2_original_piki_origin.cpp)
+target_include_directories(p2_original_piki_origin_test PRIVATE pc_port)
+target_compile_options(p2_original_piki_origin_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+add_test(NAME p2_original_piki_origin COMMAND p2_original_piki_origin_test)
