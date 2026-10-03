@@ -31,6 +31,8 @@ bool Dispatch::capability(const CatalogRow& row,std::string& e)const{
 bool Dispatch::preflight(const std::vector<CatalogRow>& rows,std::string& e){
  if(!mOwned.empty())return fail(e,"original dispatcher still owns physical actors");
  mPrepared=false;mReserved=false;mRows.clear();
+ // A selected item/Pikmin-only scene owns no enemy family reservations.
+ if(rows.empty()){mPrepared=true;e.clear();return true;}
  // Validate ALL source IDs/tails/UIDs before a physical resource callback.
  Catalog checked;
  if(!checked.install(std::string(64,'0'),rows,[this](const CatalogRow& r,std::string& e){return capability(r,e);},e))return false;

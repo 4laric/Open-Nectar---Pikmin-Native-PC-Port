@@ -1,4 +1,6 @@
 #include "pc_p2_original_drop_engine.h"
+#include "pc_p2_original_corpse_native.h"
+#include "pc_p2_original_actor.h"
 #include "pc_p2_original_pelplant_native.h"
 #include "pc_p2_original_foliage_native.h"
 #include "pc_p2_demon_host.h"
@@ -809,6 +811,9 @@ void BTeki::doAI()
 	if (pc_p2_catfish_suppress_ai(this)) {
 		return;
 	}
+	if (pc_p2_hanachirashi_suppress_ai(this)) {
+		return;
+	}
 	if (pc_p2_hana_suppress_ai(this)) {
 		return;
 	}
@@ -900,7 +905,7 @@ void BTeki::dieSoon()
 	if (pc_held_part_p2_source(this)) pc_held_part_drop(this, "dieSoon");
 #endif
 	clearTekiOption(TEKIOPT_Alive | TEKIOPT_Visible | TEKIOPT_ShadowVisible | TEKIOPT_Atari);
-	if (getParameterI(TPI_CorpseType) == TEKICORPSE_LeaveCorpse) {
+	if (pc_p2_original_corpse_leaves(this,getParameterI(TPI_CorpseType) == TEKICORPSE_LeaveCorpse)) {
 		createSoulEffect();
 		u32 typeID = TekiMgr::getTypeId(mTekiType);
 		ID32 id(typeID);
@@ -932,6 +937,8 @@ void BTeki::dieSoon()
 		}
 #endif
 
+		unsigned originalSource=0;
+		if (pc_p2_original_actor_source(this,originalSource)) vec1.set(mSRT.t);
 		becomePellet(typeID, vec1, getDirection());
 		PRINT_NAKATA("dieSoon:%08x:pellet:%08x\n", this, mPellet);
 		if (!mPellet) {

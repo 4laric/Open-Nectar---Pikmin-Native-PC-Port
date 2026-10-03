@@ -70,6 +70,9 @@ if __name__ == '__main__':
     cli.add_argument('--bundle', required=True, action='append', type=Path)
     cli.add_argument('--campaign-fingerprint', required=True)
     cli.add_argument('--output', required=True, type=Path)
+    cli.add_argument('--active-census', type=Path, help='Complete selected native calendar member census')
+    cli.add_argument('--course', choices=('tutorial', 'forest', 'yakushima', 'last'))
+    cli.add_argument('--day', type=int, help='Zero-based original source day')
     args = cli.parse_args()
     sys.path.insert(0, str(args.randomizer_root.resolve(strict=True)))
     from experimental.pikmin2_cave import tree
@@ -77,7 +80,54 @@ if __name__ == '__main__':
     if {course for course, _ in courses} != {'tutorial', 'forest', 'yakushima', 'last'} or len(courses) != 4:
         raise ValueError('Require all four complete original calendar bundles')
     manifest, streams, receipt = stage(courses, args.campaign_fingerprint)
+    active_blob = None
+    if args.active_census is not None:
+        if args.course is None or args.day is None or not 0 <= args.day <= 0xffffffff:
+            raise ValueError('Active census requires selected course and zero-based day')
+        full = {r['source_key']: (member['source_sha256'], r['actor'])
+                for course, members in courses for member in members for r in member['records']
+                if r['actor']['kind'] == 'piki'}
+        verified_members = {member['member']: member for course, members in courses
+                            if course == args.course for member in members}
+        uids, seen_members, selected_keys = [], set(), set()
+        for member in json.loads(args.active_census.read_text(encoding='utf-8')):
+            if member['member'] in seen_members:
+                raise ValueError('Duplicate selected calendar member')
+            seen_members.add(member['member'])
+            if member['member'] not in verified_members or member['source_sha256'] != verified_members[member['member']]['source_sha256']:
+                raise ValueError('Selected calendar member not in verified full source inventory')
+            for record in member['records']:
+                actor = record['actor']
+                if actor['kind'] != 'piki':
+                    continue
+                key = record['source_key']
+                if not key.startswith(args.course + '/') or key not in full:
+                    raise ValueError('Selected Piki absent from full immutable atlas')
+                sha, actual = full[key]
+                fields = ('index', 'kind', 'record_version', 'object_version', 'source_payload',
+                          'position', 'offset', 'reserved', 'respawn_days')
+                if sha != member['source_sha256'] or any(actor[f] != actual[f] for f in fields):
+                    raise ValueError('Selected Piki differs from verified source row')
+                uid = 0x52000000 | int.from_bytes(hashlib.sha256(key.encode('ascii')).digest()[:3], 'big')
+                if uid != record['generator_uid'] or uid in uids:
+                    raise ValueError('Selected Piki UID mismatch/duplicate')
+                uids.append(uid)
+                selected_keys.add(key)
+        expected_keys = {r['source_key'] for name in seen_members
+                         for r in verified_members[name]['records'] if r['actor']['kind'] == 'piki'}
+        if selected_keys != expected_keys:
+            raise ValueError('Selected calendar census omitted original Piki rows')
+        active_blob = b'P2PA1' + args.campaign_fingerprint.encode('ascii') + receipt['piki_catalog_sha256'].encode('ascii')
+        active_blob += string(args.course) + integer(args.day) + integer(len(uids))
+        active_blob += b''.join(integer(uid) for uid in sorted(uids))
+        active_blob += hashlib.sha256(active_blob).digest()
+        receipt['selected_piki_rows'] = len(uids)
+        receipt['selected_source_day'] = args.day
+    elif args.course is not None or args.day is not None:
+        raise ValueError('Course/day requires explicit complete selected calendar census')
     args.output.mkdir(parents=True, exist_ok=False)
+    if active_blob is not None:
+        (args.output / (args.course + '.p2pa')).write_bytes(active_blob)
     (args.output / 'campaign.p2pk').write_bytes(manifest)
     for key, content in streams.items():
         course, name = key.split('/', 1)

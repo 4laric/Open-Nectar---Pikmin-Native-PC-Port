@@ -14,4 +14,7 @@ struct PikiManifest {std::string campaign,catalog;std::vector<PikiSourceRecord> 
 bool validatePikiSource(const PikiSourceRecord&,std::string&);
 bool writePikiManifest(const PikiManifest&,std::string& bytes,std::string&);
 bool readPikiManifest(const std::string& bytes,PikiManifest&,std::string&);
+// Selected calendar census, separately bound to full catalog/campaign/day.
+bool writePikiActive(const PikiManifest&,const std::string& course,unsigned day,const std::vector<unsigned>&,std::string& bytes,std::string&);
+bool readPikiActive(const std::string& bytes,const PikiManifest&,const std::string& course,unsigned day,std::vector<unsigned>&,std::string&);
 }

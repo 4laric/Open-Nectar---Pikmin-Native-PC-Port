@@ -3,7 +3,9 @@
 #include "pc_p2_ship.h"
 #include "pc_p2_white_poison.h"
 #include "pc_p2_original_course.h"
+#include "pc_p2_original_cave_native.h"
 #include "pc_p2_original_onyon_native.h"
+#include "pc_p2_white_poison.h"
 #include "pc_dev_console.h"
 #include "pc_p2_ship_store.h"
 #include "pc_p2_purple.h"
@@ -32,6 +34,7 @@
 #include "pc_randomizer_campaign_catalog.h"
 #endif
 #include "BuildingItem.h"
+#include "pc_p2_original_gate_native.h"
 #include "CPlate.h"
 #include "KusaItem.h"
 #include "Generator.h"
@@ -39,6 +42,7 @@
 #include "GameCoreSection.h"
 #if defined(PIKI_PC_PORT)
 #include "pc_p2_original_piki_origin.h"
+#include "pc_p2_original_piki_recruit.h"
 #endif
 #include "pc_bbft.h"
 #include "pc_p2_preview.h"
@@ -1032,6 +1036,7 @@ void GameCoreSection::exitStage()
   std::fprintf(stderr,"P2_ORIGINAL_COURSE_EXIT_FAIL %s\n",originalError.c_str());std::abort();
  }
     pc_p2_surface_save_scene_exit();
+    pc_p2_original_piki_recruit_unbind();
     pc_p2_original_piki_origin_scene_exit();
 #endif
 #if defined(PIKI_PC_PORT)
@@ -1513,7 +1518,7 @@ void GameCoreSection::initStage()
 	playerState->initCourse();
 
 #if defined(PIKI_PC_PORT)
- if(const char* originalDirectory=std::getenv("PIKMIN_P2_ORIGINAL_CATALOG")) {
+ if(const char* originalDirectory=pc_randomizer_original_session()?pc_randomizer_original_catalog_root():std::getenv("PIKMIN_P2_ORIGINAL_CATALOG")) {
   std::string originalError;
   // The immutable catalog must exist before native cache/factory decoding.
   if(!pc_p2_original_course_boot(originalDirectory,pc_pikipelago_surface_course(),originalError)) {
@@ -1602,7 +1607,7 @@ void GameCoreSection::initStage()
 	// for one past it and birth fails outright. 102 in the original, the field
 	// limit plus a small margin, so keep that relationship to the configured
 	// limit instead of the default.
-	pikiMgr->create(pc_settings_get_piki_limit() + 2);
+	pikiMgr->create((pc_randomizer_original_session() ? 100 : pc_settings_get_piki_limit()) + 2);
 #else
 	pikiMgr->create(MAX_PIKI_ON_FIELD + 2); // This has a capacity of 102 for some reason.
 #endif
@@ -1646,6 +1651,17 @@ void GameCoreSection::initStage()
 	if(livingSurfaceCache&&!hasAuthoritativeStageCache){
         std::fprintf(stderr,"Living surface checkpoint lost its authoritative stage cache\n");std::abort();
     }
+#if defined(PIKI_PC_PORT)
+ if(pc_randomizer_original_session()){
+  // This loader uses the authenticated literal calendar and native files only.
+  std::string error;
+  if(livingSurfaceCache||hasAuthoritativeStageCache){std::fprintf(stderr,"P2_ORIGINAL_TYPED_CACHE_GRAPH_UNQUALIFIED\n");std::abort();}
+  if(!pc_p2_original_course_read_plan(useDefault,useDay,useInit,usePlant,error)){std::fprintf(stderr,"P2_ORIGINAL_NATIVE_PLAN_FAIL %s\n",error.c_str());std::abort();}
+  mNavi->reset();
+  if(mNavi2){Vector3f side(cosf(mNavi->mFaceDirection),0,-sinf(mNavi->mFaceDirection));mNavi2->mSRT.t=mNavi->mSRT.t+side*30;mNavi2->mLastPosition=mNavi2->mSRT.t;mNavi2->mDayEndPosition=mNavi2->mSRT.t;mNavi2->mFaceDirection=mNavi->mFaceDirection;mNavi2->mSRT.r=mNavi->mSRT.r;mNavi2->reset();}
+ }else
+#endif
+ {
 	sprintf(path2, "%sdefault.gen", path);
 	// On a room cache-resume boot, skip the disk default.gen entirely (the
 	// generator list already came from GeneratorCache::preload); do not even
@@ -1743,6 +1759,8 @@ void GameCoreSection::initStage()
 		}
 		i++;
 	}
+
+ }
 
 #if defined(PIKI_PC_PORT)
 	// VS: la arena no tiene .gen, así que las pastillas que pone el modo se
@@ -1847,6 +1865,11 @@ void GameCoreSection::initStage()
 	{
 		gen->init();
 	}
+#if defined(PIKI_PC_PORT)
+ if(pc_randomizer_original_session()){
+  std::string error;if(!pc_p2_original_course_loaded(error)){std::fprintf(stderr,"P2_ORIGINAL_CALENDAR_COMMIT_FAIL %s\n",error.c_str());std::abort();}
+ }
+#endif
 	memStat->end("bobby");
 
 	Iterator it(pikiMgr);
@@ -2255,7 +2278,7 @@ GameCoreSection::GameCoreSection(Controller* controller, MapMgr* mgr, Camera& ca
 	// Every consumer reads the value through AICONST.mMaxPikisOnField(), so
 	// writing it once here covers the spawn gates in pikiMgr and itemMgr as
 	// well as the HUD counter.
-	AICONST.mMaxPikisOnField(pc_randomizer_expanded() ? pc_randomizer_field_capacity() : pc_settings_get_piki_limit());
+	AICONST.mMaxPikisOnField((pc_randomizer_original_session() || pc_randomizer_expanded()) ? pc_randomizer_field_capacity() : pc_settings_get_piki_limit());
 
 	// Day length. The menu shows minutes of play, and a day runs 7am to 7pm --
 	// half the 24-hour cycle this parameter describes -- so double it. The
@@ -3249,7 +3272,7 @@ static void randomizerObserveWorld()
         pc_randomizer_observe_color_population(color, std::max(0, GameStat::allPikis[color] - specialAliases[color]), true);
     if (flowCont.mCurrentStage) {
         auto observe = [](Creature* obj, int kind, bool complete) {
-            if (!obj || !obj->mGenerator) return;
+            if (!obj || !obj->mGenerator || pc_p2_original_gate_owned(obj)) return;
             const Vector3f pos = obj->mGenerator->mGenPosition + obj->mGenerator->mGenOffset;
             pc_randomizer_observe_obstacle(flowCont.mCurrentStage->mStageID, kind, pos.x, pos.z, complete, true);
         };
@@ -4217,6 +4240,7 @@ void GameCoreSection::updateAI()
             }
         }
     }
+    if (pc_randomizer_original_session()) AICONST.mMaxPikisOnField(100);
     if (pc_randomizer_expanded()) {
         AICONST.mMaxPikisOnField(pc_randomizer_field_capacity());
         if (pc_coop_active() && mNavi && mNavi2) {
@@ -5583,6 +5607,7 @@ void GameCoreSection::draw(Graphics& gfx)
 	}
 	pc_p2_cave_draw_transition(gfx);
     pc_p2_surface_save_draw(gfx);
+    pc_p2_original_cave_draw(gfx);
 	pc_p2_breadbug_visual_draw(gfx);
 	pc_p2_breadbug_teki_draw_nests(gfx);
 	pc_p2_giant_breadbug_visual_draw(gfx);

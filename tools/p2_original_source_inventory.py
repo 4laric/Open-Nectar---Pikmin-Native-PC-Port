@@ -50,6 +50,12 @@ def inventory(bundle, tree, decode_enemies=False):
             record = {'source_key': key, 'generator_uid': uid, 'actor': actor}
             if actor['kind'] == 'teki' and decode_enemies:
                 tokens = flatten(actor['source_payload'])
+                if actor['object_version'] not in ('0004', '0005'):
+                    raise ValueError('Unsupported original enemy object version')
+                # GenTeki versions before0005 retain constructor birthType0;
+                # 0004 begins with source ID then count, without that byte.
+                if actor['object_version'] == '0004':
+                    tokens = tokens[:1] + ['0'] + tokens[1:]
                 if len(tokens) < 15 or tokens[-1] != '_eof':
                     raise ValueError('Truncated original enemy payload')
                 keys = ['source_id', 'birth_type', 'count', 'direction_degrees', 'spawn_type', 'appear_radius', 'enemy_size', 'treasure_code', 'pellet_color', 'pellet_size', 'pellet_minimum', 'pellet_maximum', 'pellet_probability']

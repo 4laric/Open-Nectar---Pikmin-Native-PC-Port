@@ -10,6 +10,8 @@
 #include "NaviMgr.h"
 #include "NaviState.h"
 #include "GameStat.h"
+#include "AIConstant.h"
+#include "ItemMgr.h"
 #include "pc_p2_original_piki_init.h"
 #include "pc_p2_original_piki_physical.h"
 #include "pc_p2_original_source_uid.h"
@@ -96,6 +98,11 @@ struct PhysicalProvider: p2original::PikiSpawnProvider {
 void run() {
  auto* manager=pikiMgr;auto* captains=naviMgr;std::string error;
  require(field()==20&&GameStat::mapPikis==20,"actual field and population baseline20");
+ const int ordinaryLimit=AICONST.mMaxPikisOnField();
+ std::printf("ORIGINAL_GENPIKI_CAPACITY map=%d ordinary_limit=%d queued=%d source_limit=100\n",
+     GameStat::mapPikis,ordinaryLimit,itemMgr?itemMgr->getContainerExitCount():0);
+ require(ordinaryLimit==20,"actual starting Flarlic ordinary limit20");
+ require(pikiMgr->birth()==nullptr,"ordinary birth retains cap20 before source allocation");
  std::vector<OriginalPikiSource> rows;
  for(const auto& row:sourceRows)rows.push_back({row.key,p2original::originalSourceCatalogUid(row.key),row.count,static_cast<std::uint8_t>(row.species)});
  require(pc_p2_original_piki_origin_install(sourceFingerprint,rows,error),"complete six source Piki rows");
@@ -129,6 +136,9 @@ void run() {
   // Explicit fresh source progress; debug retail-default false. This is not an
   // AP color mask and not a loaded/captured full P2 PlayData authority.
   require(p2original::spawnOriginalPiki(record,{},provider,result,error),"actual source attempt-to-physical provider");
+  std::printf("ORIGINAL_GENPIKI_ROW key=%s attempts=%u policy=%u capacity=%u born=%u\n",
+      row.key,result.attempts,result.policySkipped,result.capacitySkipped,result.born);
+  std::fflush(nullptr);
   attempts+=result.attempts;blocked+=result.policySkipped;born+=result.born;
   owned.insert(owned.end(),provider.bodies.begin(),provider.bodies.end());
  }
@@ -136,6 +146,8 @@ void run() {
  require(attempts==105&&blocked==100&&born==5&&owned.size()==5,"retail source filters five wild Red births");
  require(after.simDraws-before.simDraws==210,"exact original two draws per attempt with no host birth draws");
  require(field()==25&&GameStat::mapPikis==25,"actual wild bodies count in native field capacity");
+ require(AICONST.mMaxPikisOnField()==ordinaryLimit,"source birth never mutates ordinary global limit");
+ require(pikiMgr->birth()==nullptr,"ordinary birth retains cap20 after five original source births");
  Piki* duplicateOutput=unchanged;PcSimRngCheckpoint duplicateBefore,duplicateAfter;
  require(pc_sim_rng_capture(duplicateBefore,error),"actual live member refusal RNG before");
  require(pc_p2_original_piki_physical_birth(admitted,sourceRows[0].position,duplicateOutput,error)==p2original::PikiBirthResult::Failed,

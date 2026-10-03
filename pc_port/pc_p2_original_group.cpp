@@ -3,8 +3,8 @@
 namespace p2original {namespace {
 bool fail(std::string& e,const char* s){e=s;return false;}
 }
-bool GroupCourse::install(const std::vector<GroupBinding>& bindings,GroupProvider& provider,std::string& e){
- if(mProvider||!mGroups.empty()||bindings.empty()||bindings.size()!=mActors.rows().size())return fail(e,"original course already owned or empty");
+bool GroupCourse::install(const std::vector<GroupBinding>& bindings,GroupProvider& provider,std::string& e,bool selectedInventory){
+ if(mProvider||!mGroups.empty()||(!selectedInventory&&(bindings.empty()||bindings.size()!=mActors.rows().size())))return fail(e,"original course already owned or empty");
  if(!mFrontier.initialize(mActors.fingerprint(),e))return false;
  std::map<Generator*,Group> next;std::vector<CatalogRow> rows;
  for(const auto& b:bindings){

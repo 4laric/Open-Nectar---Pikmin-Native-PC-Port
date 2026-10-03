@@ -63,7 +63,7 @@ def stage(members, course, campaign):
             if key != record['source_key'] or uid != record['generator_uid'] or uid in seen or not 0 <= actor['index'] <= 65535:
                 raise ValueError('Source key, UID, index mismatch or collision')
             seen.add(uid)
-            if actor['object_version'] != '0005':
+            if actor['object_version'] not in ('0004', '0005'):
                 raise ValueError('Unsupported original enemy object version')
             ints = [enemy[k] for k in ('source_id', 'birth_type', 'count', 'spawn_type')]
             floats = actor['position'] + actor['offset'] + [enemy[k] for k in ('direction_degrees', 'appear_radius', 'enemy_size')]
@@ -71,6 +71,8 @@ def stage(members, course, campaign):
             probability = enemy['pellet_probability']
             version, tail = enemy['generator_version'], enemy['generator_tail']
             payload = flatten(actor['source_payload'])
+            if actor['object_version'] == '0004':
+                payload = payload[:1] + ['0'] + payload[1:]
             if len(payload) < 15 or payload[-1] != '_eof' or len(version) != 4 or payload[13:-1] != [version] + tail:
                 raise ValueError('Decoded species version/tail differs from raw source')
             raw_ints = [int(payload[i]) for i in (0, 1, 2, 4, 7, 8, 9, 10, 11)]

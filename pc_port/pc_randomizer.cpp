@@ -2360,6 +2360,7 @@ int pc_randomizer_carry_strength(int color) {
 }
 int pc_randomizer_field_capacity()
 {
+    if (pc_randomizer_original_session()) return 100;
     // bot-v4b power mode (TEST-ONLY): the campaign field cap is 10xFlarlic
     // (20-40 at campaign start), which binds the withdraw menu (DrawContainer
     // squad caps), the Onion exit queue, and the birth pool below the power

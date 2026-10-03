@@ -19,6 +19,12 @@ int main(int argc,char** argv){
  altered=m;altered.rows.push_back(row);check(!writePikiManifest(altered,encoded,e));
  altered=m;altered.rows[0].sourceKey="tutorial/../defaultgen.txt#5";check(!writePikiManifest(altered,encoded,e));
  auto corrupt=bytes;corrupt[130]^=1;check(!readPikiManifest(corrupt,out,e));
+ check(readPikiManifest(bytes,out,e));std::vector<unsigned> active={row.spawn.uid},decoded={7};std::string census;
+ check(writePikiActive(out,"tutorial",5,active,census,e));check(readPikiActive(census,out,"tutorial",5,decoded,e)&&decoded==active);
+ for(size_t n=0;n<census.size();++n){check(!readPikiActive(census.substr(0,n),out,"tutorial",5,decoded,e));check(decoded==active);}
+ check(!readPikiActive(census,out,"tutorial",4,decoded,e));check(!readPikiActive(census,out,"forest",5,decoded,e));
+ check(!writePikiActive(out,"tutorial",5,{row.spawn.uid,row.spawn.uid},encoded,e));check(!writePikiActive(out,"tutorial",5,{row.spawn.uid+1},encoded,e));
+ check(writePikiActive(out,"tutorial",5,{},census,e));check(readPikiActive(census,out,"tutorial",5,decoded,e)&&decoded.empty());
  if(argc==2){std::ifstream file(argv[1],std::ios::binary);check(bool(file));std::string staged((std::istreambuf_iterator<char>(file)),std::istreambuf_iterator<char>());check(readPikiManifest(staged,out,e));check(writePikiManifest(out,encoded,e)&&encoded==staged);std::cout<<"actual full-calendar Piki rows "<<out.rows.size()<<"\n";}
  else check(argc==1);
  std::cout<<"PASS original Piki manifest "<<checks<<" controls\n";

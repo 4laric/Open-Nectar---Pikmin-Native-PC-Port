@@ -1606,6 +1606,7 @@ static bool bindChappy(BTeki* actor, unsigned generatorId, unsigned sourceId,boo
     actors[view] = spec;
     actor->mHealth = spec->health;
     initFsm(view, actor, spec, generatorId);
+    if(original)actor->mMaxHealth=spec->health;
     if(!original)pc_randomizer_p2_bind_source(view, sourceId, generatorId);
     std::printf("P2_CHAPPY_DELIVERY_BIND generator=%u source_id=%u key=chappy|%s\n", generatorId,
                 sourceId, spec->enumName);
