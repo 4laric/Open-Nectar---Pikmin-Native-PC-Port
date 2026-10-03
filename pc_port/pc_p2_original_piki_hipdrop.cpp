@@ -3,6 +3,7 @@
 #include <unordered_map>
 #include <cmath>
 #include <sstream>
+#include <exception>
 namespace p2original { namespace piki {
 namespace {
 bool fail(std::string& e,const char* text){e=text;return false;}
@@ -83,7 +84,7 @@ struct NativeHipDrop::Impl {
  }
 };
 NativeHipDrop::NativeHipDrop(HipDropServices& s):impl(new Impl(s)){}
-NativeHipDrop::~NativeHipDrop()=default;
+NativeHipDrop::~NativeHipDrop(){if(owned())std::terminate();}
 bool NativeHipDrop::begin(Handle h,std::string& e){
  auto& p=*impl;Impl::Operation op(p,e);if(!op.entered)return false;
  try{
@@ -122,9 +123,9 @@ bool NativeHipDrop::update(Handle h,float dt,std::string& e){
      if(facts.teki&&facts.alive&&facts.living){const auto diff=facts.position-start;const float distance=std::sqrt(diff.dot(diff));
       if(distance<minDistance){minDistance=distance;nearest=t;destination=facts.position;}}
     }
-    if(nearest.body){HipTargetFacts facts;if(!p.source.target(nearest,facts,e)||!p.active(h,e))return false;destination=facts.position;
-     const auto offset=destination-start;const float distance=std::sqrt(offset.x*offset.x+offset.z*offset.z);
-     if(distance>0){h.body->mVelocity.x=offset.x*120/distance;h.body->mVelocity.z=offset.z*120/distance;}
+    if(nearest.body){HipTargetFacts facts;if(!p.source.target(nearest,facts,e)||!p.active(h,e)||!finite(facts.position))return false;destination=facts.position;
+     auto offset=destination-start;const float distance=std::sqrt(offset.x*offset.x+offset.z*offset.z);
+     if(distance>0){offset=offset*(120.0f*(1.0f/distance));h.body->mVelocity.x=offset.x;h.body->mVelocity.z=offset.z;}
     }
     s.phase=HipPhase::Descent;
     if(!p.source.fallMotion(h,e)||!p.active(h,e))return false;
