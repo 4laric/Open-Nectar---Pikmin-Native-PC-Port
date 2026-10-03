@@ -39,6 +39,10 @@ bool pc_p2_elecbug_flying_press(BTeki*, Piki*);
 // Ground movement precedes creature collisions in P1. Before Flying grounds,
 // dispatch only an actual collision-part intersection with a live ElecBug.
 bool pc_p2_elecbug_ground_press(Piki*);
+// Read-only origin of the authoritative Piki collision sphere sample.
+void pc_p2_elecbug_piki_geometry(Piki*);
+void pc_p2_elecbug_forget_piki(Piki*);
+void pc_p2_elecbug_actor_geometry(BTeki*);
 // Read-only registration observability (mirrors pc_p2_sokkuri/armor) so the
 // lifecycle fixture can prove forget clears stale state. Additive.
 unsigned long pc_p2_elecbug_count();

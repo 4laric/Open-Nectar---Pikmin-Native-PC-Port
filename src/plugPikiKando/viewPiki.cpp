@@ -1,6 +1,7 @@
 #include "pc_p2_purple.h"
 #include "pc_p2_white.h"
 #if defined(PIKI_PC_PORT)
+#include "pc_p2_elecbug.h"
 #include "netplay/pc_netplay_policy.h"
 #include "netplay/pc_netplay_present.h"
 #include "timing/pc_render_phase.h"
@@ -808,6 +809,9 @@ void ViewPiki::refresh(Graphics& gfx)
 	}
 
 	mCollInfo->updateInfo(gfx, false);
+#if defined(PIKI_PC_PORT)
+    if (authDemo) pc_p2_elecbug_piki_geometry(this);
+#endif
 	demoDraw(gfx, nullptr);
 }
 

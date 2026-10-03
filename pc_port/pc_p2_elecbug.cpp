@@ -121,6 +121,8 @@ struct ElecBug {
     float heading = 0.0f;
     Vector3f home;
     BTeki* self = nullptr;
+    Vector3f geometryOrigin;
+    bool hasGeometryOrigin=false;
     BTeki* partner = nullptr;
     bool hasSearched = false;
     bool shockedThisDischarge = false;
@@ -144,6 +146,8 @@ struct ElecBug {
 };
 
 std::map<PelletView*, ElecBug> actors;
+struct PikiGeometry { Vector3f origin; Vector3f centre; };
+std::map<Piki*, PikiGeometry> pikiGeometry;
 std::map<std::string, Clip> clips;
 bool ready = false;
 
@@ -464,6 +468,7 @@ void turnTowardsPair(BTeki* a, ElecBug& s) {
 
 void pc_p2_elecbug_reset() {
     actors.clear();
+    pikiGeometry.clear();
     clips.clear();
     ready = false;
 }
@@ -586,6 +591,40 @@ bool pc_p2_elecbug_flying_press(BTeki* actor, Piki* piki) {
     return flyingPress(actor, piki, "flying");
 }
 
+namespace {
+bool finitePoint(const Vector3f& p) {
+    return std::isfinite(p.x) && std::isfinite(p.y) && std::isfinite(p.z);
+}
+// Same bounding/child/sibling rules as CollInfo::checkCollisionRec, using the
+// engine's native point/radius overload. No part or creature is modified.
+CollPart* sphereContact(CollPart* part, const Vector3f& centre, float radius,
+                        Vector3f& push, int& remaining, bool root=false) {
+    if (!part || remaining-- <= 0 || !finitePoint(part->mCentre)
+        || !std::isfinite(part->mRadius) || part->mRadius < 0) return nullptr;
+    if (part->collide(centre, radius, push)) {
+        if (!part->isSphereType()) return part;
+        return sphereContact(part->getChild(), centre, radius, push, remaining);
+    }
+    return root ? nullptr : sphereContact(part->getNext(), centre, radius, push, remaining);
+}
+}
+
+void pc_p2_elecbug_piki_geometry(Piki* piki) {
+    if (!ready || actors.empty() || !piki) return;
+    if (!piki->isAlive()) { pikiGeometry.erase(piki); return; }
+    if (!piki->mCollInfo || !piki->mCollInfo->hasInfo()) return;
+    const Vector3f centre=piki->getCentre();
+    if (finitePoint(piki->mSRT.t) && finitePoint(centre))
+        pikiGeometry[piki]={piki->mSRT.t,centre};
+}
+void pc_p2_elecbug_forget_piki(Piki* piki) { pikiGeometry.erase(piki); }
+void pc_p2_elecbug_actor_geometry(BTeki* actor) {
+    ElecBug* s=ready && actor ? lookup(actor) : nullptr;
+    if (s && actor->mCollInfo && actor->mCollInfo->hasInfo() && finitePoint(actor->mSRT.t)) {
+        s->geometryOrigin=actor->mSRT.t;s->hasGeometryOrigin=true;
+    }
+}
+
 bool pc_p2_elecbug_ground_press(Piki* piki) {
     if (!ready || !piki || !piki->isAlive() || piki->getState() != PIKISTATE_Flying
         || !std::isfinite(piki->mVelocity.y) || piki->mVelocity.y >= -0.01f) return false;
@@ -598,7 +637,26 @@ bool pc_p2_elecbug_ground_press(Piki* piki) {
             || entry.second.state > ELEC_CHILDISCHARGE || !actor->mCollInfo
             || !actor->mCollInfo->hasInfo()) continue;
         Vector3f ignored;
-        if (actor->mCollInfo->checkCollision(piki, ignored)
+        const bool cachedContact=actor->mCollInfo->checkCollision(piki, ignored)!=nullptr;
+        auto geometry=pikiGeometry.find(piki);
+        if (geometry!=pikiGeometry.end() && entry.second.hasGeometryOrigin && distXZ(actor->mSRT.t,piki->mSRT.t)<50.f) {
+            const Vector3f centre=geometry->second.centre+(piki->mSRT.t-geometry->second.origin);
+            const Vector3f actorDelta=actor->mSRT.t-entry.second.geometryOrigin;
+            int remaining=128;
+            const bool currentContact=finitePoint(centre) && std::isfinite(piki->getSize())
+                && piki->getSize()>0 && sphereContact(actor->mCollInfo->getBoundingSphere(),
+                    centre-actorDelta,piki->getSize(),ignored,remaining,true);
+            std::printf("P2_ELECBUG_GROUND_GEOMETRY piki=%p generator=%u cached_contact=%d current_contact=%d "
+                "position=%.6f,%.6f,%.6f sample_origin=%.6f,%.6f,%.6f sample_centre=%.6f,%.6f,%.6f "
+                "current_centre=%.6f,%.6f,%.6f radius=%.6f state=%d actor_delta=%.6f,%.6f,%.6f read_only=1\n",
+                static_cast<void*>(piki),genOf(actor),int(cachedContact),int(currentContact),
+                piki->mSRT.t.x,piki->mSRT.t.y,piki->mSRT.t.z,
+                geometry->second.origin.x,geometry->second.origin.y,geometry->second.origin.z,
+                geometry->second.centre.x,geometry->second.centre.y,geometry->second.centre.z,
+                centre.x,centre.y,centre.z,piki->getSize(),piki->getState(),actorDelta.x,actorDelta.y,actorDelta.z);
+            std::fflush(stdout);
+        }
+        if (cachedContact
             && flyingPress(actor, piki, "ground_bounce")) return true;
     }
     return false;

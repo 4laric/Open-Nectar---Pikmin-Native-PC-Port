@@ -1936,6 +1936,7 @@ void Piki::stickToCallback(Creature*)
 void Piki::bounceCallback()
 {
 #if defined(PIKI_PC_PORT)
+#include "pc_p2_elecbug.h"
     const bool wasFlying = getState() == PIKISTATE_Flying;
 #endif
 	MsgBounce msg(Vector3f(0.0f, 1.0f, 0.0f));
@@ -2555,6 +2556,9 @@ void Piki::resetPosition(immut Vector3f& pos)
  */
 void Piki::init(Navi* navi)
 {
+#if defined(PIKI_PC_PORT)
+    pc_p2_elecbug_forget_piki(this);
+#endif
 	pc_p2_purple_flight_cancel(this);
 	pc_p2_purple_impact_forget(this);
     pc_p2_cave_campaign_party_forget(this);
