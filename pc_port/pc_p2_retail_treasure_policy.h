@@ -20,9 +20,8 @@ inline const p2treasure::Entry* looseSource(const p2treasure::Catalog& catalog,
     const p2retail::Snapshot& expectedFloor,const p2retail::BirthIdentity& expectedBirth) {
     if(!p2treasurestate::catalog_valid(catalog)||!(scene==expectedFloor.scene)
        ||scene.seed.empty()||scene.visit.empty()||!scene.serial
-       ||!p2retail::hex64(scene.layoutSha256)||!birth.epoch||!expectedFloor.inCave
-       ||birth.row!=expectedBirth.row||birth.ordinal!=expectedBirth.ordinal
-       ||birth.epoch!=expectedBirth.epoch||birth.instance!=expectedBirth.instance)return nullptr;
+       ||!p2retail::hex64(scene.layoutSha256)||!birth.epoch||!birth.activation||!expectedFloor.inCave
+       ||!(birth==expectedBirth))return nullptr;
     const auto* cave=p2retail::descriptor(supplied.cave);
     if(!cave||cave->source!=supplied.source||cave->sourceSha256!=supplied.sourceSha256
        ||cave->catalogSha256!=supplied.catalogSha256||cave->maxFloor!=supplied.maxFloor

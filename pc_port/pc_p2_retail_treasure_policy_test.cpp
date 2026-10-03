@@ -13,7 +13,7 @@ int main() {
     map.value=200;map.strength=101;map.slots=101;
     const auto* cave=p2retail::descriptor("tutorial_1");assert(cave);
     const auto* floor=p2retail::definition(*cave,2);assert(floor);
-    p2retail::BirthIdentity birth{5,0,4,p2retail::instanceKey(*cave,2,floor->rows[5],0)};
+    p2retail::BirthIdentity birth{5,0,4,p2retail::instanceKey(*cave,2,floor->rows[5],0),6};
     p2retail::SceneIdentity scene{"synthetic-seed","synthetic-visit",std::string(64,'a'),7};
     auto selectedScene=scene;selectedScene.seed=std::string(64,'f');
     assert(p2retailtreasure::selectedScene(selectedScene,std::string(64,'f')));
@@ -43,6 +43,8 @@ int main() {
     bad=birth;bad.instance="engineering-map01";
     assert(!p2retailtreasure::looseSource(catalog,*cave,2,bad,scene,expected,birth));
     bad=birth;bad.epoch++;
+    assert(!p2retailtreasure::looseSource(catalog,*cave,2,bad,scene,expected,birth));
+    bad=birth;bad.activation++;
     assert(!p2retailtreasure::looseSource(catalog,*cave,2,bad,scene,expected,birth));
     auto wrongFloor=expected;wrongFloor.floor=1;
     assert(!p2retailtreasure::looseSource(catalog,*cave,2,birth,scene,wrongFloor,birth));
