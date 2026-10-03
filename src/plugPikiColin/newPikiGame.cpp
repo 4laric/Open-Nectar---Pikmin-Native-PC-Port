@@ -198,6 +198,9 @@ static Controller* sP2Controller = nullptr;
 // la sección sigue dibujando (resultados, tarjeta). Mientras esté a false,
 // nada del port toca gamecore.
 static bool sGamecoreLive = false;
+static BaseGameSection* sDayendObservedSection = nullptr;
+static unsigned long long sDayendModeUpdates = 0;
+static unsigned long long sDayendPostUpdates = 0;
 
 bool pc_coop_right_map_menu_open(void)
 {
@@ -650,6 +653,59 @@ struct DayOverModeState : public ModeState {
 	int mState; ///< _08, current state of the day end sequence - see `State` enum.
 };
 
+#if defined(PIKI_PC_PORT)
+static int pc_dayend_mode(ModeState* state)
+{
+    if (dynamic_cast<IntroGameModeState*>(state)) return 1;
+    if (dynamic_cast<RunningModeState*>(state)) return 2;
+    if (dynamic_cast<QuittingGameModeState*>(state)) return 3;
+    if (dynamic_cast<MessageModeState*>(state)) return 4;
+    if (dynamic_cast<DayOverModeState*>(state)) return 5;
+    return 0;
+}
+
+PcDayendSnapshot pc_dayend_observe()
+{
+    PcDayendSnapshot out;
+    if (!sGamecoreLive || !sDayendObservedSection) return out;
+    const auto* section = sDayendObservedSection;
+    out.available = true;
+    out.mode = pc_dayend_mode(section->mCurrentModeState);
+    out.nextMode = pc_dayend_mode(section->mNextModeState);
+    if (const auto* day = dynamic_cast<DayOverModeState*>(section->mCurrentModeState)) out.dayOverPhase = day->mState;
+    out.tutorial = gameflow.mIsTutorialTextActive;
+    out.pauseAll = gameflow.mPauseAll;
+    out.currentFade = section->mCurrentFade;
+    out.targetFade = section->mTargetFade;
+    out.fadeSpeed = section->mFadeSpeed;
+    out.updateFlags = section->mUpdateFlags;
+    out.modeUpdates = sDayendModeUpdates;
+    out.postUpdates = sDayendPostUpdates;
+    const auto* movie = gameflow.mMoviePlayer;
+    if (!movie) return out;
+    out.movieAvailable = true;
+    out.movieActive = movie->mIsActive;
+    out.moviePaused = movie->mIsPaused;
+    out.movieFrame = movie->mCurrentFrame;
+    auto* node = movie->mPlayInfoList.mChild;
+    for (; node && out.movieCount < 4; node = node->mNext) {
+        const auto* info = static_cast<const MovieInfo*>(node);
+        auto& entry = out.movies[out.movieCount++];
+        entry.movie = info->mMovieIndex;
+        if (const auto* player = info->mPlayer) {
+            entry.playing = player->mIsPlaying;
+            entry.playbackMode = player->mPlaybackMode;
+            entry.sceneFrame = player->mCurrentSceneFrame;
+            entry.playbackTime = player->mCurrentPlaybackTime;
+            entry.speed = player->mPlaybackSpeed;
+            if (player->mCurrentScene) entry.scene = player->mCurrentScene->mSceneID;
+        }
+    }
+    out.moviesTruncated = node != nullptr;
+    return out;
+}
+#endif
+
 //////////////////////////////////////////////////////
 ////////////// STATIC HELPER FUNCTIONS ///////////////
 //////////////////////////////////////////////////////
@@ -951,6 +1007,9 @@ void BaseGameSection::draw(Graphics& gfx)
 
 	// perform any post-draw mode state updates
 	if (advanceState) {
+#if defined(PIKI_PC_PORT)
+        if (this == sDayendObservedSection) ++sDayendPostUpdates;
+#endif
 		mCurrentModeState->postUpdate();
 	}
 }
@@ -1613,6 +1672,7 @@ ModeState* DayOverModeState::update(u32& result)
 			Jac_SceneSetup(SCENE_Results, JACRES_EndOfDay);
 #if defined(PIKI_PC_PORT)
 			sGamecoreLive = false;
+			sDayendObservedSection = nullptr;
 			containerWindow2 = nullptr;
 			cameraMgrP2      = nullptr;
 			cameraMgrP1      = nullptr;
@@ -2172,6 +2232,8 @@ public:
 		gamecore = new GameCoreSection(mController, mapMgr, mGameCamera);
 #if defined(PIKI_PC_PORT)
 		sGamecoreLive = true;
+		sDayendObservedSection = this;
+		sDayendModeUpdates = sDayendPostUpdates = 0;
 #endif
 		add(gamecore);
 
@@ -2350,6 +2412,9 @@ public:
 				mNextModeState    = nullptr;
 			}
 			// update the current/new mode state
+#if defined(PIKI_PC_PORT)
+            if (this == sDayendObservedSection) ++sDayendModeUpdates;
+#endif
 			mCurrentModeState = mCurrentModeState->update(mUpdateFlags);
 		}
 

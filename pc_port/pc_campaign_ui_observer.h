@@ -43,6 +43,39 @@ struct PcSaveUiSnapshot {
     bool outerMemoryRouted = false;
     PcDefaultFileSnapshot defaultFile;
 };
+// Read-only day-end diagnostics. Unavailable after gameplay heap teardown.
+struct PcDayendMovieSnapshot {
+    int movie = -1;
+    int scene = -1;
+    int playbackMode = -1;
+    bool playing = false;
+    float sceneFrame = 0;
+    float playbackTime = 0;
+    float speed = 0;
+};
+struct PcDayendSnapshot {
+    bool available = false;
+    // 0 unknown, 1 intro, 2 running, 3 quitting, 4 message, 5 day-over.
+    int mode = 0;
+    int nextMode = 0;
+    int dayOverPhase = -1;
+    bool tutorial = false;
+    bool pauseAll = false;
+    bool movieAvailable = false;
+    bool movieActive = false;
+    bool moviePaused = false;
+    int movieFrame = -1;
+    int movieCount = 0;
+    bool moviesTruncated = false;
+    PcDayendMovieSnapshot movies[4];
+    float currentFade = 0;
+    float targetFade = 0;
+    float fadeSpeed = 0;
+    unsigned updateFlags = 0;
+    unsigned long long modeUpdates = 0;
+    unsigned long long postUpdates = 0;
+};
+PcDayendSnapshot pc_dayend_observe();
 PcPauseSnapshot pc_pause_observe();
 PcSaveUiSnapshot pc_save_ui_observe();
 #endif
