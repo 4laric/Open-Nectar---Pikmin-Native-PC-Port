@@ -10,6 +10,8 @@ struct FamilyOps {
  std::function<bool(Generator*,const Vector3f&,float,Creature*&,bool& suppressed,std::string&)> birth;
  std::function<bool(Creature*,unsigned,std::string&)> bind,release;
  std::function<bool(std::string&)> cancel;
+ // After registry retirement, before native manager address reuse.
+ std::function<bool(Creature*,std::string&)> retired;
  bool retireBeforeRelease=false;
 };
 // Geometry/stage, Pod/exit and cargo ownership remain with their actual native

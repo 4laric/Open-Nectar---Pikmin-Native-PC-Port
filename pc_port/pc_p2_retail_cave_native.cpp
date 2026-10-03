@@ -27,6 +27,7 @@ NativeFloor::NativeFloor(FloorPlan plan,SceneOps& scene):m(new Impl(std::move(pl
  snow.prepare=[](unsigned count,std::string& e){return pc_p2_snow_prepare_cave(e)&&pc_p2_snow_reserve_cave(count,e);};
  snow.birth=[](Generator* gen,const Vector3f& p,float yaw,Creature*& out,bool& suppressed,std::string& e){suppressed=false;return pc_p2_snow_birth_cave(gen,p,yaw,out,e);};
  snow.bind=pc_p2_snow_bind_cave;snow.release=pc_p2_snow_release_cave;
+ snow.retired=[](Creature*,std::string&){return true;}; // Snow native forget clears its own leaf ownership.
  snow.cancel=[](std::string&){pc_p2_original_snow_resources_reset();return true;};
  m->families.emplace(45,std::move(snow));owners().insert(this);
 }
@@ -35,7 +36,7 @@ NativeFloor::~NativeFloor(){
  owners().erase(this);
 }
 bool NativeFloor::family(unsigned source,FamilyOps ops,std::string& error){
- if(m->prepared||!ops.prepare||!ops.birth||!ops.bind||!ops.release||!ops.cancel||m->families.count(source))
+ if(m->prepared||!ops.prepare||!ops.birth||!ops.bind||!ops.release||!ops.cancel||!ops.retired||m->families.count(source))
   return refuse(error,"retail family registration invalid/already prepared");
  m->families.emplace(source,std::move(ops));error.clear();return true;
 }
@@ -157,7 +158,9 @@ bool NativeFloor::retired(Creature* pointer,std::string& error){
  for(auto& actor:m->actors)if(actor.actor==pointer){
   if(!m->cleaning&&m->committed&&!m->scene.retired(actor.origin,m->context,error))return false;
   if(actor.registered&&!p2original::originalActors().retire(pointer,actor.handle))return refuse(error,"retail native association retirement failed");
-  actor.registered=false;actor.actor=nullptr;error.clear();return true;
+  actor.registered=false;
+  if(!m->families.at(actor.source).retired(pointer,error))return false;
+  actor.actor=nullptr;error.clear();return true;
  }
  error.clear();return true;
 }
