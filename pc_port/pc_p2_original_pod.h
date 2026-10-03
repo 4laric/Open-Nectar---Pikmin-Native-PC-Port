@@ -21,6 +21,9 @@ struct Config {
  float x=0,y=0,z=0,yaw=0;
  std::string model="pod.mod";
  std::string sourceArchive="pod/arc.szs",sourceModel="pod/pot.bmd",sourceCollision="pod/coll.txt";
+ // Independently issues the original source epoch/activation. Borrowed for
+ // the floor's lifetime, never the same untrusted cargo input copied back.
+ p2retail::FloorIdentityAuthority* births=nullptr;
 };
 // Owner checks original session, selected SAVE fingerprint, cave floor and
 // layout incarnation on every query; an input descriptor alone grants nothing.

@@ -114,7 +114,7 @@ void clear(){
 
 bool pc_p2_original_pod_preflight(const p2originalpod::Config& c,ContextProvider provider,std::string& e){
  if(prepared)return reject(e,"pod_already_prepared");
- if(!gsys||!itemMgr||!itemMgr->mMeltingPotMgr||!routeMgr||!provider||!source(c.floor)
+ if(!gsys||!itemMgr||!itemMgr->mMeltingPotMgr||!routeMgr||!provider||!c.births||!source(c.floor)
   ||c.baseGenType!=7||!std::isfinite(c.x)||!std::isfinite(c.y)||!std::isfinite(c.z)||!std::isfinite(c.yaw))return reject(e,"pod_source_or_managers");
  p2retail::Snapshot actual;if(!provider(c.floor.scene,actual)||!same(actual,c.floor))return reject(e,"pod_unverified_scene");
  auto* wp=routeMgr->findNearestWayPoint('test',Vector3f(c.x,c.y,c.z),false);
@@ -132,7 +132,8 @@ bool pc_p2_original_pod_birth(const Config& c,ContextProvider provider,std::stri
  if(!prepared&&!pc_p2_original_pod_preflight(c,std::move(provider),e))return false;
  if(pod||!same(c.floor,config.floor)||c.unit!=config.unit||c.slot!=config.slot||c.baseGenType!=config.baseGenType
   ||c.x!=config.x||c.y!=config.y||c.z!=config.z||c.yaw!=config.yaw||c.model!=config.model
-  ||c.sourceArchive!=config.sourceArchive||c.sourceModel!=config.sourceModel||c.sourceCollision!=config.sourceCollision||!current())return reject(e,"pod_prepared_identity");
+  ||c.sourceArchive!=config.sourceArchive||c.sourceModel!=config.sourceModel||c.sourceCollision!=config.sourceCollision
+  ||c.births!=config.births||!current())return reject(e,"pod_prepared_identity");
  auto* wp=routeMgr->findNearestWayPoint('test',Vector3f(c.x,c.y,c.z),false);if(!wp)return reject(e,"pod_route_changed");
  HeapScope heap;auto* prop=new CreatureProp;prop->mCreatureProps.mFriction.mValue=.1f;
  pod=new Pod(prop,shape,c,wp->mIndex);node=new CreatureNode;node->mCreature=pod;
@@ -153,10 +154,13 @@ bool pc_p2_original_pod_context(Suckable* receiver,const p2retail::SceneIdentity
 }
 Suckable* pc_p2_original_pod_goal(const p2retail::SceneIdentity& scene){p2retail::Snapshot out;return pc_p2_original_pod_context(pod,scene,out)?pod:nullptr;}
 bool pc_p2_original_pod_bind_cargo(Pellet* p,const p2retail::BirthIdentity& birth,const p2retail::SceneIdentity& scene,CompletedCallback callback,std::string& e){
- if(!pod||!current()||!(scene==config.floor.scene)||!p||!p->isAlive()||!p->mConfig||!birth.epoch||birth.instance.empty()||!callback||cargo.count(p)||completing)return reject(e,"pod_cargo_identity");
+ if(!pod||!current()||!(scene==config.floor.scene)||!p||!p->isAlive()||!p->mConfig||!birth.epoch||!birth.activation||birth.instance.empty()||!callback||cargo.count(p)||completing)return reject(e,"pod_cargo_identity");
  const auto* c=p2retail::descriptor(config.floor.cave);const auto* f=c?p2retail::definition(*c,config.floor.floor):nullptr;
  if(!f||birth.row>=f->rows.size()||birth.ordinal>=f->rows[birth.row].minimum()
   ||birth.instance!=p2retail::instanceKey(*c,config.floor.floor,f->rows[birth.row],birth.ordinal))return reject(e,"pod_cargo_original_incarnation");
+ p2retail::BirthIdentity expected;
+ if(!config.births->expectedBirth(*c,config.floor.floor,scene,birth.row,birth.ordinal,expected,e)
+  ||!(birth==expected))return reject(e,"pod_cargo_unverified_epoch_activation");
  for(const auto& row:cargo)if(row.second.birth.instance==birth.instance)return reject(e,"pod_duplicate_cargo_incarnation");
  cargo.emplace(p,Cargo{birth,scene,std::move(callback),Phase::Bound});e.clear();return true;
 }

@@ -32,6 +32,8 @@ The static pose and geometry cannot qualify original animation/effect behavior.
 The floor owner supplies an authenticated `Config.floor` and `ContextProvider`
 checking original campaign, selected session/SAVE fingerprint, source cave/floor,
 source/catalog hashes and the full seed/visit/layout/serial scene incarnation.
+`Config.births` borrows the independent floor/SAVE identity authority; binding
+checks exact row/ordinal/epoch/instance/activation against its issued origin.
 The provider is available during prepared installation and after commit. A
 descriptor by itself is never authentication. Preflight resolves resources and
 the native nearest route point before an actor is born. Birth attaches a
