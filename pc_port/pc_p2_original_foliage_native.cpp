@@ -58,8 +58,8 @@ struct Native::Impl final:Engine {
     if(banks.count(source))return reject(e,"duplicate original foliage bank");
     auto b=std::make_unique<Bank>();b->source=source;
     if(!(row>>b->name>>b->stem>>b->count>>b->duration)||b->count<2||b->count>64||b->duration<2||b->duration>10000)return reject(e,"invalid original foliage species row");
-    const std::string name=source==91?"KareOoinu_s":"Nekojarashi";
-    const std::string stem=source==91?"flora_KareOoinu_s_kareooinu_s":"flora_Nekojarashi_nekojarashi";
+    const std::string name=source==47?"Clover":source==49?"Ooinu_s":source==91?"KareOoinu_s":"Nekojarashi";
+    const std::string stem=source==47?"flora_Clover_clover":source==49?"flora_Ooinu_s_ooinu_s":source==91?"flora_KareOoinu_s_kareooinu_s":"flora_Nekojarashi_nekojarashi";
     if(b->name!=name||b->stem!=stem)return reject(e,"original foliage model identity mismatch");
     banks.emplace(source,std::move(b));
    }else {

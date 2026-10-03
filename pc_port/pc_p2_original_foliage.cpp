@@ -17,12 +17,12 @@ bool sameRow(const CatalogRow& a,const CatalogRow& b){
 }
 
 }
-bool supported(unsigned source){return source==88||source==91;}
+bool supported(unsigned source){return source==47||source==49||source==88||source==91;}
 bool decode(const CatalogRow& row,std::string& e){
  if(!supported(row.enemy.source))return reject(e,"unsupported original foliage source");
  if(!validateOriginalRecord(row.enemy,e))return false;
  if(row.enemy.generatorVersion!="????"||!row.enemy.generatorTail.empty())return reject(e,"Plants default generator requires literal ???? and empty tail");
- // These two sources reserve no Spectralid child slot. Their immutable common
+ // These admitted sources reserve no Spectralid child slot. Their immutable common
  // fields remain in the catalog, but an invulnerable plant never pays drops.
  if(row.enemy.pelletColor==0&&row.enemy.pelletSize==1)return reject(e,"foliage Spectralid sentinel requires a qualified child provider");
  e.clear();return true;
