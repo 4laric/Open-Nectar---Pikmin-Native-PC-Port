@@ -22,6 +22,9 @@
 #include <memory>
 #include <string>
 #include <set>
+#include <thread>
+#include <array>
+#include <new>
 #include <filesystem>
 
 // xxHash en un solo header con la implementación inline: no añade nada que
@@ -181,6 +184,14 @@ static PCGLGETQUERYOBJECTUI64VPROC glGetQueryObjectui64v_ptr = nullptr;
 // here; the cached wrappers count internally before each real call instead.
 // Real-GL tripwire at a single choke point: every counted call above funnels
 // through here, so null_gl is a live measurement, not true by construction.
+// A captured GPU name must not be destroyed or rewritten while borrowed.
+static void halo_scope_require_texture_mutable(GLuint id);
+static void halo_scope_require_texture_delete(GLsizei count,const GLuint* ids);
+static void halo_scope_require_filter_change();
+static void halo_scope_require_texture_key_mutable(uintptr_t key);
+static void halo_scope_retain_texture(uintptr_t key,GLuint id);
+static void halo_scope_require_recording_start();
+
 static inline void pc_gfx_count_real_gl()
 {
 	if (pc_netplay_present_null_active()) {
@@ -215,7 +226,7 @@ static inline void pc_gfx_count_real_gl()
 #define glDeleteProgram_ptr(...) (pc_gfx_count_real_gl(), (glDeleteProgram_ptr)(__VA_ARGS__))
 #define glDeleteShader_ptr(...) (pc_gfx_count_real_gl(), (glDeleteShader_ptr)(__VA_ARGS__))
 #define glDeleteSync_ptr(...) (pc_gfx_count_real_gl(), (glDeleteSync_ptr)(__VA_ARGS__))
-#define glDeleteTextures(...) (pc_gfx_count_real_gl(), (glDeleteTextures)(__VA_ARGS__))
+#define glDeleteTextures(n,ids) (halo_scope_require_texture_delete((n),(ids)), pc_gfx_count_real_gl(), (glDeleteTextures)((n),(ids)))
 #define glDepthFunc(...) (pc_gfx_count_real_gl(), (glDepthFunc)(__VA_ARGS__))
 #define glDepthMask(...) (pc_gfx_count_real_gl(), (glDepthMask)(__VA_ARGS__))
 #define glDisable(...) (pc_gfx_count_real_gl(), (glDisable)(__VA_ARGS__))
@@ -910,6 +921,8 @@ static std::vector<Vertex> sVertexStream;
 static GXPrimitive sCurrentPrimType;
 static u16 sExpectedVerts = 0;
 static bool sInPrimitive = false;
+static unsigned sHaloRecordingDepth=0;
+static unsigned sHaloDisplayListDepth=0;
 static bool sHaveVertex = false;
 static bool sVerticesPretransformed = false;
 static bool sVertexUsesPalette = false;
@@ -1370,6 +1383,7 @@ static void null_auth_invalidate(uintptr_t key)
     auto cached = sTextureCache.find(key);
     if (cached != sTextureCache.end()) {
         const GLuint doomed = cached->second;
+        halo_scope_require_texture_mutable(doomed);
         sNullDoomedTextures.push_back(doomed);
         // Fix3 R2-7: clear the bind cache for the retired GL name, the same
         // way the release path does, so a later reuse of the name by GL
@@ -5716,6 +5730,7 @@ void pc_gfx_release_texture(void* gxTexObj)
 {
     if (!gxTexObj) return;
     const uintptr_t key = reinterpret_cast<uintptr_t>(gxTexObj);
+    halo_scope_require_texture_key_mutable(key);
     // M2/m4: release clears every per-key record, including the deferred store
     // (their bytes are freed here, not leaked) — even when no live GL name
     // exists for the key.
@@ -5725,6 +5740,7 @@ void pc_gfx_release_texture(void* gxTexObj)
 
     pc_gfx_flush_batch();  // the batch may still reference this texture
     GLuint id = it->second;
+    halo_scope_require_texture_mutable(id);
     for (int unit = 0; unit < 8; ++unit) {
         if (sBoundTextures[unit] == id) sBoundTextures[unit] = 0;
     }
@@ -5766,6 +5782,7 @@ void pc_gfx_get_texture_stats(size_t* live, size_t* liveBytes, size_t* peakBytes
 void pc_gfx_set_anisotropy(int samples)
 {
     if (samples == sAnisotropyRequested) return;
+    halo_scope_require_filter_change();
     sAnisotropyRequested = samples;
     if (!glActiveTexture_ptr) return;
 
@@ -5854,6 +5871,7 @@ static void apply_texture_filtering(bool gameRequestedMipmaps)
 }
 
 void pc_gfx_init_tex_obj_rgba(GXTexObj* obj, void* rgba, u16 width, u16 height, GXTexWrapMode wrapS, GXTexWrapMode wrapT) {
+    halo_scope_require_texture_key_mutable(reinterpret_cast<uintptr_t>(obj));
     // Polish (issue #880 item 6): retain the init parameters in auth and
     // upload lazily on first presentation use; invalidate any stale cache
     // entry so a re-init during auth never leaves the old image live.
@@ -5898,6 +5916,7 @@ void pc_gfx_init_tex_obj_rgba(GXTexObj* obj, void* rgba, u16 width, u16 height, 
     // exactly the case that must still re-upload.
     pc_gfx_flush_batch();
     glActiveTexture_ptr(GL_TEXTURE0);
+    halo_scope_require_texture_mutable(texId);
     glBindTexture(GL_TEXTURE_2D, texId);
     sBoundTextures[0] = texId;
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, wrapS == GX_REPEAT ? GL_REPEAT : GL_CLAMP_TO_EDGE);
@@ -5910,6 +5929,7 @@ void pc_gfx_init_tex_obj_rgba(GXTexObj* obj, void* rgba, u16 width, u16 height, 
 }
 
 void pc_gfx_init_tex_obj(GXTexObj* obj, void* imagePtr, u16 width, u16 height, GXTexFmt format, GXTexWrapMode wrapS, GXTexWrapMode wrapT, GXBool mipmap) {
+    halo_scope_require_texture_key_mutable(reinterpret_cast<uintptr_t>(obj));
     // Polish (issue #880 item 6): see init_tex_obj_rgba above. Retain the
     // init parameters in auth; erase any stale cache entry.
     if (!obj || !imagePtr || width == 0 || height == 0) return;
@@ -5985,6 +6005,7 @@ void pc_gfx_init_tex_obj(GXTexObj* obj, void* imagePtr, u16 width, u16 height, G
 
     pc_gfx_flush_batch();  // about to rebind and rewrite texture unit 0
     glActiveTexture_ptr(GL_TEXTURE0);
+    halo_scope_require_texture_mutable(texId);
     glBindTexture(GL_TEXTURE_2D, texId);
     sBoundTextures[0] = texId;
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, wrapS == GX_REPEAT ? GL_REPEAT : GL_CLAMP_TO_EDGE);
@@ -6262,6 +6283,7 @@ static bool upload_ci_texture(GXTexObj* obj, const PcDeferredCi& ci) {
     }
     pc_gfx_flush_batch();  // about to rebind and rewrite texture unit 0
     glActiveTexture_ptr(GL_TEXTURE0);
+    halo_scope_require_texture_mutable(texId);
     glBindTexture(GL_TEXTURE_2D, texId);
     sBoundTextures[0] = texId;
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, ci.wrapS == GX_REPEAT ? GL_REPEAT : GL_CLAMP_TO_EDGE);
@@ -6297,6 +6319,7 @@ static bool upload_ci_texture(GXTexObj* obj, const PcDeferredCi& ci) {
 
 void pc_gfx_init_tex_obj_ci(GXTexObj* obj, void* imagePtr, u16 width, u16 height, GXCITexFmt format,
                             GXTexWrapMode wrapS, GXTexWrapMode wrapT, GXBool mipmap, u32 tlutName) {
+    halo_scope_require_texture_key_mutable(reinterpret_cast<uintptr_t>(obj));
     // M2b fix2 (issue #879 B1): uploads happen in presentation, never in the
     // authoritative pass. The CPU-side CI description is still stored so the
     // presentation load_tex_obj fallback can upload on first draw; no
@@ -6443,6 +6466,7 @@ void pc_gfx_load_tex_obj(GXTexObj* obj, GXTexMapID id) {
         }
     }
     if (it != sTextureCache.end()) {
+        halo_scope_retain_texture(key,it->second);
         sActiveGLTextures[id] = it->second;
         sHasActiveTextures[id] = true;
     } else {
@@ -9240,6 +9264,7 @@ static void draw_resident_mesh(ResidentMesh& mesh) {
 }
 
 void pc_gfx_call_display_list(const void* list, u32 nbytes) {
+    struct ParseScope {ParseScope(){++sHaloDisplayListDepth;}~ParseScope(){--sHaloDisplayListDepth;}} parseScope;
     // M2b fix2 (issue #879 B1): the authoritative pass issues no GL. The
     // resident-mesh path below (draw_resident_mesh: uniforms/programs, VAO
     // bind, glDrawArrays; mesh_upload: buffer binds/maps/sub-data) is real GL
@@ -9729,3 +9754,346 @@ void pc_gfx_set_copy_clear(GXColor color, u32 clearZ) {
     sReplayClearColor[3] = sCopyClearColor[3];
     sReplayClearDepth    = sCopyClearDepth;
 }
+
+
+// Actual source-visible halo transport scope (issue1252).
+namespace {
+struct HaloTransportState {
+ decltype(sPosMatrix) PosMatrix{};
+ decltype(sNrmMatrix) NrmMatrix{};
+ decltype(sTexMatrices) TexMatrices{};
+ decltype(sTexMtxLoaded) TexMtxLoaded{};
+ decltype(sCurrentPosMtxId) CurrentPosMtxId{};
+ decltype(sTexCoordGen) TexCoordGen{};
+ decltype(sChannels) Channels{};
+ decltype(sTevSwapModes) TevSwapModes{};
+ decltype(sTevRasSwapSel) TevRasSwapSel{};
+ decltype(sTevTexSwapSel) TevTexSwapSel{};
+ decltype(sActiveGLTextures) ActiveGLTextures{};
+ decltype(sHasActiveTextures) HasActiveTextures{};
+ decltype(sUseMaterialRgb) UseMaterialRgb{};
+ decltype(sUseMaterialAlpha) UseMaterialAlpha{};
+ decltype(sMaterialColor) MaterialColor{};
+ decltype(sAlphaComp0) AlphaComp0{};
+ decltype(sAlphaComp1) AlphaComp1{};
+ decltype(sAlphaOp) AlphaOp{};
+ decltype(sAlphaRef0) AlphaRef0{};
+ decltype(sAlphaRef1) AlphaRef1{};
+ decltype(sNumTevStages) NumTevStages{};
+ decltype(sTevStages) TevStages{};
+ decltype(sTevRegisters) TevRegisters{};
+ decltype(sKonstColors) KonstColors{};
+ decltype(sKonstColorSel) KonstColorSel{};
+ decltype(sKonstAlphaSel) KonstAlphaSel{};
+ decltype(sVtxDesc) VtxDesc{};
+ decltype(sVtxArrays) VtxArrays{};
+ decltype(sVtxFormats) VtxFormats{};
+ decltype(sCurVertex) CurVertex{};
+ decltype(sImmVtxFmt) ImmVtxFmt{};
+ decltype(sFifoImmActive) FifoImmActive{};
+ decltype(sFifoAttr) FifoAttr{};
+ decltype(sFifoMtxId) FifoMtxId{};
+ decltype(sFifoNeed) FifoNeed{};
+ decltype(sFifoGot) FifoGot{};
+ decltype(sFifoTmp) FifoTmp{};
+ decltype(sFifoVertex) FifoVertex{};
+ decltype(sAttrStep) AttrStep{};
+ decltype(sCurrentPrimType) CurrentPrimType{};
+ decltype(sExpectedVerts) ExpectedVerts{};
+ decltype(sHaveVertex) HaveVertex{};
+ decltype(sVerticesPretransformed) VerticesPretransformed{};
+ decltype(sVertexUsesPalette) VertexUsesPalette{};
+ PcGfxPipelineState pipeline{};
+ void capture(){
+  std::memcpy(&PosMatrix,&sPosMatrix,sizeof(sPosMatrix));
+  std::memcpy(&NrmMatrix,&sNrmMatrix,sizeof(sNrmMatrix));
+  std::memcpy(&TexMatrices,&sTexMatrices,sizeof(sTexMatrices));
+  std::memcpy(&TexMtxLoaded,&sTexMtxLoaded,sizeof(sTexMtxLoaded));
+  std::memcpy(&CurrentPosMtxId,&sCurrentPosMtxId,sizeof(sCurrentPosMtxId));
+  std::memcpy(&TexCoordGen,&sTexCoordGen,sizeof(sTexCoordGen));
+  std::memcpy(&Channels,&sChannels,sizeof(sChannels));
+  std::memcpy(&TevSwapModes,&sTevSwapModes,sizeof(sTevSwapModes));
+  std::memcpy(&TevRasSwapSel,&sTevRasSwapSel,sizeof(sTevRasSwapSel));
+  std::memcpy(&TevTexSwapSel,&sTevTexSwapSel,sizeof(sTevTexSwapSel));
+  std::memcpy(&ActiveGLTextures,&sActiveGLTextures,sizeof(sActiveGLTextures));
+  std::memcpy(&HasActiveTextures,&sHasActiveTextures,sizeof(sHasActiveTextures));
+  std::memcpy(&UseMaterialRgb,&sUseMaterialRgb,sizeof(sUseMaterialRgb));
+  std::memcpy(&UseMaterialAlpha,&sUseMaterialAlpha,sizeof(sUseMaterialAlpha));
+  std::memcpy(&MaterialColor,&sMaterialColor,sizeof(sMaterialColor));
+  std::memcpy(&AlphaComp0,&sAlphaComp0,sizeof(sAlphaComp0));
+  std::memcpy(&AlphaComp1,&sAlphaComp1,sizeof(sAlphaComp1));
+  std::memcpy(&AlphaOp,&sAlphaOp,sizeof(sAlphaOp));
+  std::memcpy(&AlphaRef0,&sAlphaRef0,sizeof(sAlphaRef0));
+  std::memcpy(&AlphaRef1,&sAlphaRef1,sizeof(sAlphaRef1));
+  std::memcpy(&NumTevStages,&sNumTevStages,sizeof(sNumTevStages));
+  std::memcpy(&TevStages,&sTevStages,sizeof(sTevStages));
+  std::memcpy(&TevRegisters,&sTevRegisters,sizeof(sTevRegisters));
+  std::memcpy(&KonstColors,&sKonstColors,sizeof(sKonstColors));
+  std::memcpy(&KonstColorSel,&sKonstColorSel,sizeof(sKonstColorSel));
+  std::memcpy(&KonstAlphaSel,&sKonstAlphaSel,sizeof(sKonstAlphaSel));
+  std::memcpy(&VtxDesc,&sVtxDesc,sizeof(sVtxDesc));
+  std::memcpy(&VtxArrays,&sVtxArrays,sizeof(sVtxArrays));
+  std::memcpy(&VtxFormats,&sVtxFormats,sizeof(sVtxFormats));
+  std::memcpy(&CurVertex,&sCurVertex,sizeof(sCurVertex));
+  std::memcpy(&ImmVtxFmt,&sImmVtxFmt,sizeof(sImmVtxFmt));
+  std::memcpy(&FifoImmActive,&sFifoImmActive,sizeof(sFifoImmActive));
+  std::memcpy(&FifoAttr,&sFifoAttr,sizeof(sFifoAttr));
+  std::memcpy(&FifoMtxId,&sFifoMtxId,sizeof(sFifoMtxId));
+  std::memcpy(&FifoNeed,&sFifoNeed,sizeof(sFifoNeed));
+  std::memcpy(&FifoGot,&sFifoGot,sizeof(sFifoGot));
+  std::memcpy(&FifoTmp,&sFifoTmp,sizeof(sFifoTmp));
+  std::memcpy(&FifoVertex,&sFifoVertex,sizeof(sFifoVertex));
+  std::memcpy(&AttrStep,&sAttrStep,sizeof(sAttrStep));
+  std::memcpy(&CurrentPrimType,&sCurrentPrimType,sizeof(sCurrentPrimType));
+  std::memcpy(&ExpectedVerts,&sExpectedVerts,sizeof(sExpectedVerts));
+  std::memcpy(&HaveVertex,&sHaveVertex,sizeof(sHaveVertex));
+  std::memcpy(&VerticesPretransformed,&sVerticesPretransformed,sizeof(sVerticesPretransformed));
+  std::memcpy(&VertexUsesPalette,&sVertexUsesPalette,sizeof(sVertexUsesPalette));
+  pipeline=sPipelineState;
+ }
+ void restoreLogical()const{
+  std::memcpy(&sPosMatrix,&PosMatrix,sizeof(sPosMatrix));
+  std::memcpy(&sNrmMatrix,&NrmMatrix,sizeof(sNrmMatrix));
+  std::memcpy(&sTexMatrices,&TexMatrices,sizeof(sTexMatrices));
+  std::memcpy(&sTexMtxLoaded,&TexMtxLoaded,sizeof(sTexMtxLoaded));
+  std::memcpy(&sCurrentPosMtxId,&CurrentPosMtxId,sizeof(sCurrentPosMtxId));
+  std::memcpy(&sTexCoordGen,&TexCoordGen,sizeof(sTexCoordGen));
+  std::memcpy(&sChannels,&Channels,sizeof(sChannels));
+  std::memcpy(&sTevSwapModes,&TevSwapModes,sizeof(sTevSwapModes));
+  std::memcpy(&sTevRasSwapSel,&TevRasSwapSel,sizeof(sTevRasSwapSel));
+  std::memcpy(&sTevTexSwapSel,&TevTexSwapSel,sizeof(sTevTexSwapSel));
+  std::memcpy(&sActiveGLTextures,&ActiveGLTextures,sizeof(sActiveGLTextures));
+  std::memcpy(&sHasActiveTextures,&HasActiveTextures,sizeof(sHasActiveTextures));
+  std::memcpy(&sUseMaterialRgb,&UseMaterialRgb,sizeof(sUseMaterialRgb));
+  std::memcpy(&sUseMaterialAlpha,&UseMaterialAlpha,sizeof(sUseMaterialAlpha));
+  std::memcpy(&sMaterialColor,&MaterialColor,sizeof(sMaterialColor));
+  std::memcpy(&sAlphaComp0,&AlphaComp0,sizeof(sAlphaComp0));
+  std::memcpy(&sAlphaComp1,&AlphaComp1,sizeof(sAlphaComp1));
+  std::memcpy(&sAlphaOp,&AlphaOp,sizeof(sAlphaOp));
+  std::memcpy(&sAlphaRef0,&AlphaRef0,sizeof(sAlphaRef0));
+  std::memcpy(&sAlphaRef1,&AlphaRef1,sizeof(sAlphaRef1));
+  std::memcpy(&sNumTevStages,&NumTevStages,sizeof(sNumTevStages));
+  std::memcpy(&sTevStages,&TevStages,sizeof(sTevStages));
+  std::memcpy(&sTevRegisters,&TevRegisters,sizeof(sTevRegisters));
+  std::memcpy(&sKonstColors,&KonstColors,sizeof(sKonstColors));
+  std::memcpy(&sKonstColorSel,&KonstColorSel,sizeof(sKonstColorSel));
+  std::memcpy(&sKonstAlphaSel,&KonstAlphaSel,sizeof(sKonstAlphaSel));
+  std::memcpy(&sVtxDesc,&VtxDesc,sizeof(sVtxDesc));
+  std::memcpy(&sVtxArrays,&VtxArrays,sizeof(sVtxArrays));
+  std::memcpy(&sVtxFormats,&VtxFormats,sizeof(sVtxFormats));
+  std::memcpy(&sCurVertex,&CurVertex,sizeof(sCurVertex));
+  std::memcpy(&sImmVtxFmt,&ImmVtxFmt,sizeof(sImmVtxFmt));
+  std::memcpy(&sFifoImmActive,&FifoImmActive,sizeof(sFifoImmActive));
+  std::memcpy(&sFifoAttr,&FifoAttr,sizeof(sFifoAttr));
+  std::memcpy(&sFifoMtxId,&FifoMtxId,sizeof(sFifoMtxId));
+  std::memcpy(&sFifoNeed,&FifoNeed,sizeof(sFifoNeed));
+  std::memcpy(&sFifoGot,&FifoGot,sizeof(sFifoGot));
+  std::memcpy(&sFifoTmp,&FifoTmp,sizeof(sFifoTmp));
+  std::memcpy(&sFifoVertex,&FifoVertex,sizeof(sFifoVertex));
+  std::memcpy(&sAttrStep,&AttrStep,sizeof(sAttrStep));
+  std::memcpy(&sCurrentPrimType,&CurrentPrimType,sizeof(sCurrentPrimType));
+  std::memcpy(&sExpectedVerts,&ExpectedVerts,sizeof(sExpectedVerts));
+  std::memcpy(&sHaveVertex,&HaveVertex,sizeof(sHaveVertex));
+  std::memcpy(&sVerticesPretransformed,&VerticesPretransformed,sizeof(sVerticesPretransformed));
+  std::memcpy(&sVertexUsesPalette,&VertexUsesPalette,sizeof(sVertexUsesPalette));
+  // Counters are monotonic: invalidate every derived matrix/hash cache.
+  for(unsigned i=0;i<64;++i){++sPosMtxGen[i];++sNrmMtxGen[i];++sTexMtxGen[i];}
+  state_touched();
+ }
+};
+bool halo_refuse(const char** e,const char* why){if(e)*e=why;return false;}
+}
+struct PcGfxHaloScope {
+ HaloTransportState state;
+ std::thread::id thread;
+ SDL_GLContext context=nullptr;
+ std::uint64_t frame=0;
+ GLint activeUnit=GL_TEXTURE0;
+ GLuint bound[8]{};
+ struct Texture {uintptr_t key;GLuint id;PcTextureSignature signature;bool hasSignature;};
+ // Fixed metadata: 8 logical+8 physical names plus lazy halo textures.
+ std::array<Texture,64> textures{};std::size_t textureCount=0;
+ std::array<GLuint,64> pins{};std::size_t pinCount=0;
+ bool pinned(GLuint id)const{for(std::size_t i=0;i<pinCount;++i)if(pins[i]==id)return true;return false;}
+ bool tryPin(GLuint id){
+  if(!id||pinned(id))return true;
+  if(pinCount==pins.size())return false;
+  pins[pinCount++]=id;return true;
+ }
+ bool tryRetain(Texture t){
+  for(std::size_t i=0;i<textureCount;++i)if(textures[i].key==t.key&&textures[i].id==t.id)return true;
+  if(textureCount==textures.size())return false;
+  textures[textureCount++]=t;return true;
+ }
+ void pin(GLuint id){if(!tryPin(id))capacityGuard();}
+ void retain(Texture t){if(!tryRetain(t))capacityGuard();}
+ static void capacityGuard(){std::fputs("P2_HALO_SCOPE_TEXTURE_CAPACITY_REFUSED\n",stderr);std::fflush(stderr);std::abort();}
+};
+static PcGfxHaloScope* sHaloScope=nullptr;
+static void halo_scope_require_texture_mutable(GLuint id){
+ if(sHaloScope&&id&&sHaloScope->pinned(id)){
+  std::fprintf(stderr,"P2_HALO_SCOPE_RETAINED_TEXTURE_MUTATION_REFUSED id=%u\n",unsigned(id));std::fflush(stderr);std::abort();
+ }
+}
+static void halo_scope_require_texture_key_mutable(uintptr_t key){
+ auto found=sTextureCache.find(key);if(found!=sTextureCache.end())halo_scope_require_texture_mutable(found->second);
+}
+static void halo_scope_retain_texture(uintptr_t key,GLuint id){
+ if(!sHaloScope||!id)return;
+ sHaloScope->pin(id);
+ auto sig=sTextureSignatures.find(key);
+ sHaloScope->retain({key,id,sig==sTextureSignatures.end()?PcTextureSignature{}:sig->second,sig!=sTextureSignatures.end()});
+}
+static void halo_scope_require_texture_delete(GLsizei n,const GLuint* ids){for(GLsizei i=0;ids&&i<n;++i)halo_scope_require_texture_mutable(ids[i]);}
+static void halo_scope_require_filter_change(){
+ if(sHaloScope&&sHaloScope->pinCount!=0){
+  std::fputs("P2_HALO_SCOPE_RETAINED_FILTER_MUTATION_REFUSED\n",stderr);std::fflush(stderr);std::abort();
+ }
+}
+static void halo_scope_require_recording_start(){
+ if(sHaloScope){std::fputs("P2_HALO_SCOPE_RECORDING_PHASE_REFUSED\n",stderr);std::fflush(stderr);std::abort();}
+}
+void pc_gfx_note_display_list_recording(bool begin){
+ if(begin){halo_scope_require_recording_start();++sHaloRecordingDepth;}
+ else if(sHaloRecordingDepth)--sHaloRecordingDepth;
+}
+bool pc_gfx_begin_halo_scope(PcGfxHaloScope*& out,const char** e){
+ if(out||sHaloScope)return halo_refuse(e,"halo render scope already retained");
+ // Last-completed vertex/model scratch vectors are deliberately not restored:
+ // next GXBegin clears them. An unfinished FIFO/list is never eligible.
+ if(sInPrimitive||sHaveVertex||sAttrStep!=0||sFifoGot!=0||sHaloRecordingDepth||sHaloDisplayListDepth)return halo_refuse(e,"halo render scope cannot interrupt primitive/FIFO/display-list phase");
+ if(pc_netplay_present_null_active()||!SDL_GL_GetCurrentContext()||!glActiveTexture_ptr||!sShaderProgram)
+  return halo_refuse(e,"halo render scope requires actual initialized non-null GL context");
+ std::unique_ptr<PcGfxHaloScope> held(new(std::nothrow) PcGfxHaloScope);
+ if(!held)return halo_refuse(e,"halo render scope allocation failed");
+ pc_gfx_flush_batch(); // prior scene geometry must complete under prior state
+ held->thread=std::this_thread::get_id();held->context=SDL_GL_GetCurrentContext();held->frame=sFrameSerial;
+ held->state.capture();
+ glGetIntegerv(GL_ACTIVE_TEXTURE,&held->activeUnit);
+ for(unsigned i=0;i<8;++i){
+  glActiveTexture_ptr(GL_TEXTURE0+i);GLint binding=0;glGetIntegerv(GL_TEXTURE_BINDING_2D,&binding);held->bound[i]=GLuint(binding);
+ }
+ // Restore the physical active unit BEFORE metadata processing. Metadata is
+ // fixed/bounded and has no allocations after this sole nothrow scope birth.
+ glActiveTexture_ptr(held->activeUnit);
+ for(unsigned i=0;i<8;++i)if(!held->tryPin(held->bound[i])||(sHasActiveTextures[i]&&!held->tryPin(sActiveGLTextures[i])))
+  return halo_refuse(e,"halo render scope captured texture capacity exceeded");
+ // Preserve each captured source cache key+signature, not a pointer-shaped
+ // identity. A new, uncaptured halo upload is allowed during the draw.
+ for(const auto& t:sTextureCache)if(held->pinned(t.second)){
+  auto sig=sTextureSignatures.find(t.first);if(!held->tryRetain({t.first,t.second,sig==sTextureSignatures.end()?PcTextureSignature{}:sig->second,sig!=sTextureSignatures.end()}))
+   return halo_refuse(e,"halo render scope captured cache alias capacity exceeded");
+ }
+ out=held.release();sHaloScope=out;if(e)*e=nullptr;return true;
+}
+bool pc_gfx_end_halo_scope(PcGfxHaloScope*& held,const char** e){
+ if(!held||held!=sHaloScope)return halo_refuse(e,"halo render scope ownership mismatch");
+ if(held->thread!=std::this_thread::get_id()||held->context!=SDL_GL_GetCurrentContext()||held->frame!=sFrameSerial||pc_netplay_present_null_active())
+  return halo_refuse(e,"halo render scope actual thread/context/frame changed");
+ if(sInPrimitive||sHaveVertex||sAttrStep!=0||sFifoGot!=0||sHaloRecordingDepth||sHaloDisplayListDepth)return halo_refuse(e,"halo render scope end has unfinished primitive/FIFO/display-list phase");
+ for(std::size_t i=0;i<held->textureCount;++i){const auto& t=held->textures[i];
+  auto found=sTextureCache.find(t.key);auto sig=sTextureSignatures.find(t.key);
+  if(found==sTextureCache.end()||found->second!=t.id||t.hasSignature!=(sig!=sTextureSignatures.end())||(t.hasSignature&&!(sig->second==t.signature)))
+   return halo_refuse(e,"halo render scope captured texture lifetime changed");
+ }
+ pc_gfx_flush_batch(); // halo geometry must complete BEFORE restored state
+ held->state.restoreLogical();
+ pc_gfx_set_pipeline_state(held->state.pipeline);
+ for(unsigned i=0;i<8;++i){glActiveTexture_ptr(GL_TEXTURE0+i);glBindTexture(GL_TEXTURE_2D,held->bound[i]);sBoundTextures[i]=held->bound[i];}
+ glActiveTexture_ptr(held->activeUnit);
+ delete held;held=nullptr;sHaloScope=nullptr;if(e)*e=nullptr;return true;
+}
+
+#ifdef PC_GFX_HALO_SCOPE_TEST
+// Engineering-only CPU control in the real transport TU. No GL context,
+// synthetic gameplay actor, installed Scene or renderer qualification.
+extern "C" bool pc_gfx_halo_scope_cpu_control(const char** e){
+ PcGfxHaloScope capacity;
+ for(unsigned i=1;i<=64;++i)if(!capacity.tryPin(i)||!capacity.tryRetain({i,i,PcTextureSignature{},false}))return halo_refuse(e,"halo bounded metadata fill failed");
+ if(capacity.tryPin(65)||capacity.tryRetain({65,65,PcTextureSignature{},false})||capacity.pinCount!=64||capacity.textureCount!=64||!capacity.tryPin(1)||!capacity.tryRetain({1,1,PcTextureSignature{},false}))return halo_refuse(e,"halo bounded metadata refusal mutated capacity");
+ HaloTransportState saved;saved.capture();
+ const auto gen=sStateGen;const auto posGen=sPosMtxGen[0];
+ Mtx matrix={{2,3,4,5},{6,7,8,9},{10,11,12,13}};
+ for(unsigned i=0;i<64;++i){pc_gfx_load_pos_mtx(matrix,i);pc_gfx_load_nrm_mtx(matrix,i);pc_gfx_load_tex_mtx(matrix,i);}
+ pc_gfx_set_current_mtx(63);
+ for(unsigned i=0;i<8;++i){pc_gfx_set_tex_coord_gen(GXTexCoordID(i),GX_TG_MTX2X4,GX_TG_POS,30);sActiveGLTextures[i]=37+i;sHasActiveTextures[i]=true;}
+ for(unsigned i=0;i<16;++i){
+  pc_gfx_set_tev_order(GXTevStageID(i),GX_TEXCOORD3,GX_TEXMAP4,GX_COLOR1A1);
+  pc_gfx_set_tev_color_in(GXTevStageID(i),GX_CC_C1,GX_CC_C0,GX_CC_TEXC,GX_CC_ZERO);
+  pc_gfx_set_tev_alpha_in(GXTevStageID(i),GX_CA_A1,GX_CA_A0,GX_CA_TEXA,GX_CA_ZERO);
+  pc_gfx_set_tev_color_op(GXTevStageID(i),GX_TEV_SUB,GX_TB_ADDHALF,GX_CS_SCALE_2,GX_FALSE,GX_TEVREG2);
+  pc_gfx_set_tev_alpha_op(GXTevStageID(i),GX_TEV_SUB,GX_TB_SUBHALF,GX_CS_DIVIDE_2,GX_FALSE,GX_TEVREG1);
+ }
+ pc_gfx_set_num_tev_stages(16);
+ for(unsigned i=0;i<16;++i){pc_gfx_set_tev_swap_mode(GXTevStageID(i),GX_TEV_SWAP1,GX_TEV_SWAP2);pc_gfx_set_tev_kcolor_sel(GXTevStageID(i),GX_TEV_KCSEL_K2);pc_gfx_set_tev_kalpha_sel(GXTevStageID(i),GX_TEV_KASEL_K3_A);}
+ for(unsigned i=0;i<4;++i){pc_gfx_set_tev_kcolor(GXTevKColorID(i),GXColor{29,51,73,95});pc_gfx_set_tev_swap_mode_table(GXTevSwapSel(i),GX_CH_BLUE,GX_CH_RED,GX_CH_ALPHA,GX_CH_GREEN);}
+ for(unsigned i=0;i<4;++i){pc_gfx_set_tev_color(GXTevRegID(i),GXColor{13,25,47,87});}
+ pc_gfx_set_chan_ctrl(GX_COLOR0A0,GX_TRUE,GX_SRC_VTX,GX_SRC_REG,0x85,GX_DF_CLAMP,GX_AF_SPEC);
+ pc_gfx_set_chan_ctrl(GX_COLOR1A1,GX_TRUE,GX_SRC_REG,GX_SRC_VTX,0x41,GX_DF_SIGN,GX_AF_NONE);
+ pc_gfx_set_alpha_compare(GX_LESS,28,GX_AOP_XOR,GX_GEQUAL,172);
+ pc_gfx_clear_vtx_desc();pc_gfx_set_vtx_desc(GX_VA_TEX0,GX_DIRECT);
+ pc_gfx_set_vtx_attr_fmt(GX_VTXFMT0,GX_VA_POS,GX_POS_XYZ,GX_F32,2);
+ pc_gfx_set_array(GX_VA_POS,matrix,12);
+ sCurVertex.x=37;sCurVertex.tex[0][0]=.75f;sImmVtxFmt=GX_VTXFMT3;
+ sFifoImmActive=true;sFifoMtxId=7;sFifoGot=2;sFifoNeed=4;sFifoAttr=GX_VA_TEX1;sFifoTmp[4]=19;sFifoVertex.y=19;sAttrStep=4;
+ sCurrentPrimType=GX_TRIANGLESTRIP;sExpectedVerts=12;sVerticesPretransformed=true;sVertexUsesPalette=true;
+ HaloTransportState changed;changed.capture();
+ if(std::memcmp(&saved.PosMatrix,&changed.PosMatrix,sizeof(sPosMatrix))==0||std::memcmp(&saved.TevStages,&changed.TevStages,sizeof(sTevStages))==0){saved.restoreLogical();return halo_refuse(e,"halo CPU control failed to exercise changed source state");}
+ saved.restoreLogical();HaloTransportState restored;restored.capture();
+ if(std::memcmp(&saved.PosMatrix,&restored.PosMatrix,sizeof(sPosMatrix))!=0)return halo_refuse(e,"halo CPU roundtrip mismatch: sPosMatrix");
+ if(std::memcmp(&saved.NrmMatrix,&restored.NrmMatrix,sizeof(sNrmMatrix))!=0)return halo_refuse(e,"halo CPU roundtrip mismatch: sNrmMatrix");
+ if(std::memcmp(&saved.TexMatrices,&restored.TexMatrices,sizeof(sTexMatrices))!=0)return halo_refuse(e,"halo CPU roundtrip mismatch: sTexMatrices");
+ if(std::memcmp(&saved.TexMtxLoaded,&restored.TexMtxLoaded,sizeof(sTexMtxLoaded))!=0)return halo_refuse(e,"halo CPU roundtrip mismatch: sTexMtxLoaded");
+ if(std::memcmp(&saved.CurrentPosMtxId,&restored.CurrentPosMtxId,sizeof(sCurrentPosMtxId))!=0)return halo_refuse(e,"halo CPU roundtrip mismatch: sCurrentPosMtxId");
+ if(std::memcmp(&saved.TexCoordGen,&restored.TexCoordGen,sizeof(sTexCoordGen))!=0)return halo_refuse(e,"halo CPU roundtrip mismatch: sTexCoordGen");
+ if(std::memcmp(&saved.Channels,&restored.Channels,sizeof(sChannels))!=0)return halo_refuse(e,"halo CPU roundtrip mismatch: sChannels");
+ if(std::memcmp(&saved.TevSwapModes,&restored.TevSwapModes,sizeof(sTevSwapModes))!=0)return halo_refuse(e,"halo CPU roundtrip mismatch: sTevSwapModes");
+ if(std::memcmp(&saved.TevRasSwapSel,&restored.TevRasSwapSel,sizeof(sTevRasSwapSel))!=0)return halo_refuse(e,"halo CPU roundtrip mismatch: sTevRasSwapSel");
+ if(std::memcmp(&saved.TevTexSwapSel,&restored.TevTexSwapSel,sizeof(sTevTexSwapSel))!=0)return halo_refuse(e,"halo CPU roundtrip mismatch: sTevTexSwapSel");
+ if(std::memcmp(&saved.ActiveGLTextures,&restored.ActiveGLTextures,sizeof(sActiveGLTextures))!=0)return halo_refuse(e,"halo CPU roundtrip mismatch: sActiveGLTextures");
+ if(std::memcmp(&saved.HasActiveTextures,&restored.HasActiveTextures,sizeof(sHasActiveTextures))!=0)return halo_refuse(e,"halo CPU roundtrip mismatch: sHasActiveTextures");
+ if(std::memcmp(&saved.UseMaterialRgb,&restored.UseMaterialRgb,sizeof(sUseMaterialRgb))!=0)return halo_refuse(e,"halo CPU roundtrip mismatch: sUseMaterialRgb");
+ if(std::memcmp(&saved.UseMaterialAlpha,&restored.UseMaterialAlpha,sizeof(sUseMaterialAlpha))!=0)return halo_refuse(e,"halo CPU roundtrip mismatch: sUseMaterialAlpha");
+ if(std::memcmp(&saved.MaterialColor,&restored.MaterialColor,sizeof(sMaterialColor))!=0)return halo_refuse(e,"halo CPU roundtrip mismatch: sMaterialColor");
+ if(std::memcmp(&saved.AlphaComp0,&restored.AlphaComp0,sizeof(sAlphaComp0))!=0)return halo_refuse(e,"halo CPU roundtrip mismatch: sAlphaComp0");
+ if(std::memcmp(&saved.AlphaComp1,&restored.AlphaComp1,sizeof(sAlphaComp1))!=0)return halo_refuse(e,"halo CPU roundtrip mismatch: sAlphaComp1");
+ if(std::memcmp(&saved.AlphaOp,&restored.AlphaOp,sizeof(sAlphaOp))!=0)return halo_refuse(e,"halo CPU roundtrip mismatch: sAlphaOp");
+ if(std::memcmp(&saved.AlphaRef0,&restored.AlphaRef0,sizeof(sAlphaRef0))!=0)return halo_refuse(e,"halo CPU roundtrip mismatch: sAlphaRef0");
+ if(std::memcmp(&saved.AlphaRef1,&restored.AlphaRef1,sizeof(sAlphaRef1))!=0)return halo_refuse(e,"halo CPU roundtrip mismatch: sAlphaRef1");
+ if(std::memcmp(&saved.NumTevStages,&restored.NumTevStages,sizeof(sNumTevStages))!=0)return halo_refuse(e,"halo CPU roundtrip mismatch: sNumTevStages");
+ if(std::memcmp(&saved.TevStages,&restored.TevStages,sizeof(sTevStages))!=0)return halo_refuse(e,"halo CPU roundtrip mismatch: sTevStages");
+ if(std::memcmp(&saved.TevRegisters,&restored.TevRegisters,sizeof(sTevRegisters))!=0)return halo_refuse(e,"halo CPU roundtrip mismatch: sTevRegisters");
+ if(std::memcmp(&saved.KonstColors,&restored.KonstColors,sizeof(sKonstColors))!=0)return halo_refuse(e,"halo CPU roundtrip mismatch: sKonstColors");
+ if(std::memcmp(&saved.KonstColorSel,&restored.KonstColorSel,sizeof(sKonstColorSel))!=0)return halo_refuse(e,"halo CPU roundtrip mismatch: sKonstColorSel");
+ if(std::memcmp(&saved.KonstAlphaSel,&restored.KonstAlphaSel,sizeof(sKonstAlphaSel))!=0)return halo_refuse(e,"halo CPU roundtrip mismatch: sKonstAlphaSel");
+ if(std::memcmp(&saved.VtxDesc,&restored.VtxDesc,sizeof(sVtxDesc))!=0)return halo_refuse(e,"halo CPU roundtrip mismatch: sVtxDesc");
+ if(std::memcmp(&saved.VtxArrays,&restored.VtxArrays,sizeof(sVtxArrays))!=0)return halo_refuse(e,"halo CPU roundtrip mismatch: sVtxArrays");
+ if(std::memcmp(&saved.VtxFormats,&restored.VtxFormats,sizeof(sVtxFormats))!=0)return halo_refuse(e,"halo CPU roundtrip mismatch: sVtxFormats");
+ if(std::memcmp(&saved.CurVertex,&restored.CurVertex,sizeof(sCurVertex))!=0)return halo_refuse(e,"halo CPU roundtrip mismatch: sCurVertex");
+ if(std::memcmp(&saved.ImmVtxFmt,&restored.ImmVtxFmt,sizeof(sImmVtxFmt))!=0)return halo_refuse(e,"halo CPU roundtrip mismatch: sImmVtxFmt");
+ if(std::memcmp(&saved.FifoImmActive,&restored.FifoImmActive,sizeof(sFifoImmActive))!=0)return halo_refuse(e,"halo CPU roundtrip mismatch: sFifoImmActive");
+ if(std::memcmp(&saved.FifoAttr,&restored.FifoAttr,sizeof(sFifoAttr))!=0)return halo_refuse(e,"halo CPU roundtrip mismatch: sFifoAttr");
+ if(std::memcmp(&saved.FifoMtxId,&restored.FifoMtxId,sizeof(sFifoMtxId))!=0)return halo_refuse(e,"halo CPU roundtrip mismatch: sFifoMtxId");
+ if(std::memcmp(&saved.FifoNeed,&restored.FifoNeed,sizeof(sFifoNeed))!=0)return halo_refuse(e,"halo CPU roundtrip mismatch: sFifoNeed");
+ if(std::memcmp(&saved.FifoGot,&restored.FifoGot,sizeof(sFifoGot))!=0)return halo_refuse(e,"halo CPU roundtrip mismatch: sFifoGot");
+ if(std::memcmp(&saved.FifoTmp,&restored.FifoTmp,sizeof(sFifoTmp))!=0)return halo_refuse(e,"halo CPU roundtrip mismatch: sFifoTmp");
+ if(std::memcmp(&saved.FifoVertex,&restored.FifoVertex,sizeof(sFifoVertex))!=0)return halo_refuse(e,"halo CPU roundtrip mismatch: sFifoVertex");
+ if(std::memcmp(&saved.AttrStep,&restored.AttrStep,sizeof(sAttrStep))!=0)return halo_refuse(e,"halo CPU roundtrip mismatch: sAttrStep");
+ if(std::memcmp(&saved.CurrentPrimType,&restored.CurrentPrimType,sizeof(sCurrentPrimType))!=0)return halo_refuse(e,"halo CPU roundtrip mismatch: sCurrentPrimType");
+ if(std::memcmp(&saved.ExpectedVerts,&restored.ExpectedVerts,sizeof(sExpectedVerts))!=0)return halo_refuse(e,"halo CPU roundtrip mismatch: sExpectedVerts");
+ if(std::memcmp(&saved.HaveVertex,&restored.HaveVertex,sizeof(sHaveVertex))!=0)return halo_refuse(e,"halo CPU roundtrip mismatch: sHaveVertex");
+ if(std::memcmp(&saved.VerticesPretransformed,&restored.VerticesPretransformed,sizeof(sVerticesPretransformed))!=0)return halo_refuse(e,"halo CPU roundtrip mismatch: sVerticesPretransformed");
+ if(std::memcmp(&saved.VertexUsesPalette,&restored.VertexUsesPalette,sizeof(sVertexUsesPalette))!=0)return halo_refuse(e,"halo CPU roundtrip mismatch: sVertexUsesPalette");
+ PcGfxHaloScope* refused=nullptr;const char* refusal=nullptr;
+ sFifoGot=1;
+ const bool partialRefused=!pc_gfx_begin_halo_scope(refused,&refusal)&&!refused&&refusal&&std::strstr(refusal,"FIFO");
+ sFifoGot=saved.FifoGot;
+ if(!partialRefused)return halo_refuse(e,"halo partial FIFO capture was not refused");
+ ++sHaloDisplayListDepth;
+ const bool parserRefused=!pc_gfx_begin_halo_scope(refused,&refusal)&&!refused&&refusal&&std::strstr(refusal,"display-list");
+ --sHaloDisplayListDepth;
+ if(!parserRefused)return halo_refuse(e,"halo active display-list parser capture was not refused");
+ if(sStateGen<=gen||sPosMtxGen[0]<=posGen)return halo_refuse(e,"halo restore rolled back derived cache generations");
+ if(e)*e=nullptr;return true;
+}
+#endif
