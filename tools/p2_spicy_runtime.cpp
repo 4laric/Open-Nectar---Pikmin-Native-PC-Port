@@ -77,7 +77,7 @@ public:
             require(!input(n),"zero stock spent");
             phase=3;phaseTime=0;return result;
         }
-        if(gameflow.mPauseAll||n->getCurrState()->getID()!=NAVISTATE_Walk) return result;
+        if(gameflow.mPauseAll||(phase==0&&n->getCurrState()->getID()!=NAVISTATE_Walk)) return result;
         if(phase==0) {
             setupTime+=gsys->getFrameTime();
             Iterator pikis(pikiMgr);int alive=0;CI_LOOP(pikis) { auto* p=static_cast<Piki*>(*pikis);if(p&&p->isAlive()) ++alive; }
@@ -127,6 +127,7 @@ public:
             gameflow.mPauseAll=true;phase=2;return result;
         }
         if(phase==3) {
+            if(ticks%120==0)std::printf("P2_SPICY_PROGRESS seconds=%.3f remaining=%.3f captain_state=%d\n",phaseTime,squad.front().p->mP2Spicy.remaining,n->getCurrState()->getID());
             bool recovered=true;for(const auto& b:squad) recovered=recovered&&!b.p->mP2Spicy.active();
             require(phaseTime<43,"40sec effect did not expire");
             if(!recovered) return result;
