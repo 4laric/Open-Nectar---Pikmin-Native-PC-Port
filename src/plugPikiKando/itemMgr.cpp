@@ -1219,10 +1219,11 @@ void BuildingItem::refresh2d(Graphics&)
  */
 void BuildingItem::doKill()
 {
-#if defined(PIKI_PC_PORT)
-    pc_p2_original_gate_forget(this);
-#endif
 	mPlatMgr.release();
+#if defined(PIKI_PC_PORT)
+    // Source gates belong to MeltingPot's nodes, never the pooled item array.
+    if(pc_p2_original_gate_forget(this))return;
+#endif
 	ItemCreature::doKill();
 }
 
