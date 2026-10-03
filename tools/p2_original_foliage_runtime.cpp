@@ -43,10 +43,11 @@
 namespace {
 using namespace p2original;
 using namespace p2original::foliage;
-bool human=false,refusal=false,naturalWalk=false,forestBatch=false;
-unsigned firstSource(){return forestBatch?47:91;}
-unsigned secondSource(){return forestBatch?49:88;}
-const char* batchSources(){return forestBatch?"47,49":"91,88";}
+bool human=false,refusal=false,naturalWalk=false;
+std::string batch="tutorial",sourcePair="91,88";
+std::array<unsigned,2> sourceIDs{{91,88}};
+unsigned firstSource(){return sourceIDs[0];}
+const char* batchSources(){return sourcePair.c_str();}
 SDL_Joystick* pad=nullptr;
 void require(bool ok,const char* message){if(!ok){std::printf("FAIL ORIGINAL_FOLIAGE %s\n",message);std::fflush(nullptr);std::_Exit(1);}}
 void checked(bool ok,const std::string& e){if(!ok)std::fprintf(stderr,"ORIGINAL_FOLIAGE_ERROR %s\n",e.c_str());require(ok,"native foliage operation");}
@@ -71,13 +72,14 @@ class FoliageApp final:public PlugPikiApp {
  std::array<Creature*,2> actors{};
  std::array<InstanceIdentity,2> firstIdentity;
  std::array<Vector3f,2> collisionCentre;
+ std::array<std::array<Vector3f,5>,2> partCentres;
  std::array<float,2> health{};
  int ready=0,phase=0,age=0,pelletBaseline=0,rewardBaseline=0,tekiBaseline=0;
  bool captainSeen=false;
  unsigned walked=0;std::array<bool,2> naturalTouch{};
  const std::string fingerprint=std::string(64,'f');
- CatalogRow literal(unsigned source,unsigned index,unsigned uid,const Position& at,float facing){
-  CatalogRow r;r.course=forestBatch?"forest":"tutorial";r.member="plantsgen.txt";r.index=index;r.sourceKey=r.course+"/plantsgen.txt#"+std::to_string(index);
+ CatalogRow literal(unsigned source,unsigned index,unsigned uid,const Position& at,float facing,const char* course="tutorial"){
+  CatalogRow r;r.course=course;r.member="plantsgen.txt";r.index=index;r.sourceKey=r.course+"/plantsgen.txt#"+std::to_string(index);
   r.enemy.source=source;r.enemy.uid=uid;r.enemy.count=1;r.enemy.position=at;r.enemy.directionDegrees=facing;return r;
  }
  int rewards(){int total=heads();for(int color=0;color<3;++color){auto* onion=itemMgr->getContainer(color);if(onion)total+=onion->getTotalStorePikis();}return total;}
@@ -98,12 +100,17 @@ class FoliageApp final:public PlugPikiApp {
   require(native->provider().size()==2&&tekiMgr->getSize()==tekiBaseline+2,"two native births; count-zero row has no actor");
   actors.fill(nullptr);Iterator it(tekiMgr);CI_LOOP(it){Creature* actor=*it;unsigned source=0,token=0;InstanceIdentity identity;
    if(!originalActors().query(actor,source,token,&identity))continue;
-   unsigned i=source==firstSource()?0:source==secondSource()?1:2;require(i<2&&!actors[i],"distinct original foliage identity");actors[i]=actor;
+   // The original UID determines the fixture slot independently of species.
+   unsigned i=identity.generator==rows[0].enemy.uid?0:identity.generator==rows[1].enemy.uid?1:2;require(i<2&&source==sourceIDs[i]&&!actors[i],"distinct original foliage identity");actors[i]=actor;
    require(native->owns(actor)&&identity.generator==rows[i].enemy.uid&&identity.ordinal==0&&token,"native source UID and ordinal association");
    auto* h=native->provider().lookup(actor);require(h&&h->generator==generators[i].get()&&h->token==token,"native generator and family binding");
    if(reentry)require(identity.activation==firstIdentity[i].activation+1&&identity.epoch==firstIdentity[i].epoch+1,"disc cache reentry advances epoch and activation");else firstIdentity[i]=identity;
    require(actor->mCollInfo&&actor->mCollInfo->getBoundingSphere(),"actual source static collider");
    collisionCentre[i]=actor->mCollInfo->getBoundingSphere()->mCentre;health[i]=actor->mHealth;
+   const unsigned parts=source==46?5:2;
+   require(actor->mCollInfo->getBoundingSphere()->getChildCount()==int(parts-1),"literal source collider child topology");
+   for(unsigned j=0;j<parts;++j){auto* part=actor->mCollInfo->getSphere(0x66303030u+j);require(part,"literal source collider part identity");partCentres[i][j]=part->mCentre;
+    if(source==46)require(part->mRadius==(j==0?50.f:j==1?25.f:20.f),"Dandelion literal root and leaf sphere radii");}
    std::printf("ORIGINAL_FOLIAGE_BIRTH source=%u uid=%u ordinal=%u epoch=%llu activation=%llu reentry=%d\n",source,identity.generator,identity.ordinal,(unsigned long long)identity.epoch,(unsigned long long)identity.activation,int(reentry));
   }
   require(actors[0]&&actors[1],"both literal variants physically admitted");checkEconomy();
@@ -116,16 +123,22 @@ class FoliageApp final:public PlugPikiApp {
   // plants on the east approach used by the successfully surveyed walk.
   Position a{n->mSRT.t.x+90,0,n->mSRT.t.z},b{n->mSRT.t.x+90,0,n->mSRT.t.z+70};
   a.y=mapMgr->getMinY(a.x,a.z,true);b.y=mapMgr->getMinY(b.x,b.z,true);require(std::isfinite(a.y)&&std::isfinite(b.y),"actual native arena floor");
-  if(forestBatch){
+  if(batch=="forest"){
    // Actual forest/plantsgen.txt literals #23 (Clover47) and #0 (Ooinu_s49),
    // decoded in forest47-49-source-records.json. Only positions are relocated
    // to the same surveyed tutorial arena; this is not forest-course admission.
-   rows={literal(47,23,1376717705u,a,0),literal(49,0,1389527839u,b,180)};
+   rows={literal(47,23,1376717705u,a,0,"forest"),literal(49,0,1389527839u,b,180,"forest")};
+  }else if(batch=="dandelion"){
+   rows={literal(46,13,1375741226u,a,0,"forest"),literal(80,5,1390227387u,b,90,"forest")};
+  }else if(batch=="shoots"){
+   rows={literal(51,0,1382955810u,a,240,"yakushima"),literal(52,5,1390174228u,b,270,"yakushima")};
+  }else if(batch=="horsetails"){
+   rows={literal(90,14,1384248119u,a,270,"forest"),literal(88,4,1381420794u,b,95)};
   }else rows={literal(91,0,1390538979u,a,0),literal(88,4,1381420794u,b,95)};
   auto zero=literal(firstSource(),0,originalGeneratorUid("fixture/foliage-zero#0"),a,0);zero.course="fixture";zero.member="foliage-zero";zero.sourceKey="fixture/foliage-zero#0";zero.enemy.count=0;rows.push_back(zero);
   native=std::make_unique<Native>();tekiBaseline=tekiMgr->getSize();pelletBaseline=pelletMgr->getSize();rewardBaseline=rewards();
   bool physical=native->provider().preflight(rows,e);
-  if(refusal){require(!physical&&native->provider().size()==0&&tekiMgr->getSize()==tekiBaseline&&pelletMgr->getSize()==pelletBaseline,"physical resource refusal before allocation");std::puts(forestBatch?"PASS ORIGINAL_FOLIAGE_RESOURCE_REFUSAL sources=47,49 births=0 direct_control=1 gameplay=0":"PASS ORIGINAL_FOLIAGE_RESOURCE_REFUSAL births=0 direct_control=1 gameplay=0");std::fflush(nullptr);std::_Exit(0);}
+  if(refusal){require(!physical&&native->provider().size()==0&&tekiMgr->getSize()==tekiBaseline&&pelletMgr->getSize()==pelletBaseline,"physical resource refusal before allocation");if(batch=="tutorial")std::puts("PASS ORIGINAL_FOLIAGE_RESOURCE_REFUSAL births=0 direct_control=1 gameplay=0");else std::printf("PASS ORIGINAL_FOLIAGE_RESOURCE_REFUSAL sources=%s births=0 direct_control=1 gameplay=0\n",batchSources());std::fflush(nullptr);std::_Exit(0);}
   checked(physical,e);checked(native->geometryOwnershipControl(e),e);
   checked(originalActors().install(fingerprint,rows,[](const CatalogRow& r,std::string& err){return decode(r,err);},e),e);install(false);
   std::printf("ORIGINAL_FOLIAGE_READY sources=%s zero_count=1 baseline=20 window=960x540 initialized_placement=1 original_positions=0 naturalinput=%d callbackcontrol=%d gameplay=0\n",batchSources(),int(naturalWalk),int(!naturalWalk&&!human));std::fflush(nullptr);
@@ -145,6 +158,7 @@ class FoliageApp final:public PlugPikiApp {
  }
  void checkStatic(){for(unsigned i=0;i<2;++i){auto* actor=actors[i];const auto* h=native->provider().lookup(actor);require(h&&actor->mHealth==health[i]&&actor->isAlive(),"native foliage remains invulnerable");
    const auto& centre=actor->mCollInfo->getBoundingSphere()->mCentre;const auto& before=collisionCentre[i];require(std::fabs(centre.x-before.x)<.01f&&std::fabs(centre.y-before.y)<.01f&&std::fabs(centre.z-before.z)<.01f,"animated pose does not move static source collider");
+   for(unsigned j=0;j<(h->row.enemy.source==46?5u:2u);++j){const auto* part=actor->mCollInfo->getSphere(0x66303030u+j);require(part,"retained source collider part");const auto& old=partCentres[i][j];require(std::fabs(part->mCentre.x-old.x)<.01f&&std::fabs(part->mCentre.y-old.y)<.01f&&std::fabs(part->mCentre.z-old.z)<.01f,"all source leaf collider centres remain static during touch");}
    require(actor->mVelocity.x==0&&actor->mVelocity.y==0&&actor->mVelocity.z==0,"native scenery remains constrained");}
   checkEconomy();
  }
@@ -192,7 +206,13 @@ public:
 }
 int main(int argc,char** argv){
  human=std::getenv("P2_ORIGINAL_FOLIAGE_HUMAN")!=nullptr;refusal=std::getenv("P2_ORIGINAL_FOLIAGE_REFUSE_RESOURCES")!=nullptr;naturalWalk=!human&&std::getenv("P2_ORIGINAL_FOLIAGE_WALK")!=nullptr;
- forestBatch=std::getenv("P2_ORIGINAL_FOLIAGE_FOREST")!=nullptr;
+ if(const char* selected=std::getenv("P2_ORIGINAL_FOLIAGE_BATCH"))batch=selected;else if(std::getenv("P2_ORIGINAL_FOLIAGE_FOREST"))batch="forest";
+ if(batch=="tutorial")sourceIDs={91,88},sourcePair="91,88";
+ else if(batch=="forest")sourceIDs={47,49},sourcePair="47,49";
+ else if(batch=="dandelion")sourceIDs={46,80},sourcePair="46,80";
+ else if(batch=="shoots")sourceIDs={51,52},sourcePair="51,52";
+ else if(batch=="horsetails")sourceIDs={90,88},sourcePair="90,88";
+ else require(false,"known explicit foliage batch");
  SDL_setenv("PIKMIN_RANDOMIZER_TEST_BACKGROUND","1",1);SDL_setenv("SDL_AUDIODRIVER","dummy",1);SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS,"1");SDL_SetMainReady();
  pc_sim_rng_note_main_thread();std::string e;checked(pc_sim_rng_begin_offline(0x9188,0x8891,e),e);pc_gpu_preference_apply();pc_bbft_init(argc,argv);
  require(!pc_randomizer_enabled()&&pc_pikipelago_surface_course()&&!std::strcmp(pc_pikipelago_surface_course(),"tutorial")&&!pc_pikipelago_room_preview(),"real tutorial course assets required");
