@@ -98,6 +98,10 @@ int indexOf(Pellet* pellet)
 PelletConfig* treasureTemplate()
 {
     if (!pelletMgr) return nullptr;
+    // Ordinary generated floors have no placeholder live treasure. The native
+    // config catalog already owns this exact model's template independently of
+    // whether any generator birthed it in the current scene.
+    if (pc_randomizer_generated_cave()) return pelletMgr->getConfig('pr05');
     Iterator it(pelletMgr);
     CI_LOOP(it) {
         Pellet* pellet = static_cast<Pellet*>(*it);

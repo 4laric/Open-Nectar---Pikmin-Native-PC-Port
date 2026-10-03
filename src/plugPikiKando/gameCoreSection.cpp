@@ -1943,7 +1943,10 @@ void GameCoreSection::finalSetup()
 	PRINT("********* BONUS PIKI CHECK\n");
 	GameStat::dump();
 
-	if (playerState->mHasExtinctionDemoPlayed == false && !playerState->isTutorial() PC_NOT_VS
+	// The selected living campaign party is restored later in finalSetup.
+	// Its empty pre-restore native counters are not an Onion extinction.
+	if (!pc_p2_cave_campaign_owns_heads()
+	    && playerState->mHasExtinctionDemoPlayed == false && !playerState->isTutorial() PC_NOT_VS
 	    && ((GameStat::allPikis[Blue] == 0 && playerState->hasContainer(Blue))
 	        || (GameStat::allPikis[Red] == 0 && playerState->hasContainer(Red))
 	        || (GameStat::allPikis[Yellow] == 0 && playerState->hasContainer(Yellow)))) {
