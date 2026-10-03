@@ -56,3 +56,25 @@ bool pc_p2_cave_campaign_survivor_body(const std::string& sourceKey,
 // fresh flags and no current live association. No native allocation or RNG.
 bool pc_p2_original_piki_body_birth_admit(const OriginalPikiBody&);
 bool pc_p2_original_piki_body_wild(const Piki*) noexcept;
+
+// Exact-body RGB bind scope for an authenticated selected Cave survivor. It
+// neither resets Piki::init/FSM nor consumes RNG nor unlocks an AP color globally.
+class PcOriginalPikiSavedColorScope {
+public:
+ explicit PcOriginalPikiSavedColorScope(Piki*);
+ ~PcOriginalPikiSavedColorScope();
+ PcOriginalPikiSavedColorScope(const PcOriginalPikiSavedColorScope&)=delete;
+ PcOriginalPikiSavedColorScope& operator=(const PcOriginalPikiSavedColorScope&)=delete;
+ bool valid() const noexcept{return mActive;}
+private:
+ Piki* mBody=nullptr;
+ OriginalPikiBody mSelected;
+ std::uint64_t mGeneration=0;
+ std::uint8_t mSha[32]={};
+ bool mActive=false;
+ friend bool pc_p2_original_piki_saved_color_held(const Piki*,int) noexcept;
+};
+bool pc_p2_original_piki_saved_color_held(const Piki*,int baseColor) noexcept;
+// Reapply only the existing source body's canonical base color (e.g. ending
+// mushroom tint). Caller additionally requires color==native current mColor.
+bool pc_p2_original_piki_body_color_access(const Piki*,int baseColor) noexcept;

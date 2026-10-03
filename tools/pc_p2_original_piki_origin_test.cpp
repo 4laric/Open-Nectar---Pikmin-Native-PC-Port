@@ -44,6 +44,21 @@ int main(){std::string e,fp(64,'a');int slots[3]={};auto p=reinterpret_cast<Piki
  selectedState=body.state;selectedState.species=1;CHECK(!pc_p2_original_piki_body_restore_saved(q,body));
  selectedState=body.state;selected=0;CHECK(!pc_p2_original_piki_body_restore_saved(q,body));selected=1;zeroHash=true;CHECK(!pc_p2_original_piki_body_restore_saved(q,body));zeroHash=false;
  CHECK(pc_p2_original_piki_body_restore_saved(q,body));CHECK(pc_p2_original_piki_body_query(q,bodyOut));CHECK(bodyOut.state.wasWild&&!bodyOut.state.wild);CHECK(!pc_p2_original_piki_body_restore_saved(p,body));
+ CHECK(!pc_p2_original_piki_saved_color_held(q,0));
+ {PcOriginalPikiSavedColorScope nullScope(nullptr);CHECK(!nullScope.valid());}
+ bodyPermitted=false;{PcOriginalPikiSavedColorScope refused(q);CHECK(!refused.valid());}bodyPermitted=true;
+ {PcOriginalPikiSavedColorScope selectedColor(q);CHECK(selectedColor.valid());
+  CHECK(pc_p2_original_piki_saved_color_held(q,0));
+  bodyPermitted=false;CHECK(!pc_p2_original_piki_saved_color_held(q,0));bodyPermitted=true;
+  selected++;CHECK(!pc_p2_original_piki_saved_color_held(q,0));selected--;
+  zeroHash=true;CHECK(!pc_p2_original_piki_saved_color_held(q,0));zeroHash=false;
+  CHECK(pc_p2_original_piki_saved_color_held(q,0));CHECK(!pc_p2_original_piki_saved_color_held(q,1));CHECK(!pc_p2_original_piki_saved_color_held(p,0));
+  PcOriginalPikiSavedColorScope nested(q);CHECK(!nested.valid());
+  CHECK(pc_p2_original_piki_body_color_access(q,0));CHECK(!pc_p2_original_piki_body_color_access(q,2));
+  pc_p2_original_piki_origin_forget(q);CHECK(!pc_p2_original_piki_saved_color_held(q,0));
+ }
+ CHECK(!pc_p2_original_piki_saved_color_held(q,0));
+ CHECK(pc_p2_original_piki_body_restore_saved(q,body));
  pc_p2_original_piki_origin_forget(q);auto freshReplay=body;freshReplay.state={0,true,true};CHECK(!pc_p2_original_piki_body_birth_admit(freshReplay));bodyPermitted=false;CHECK(!pc_p2_original_piki_body_restore_saved(p,body));bodyPermitted=true;
  CHECK(pc_p2_original_piki_body_restore_saved(p,body)); // selected older SAVE remains legitimate
  pc_p2_original_piki_origin_forget(p);CHECK(pc_p2_original_piki_origin_associate_birth(p,o));CHECK(!pc_p2_original_piki_body_query(p,bodyOut));CHECK(!pc_p2_original_piki_body_recruited(p));pc_p2_original_piki_origin_forget(p);

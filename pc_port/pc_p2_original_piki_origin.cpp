@@ -108,3 +108,40 @@ bool pc_p2_original_piki_body_birth_admit(const OriginalPikiBody& b){
 bool pc_p2_original_piki_body_wild(const Piki* p) noexcept {
  auto i=bodies.find(p);return i!=bodies.end()&&i->second.hasState&&i->second.state.wild;
 }
+
+namespace {thread_local PcOriginalPikiSavedColorScope* savedColor=nullptr;}
+PcOriginalPikiSavedColorScope::PcOriginalPikiSavedColorScope(Piki* p){
+ if(!p||savedColor||!pc_p2_original_piki_body_query(p,mSelected))return;
+ OriginalPikiBodyState selected;std::uint64_t generation=0;std::uint8_t sha[32]={};
+ const auto& o=mSelected.origin;
+ if(!pc_p2_cave_campaign_survivor_body(o.sourceKey,o.recordUid,o.attempt,o.activation,
+     o.catalogFingerprint,selected,&generation,sha)||!generation
+     ||!stateSame(selected,mSelected.state))return;
+ bool nonzero=false;for(auto byte:sha)nonzero|=byte!=0;if(!nonzero)return;
+ mBody=p;mGeneration=generation;for(unsigned i=0;i<32;++i)mSha[i]=sha[i];mActive=true;savedColor=this;
+}
+PcOriginalPikiSavedColorScope::~PcOriginalPikiSavedColorScope(){
+ if(mActive&&savedColor==this)savedColor=nullptr;
+}
+bool pc_p2_original_piki_body_color_access(const Piki* p,int color) noexcept {
+ auto i=bodies.find(p);if(i==bodies.end()||!i->second.hasState)return false;
+ const int base=i->second.state.species<=2?i->second.state.species:1;
+ return color==base;
+}
+bool pc_p2_original_piki_saved_color_held(const Piki* p,int color) noexcept {
+ if(!savedColor||!savedColor->mActive||savedColor->mBody!=p)return false;
+ auto i=bodies.find(p);if(i==bodies.end()||!i->second.hasState
+     ||!same(i->second.origin,savedColor->mSelected.origin)
+     ||!stateSame(i->second.state,savedColor->mSelected.state)
+     ||!pc_p2_original_piki_body_color_access(p,color))return false;
+ // A lexical scope cannot outlive or retarget the selected checkpoint proof.
+ try {
+  OriginalPikiBodyState state;std::uint64_t generation=0;std::uint8_t sha[32]={};
+  const auto& o=savedColor->mSelected.origin;
+  if(!pc_p2_cave_campaign_survivor_body(o.sourceKey,o.recordUid,o.attempt,o.activation,
+      o.catalogFingerprint,state,&generation,sha)||generation!=savedColor->mGeneration
+      ||!stateSame(state,savedColor->mSelected.state))return false;
+  for(unsigned n=0;n<32;++n)if(sha[n]!=savedColor->mSha[n])return false;
+  return true;
+ } catch(...) {return false;}
+}
