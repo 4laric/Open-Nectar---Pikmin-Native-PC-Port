@@ -288,6 +288,7 @@ set(PC_PORT_SOURCES
     pc_port/pc_p2_original_sprout_reader.cpp
     pc_port/pc_p2_original_onyon_lineage.cpp
     pc_port/pc_p2_original_number_profile.cpp
+    pc_port/pc_p2_original_resource_contents.cpp
     pc_port/pc_p2_original_piki_spawn.cpp
     pc_port/pc_p2_original_drop.cpp
     pc_port/pc_p2_original_drop_engine.cpp
@@ -3486,6 +3487,10 @@ add_test(NAME p2_original_onyon_lineage COMMAND p2_original_onyon_lineage_test)
 add_executable(p2_original_number_profile_test tools/p2_original_number_profile_test.cpp pc_port/pc_p2_original_number_profile.cpp)
 target_include_directories(p2_original_number_profile_test PRIVATE pc_port)
 add_test(NAME p2_original_number_profile COMMAND p2_original_number_profile_test)
+add_executable(p2_original_resource_contents_test pc_port/pc_p2_original_resource_contents_test.cpp pc_port/pc_p2_original_resource_contents.cpp)
+target_include_directories(p2_original_resource_contents_test PRIVATE pc_port)
+target_compile_options(p2_original_resource_contents_test PRIVATE -Wall -Wextra -Werror -UNDEBUG)
+add_test(NAME p2_original_resource_contents COMMAND p2_original_resource_contents_test)
 
 pikmin_add_ci_fixture(surface_campaign_sdl tools/p2_surface_campaign_sdl_fixture.cpp)
 
