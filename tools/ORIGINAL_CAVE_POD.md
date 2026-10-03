@@ -78,6 +78,24 @@ until the SAVE owner can atomically compose cargo, Pod and the canonical ledger.
 
 ## Ordinary gameplay acceptance script (30–90 seconds)
 
+`pc_p2_original_pod_floor.h` provides the narrow `FloorLifecycle` for the
+concrete retail `SceneOps` owner: `prepare`, `birth`, `commit`, and `release`.
+It re-parses the selected `FloorPlan.authenticatedBytes` against the supplied
+selected snapshot's layout hash before deriving the Pod anchor. The imported
+plan parser is unchanged from cave-owner commit `0f4f7f0d68dd052e6492749e2805a54858b878a0`.
+The caller supplies original resource paths, independent birth authority and
+its authenticated selected-prepared context provider. That provider must work
+before `FloorSession` becomes active and during teardown after active authority
+is revoked; it must be revoked after accepted teardown. It grants no live
+receiver authority before the explicit physical floor commit.
+
+A failed release retains wrapper state for retry; destroying an owned wrapper
+aborts. Prepared rollback calls the native abort path, and committed release
+still requires explicit actual ground-graph retention for unfinished cargo.
+The plan control tests placement/context only and issues no birth or receipt.
+Concrete selected StageInfo/geometry/routes, source cargo and ledger bridge
+remain prerequisites for gameplay.
+
 Use the floor owner's composed Emergence floor 2 launcher with original geometry,
 actual source cargo and canonical ledger, 20 Pikmin, a centered 960x540 window,
 and a fresh private save/log directory. The source BaseGen7 slot is
