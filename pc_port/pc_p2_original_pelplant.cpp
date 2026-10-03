@@ -48,6 +48,7 @@ bool Provider::preflight(const std::vector<CatalogRow>& rows,std::string& e){
  for(bool clip:resources.clips)if(!clip)return refuse(e,"Pelplant authored animation unresolved");
  std::map<unsigned,CatalogRow> admitted;
  for(const auto& row:rows){if(row.enemy.source!=0)continue;Initial init;if(!decode(row,init,e))return false;
+  if(!mEngine.commonResources(row,e))return false;
   if(!admitted.emplace(row.enemy.uid,row).second)return refuse(e,"duplicate original Pelplant generator");
   for(unsigned c=0;c<3;++c)if(!resources.numberConfigs[amountIndex(init.amount)][c])return refuse(e,"configured Pelplant number/color pellet resource unresolved");
  }

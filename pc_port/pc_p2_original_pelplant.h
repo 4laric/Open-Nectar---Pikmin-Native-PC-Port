@@ -1,5 +1,6 @@
 #pragma once
 #include "pc_p2_original_catalog.h"
+#include "pc_p2_original_group.h"
 #include <array>
 #include <map>
 #include <memory>
@@ -46,6 +47,7 @@ class Engine {
 public:
  virtual ~Engine()=default;
  virtual bool resources(Resources&,std::string&)=0;
+ virtual bool commonResources(const CatalogRow&,std::string&)=0;
  virtual bool identity(Host&,std::string& durable,std::string& error)=0;
  virtual bool reserve(unsigned actors,const std::array<unsigned,4>& pellets,std::string&)=0;
  virtual bool allocate(Host&,const Position&,float radians,std::string&)=0;
@@ -62,16 +64,16 @@ public:
  // Already released ordinary cargo is not owned by the plant anymore.
  virtual bool cleanup(Host&,std::string&)=0;
 };
-class Provider {
+class Provider : public GroupProvider {
 public:
  explicit Provider(Engine& engine):mEngine(engine){}
  Provider(const Provider&)=delete;
  Provider& operator=(const Provider&)=delete;
- bool preflight(const std::vector<CatalogRow>&,std::string&);
- bool reserve(const std::vector<CatalogRow>&,std::string&);
- bool birth(const CatalogRow&,Generator*,unsigned,const Position&,float,Creature*&,std::string&);
- bool bind(const CatalogRow&,Creature*,unsigned,std::string&);
- bool release(Creature*,unsigned,std::string&);
+ bool preflight(const std::vector<CatalogRow>&,std::string&) override;
+ bool reserve(const std::vector<CatalogRow>&,std::string&) override;
+ bool birth(const CatalogRow&,Generator*,unsigned,const Position&,float,Creature*&,std::string&) override;
+ bool bind(const CatalogRow&,Creature*,unsigned,std::string&) override;
+ bool release(Creature*,unsigned,std::string&) override;
  Host* lookup(Creature*);
  bool tick(Creature*,float,Event,std::string&);
  bool damage(Creature*,float,const char special[4],std::string&);
