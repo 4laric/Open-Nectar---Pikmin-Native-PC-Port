@@ -75,6 +75,20 @@ static void request(const char*key){std::printf("P2_WHITE_NATIVE_KEY_REQUEST seq
 static bool retryBody(Piki*p,Navi*n){
  return p&&p->isAlive()&&restored.count(p)&&!captured.count(p)&&pc_p2_is_white(p)&&p->mNavi==n&&p->mMode==PikiMode::FormationMode&&p->getState()==PIKISTATE_Normal&&p->isCreatureFlag(CF_IsOnGround)&&!p->isHolding()&&!p->isStickTo()&&p->getStickObject()==nullptr;
 }
+// Mirrors the ordinary A action priority using current manager objects only.
+static bool actionClear(const Vector3f&position,bool disclose,float margin=0.f){
+ auto*ship=itemMgr?itemMgr->getUfo():nullptr;if(!ship||!pelletMgr)return false;
+ const float shipDx=ship->mSRT.t.x-position.x,shipDz=ship->mSRT.t.z-position.z;
+ if(shipDx*shipDx+shipDz*shipDz<=(50.f+margin)*(50.f+margin)){if(disclose)std::printf("P2_WHITE_ADULT_ACTION_BLOCK ship x=%.3f z=%.3f\n",ship->mSRT.t.x,ship->mSRT.t.z);return false;}
+ Iterator current(pelletMgr);CI_LOOP(current){auto*p=static_cast<Pellet*>(*current);if(!p->mConfig)continue;
+  if(p->mConfig->mPelletType()!=PELTYPE_UfoPart||!p->onGround()||p->getState()!=0)continue;
+  const auto shipPosition=ship->getGoalPos();float dx=p->mSRT.t.x-shipPosition.x,dz=p->mSRT.t.z-shipPosition.z;
+  if(dx*dx+dz*dz<900&&p->mCarrierCounter!=0)continue;
+  dx=p->mSRT.t.x-position.x;dz=p->mSRT.t.z-position.z;float radius=p->getBottomRadius()+20.f+margin;
+  if(dx*dx+dz*dz<=radius*radius){if(disclose)std::printf("P2_WHITE_ADULT_ACTION_BLOCK part=%p model=%u x=%.3f z=%.3f bottom_radius=%.3f native_action_range=20\n",(void*)p,p->mConfig->mModelId.mId,p->mSRT.t.x,p->mSRT.t.z,p->getBottomRadius());return false;}
+ }
+ return true;
+}
 class Input:public Kontroller{
 public:Input():Kontroller(1){}
  void update()override{
@@ -95,8 +109,8 @@ public:Input():Kontroller(1){}
     require(pc_world_map_stick_command(action,invert,deadzone,live,extra,sx,sy),"native map loaded binding cleared or duplicated");
    }
   }
-  if(n&&n->getCurrState()&&n->mNaviCamera&&(phase==1||phase==5)){
-   float bx=goal.x-n->mSRT.t.x,bz=goal.z-n->mSRT.t.z;bool walk=phase==1||bx*bx+bz*bz>10000;
+  if(n&&n->getCurrState()&&n->mNaviCamera&&(phase==1||phase==5||phase==11)){
+   float bx=goal.x-n->mSRT.t.x,bz=goal.z-n->mSRT.t.z;bool walk=phase==1||phase==11||bx*bx+bz*bz>10000;
    if(walk||tick%10==0){float dx=walk?bx:goal.x-n->mCursorWorldPos.x,dz=walk?bz:goal.z-n->mCursorWorldPos.z,d=std::hypot(dx,dz);
     if(d>(walk?15:3)){const auto&axis=n->mNaviCamera->mViewXAxis;float strength=walk?65:22;sx=int(strength*(dx*axis.x+dz*axis.z)/d);sy=int(strength*(dx*axis.z-dz*axis.x)/d);}
    }
@@ -181,7 +195,20 @@ public:int idle()override{
  if(phase==4&&tick>=20&&followers==2&&settled(n->getCurrState()->getID())){goal=predator->mSRT.t;next(5);return result;}
  if(phase==5){require(predator->isAlive(),"predator died before two witnessed consumptions");goal=predator->mSRT.t;
   float dx=goal.x-n->mCursorWorldPos.x,dz=goal.z-n->mCursorWorldPos.z,bx=goal.x-n->mSRT.t.x,bz=goal.z-n->mSRT.t.z;
-  if(dx*dx+dz*dz<144&&bx*bx+bz*bz>1600&&bx*bx+bz*bz<10000&&n->getCurrState()->getID()==NAVISTATE_Walk){held=nullptr;next(6);return result;}
+  if(dx*dx+dz*dz<144&&bx*bx+bz*bz>1600&&bx*bx+bz*bz<10000&&n->getCurrState()->getID()==NAVISTATE_Walk){
+   if(!actionClear(n->mSRT.t,true)){
+    bool found=false;float closest=1e30f;
+    for(int i=0;i<8;++i){float angle=i*0.78539816339f;Vector3f candidate(predator->mSRT.t.x+70.f*std::sin(angle),predator->mSRT.t.y,predator->mSRT.t.z+70.f*std::cos(angle));
+     if(!actionClear(candidate,false,16.f))continue;float ax=candidate.x-n->mSRT.t.x,az=candidate.z-n->mSRT.t.z,distance=ax*ax+az*az;
+     if(distance<closest){closest=distance;goal=candidate;found=true;}
+    }
+    require(found,"no native action-clear ordinary throw approach");std::printf("P2_WHITE_ADULT_ACTION_ROUTE x=%.3f z=%.3f ordinary_SDL_walk=1 prospective_terrain_unproved=1\n",goal.x,goal.z);next(11);return result;
+   }
+   held=nullptr;next(6);return result;
+  }
+ }
+ if(phase==11){float dx=goal.x-n->mSRT.t.x,dz=goal.z-n->mSRT.t.z;
+  if(dx*dx+dz*dz<225&&settled(n->getCurrState()->getID())&&actionClear(n->mSRT.t,false)){goal=predator->mSRT.t;next(5);return result;}
  }
  if(phase==6&&n->getCurrState()->getID()==NAVISTATE_ThrowWait){auto*grab=static_cast<NaviThrowWaitState*>(n->getCurrState());Piki*actual=grab->mHeldThrowPiki?grab->mHeldThrowPiki:grab->mPendingThrowPiki;
   if(!held&&actual){
