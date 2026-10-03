@@ -111,19 +111,60 @@ bool control(Navi* n,std::string& e){
 }
 bool animateWalk(Navi* n,const std::function<bool(int)>& emit,std::string& e){
  e.clear();Binding b;if(!bind(n,b,e,true,true))return false;auto* actor=live(n,b,e);if(!actor)return false;
- if(b.state->sourceStateId()!=StateId::Walk)return fail(e,"locomotion selector requires exact source Walk state");
  if(!pc_p2_original_captain_control_effects)return fail(e,"missing source animation observation provider");
  const auto* effects=pc_p2_original_captain_control_effects(n);if(!effects||&effects->scene()!=b.scene)return fail(e,"noncanonical source animation provider");
  AnimationFrame frame;if(!effects->animationFrame(*n,frame,e))return false;
- MotionState current;if(!b.bank->state(n,current,e))return false;
- auto next=actor->animation;next.bound=selectorMotion(current.motion);
- control::AnimationOutput selected;if(!control::updateWalkAnimation(b.params,frame.displacement,frame.deltaTime,b.frame.face,frame.faceDirectionOffset,frame.selfIsJKoke,next,selected,e))return false;
+ if(!frame.gameFrozen)return fail(e,"missing actual source gameFrozen observation");
+ MotionState self,bound;int lock;
+ if(!b.bank->stateAnimator(n,Animator::Self,self,e)||!b.bank->stateAnimator(n,Animator::Bound,bound,e)||!b.bank->boundMotionLock(n,lock,e))return false;
+ if(lock<-1)return fail(e,"invalid actual source bound motion lock");
+ auto next=actor->animation;next.bound=selectorMotion(bound.motion);
+ control::AnimationOutput selected;
+ if(!control::updateWalkAnimation(b.params,frame.displacement,frame.deltaTime,b.frame.face,frame.faceDirectionOffset,self.motion==Motion::Jkoke,next,selected,e))return false;
+ if(!emit)return fail(e,"missing actual source animator event receiver");
+ const auto epoch=b.scene->incarnation();const auto* native=b.state->nativeState();
+ auto current=[&](){
+  return pc_p2_original_captain_loaded_scene()==b.scene&&pc_p2_original_captain_world()==b.world
+   &&b.scene->incarnation()==epoch&&actor->scene==b.scene&&actor->actor==n&&actor->incarnation==epoch
+   &&b.scene->captainAt(b.slot)==n&&pc_p2_original_captain_actor_alive(n)&&n->getCurrState()==native
+   &&pc_p2_original_captain_source_bank()==b.bank&&pc_p2_original_captain_action_source(n)==b.source
+   &&pc_p2_original_captain_control_effects(n)==effects;
+ };
+ if(!current())return fail(e,"source animation authority changed during preflight");
  if(selected.transition){
-  bool started=selected.preserveFrame?b.bank->startPreservingFrame(n,sourceMotion(selected.motion),e):b.bank->start(n,sourceMotion(selected.motion),e);
-  if(!started)return false;
+  Motion target=sourceMotion(selected.motion);
+  if(!b.bank->supports(n,target,e))return false;
+  const Listener listener=selected.listener?Listener::SourceActor:Listener::None;
+  if(selected.preserveFrame){
+   // Literal source order saves each clock separately: moving Bound first,
+   // then unlocked Self. Preserving Bound's frame cannot replace Self's frame.
+   if(!b.bank->startAnimator(n,Animator::Bound,target,true,listener,e))return false;
+   if(lock==-1&&!b.bank->startAnimator(n,Animator::Self,target,true,Listener::None,e))return false;
+  }else {
+   // Wait/ASIBUMI boundary resets Self first only when no motion blend lock.
+   if(lock==-1&&!b.bank->startAnimator(n,Animator::Self,target,false,Listener::None,e))return false;
+   if(!b.bank->startAnimator(n,Animator::Bound,target,false,listener,e))return false;
+  }
  }
- if(!b.bank->advance(n,selected.playbackSpeed*frame.deltaTime,emit,e))return false;
- if(n->getCurrState()==b.state->nativeState()&&pc_p2_original_captain_loaded_scene()==b.scene&&actor->actor==n&&actor->incarnation==b.scene->incarnation())actor->animation=next;
+ actor->animation=next;
+ // updateWalkAnimation still chooses motion/rate, but retail doAnimation
+ // suppresses BOTH source animator clocks when the actual game is frozen.
+ if(*frame.gameFrozen)return true;
+ if(!b.bank->stateAnimator(n,Animator::Self,self,e)||!b.bank->stateAnimator(n,Animator::Bound,bound,e))return false;
+ const auto selfGeneration=self.generation,boundGeneration=bound.generation;
+ auto generations=[&](){
+  MotionState nowSelf,nowBound;
+  return current()&&b.bank->stateAnimator(n,Animator::Self,nowSelf,e)&&b.bank->stateAnimator(n,Animator::Bound,nowBound,e)
+   &&nowSelf.generation==selfGeneration&&nowBound.generation==boundGeneration;
+ };
+ bool deliveryStopped=false;
+ auto deliver=[&](int key){if(!generations())return false;bool keep=emit(key);if(!keep)deliveryStopped=true;return keep&&generations();};
+ const float amount=selected.playbackSpeed*frame.deltaTime;
+ if(!b.bank->advanceAnimator(n,Animator::Self,amount,deliver,e))return false;
+ // A Self key may re-enter the same state or start a different bound motion.
+ // Never consume stale Bound keys or advance the replacement generation.
+ if(deliveryStopped||!generations()){e.clear();return true;}
+ if(!b.bank->advanceAnimator(n,Animator::Bound,amount,deliver,e))return false;
  return true;
 }
 void forget(Navi* n){for(auto& a:actors)if(a.actor==n)a={};}

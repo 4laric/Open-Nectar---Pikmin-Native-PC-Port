@@ -37,7 +37,9 @@ struct AnimationFrame {
  // and NaviMgr's faceDirOffset captured before the actor update pass.
  control::Vec2 displacement;
  float deltaTime=0, faceDirectionOffset=0;
- bool selfIsJKoke=false;
+ // Actual GameSystem::mIsFrozen observation. Missing authority refuses;
+ // Self JKOKE identity is queried from the real dual animator bank.
+ std::optional<bool> gameFrozen;
 };
 struct ControlFacts {
  bool movieFlagActive=false, movieActor=false, storyMode=false, activeActor=false;
@@ -58,8 +60,10 @@ std::optional<float> sceneAnimationTimer(const Navi*);
 // Actual native Walk/action states call once BEFORE inspecting post-control
 // timer. Walk command application must not execute this same control twice.
 bool control(Navi*,std::string&);
-// Source Walk locomotion only: authored motion selection, frame-preserving
-// Walk/Run/Escape transition and real event callback. No P1 Pani animator.
+// Common FakePiki locomotion for every genuine source state. Bound motion
+// controls selection; locked Self motion survives. Advances Self then Bound
+// exactly once with source listeners and generation guards; frozen skips clocks.
+// Callers must not additionally use a state-style bank advance that frame.
 bool animateWalk(Navi*,const std::function<bool(int)>& emit,std::string&);
 void forget(Navi*);
 }}}
