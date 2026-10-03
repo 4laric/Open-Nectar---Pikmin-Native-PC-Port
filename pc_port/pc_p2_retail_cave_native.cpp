@@ -113,8 +113,10 @@ bool NativeFloor::install(const CaveDescriptor& cave,const FloorDefinition& floo
    if(!m->scene.prior(row,*origin,m->context,binding,absent,error))return false;
    if(!(binding.identity==*origin)||binding.actor)return refuse(error,"retail prior disposition changed identity/actor");
    if(absent){
-    if(binding.state!=BindingState::RetiredNative||!m->scene.absent(row,*origin,m->context,binding))
-     return refuse(error,"retail prior absence has no native-cache receipt");
+    if((binding.state!=BindingState::RetiredNative&&
+        !(binding.state==BindingState::SourceSuppressed&&(row.sourceId==6||row.sourceId==7)))||
+       !m->scene.absent(row,*origin,m->context,binding))
+     return refuse(error,"retail prior absence has no native-cache/population receipt");
     out.push_back(std::move(binding));continue;
    }
    if(binding.state!=BindingState::Live||!binding.receipt.empty())return refuse(error,"retail live prior disposition differs");
