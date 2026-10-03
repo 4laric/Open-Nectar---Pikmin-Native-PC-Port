@@ -344,6 +344,7 @@ set(PC_PORT_SOURCES
     pc_port/pc_p2_cave.cpp
     pc_port/pc_p2_cave_campaign_cache_engine.cpp
     pc_port/pc_p2_cave_campaign_party_engine.cpp
+    pc_port/pc_p2_original_piki_origin.cpp
     pc_port/pc_p2_cave_campaign.cpp
     pc_port/pc_p2_cave_dialog_window.cpp
     pc_port/pc_p2_cave_generate.cpp
@@ -2500,6 +2501,9 @@ add_executable(p2_cave_seed_binding_test tools/p2_cave_seed_binding_test.cpp)
 target_include_directories(p2_cave_seed_binding_test PRIVATE pc_port)
 add_test(NAME p2_cave_seed_binding_test COMMAND p2_cave_seed_binding_test)
 add_executable(p2_cave_campaign_party_test tools/test_p2_cave_campaign_party.cpp)
+add_executable(p2_original_piki_origin_test tools/pc_p2_original_piki_origin_test.cpp pc_port/pc_p2_original_piki_origin.cpp)
+target_include_directories(p2_original_piki_origin_test PRIVATE pc_port)
+add_test(NAME p2_original_piki_origin_test COMMAND p2_original_piki_origin_test)
 target_include_directories(p2_cave_campaign_party_test PRIVATE pc_port)
 add_test(NAME p2_cave_campaign_party_test COMMAND p2_cave_campaign_party_test)
 

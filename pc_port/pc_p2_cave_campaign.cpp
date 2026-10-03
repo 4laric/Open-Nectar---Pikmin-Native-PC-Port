@@ -323,3 +323,12 @@ void pc_p2_cave_campaign_before_day_cleanup(){
     // authority is the settled native boundary transaction above.
     invalid("floor reached destructive surface day-end path");
 }
+
+bool pc_p2_cave_campaign_survivor_body(const std::string& sourceKey,std::uint32_t recordUid,
+    std::uint32_t attempt,std::uint64_t activation,const std::string& catalogFingerprint,
+    OriginalPikiBodyState& state,std::uint64_t* generation,std::uint8_t sha[32]){
+    if(!pc_randomizer_generated_cave())return false;
+    return p2CaveSurvivorBody(pc_randomizer_generated_cave_party(),detaching||restoringParty,
+        permitGeneration,pc_randomizer_active_campaign_generation(),permitSha,
+        sourceKey,recordUid,attempt,activation,catalogFingerprint,state,generation,sha);
+}
