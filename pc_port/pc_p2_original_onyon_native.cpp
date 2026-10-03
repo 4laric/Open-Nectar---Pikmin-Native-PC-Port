@@ -4,6 +4,8 @@
 #include "UfoItem.h"
 #include "PlayerState.h"
 #include "Route.h"
+#include "MapMgr.h"
+#include "EffectMgr.h"
 #include "Stream.h"
 #include "sysNew.h"
 #include "netplay/pc_netplay_sha256.h"
@@ -51,7 +53,7 @@ void GenObjectOriginalOnyon::ramSaveParameters(RandomAccessStream& s){cache(*thi
 void GenObjectOriginalOnyon::updateUseList(Generator*,int){const auto& r=row(uid);if(!itemMgr)fail("item manager missing before onyn use-list");itemMgr->addUseList(r.index==4?OBJTYPE_Ufo:OBJTYPE_Goal);}
 bool pc_p2_original_onyon_preflight(const std::vector<Generator*>& inventory,std::string& e){
  auto reject=[&](const char* text){e=text;return false;};
- if(admitted||!progress||!notify||!itemMgr||!gsys||records.empty()||inventory.size()!=records.size())return reject("original onyn preflight requires complete installed inventory/managers");
+ if(admitted||!progress||!notify||!itemMgr||!gsys||!mapMgr||!effectMgr||records.empty()||inventory.size()!=records.size())return reject("original onyn preflight requires complete installed inventory/managers");
  std::set<unsigned> seen;std::set<int> active;const auto state=progress();const auto mask=state.containers;if((mask|state.boot)&~7u)return reject("invalid original container/boot progress");
  std::map<const Generator*,unsigned> bindings;
  for(auto* gen:inventory){auto* object=gen?dynamic_cast<GenObjectOriginalOnyon*>(gen->mGenObject):nullptr;
@@ -63,7 +65,7 @@ bool pc_p2_original_onyon_preflight(const std::vector<Generator*>& inventory,std
   if(!active.insert(r.index).second)return reject("two eligible original Onyons of one type");
   if(r.index==4?itemMgr->getUfo()!=nullptr:itemMgr->getContainer(r.index)!=nullptr)return reject("proxy landing infrastructure duplicates original onyn");
   Vector3f p(r.position[0]+r.offset[0],r.position[1]+r.offset[1],r.position[2]+r.offset[2]);
-  if(r.index!=4&&(!routeMgr||!routeMgr->findNearestWayPoint('test',p,false)))return reject("onyn physical route missing");
+  if(!routeMgr||!routeMgr->findNearestWayPoint('test',p,false))return reject("onyn/ship physical route missing");
   if(r.index==4?(!itemMgr->mUfoShape||!itemMgr->mUfoShape->mShape):(!itemMgr->mItemShapes||!itemMgr->mItemShapes[7]||!itemMgr->mItemShapes[7]->mShape))return reject("onyn native family resource missing");
  }
  generators.swap(bindings);admitted=true;e.clear();return true;
@@ -80,7 +82,7 @@ Creature* GenObjectOriginalOnyon::birth(BirthInfo& info){
  if(!p2original::onyonEligible(r,mask))return nullptr;
  if(r.index==4?itemMgr->getUfo()!=nullptr:itemMgr->getContainer(r.index)!=nullptr)fail("landing infrastructure duplicates an eligible original onyn");
  Vector3f position(r.position[0]+r.offset[0],r.position[1]+r.offset[1],r.position[2]+r.offset[2]);
- if(r.index!=4&&(!routeMgr||!routeMgr->findNearestWayPoint('test',position,false)))fail("onyn requires a physical route waypoint");
+ if(!routeMgr||!routeMgr->findNearestWayPoint('test',position,false))fail("onyn/ship requires a physical route waypoint");
  if(r.index==4?(!itemMgr->mUfoShape||!itemMgr->mUfoShape->mShape):(!itemMgr->mItemShapes||!itemMgr->mItemShapes[7]||!itemMgr->mItemShapes[7]->mShape))fail("onyn native family resources not preloaded");
  AppHeap heap;Creature* actor=itemMgr->birth(r.index==4?OBJTYPE_Ufo:OBJTYPE_Goal);if(!actor)fail("native onyn allocation failed");
  if(r.index!=4)static_cast<GoalItem*>(actor)->setColorType(r.index);
