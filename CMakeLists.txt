@@ -292,6 +292,11 @@ set(PC_PORT_SOURCES
     pc_port/pc_p2_original_number_animation.cpp
     pc_port/pc_p2_original_number_ledger.cpp
     pc_port/pc_p2_original_number_native.cpp
+    pc_port/pc_p2_original_number_motion.cpp
+    pc_port/pc_p2_original_number_grid.cpp
+    pc_port/pc_p2_original_number_lod.cpp
+    pc_port/pc_p2_original_number_rigid.cpp
+    pc_port/pc_p2_original_number_trace_native.cpp
     pc_port/pc_p2_original_egg_number_journal.cpp
     pc_port/pc_p2_original_resource_contents.cpp
     pc_port/pc_p2_original_piki_spawn.cpp
@@ -3512,6 +3517,22 @@ add_executable(p2_original_number_animation_test tools/p2_original_number_animat
 target_include_directories(p2_original_number_animation_test PRIVATE pc_port)
 target_compile_options(p2_original_number_animation_test PRIVATE -Wall -Wextra -Werror -UNDEBUG)
 add_test(NAME p2_original_number_animation COMMAND p2_original_number_animation_test)
+add_executable(p2_original_number_motion_test tools/p2_original_number_motion_test.cpp pc_port/pc_p2_original_number_motion.cpp)
+target_include_directories(p2_original_number_motion_test PRIVATE pc_port)
+target_compile_options(p2_original_number_motion_test PRIVATE -Wall -Wextra -Werror -UNDEBUG -ffp-contract=off)
+add_test(NAME p2_original_number_motion COMMAND p2_original_number_motion_test)
+add_executable(p2_original_number_rigid_test tools/p2_original_number_rigid_test.cpp pc_port/pc_p2_original_number_rigid.cpp)
+target_include_directories(p2_original_number_rigid_test PRIVATE pc_port)
+target_compile_options(p2_original_number_rigid_test PRIVATE -Wall -Wextra -Werror -UNDEBUG -ffp-contract=off)
+add_test(NAME p2_original_number_rigid COMMAND p2_original_number_rigid_test)
+add_executable(p2_original_number_grid_test tools/p2_original_number_grid_test.cpp pc_port/pc_p2_original_number_grid.cpp)
+target_include_directories(p2_original_number_grid_test PRIVATE pc_port)
+target_compile_options(p2_original_number_grid_test PRIVATE -Wall -Wextra -Werror -UNDEBUG -ffp-contract=off)
+add_test(NAME p2_original_number_grid COMMAND p2_original_number_grid_test)
+add_executable(p2_original_number_lod_test tools/p2_original_number_lod_test.cpp pc_port/pc_p2_original_number_lod.cpp)
+target_include_directories(p2_original_number_lod_test PRIVATE pc_port)
+target_compile_options(p2_original_number_lod_test PRIVATE -Wall -Wextra -Werror -UNDEBUG -ffp-contract=off)
+add_test(NAME p2_original_number_lod COMMAND p2_original_number_lod_test)
 
 pikmin_add_ci_fixture(surface_campaign_sdl tools/p2_surface_campaign_sdl_fixture.cpp)
 

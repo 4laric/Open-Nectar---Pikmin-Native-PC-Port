@@ -4,10 +4,39 @@ The One candidate uses the verified private `number1_{blue,red,yellow}.mod`
 and `number1_carry.txt` resources under `assets/p2-original/numbers/`. Each
 resource is checked against its converter output hash before any model load.
 Legal assets remain local and ignored. Five refuses before fresh producer RNG
-until its source LOD and rigid physics adapter exists. One also holds before
-producer RNG until the source post-trace floor-force/gravity ordering adapter
-replaces native P1 horizontal damping. Fixed simple dynamics and zero particles
-alone do not establish source movement.
+until its actual source LOD and rigid physics wrapper exists. One also holds
+before producer RNG until source map traversal and platform lifecycle are
+admitted for the actual selected scene. The dedicated One update now bypasses
+P1's two movement passes, preserves vertical carry velocity, continues physics
+after carrier loss, and owns one gravity application and post-trace floor force.
+The source map families have different limits: ShapeMapMgr 16 substeps,
+RoomMapMgr 8. Both use strict travel-distance greater than sphere radius.
+
+`number_trace_native` is a compiled candidate using actual native geometry,
+not an admitted retail collision adapter. Its grid traversal preserves x-major
+cell order, original per-cell entries and repeats, without sort/deduplication.
+The current scene converter, however, synthesizes a 64-unit grid with every
+triangle in each cell. It does not establish the source ordered divider or
+active Plat OBB traversal and per-instance events. These remain explicit
+pre-RNG admission holds; compiled movement math cannot remove them.
+
+Normal retail caves recompute a combined grid, so serialized room cell lists
+need not survive. `number_grid` ports that recipe: actual combined vertex bbox
+expanded by 10, source count casts capped at 48 per axis, independent X/Z scales,
+x-major cells, original triangle-index order, inclusive projected-AABB overlap,
+first 1024 entries per cell, and repeated contacts across cells. Its input still
+requires authenticated actual source room order, transforms, vertices, triangle
+order and room-index mapping. No current native Shape index is relabeled as that
+proof. `motion::hiddenFloor` ports the source fallback equation but needs the
+genuine floor's hiddenCollision lifecycle and callback owner before installation.
+
+The Five foundation ports four radius-7 particles on the source radius-13 ring,
+force/friction, quaternion/inertia integration and two-halfstep contact APIs.
+Its 68 controls do not install a native Five or implement the final resting
+probe/center trace. The LOD helper has 41 controls and a thin actual Camera field
+reader; verified direct One/Five LOD radii are 20.60190773010254/41.03627395629883,
+centered on the actual source CollTree sphere. The actual simulation viewport
+roster and capture phase remain required. Actual wrapper and gameplay remain open.
 
 No producer installs this factory yet. The pure ledger, animation and geometry
 controls and compiled production objects are engineering evidence. They do not
@@ -29,6 +58,14 @@ fresh `beginContents`/`endContents` scope. It reads the actual incomplete journa
 row with attempted=true and born=false. It authenticates the complete source
 identity and independently proves the real root source type (Egg37 or captured
 Qurione16). It never creates a replacement journal or guessed source identity.
+
+After that actual pending proof, Number native selects a retained ledger keyed
+by the unchanged producer fingerprint. For a cave this is the actual layout
+SHA, independently authenticated against the literal source/catalog descriptor
+by the root resolver. Campaign and session hashes pin lifetime separately.
+All layout histories survive ordinary unload, aggregate receipts remain bounded
+at 65,536, and each physical borrower retains its exact ledger. Only an explicit
+fresh session may discard those histories after all physical borrowers retire.
 
 After that scope ends, `completed` reads the same retained journal and verifies
 the selected scene catalog and successful matching child. `consumeAccepted`

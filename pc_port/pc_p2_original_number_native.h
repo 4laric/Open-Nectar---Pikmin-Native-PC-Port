@@ -23,6 +23,9 @@ const p2originalnumber::Profile* pc_p2_original_number_profile(const Pellet*)noe
 p2originalnumber::QueryResult pc_p2_original_number_query(const Pellet*,p2originalnumber::Receipt&,std::string&);
 bool pc_p2_original_number_consume(Pellet*,GoalItem*,unsigned& actualYield,std::string&);
 void pc_p2_original_number_collision(Pellet*);
+// Owns numeric FSM/animation and one source trace; true bypasses P1's update.
+// The pre-RNG resource hold remains until actual source scene tracing is admitted.
+bool pc_p2_original_number_update(Pellet*);
 bool pc_p2_original_number_unload(std::string&);
 // Read-only before provider disposal or SAVE. Requires actual bodies retired;
 // it does not destroy receipts, authority objects or App-heap resources.

@@ -1208,6 +1208,7 @@ static u32 bounceSounds[] = {
  */
 void Pellet::update()
 {
+	if (pc_p2_original_number_update(this)) return;
 	pc_p2_original_number_collision(this);
 	pc_p2_original_corpse_collision(this);
 #if defined(PIKI_PC_PORT) && PIKI_PC_PORT
