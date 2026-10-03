@@ -273,6 +273,7 @@ set(PC_PORT_SOURCES
     pc_port/pc_p2_original_dispatch.cpp
     pc_port/pc_p2_original_course.cpp
     pc_port/pc_p2_original_manifest.cpp
+    pc_port/pc_p2_original_piki_manifest.cpp
     pc_port/pc_p2_original_progress.cpp
     pc_port/pc_p2_original_chappy.cpp
     pc_port/pc_p2_original_chappy_native.cpp
@@ -3297,6 +3298,10 @@ add_test(NAME pc_midday_render_graph COMMAND pc_midday_render_graph_test)
         pc_port/pc_p2_original_spawn_plan.cpp pc_port/pc_p2_original_lifecycle.cpp)
     target_include_directories(pc_p2_original_manifest_test PRIVATE "${PROJECT_SOURCE_DIR}/pc_port")
     add_test(NAME p2_original_manifest COMMAND pc_p2_original_manifest_test)
+    add_executable(pc_p2_original_piki_manifest_test tools/pc_p2_original_piki_manifest_test.cpp
+        pc_port/pc_p2_original_piki_manifest.cpp)
+    target_include_directories(pc_p2_original_piki_manifest_test PRIVATE "${PROJECT_SOURCE_DIR}/pc_port")
+    add_test(NAME p2_original_piki_manifest COMMAND pc_p2_original_piki_manifest_test)
     add_executable(pc_p2_original_progress_test tools/pc_p2_original_progress_test.cpp
         pc_port/pc_p2_original_progress.cpp)
     target_include_directories(pc_p2_original_progress_test PRIVATE "${PROJECT_SOURCE_DIR}/pc_port")

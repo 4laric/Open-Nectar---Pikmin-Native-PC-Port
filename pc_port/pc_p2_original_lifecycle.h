@@ -34,6 +34,9 @@ class IncarnationFrontier {
 public:
  bool initialize(const std::string& campaign,std::string&);
  bool activate(const GeneratorState&,unsigned day,bool disc,GenerationDecision&,std::string&);
+ // Typed non-enemy source records have their own lifecycle/count schema.
+ // Allocate only their incarnation number, never reinterpret them as enemies.
+ bool nextActivation(unsigned sourceUid,std::uint64_t& activation,std::string&);
  bool encode(std::string& bytes,std::string&)const;
  bool decode(const std::string& campaign,const std::string& bytes,std::string&);
 private:

@@ -15,4 +15,5 @@ bool pc_p2_original_generator_death(Generator*,Creature*,bool& handled,std::stri
 void pc_p2_original_native_retired(Creature*);
 bool pc_p2_original_incarnation_encode(std::string& bytes,std::string& error);
 bool pc_p2_original_incarnation_initialize(const std::string& campaign,std::string& error);
+bool pc_p2_original_incarnation_next(unsigned sourceUid,std::uint64_t& activation,std::string& error);
 bool pc_p2_original_incarnation_decode(const std::string& campaign,const std::string& bytes,std::string& error);

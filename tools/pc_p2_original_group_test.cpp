@@ -102,5 +102,11 @@ int main(){
  source.reserved=3;check(!savedOnly.activate(source,0,false,decision,e));
  check(savedOnly.encode(unchanged,e)&&unchanged.size()==105);
  IncarnationFrontier roundTrip;check(roundTrip.decode(std::string(64,'a'),unchanged,e));
+ std::uint64_t typedActivation=99;
+ check(!roundTrip.nextActivation(0,typedActivation,e)&&typedActivation==99);
+ check(roundTrip.nextActivation(0x52000001u,typedActivation,e)&&typedActivation==1);
+ check(roundTrip.encode(unchanged,e)&&unchanged.size()==125);
+ IncarnationFrontier typedRestored;check(typedRestored.decode(std::string(64,'a'),unchanged,e));
+ check(typedRestored.nextActivation(0x52000001u,typedActivation,e)&&typedActivation==2);
  std::cout<<"PASS original native group coordinator "<<checks<<" controls\n";
 }

@@ -36,6 +36,7 @@ public:
  bool unload(std::string&);
  bool encodeFrontier(std::string& bytes,std::string& e)const{return mFrontier.encode(bytes,e);}
  bool initializeFrontier(const std::string& campaign,std::string& e){return mFrontier.initialize(campaign,e);}
+ bool nextActivation(unsigned uid,std::uint64_t& activation,std::string& e){return mFrontier.nextActivation(uid,activation,e);}
  // Checkpoint owner must adopt before scene construction, never over live groups.
  bool decodeFrontier(const std::string& campaign,const std::string& bytes,std::string&);
 private:

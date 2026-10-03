@@ -73,6 +73,15 @@ bool IncarnationFrontier::encode(std::string& out,std::string& e)const{
  for(const auto& entry:mMarks){put(b,entry.first,4);put(b,entry.second.first,8);put(b,entry.second.second,8);}
  b+=checksum(b);out.swap(b);e.clear();return true;
 }
+bool IncarnationFrontier::nextActivation(unsigned uid,std::uint64_t& out,std::string& e){
+ if(mCampaign.empty()||(uid&0xff000000u)!=0x52000000u)return fail(e,"original typed incarnation source/campaign invalid");
+ auto found=mMarks.find(uid);
+ if(found==mMarks.end()&&mMarks.size()>=65536)return fail(e,"original incarnation frontier capacity exhausted");
+ const auto previous=found==mMarks.end()?0:found->second.second;
+ if(previous==std::numeric_limits<std::uint64_t>::max())return fail(e,"original typed incarnation exhausted");
+ auto& mark=mMarks[uid];mark.first=std::max(mark.first,std::uint64_t(1));mark.second=previous+1;
+ out=mark.second;e.clear();return true;
+}
 bool IncarnationFrontier::decode(const std::string& campaign,const std::string& b,std::string& e){
  if(!fingerprintValid(campaign)||(!mCampaign.empty()&&mCampaign!=campaign)||b.size()<105||b.size()>105+20*65536||b.substr(0,5)!="P2IF1"||b.substr(5,64)!=campaign||b.substr(b.size()-32)!=checksum(b.substr(0,b.size()-32)))return fail(e,"original incarnation envelope invalid");
  unsigned p=69,count=unsigned(get(b,p,4));if(count>65536||b.size()!=105+20*size_t(count))return fail(e,"original incarnation count invalid");
