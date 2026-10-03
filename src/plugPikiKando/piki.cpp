@@ -1,5 +1,4 @@
 #if defined(PIKI_PC_PORT)
-#include "pc_p2_elecbug.h"
 #include "pc_p2_captive_navi_policy.h"
 #include "pc_p2_original_piki_init.h"
 #include "pc_p2_original_piki_origin.h"
@@ -2556,9 +2555,6 @@ void Piki::resetPosition(immut Vector3f& pos)
  */
 void Piki::init(Navi* navi)
 {
-#if defined(PIKI_PC_PORT)
-    pc_p2_elecbug_forget_piki(this);
-#endif
 	pc_p2_purple_flight_cancel(this);
 	pc_p2_purple_impact_forget(this);
     pc_p2_cave_campaign_party_forget(this);

@@ -585,7 +585,6 @@ void BTeki::update()
 	pc_p2_chappy_update(this);
 	// Shared P2 body collision: fitted spheres on the drawn mesh (after every species tick).
 	pc_p2_body_coll_update(this);
-    if (pc_p2_body_coll_bound(this)) pc_p2_elecbug_actor_geometry(this);
 #endif
 	releaseP2DeathStickers();
 	if (mDeadState == 0) {
@@ -2439,10 +2438,6 @@ void BTeki::drawTekiShape(Graphics& gfx)
 
 	if (mCollInfo) {
 		mCollInfo->updateInfo(gfx, false);
-#if defined(PIKI_PC_PORT)
-        if (!pc_p2_body_coll_bound(this) && pc_render_is_authoritative())
-            pc_p2_elecbug_actor_geometry(this);
-#endif
 	}
 
 	mPlatMgr.update(gfx);
