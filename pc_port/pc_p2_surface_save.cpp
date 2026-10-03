@@ -62,6 +62,16 @@ bool settled(){
     Generator* source;
     FOREACH_NODE_REUSE(Generator,generatorList->mGenListHead->mChild,source){
         if(source->isExpired())continue;
+        // Native saveGenerator excludes equality-day sources although init
+        // still considers them live. Do not write an orphan creature record.
+        if(source->mDayLimit==gameflow.mWorldClock.mCurrentDay)
+            return held("equality_day_source_restore_pending");
+        // Native SaveCreature retains only mLatestSpawnCreature. Its exact
+        // properties cannot stand in for a grouped source's other actors.
+        if(source->mAliveCount<0||source->mAliveCount>1
+            ||(source->mAliveCount==1&&(!source->mLatestSpawnCreature||!source->mLatestSpawnCreature->isAlive()))
+            ||(source->mAliveCount==0&&source->mLatestSpawnCreature))
+            return held("source_actor_cardinality_restore_pending");
         // A fresh-process mid-day load must use only saved source records.
         // Sources without durable generator/count state cannot preserve their
         // absence (killed enemies, consumed items) or their remaining births.
