@@ -8,6 +8,7 @@ import json
 import os
 from pathlib import Path
 import re
+import shutil
 import struct
 import sys
 
@@ -42,7 +43,13 @@ def overlay(source, dest, overrides):
         else:
             # Assets are immutable under this fixture; saves/settings/logs use
             # a separate fresh run-specific directory supplied by supervisor.
-            os.link(src, dst)
+            try:
+                os.link(src, dst)
+            except PermissionError:
+                # Linux protected_hardlinks refuses other owners' read-only
+                # legal inputs. Preserve the immutable baseline and copy only
+                # this regular file; never create a directory link to a file.
+                shutil.copyfile(src, dst)
 
 
 def main():
