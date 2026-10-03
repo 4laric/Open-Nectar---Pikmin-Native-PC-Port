@@ -28,11 +28,15 @@ public:
  virtual bool target(TargetHandle,TargetFrame&,std::string&)const=0;
  // Actual source CollTree::checkCollision callback order and live part positions.
  virtual bool collision(TargetHandle,Sphere,std::vector<PartFrame>&,std::string&)const=0;
+ // Re-read the same live part AFTER stimulate(), matching retail feedback.
+ virtual bool part(PartHandle,PartFrame&,std::string&)const=0;
  // Literal source InteractAttack(captain,rawDamage,part). accepted is the
  // genuine receiver result, not an authorization flag or assumed success.
  virtual bool attack(Navi&,PartHandle,float rawDamage,bool& accepted,std::string&)=0;
  // Hit positions are source-normalized(part-rhnd)*15+rhnd; Swing has no effect.
  virtual bool feedback(Navi&,Feedback,Vec3,std::string&)=0;
+ // Literal source enableMotionBlend after each PUNCH start; authentic pose owner.
+ virtual bool enableMotionBlend(Navi&,std::string&)=0;
 };
 // Typed source NaviPunchArg, scoped to actual canonical actor/scene. Following
 // disallows player A combo queuing and returns to the requested source state.
