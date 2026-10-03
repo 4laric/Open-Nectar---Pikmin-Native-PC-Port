@@ -15,6 +15,7 @@
 #include "FlowController.h"
 #include "MoviePlayer.h"
 #include "Navi.h"
+#include "pc_p2_purple_impact_policy.h"
 #include "Kontroller.h"
 #include "NaviMgr.h"
 #include "NaviState.h"
@@ -835,12 +836,18 @@ public:
    require(!fsm.stunPaused&&!fsm.terminal&&enemy->mHealth>0,"natural recovery entered terminal state or retained pause");
    std::printf("P2_PURPLE_KOCHAPPY_RECOVERY elapsed=%.3f counter=%.6f fit=%d\n",activeSeconds,counter,int(sawFit));
    if(sawFit){require(activeSeconds>=10,"RedFit recovered before source10s");phase=6;start=age;lastCounter=counter;input();}
+   else if(nearLayout()){
+    // Source Fit is probabilistic. A real bounce-only recovery may be
+    // followed by another ordinary throw; never alter the roll or duration.
+    std::puts("P2_PURPLE_KOCHAPPY_BOUNCE_ONLY ordinary_rethrow=1 source_roll_unchanged=1");
+    nearThrowStarted=false;nearThrowReleased=false;nearThrowAge=0;start=age;input();
+   }
   }
   if(phase==7&&wasActive&&!active&&enemy->mHealth<=0){require(fsm.terminal&&!fsm.stunPaused,"terminal interruption missing ownFSM terminal/unpause");deathDuringStun=true;}
   wasActive=active;
   if(phase==5&&!active){
    if(nearLayout()){
-    Vector3f aim=enemy->mSRT.t;aim.x+=40;
+    Vector3f aim=enemy->mSRT.t;aim.x+=20;
     Piki* next=nullptr;Iterator current(pikiMgr);CI_LOOP(current){Piki* p=static_cast<Piki*>(*current);if(p==n->mNextThrowPiki&&p->isAlive())next=p;}
     if(age%15==0)std::printf("P2_PURPLE_KOCHAPPY_SELECTION_OBSERVE age=%d navi_state=%d next_class=%d next_state=%d purple_state=%d preferred=%d cursor_error=%.4f started=%d released=%d ordinary_input=1 actor_writes=0\n",age,n->getCurrState()->getID(),next?pc_throw_selection_class(next):-1,next?next->getState():-1,purple->getState(),pc_preferred_throw_color_for(n),distance(n->mCursorWorldPos,aim),int(nearThrowStarted),int(nearThrowReleased));
     if(nearThrowReleased){input(KeyConfig::_instance->mSetCursorKey.mBind);require(age-start<450,"ordinary Purple landing/impact not observed");return result;}
@@ -849,8 +856,8 @@ public:
      nearThrowStarted=true;
     }
     ++nearThrowAge;
-    if(next==purple&&purple->getState()==PIKISTATE_Hanged&&distance(n->mCursorWorldPos,aim)<12){
-     nearThrowReleased=true;input();std::printf("P2_PURPLE_KOCHAPPY_PURPLE_RELEASE age=%d observed_Hanged=1 ordinary_A_release=1 selection_setter=0 actor_writes=0\n",age);std::fflush(nullptr);return result;
+    if(next==purple&&purple->getState()==PIKISTATE_Hanged&&distance(n->mCursorWorldPos,enemy->mSRT.t)<p2purpleimpact::EarthquakeRadius){
+     require(++throwCount<=8,"bounded ordinary Purple throw attempts exhausted");nearThrowReleased=true;input();std::printf("P2_PURPLE_KOCHAPPY_PURPLE_RELEASE age=%d observed_Hanged=1 ordinary_A_release=1 selection_setter=0 actor_writes=0\n",age);std::fflush(nullptr);return result;
     }
     const bool cycle=next&&next!=purple&&nearThrowAge%12==0;
     point(n,aim,false,KeyConfig::_instance->mThrowKey.mBind|(cycle?KBBTN_DPAD_RIGHT:0));
