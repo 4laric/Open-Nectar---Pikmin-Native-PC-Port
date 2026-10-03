@@ -2,6 +2,7 @@
 class BTeki;
 class Teki;
 class Creature;
+class Piki;
 
 // Family-owned ground-invertebrate source behavior: Anode Beetle (ElecBug,
 // EnemyID 28) on the batch-2 Chappy placement vehicle (#165/#407).
@@ -32,6 +33,9 @@ bool pc_p2_elecbug_attacked(Teki*);
 // P2_ELECBUG_PRESS_IMMUNE for an electric-immune Yellow/Bulbmin, decided by the
 // lane-11 capability matrix.
 bool pc_p2_elecbug_pressed(BTeki*, Creature*);
+// Called only by the actual descending PikiFlying collision callback, before
+// the host changes the presser to Normal. False outside source press states.
+bool pc_p2_elecbug_flying_press(BTeki*, Piki*);
 // Read-only registration observability (mirrors pc_p2_sokkuri/armor) so the
 // lifecycle fixture can prove forget clears stale state. Additive.
 unsigned long pc_p2_elecbug_count();

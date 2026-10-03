@@ -565,6 +565,23 @@ bool pc_p2_elecbug_pressed(BTeki* teki, Creature* presser) {
     return true;
 }
 
+bool pc_p2_elecbug_flying_press(BTeki* actor, Piki* piki) {
+    if (!ready || !actor || !piki || !piki->isAlive() || piki->getState() != PIKISTATE_Flying
+        || !std::isfinite(piki->mVelocity.y) || piki->mVelocity.y >= -0.01f) return false;
+    ElecBug* s = lookup(actor);
+    if (!s || s->state < ELEC_WAIT || s->state > ELEC_CHILDISCHARGE) return false;
+    const char* before = stateName(s->state);
+    const int species = pc_p2_species(piki);
+    const float velocityY = piki->mVelocity.y;
+    if (!actor->stimulate(InteractPress(piki, 0))) return false;
+    // This dispatch originates in the real collision event, not proximity.
+    std::printf("P2_ELECBUG_CONTACT_DISPATCH generator=%u piki=%p species=%d vy=%.6f "
+                "contact=1 enemy_before=%s enemy_after=%s callback=flying\n",
+                genOf(actor), static_cast<void*>(piki), species, velocityY, before, stateName(s->state));
+    std::fflush(stdout);
+    return true;
+}
+
 bool pc_p2_elecbug_clip(const BTeki* actor, const char*& name, float& phase) {
     if (!ready) return false;
     auto it = actors.find(static_cast<PelletView*>(const_cast<BTeki*>(actor)));
