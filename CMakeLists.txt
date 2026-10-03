@@ -117,6 +117,10 @@ option(PIKMIN_NATIVE_JAUDIO "Drive audio with the original src/jaudio engine" OF
 # on with -DPIKMIN_DEBUG_KEYS=ON while working on the Mods settings.
 option(PIKMIN_DEBUG_KEYS "Build the F5/F6 testing shortcuts" OFF)
 
+# Code intake only: actual Scene/party services must still admit the instance.
+# This option supplies no services and does not enable SAVE.
+option(PIKMIN_ORIGINAL_SENTINEL "Link original plant source77 factory and attachment consumers" OFF)
+
 # ─── Render backend ───
 # GLES 3.0 for Android and as an optional desktop path. When ON, shaders emit
 # #version 300 es and the GL context requests ES via SDL. When OFF (default for
@@ -706,6 +710,23 @@ include_directories(
     ${CMAKE_CURRENT_SOURCE_DIR}/third_party/xxhash
 )
 
+if(PIKMIN_ORIGINAL_SENTINEL)
+    # One production source list, inherited by normal runtime fixtures.
+    # Honey/typed ancestry and the genuine Piki SDK are already in the root
+    # source list; never inject duplicate dependency TUs from a harness.
+    list(APPEND PC_PORT_SOURCES
+        pc_port/pc_p2_original_shijimi_group.cpp
+        pc_port/pc_p2_original_shijimi_bank.cpp
+        pc_port/pc_p2_original_shijimi_state.cpp
+        pc_port/pc_p2_original_shijimi_honey.cpp
+        pc_port/pc_p2_original_shijimi_honey_native.cpp
+        pc_port/pc_p2_original_shijimi_native.cpp
+        pc_port/pc_p2_shijimi_attachment.cpp
+        pc_port/pc_p2_shijimi_attachment_native.cpp
+        pc_port/pc_p2_shijimi_effect.cpp
+        pc_port/pc_p2_shijimi_effect_native.cpp)
+endif()
+
 # ─── System Common (platform-independent game engine) ───
 file(GLOB SYSCOMMON_SOURCES "src/sysCommon/*.cpp")
 
@@ -868,6 +889,13 @@ add_library(${NECTAR_LEGACY} STATIC
     ${JAUDIO_TARGET_SOURCES}
 )
 target_compile_options(${NECTAR_LEGACY} PRIVATE ${LEGACY_COMPILE_OPTIONS})
+if(PIKMIN_ORIGINAL_SENTINEL)
+    target_compile_definitions(${NECTAR_LEGACY} PRIVATE PIKMIN_ORIGINAL_SENTINEL=1)
+    # Native consumers and fixtures inherit consistent guards when linked to
+    # this legacy library. The legacy sources only need the actor-hook guard.
+    target_compile_definitions(${NECTAR_LEGACY} INTERFACE
+        PIKMIN_ORIGINAL_SENTINEL=1 PIKMIN_ORIGINAL_SENTINEL_ATTACHMENTS=1)
+endif()
 
 # Native executable with strict flags. En Android es una biblioteca
 # compartida que carga la actividad Java de SDL (libnectar.so, con SDL_main
