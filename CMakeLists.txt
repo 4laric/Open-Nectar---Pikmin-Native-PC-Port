@@ -3253,6 +3253,7 @@ target_include_directories(pc_p2_original_piki_spawn_test PRIVATE "${PROJECT_SOU
 add_test(NAME p2_original_piki_spawn COMMAND pc_p2_original_piki_spawn_test)
 
 pikmin_add_ci_fixture(original_piki_physical tools/p2_original_piki_physical_runtime.cpp)
+pikmin_add_ci_fixture(original_piki_recruit tools/p2_original_piki_recruit_runtime.cpp)
 
 add_executable(pc_p2_original_piki_recruit_test tools/pc_p2_original_piki_recruit_test.cpp
     pc_port/pc_p2_original_piki_recruit.cpp pc_port/pc_p2_original_piki_origin.cpp pc_port/pc_p2_original_progress.cpp)
