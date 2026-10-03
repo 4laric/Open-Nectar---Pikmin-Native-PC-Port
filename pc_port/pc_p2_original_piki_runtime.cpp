@@ -436,6 +436,7 @@ static bool retireSceneImpl(std::string& e){
  return complete;
 }
 bool owned()noexcept{return ownerMutationActive||!actors.empty();}
+bool retains(Handle h)noexcept{if(!h.body||!h.lifetime)return false;auto i=actors.find(h.body);return ownerMutationActive||(i!=actors.end()&&i->second.handle.lifetime==h.lifetime);}
 bool retired(std::string& e){ReadOperation op;if(!op.complete(true,e))return false;return (!ownerMutationActive&&actors.empty())||fail(e,"SourcePiki runtime retains native owners or an in-flight owner operation");}
 bool canRetireScene(std::string& e){
  ReadOperation op;ObservationScope observation;
