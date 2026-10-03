@@ -1,7 +1,7 @@
 #include "pc_p2_bud_retail_live.h"
 #include "pc_p2_bud_native_live.h"
 #include "Pom.h"
-#include "GameFlow.h"
+#include "gameflow.h"
 #include "MoviePlayer.h"
 namespace p2budorigin {namespace {
 bool refuse(std::string& e,const char* m){e=m;return false;}
