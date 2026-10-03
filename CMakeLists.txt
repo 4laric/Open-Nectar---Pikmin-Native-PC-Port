@@ -376,6 +376,9 @@ set(PC_PORT_SOURCES
     pc_port/pc_p2_species.cpp
     pc_port/pc_p2_bulbmin.cpp
     pc_port/pc_p2_white.cpp
+    pc_port/pc_p2_sprays.cpp
+    pc_port/pc_p2_original_resource_state.cpp
+    pc_port/pc_p2_original_resource_contents.cpp
     pc_port/pc_p2_white_poison.cpp
     pc_port/pc_p2_cave.cpp
     pc_port/pc_p2_cave_campaign_cache_engine.cpp
@@ -3600,3 +3603,10 @@ add_test(NAME pc_p2_original_calendar_state COMMAND pc_p2_original_calendar_stat
 add_executable(pc_p2_original_contact_clock_test tools/pc_p2_original_contact_clock_test.cpp)
 target_include_directories(pc_p2_original_contact_clock_test PRIVATE pc_port)
 add_test(NAME p2_original_contact_clock COMMAND pc_p2_original_contact_clock_test)
+
+if(PIKMIN_BUILD_TESTS)
+    add_executable(pc_p2_spicy_policy_test tools/p2_spicy_policy_test.cpp pc_port/pc_p2_original_resource_state.cpp pc_port/pc_p2_original_resource_contents.cpp)
+    target_include_directories(pc_p2_spicy_policy_test PRIVATE "${PROJECT_SOURCE_DIR}/pc_port")
+    target_compile_options(pc_p2_spicy_policy_test PRIVATE -UNDEBUG)
+    add_test(NAME p2_spicy_policy COMMAND pc_p2_spicy_policy_test)
+endif()
