@@ -222,6 +222,7 @@ public:
         int live=0,red=0;
         Iterator squad(pikiMgr);CI_LOOP(squad){Piki* p=static_cast<Piki*>(*squad);if(p&&p->isAlive()){++live;if(pc_p2_species(p)==P2SpeciesRed)++red;}}
         if(!started){
+            std::printf("P2_ELECBUG_BASELINE live=%d red=%d captain=%.3f,%.3f,%.3f\n",live,red,n->mSRT.t.x,n->mSRT.t.y,n->mSRT.t.z);std::fflush(nullptr);
             require(live==20&&red==20,"fresh20 nativeRed1 baseline");
             require(enemy->mCollInfo&&enemy->mCollInfo->hasInfo(),"initialized enemy geometry");
             if(desiredSpecies()==P2SpeciesYellow)stageYellow(n);
