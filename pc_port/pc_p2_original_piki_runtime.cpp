@@ -22,6 +22,31 @@ struct Entry {
 Services* services=nullptr;
 std::unordered_map<const Piki*,Entry> actors;
 bool fail(std::string& e,const char* text){e=text;return false;}
+bool ownerBusy=false,ownerReentered=false;
+class OwnerOperation {
+ bool entered=false;
+public:
+ explicit OwnerOperation(std::string& e){
+  if(ownerBusy){ownerReentered=true;e="reentrant SourcePiki owner operation refused";return;}
+  ownerBusy=true;ownerReentered=false;entered=true;
+ }
+ ~OwnerOperation(){if(entered)ownerBusy=false;}
+ bool admitted()const{return entered;}
+ bool complete(bool result,std::string& e)const{
+  if(ownerReentered)return fail(e,"SourcePiki service attempted reentrant owner mutation");
+  return result;
+ }
+ void release(){if(entered){ownerBusy=false;entered=false;}}
+};
+class ReadOperation {
+ bool entered=false;
+public:
+ ReadOperation(){if(!ownerBusy){ownerBusy=true;ownerReentered=false;entered=true;}}
+ ~ReadOperation(){if(entered)ownerBusy=false;}
+ bool complete(bool result,std::string& e)const{
+  return ownerReentered?fail(e,"SourcePiki read callback attempted owner mutation"):result;
+ }
+};
 bool finite(const Vector3f& v){return std::isfinite(v.x)&&std::isfinite(v.y)&&std::isfinite(v.z);}
 bool parameter(const std::string& raw,const char* key,float& out){
  const std::string token=std::string("{")+key+"}";
@@ -101,6 +126,9 @@ bool enter(Entry& x,State state,std::string& e){
  return true;
 }
 }
+static bool retireImpl(Piki*,std::string&);
+static bool bounceImpl(Handle,std::string&);
+static bool whistleImpl(Handle,Navi*,std::string&);
 bool parseParameters(const std::string& pb,const std::string& nb,float g,Parameters& out,std::string& e){
  Parameters p;
  if(!parameter(pb,"p000",p.walk)||!parameter(pb,"p001",p.run)||!parameter(pb,"p054",p.flowerRun)
@@ -119,7 +147,7 @@ bool parseParameters(const std::string& pb,const std::string& nb,float g,Paramet
  out=p;return true;
 }
 bool installServices(Services& s)noexcept {if(services)return services==&s;services=&s;return true;}
-bool initialize(Piki* p,std::string& e){
+static bool initializeImpl(Piki* p,std::string& e){
  PcP2SourceBody b;if(!body(p,b,e))return false;
  if(actors.count(p))return fail(e,"SourcePiki already initialized; forget old lifetime before reuse");
  Entry x;x.handle={p,b.nativeLifetime};x.scene=services->scene().incarnation();
@@ -129,19 +157,20 @@ bool initialize(Piki* p,std::string& e){
  // Allocate/register a pending owner BEFORE any animation/effect callback.
  // Failure leaves an owned cleanup record; an uncommitted entry is never a
  // callable runtime handle. emplace cannot fail after body fields were written.
+ if(ownerReentered)return fail(e,"SourcePiki initialization preflight attempted owner mutation");
  auto inserted=actors.emplace(p,std::move(x));auto& pending=inserted.first->second;
  try{
-  if(services->motion(pending.handle,Motion::Wait,e)&&brainFree(pending.handle,pending.runtime,*services,e)){
+  if(services->motion(pending.handle,Motion::Wait,e)&&brainFree(pending.handle,pending.runtime,*services,e)&&!ownerReentered){
    pending.committed=true;return true;
   }
  }catch(...){e="source initialization callback threw; pending ownership retained";}
  std::string cleanupError;
- if(!retire(p,cleanupError))e+="; pending cleanup refused: "+cleanupError;
+ if(!retireImpl(p,cleanupError))e+="; pending cleanup refused: "+cleanupError;
  return false;
 }
-bool handle(const Piki* p,Handle& out){std::string e;auto i=actors.find(p);if(i==actors.end()||!current(i->second.handle,e))return false;out=i->second.handle;return true;}
-bool snapshot(Handle h,RuntimeState& out){std::string e;auto* x=current(h,e);if(!x)return false;out=x->runtime;return true;}
-bool frame(Handle h,Frame& out,std::string& e){
+bool handle(const Piki* p,Handle& out){ReadOperation op;std::string e;auto i=actors.find(p);if(i==actors.end()||!current(i->second.handle,e)||!op.complete(true,e))return false;out=i->second.handle;return true;}
+bool snapshot(Handle h,RuntimeState& out){ReadOperation op;std::string e;auto* x=current(h,e);if(!x||!op.complete(true,e))return false;out=x->runtime;return true;}
+static bool frameImpl(Handle h,Frame& out,std::string& e){
  auto* x=current(h,e);if(!x)return false;
  PcP2SourceBody source;if(!body(h.body,source,e)||!finite(h.body->mSRT.t)||h.body->mHappa<0||h.body->mHappa>2)return false;
  Frame next;next.handle=h;next.position=h.body->mSRT.t;next.state=x->runtime.state;next.species=source.state.species;
@@ -151,7 +180,7 @@ bool frame(Handle h,Frame& out,std::string& e){
  next.releasable=next.state==State::Walk;
  out=next;return true;
 }
-bool squad(Navi* n,std::vector<Frame>& out,std::string& e){
+static bool squadImpl(Navi* n,std::vector<Frame>& out,std::string& e){
  if(!canonical(e)||(services->scene().captainAt(0)!=n&&services->scene().captainAt(1)!=n))return false;
  std::vector<Frame> next;
  for(const auto& pair:actors){
@@ -166,12 +195,12 @@ bool squad(Navi* n,std::vector<Frame>& out,std::string& e){
  for(std::size_t i=1;i<next.size();++i)if(next[i-1].formationSlot==next[i].formationSlot)return fail(e,"duplicate source CPlate slot");
  out=std::move(next);return true;
 }
-bool sortFormation(Handle h,unsigned happa,std::string& e){
+static bool sortFormationImpl(Handle h,unsigned happa,std::string& e){
  auto* x=current(h,e);if(!x||happa>2||x->runtime.brain.action!=Action::Formation||x->runtime.brain.slot<0)return false;
  if(!services->sortSlot(h,x->runtime.brain.navi,x->runtime.brain.slot,happa,e))return false;
  x->runtime.brain.sortState=2;return true;
 }
-bool transition(Handle h,State s,std::string& e){
+static bool transitionImpl(Handle h,State s,std::string& e){
  auto* x=current(h,e);if(!x)return false;
  if(s==State::Flying)return x->runtime.state==State::Flying||fail(e,"SourcePiki Flying entry requires actual source launch mechanics");
  if(s==State::LookAt)return fail(e,"SourcePiki LookAt entry requires actual source whistle receiver");
@@ -183,13 +212,13 @@ bool transition(Handle h,State s,std::string& e){
  }
  return enter(*x,s,e);
 }
-bool animate(Handle h,float dt,std::string& e){auto* x=current(h,e);return x&&std::isfinite(dt)&&dt>=0&&services->animate(h,dt,e);}
+static bool animateImpl(Handle h,float dt,std::string& e){auto* x=current(h,e);return x&&std::isfinite(dt)&&dt>=0&&services->animate(h,dt,e);}
 bool animationKey(Handle h,unsigned type,std::string& e){
- auto* x=current(h,e);if(!x)return false;
+ ReadOperation op;auto* x=current(h,e);if(!x||!op.complete(true,e))return false;
  if(x->runtime.state==State::LookAt&&type==1000)x->runtime.lookSubState=2;
  return true;
 }
-bool moveVelocity(Handle h,float dt,std::string& e){
+static bool moveVelocityImpl(Handle h,float dt,std::string& e){
  auto* x=current(h,e);if(!x||!std::isfinite(dt)||dt<0)return false;
  if(!x->runtime.moveVelocity)return true;
  auto* p=h.body;Vector3f velocity=p->mTargetVelocity,extra(0,0,0);
@@ -206,13 +235,13 @@ bool moveVelocity(Handle h,float dt,std::string& e){
  p->mVelocity=p->mVelocity+(velocity+p->_B0-p->mVelocity)*(dt/0.1f)+extra;
  return finite(p->mVelocity);
 }
-bool applyGravity(Handle h,float dt,std::string& e){
+static bool applyGravityImpl(Handle h,float dt,std::string& e){
  auto* x=current(h,e);if(!x||!std::isfinite(dt)||dt<0)return false;
  if(x->runtime.state!=State::Hanged)h.body->mVelocity.y-=x->params.gravity*dt;
  return std::isfinite(h.body->mVelocity.y);
 }
-bool position(Handle h,const Vector3f& v,std::string& e){auto* x=current(h,e);if(!x||!finite(v))return false;h.body->mSRT.t=v;return true;}
-bool whistle(Handle h,Navi* n,std::string& e){
+static bool positionImpl(Handle h,const Vector3f& v,std::string& e){auto* x=current(h,e);if(!x||!finite(v))return false;h.body->mSRT.t=v;return true;}
+static bool whistleImpl(Handle h,Navi* n,std::string& e){
  auto* x=current(h,e);if(!x||x->runtime.state!=State::Walk)return fail(e,"SourcePiki whistle requires source Walk");
  CaptainFrame f;if(!services->captainFrame(n,f,e)||!f.alive||!f.formationable)return false;
  unsigned captain=services->scene().captainAt(0)==n?0:services->scene().captainAt(1)==n?1:2;
@@ -233,7 +262,7 @@ bool whistle(Handle h,Navi* n,std::string& e){
  x->runtime.state=State::LookAt;x->runtime.lookSubState=0;x->runtime.lookWaitTime=0.3f*random;
  return services->calledSound(h,e);
 }
-bool launch(Handle h,Navi* n,const Vector3f& cursor,std::string& e){
+static bool launchImpl(Handle h,Navi* n,const Vector3f& cursor,std::string& e){
  auto* x=current(h,e);if(!x||!finite(cursor)||h.body->mNavi!=n||x->runtime.brain.action!=Action::Formation
   ||(x->runtime.state!=State::Walk&&x->runtime.state!=State::GoHang&&x->runtime.state!=State::Hanged))
  return fail(e,"SourcePiki throw requires exact throwable source body/captain");
@@ -255,13 +284,13 @@ bool launch(Handle h,Navi* n,const Vector3f& cursor,std::string& e){
  h.body->mSRT.t=start;h.body->mFaceDirection=angle;h.body->mVelocity=velocity;h.body->mTargetVelocity=velocity;
  return true;
 }
-bool bounce(Handle h,std::string& e){
+static bool bounceImpl(Handle h,std::string& e){
  auto* x=current(h,e);if(!x||x->runtime.state!=State::Flying)return false;
  if(!enter(*x,State::Walk,e)||!brainFree(h,x->runtime,*services,e))return false;
  // invokeAI task search is not yet ported; no P1 mActiveAction fallback.
  return services->landSound(h,e);
 }
-bool update(Handle h,float dt,std::string& e){
+static bool updateImpl(Handle h,float dt,std::string& e){
  auto* x=current(h,e);if(!x||!std::isfinite(dt)||dt<0)return false;
  auto& r=x->runtime;auto* p=h.body;
  if(r.state==State::Walk)return brainExec(h,r,*services,x->params,dt,e);
@@ -281,7 +310,7 @@ bool update(Handle h,float dt,std::string& e){
    p->mTargetVelocity=diff*(scale*x->params.run+f.velocity.length());}
   return f.throwWait||enter(*x,State::Walk,e);
  }
- if(++r.flyingFrames>=240)return bounce(h,e); // Retail timeout, distinct from a physical floor bounce.
+ if(++r.flyingFrames>=240)return bounceImpl(h,e); // Retail timeout, distinct from a physical floor bounce.
  if(p->mHappa==2&&p->mVelocity.y<=0&&!r.flowerFalling){
   CaptainFrame f;if(!p->mNavi||!services->captainFrame(p->mNavi,f,e))return false;
   PcP2SourceBody b;if(!body(p,b,e))return false;
@@ -304,9 +333,9 @@ bool update(Handle h,float dt,std::string& e){
  }
  return true;
 }
-bool ignoreAtari(Handle h,const Creature* c,bool& out){std::string e;auto* x=current(h,e);if(!x||!c)return false;
+bool ignoreAtari(Handle h,const Creature* c,bool& out){ReadOperation op;std::string e;auto* x=current(h,e);if(!x||!c||!op.complete(true,e))return false;
  out=(x->runtime.state==State::Hanged||x->runtime.state==State::Flying)&&(c->mObjType==OBJTYPE_Navi||c->mObjType==OBJTYPE_Piki);return true;}
-bool collision(Handle h,const CollEvent& event,std::string& e){
+static bool collisionImpl(Handle h,const CollEvent& event,std::string& e){
  auto* x=current(h,e);if(!x||!event.mCollider)return false;
  if(x->runtime.state==State::Flying){
   bool ignored=false;if(!ignoreAtari(h,event.mCollider,ignored))return false;if(ignored)return true;
@@ -322,11 +351,11 @@ bool collision(Handle h,const CollEvent& event,std::string& e){
   if(!n||static_cast<const Creature*>(n)!=event.mCollider)return false;
   CaptainFrame frame;if(!services->captainFrame(n,frame,e))return false;
   if(!frame.alive||!frame.controller||!frame.formationable)return true;
-  return services->nudgeRumble(h,n,e)&&whistle(h,n,e);
+  return services->nudgeRumble(h,n,e)&&whistleImpl(h,n,e);
  }
  return true;
 }
-bool retire(Piki* p,std::string& e){
+static bool retireImpl(Piki* p,std::string& e){
  auto i=actors.find(p);if(i==actors.end())return true;
  OriginalPikiBodyHandle live;
  // Teardown is authorized by actual native lifetime, not GameWorldActive.
@@ -336,16 +365,32 @@ bool retire(Piki* p,std::string& e){
  bool stateClean=cleanup(i->second,e);
  std::string brainError;bool brainClean=brainCleanupAll(i->second.handle,i->second.runtime,*services,brainError);
  if(!brainClean){if(stateClean)e=brainError;else e+="; "+brainError;}
- if(!stateClean||!brainClean)return false; // Explicit owner remains for retry.
+ if(!stateClean||!brainClean||ownerReentered)return false; // Explicit owner remains for retry.
  actors.erase(i);return true;
 }
-bool retireScene(std::string& e){
+static bool retireSceneImpl(std::string& e){
  bool complete=true;
  for(auto i=actors.begin();i!=actors.end();){auto* p=const_cast<Piki*>(i->first);++i;
-  std::string actorError;if(!retire(p,actorError)){if(complete)e=actorError;complete=false;}
+  std::string actorError;if(!retireImpl(p,actorError)){if(complete)e=actorError;complete=false;}
  }
  return complete;
 }
+bool initialize(Piki* p,std::string& e){OwnerOperation op(e);return op.admitted()&&op.complete(initializeImpl(p,e),e);}
+bool frame(Handle h,Frame& out,std::string& e){ReadOperation op;Frame next;if(!frameImpl(h,next,e)||!op.complete(true,e))return false;out=next;return true;}
+bool squad(Navi* n,std::vector<Frame>& out,std::string& e){ReadOperation op;std::vector<Frame> next;if(!squadImpl(n,next,e)||!op.complete(true,e))return false;out=std::move(next);return true;}
+bool transition(Handle h,State s,std::string& e){OwnerOperation op(e);return op.admitted()&&op.complete(transitionImpl(h,s,e),e);}
+bool animate(Handle h,float dt,std::string& e){OwnerOperation op(e);return op.admitted()&&op.complete(animateImpl(h,dt,e),e);}
+bool update(Handle h,float dt,std::string& e){OwnerOperation op(e);return op.admitted()&&op.complete(updateImpl(h,dt,e),e);}
+bool moveVelocity(Handle h,float dt,std::string& e){OwnerOperation op(e);return op.admitted()&&op.complete(moveVelocityImpl(h,dt,e),e);}
+bool applyGravity(Handle h,float dt,std::string& e){OwnerOperation op(e);return op.admitted()&&op.complete(applyGravityImpl(h,dt,e),e);}
+bool position(Handle h,const Vector3f& v,std::string& e){OwnerOperation op(e);return op.admitted()&&op.complete(positionImpl(h,v,e),e);}
+bool whistle(Handle h,Navi* n,std::string& e){OwnerOperation op(e);return op.admitted()&&op.complete(whistleImpl(h,n,e),e);}
+bool launch(Handle h,Navi* n,const Vector3f& v,std::string& e){OwnerOperation op(e);return op.admitted()&&op.complete(launchImpl(h,n,v,e),e);}
+bool bounce(Handle h,std::string& e){OwnerOperation op(e);return op.admitted()&&op.complete(bounceImpl(h,e),e);}
+bool collision(Handle h,const CollEvent& event,std::string& e){OwnerOperation op(e);return op.admitted()&&op.complete(collisionImpl(h,event,e),e);}
+bool sortFormation(Handle h,unsigned happa,std::string& e){OwnerOperation op(e);return op.admitted()&&op.complete(sortFormationImpl(h,happa,e),e);}
+bool retire(Piki* p,std::string& e){OwnerOperation op(e);return op.admitted()&&op.complete(retireImpl(p,e),e);}
+bool retireScene(std::string& e){OwnerOperation op(e);return op.admitted()&&op.complete(retireSceneImpl(e),e);}
 void forget(Piki* p)noexcept{try{std::string error;retire(p,error);}catch(...){ }}
 void sceneExit()noexcept{try{std::string error;retireScene(error);}catch(...){ }}
 } }

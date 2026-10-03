@@ -40,6 +40,10 @@ struct CaptainFrame {
 // There are no default implementations and no "ready"/permission parameters.
 // Services MUST be a process-lifetime stable singleton; no uninstall exists.
 // install alone does not initialize actors or activate the original course.
+// All operations run on the native game thread. Source mutation/retirement is
+// nonreentrant across service callbacks. Read-only queries and animationKey
+// notification may nest; a nested mutation refuses and invalidates the outer
+// operation's success. Services must propagate such refusal to their callers.
 class Services {
 public:
  virtual ~Services()=default;
