@@ -30,6 +30,10 @@ bool pc_randomizer_init(int argc, char** argv);
 // Explicit authenticated bootstrap selections; empty for historical sessions.
 std::string pc_randomizer_original_campaign();
 bool pc_randomizer_original_session();
+// Nonallocating current immutable selection identity. Zero before successful
+// authenticated initialization and for ordinary/AP sessions. This is neither
+// a native scene serial nor a selected card generation/proof.
+std::uint64_t pc_randomizer_original_selection_revision() noexcept;
 const char* pc_randomizer_original_catalog_root();
 bool pc_randomizer_original_calendar_plan(const std::string& course,const p2original::CalendarState& actualCacheFlags,std::vector<p2original::CalendarLoad>& out,std::string& error);
 std::string pc_randomizer_campaign_treasure_source();
