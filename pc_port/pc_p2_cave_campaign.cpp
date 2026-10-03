@@ -12,6 +12,7 @@
 #include "pc_p2_cave_bud_actor.h"
 #include "pc_p2_cave_carry_engine.h"
 #include "pc_p2_cave.h"
+#include "pc_p2_teki_lifetime.h"
 #include "pc_randomizer.h"
 #include "FlowController.h"
 #include "OnePlayerSection.h"
@@ -198,14 +199,31 @@ void pc_p2_cave_campaign_scene_exit(){
     sceneReady=false;pc_p2_cave_items_shutdown();pc_p2_cave_geometry_shutdown();pc_p2_cave_rooms_shutdown();
     pc_p2_cave_campaign_party_scene_exit();
 }
-void pc_p2_cave_campaign_request(){
-    if(!pc_randomizer_generated_cave()||!safe()||!atBoundary()||!saveChoice)return;
+P2CaveBoundarySnapshot pc_p2_cave_campaign_boundary(){
+    P2CaveBoundarySnapshot result;
+    if(!pc_randomizer_generated_cave()||!prepared||!sceneReady
+        ||flowCont.mCurrentStage!=(inside()?floorStage:surfaceStage))return result;
+    result.action=inside()?P2CaveBoundaryAction::Return:P2CaveBoundaryAction::Enter;
+    result.seed=config.seed;result.cave="forest_1";result.floor=inside()?1:0;
+    result.token=config.token;result.sceneGeneration=pc_p2_scene_generation();
+    result.checkpointGeneration=pc_randomizer_active_campaign_generation();
+    result.x=inside()?config.exitX:config.entryX;
+    result.z=inside()?config.exitZ:config.entryZ;
+    result.ready=safe()&&saveChoice&&!choosingSave&&!requested&&!pending;
+    return result;
+}
+bool pc_p2_cave_campaign_request_boundary(const P2CaveBoundarySnapshot& selected){
+    if(!p2CaveBoundaryMatches(selected,pc_p2_cave_campaign_boundary())||!atBoundary())return false;
     // Direct randomizer startup bypasses the title/file menu. Reuse its real
     // preparation and controller-driven file choice at each cave boundary;
     // physical backup slots are derived by the native card inventory.
     requested=false;saveChoice->startSave();choosingSave=true;saveChoiceTicks=0;
     gameflow.mIsUIOverlayActive=TRUE;
     std::puts("P2_CAMPAIGN_SAVE_CHOICE_STARTED native_file_menu=1");
+    return true;
+}
+void pc_p2_cave_campaign_request(){
+    pc_p2_cave_campaign_request_boundary(pc_p2_cave_campaign_boundary());
 }
 P2CaveSaveChoiceSnapshot pc_p2_cave_campaign_save_choice(){
     P2CaveSaveChoiceSnapshot result;

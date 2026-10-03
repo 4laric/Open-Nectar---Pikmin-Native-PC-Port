@@ -2,6 +2,7 @@
 #include <string>
 #include <cstdint>
 #include "pc_campaign_ui_observer.h"
+#include "pc_p2_cave_campaign_boundary.h"
 class Controller;
 class Graphics;
 struct P2CaveSaveChoiceSnapshot {
@@ -21,6 +22,10 @@ void pc_p2_cave_campaign_before_preload();
 void pc_p2_cave_campaign_scene_setup();
 void pc_p2_cave_campaign_scene_exit();
 void pc_p2_cave_campaign_request();
+// Snapshot XZ is resolved against the consumer's live map for presentation.
+// Successful requests open native file UI; completed SAVE owns the transition.
+P2CaveBoundarySnapshot pc_p2_cave_campaign_boundary();
+bool pc_p2_cave_campaign_request_boundary(const P2CaveBoundarySnapshot& selected);
 void pc_p2_cave_campaign_tick();
 bool pc_p2_cave_campaign_commit_transition();
 bool pc_p2_cave_campaign_restored_party();
