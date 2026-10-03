@@ -17,7 +17,9 @@ bool pc_p2_cave_campaign_survivor_body(const std::string& k,std::uint32_t u,std:
 #define CHECK(x) do{if(!(x))throw std::runtime_error(#x);}while(0)
 struct Authority final:AttachmentAuthority {
  OriginalPikiSource source;std::string fingerprint;bool available=true;
+ mutable unsigned visits=0;unsigned forgetAt=0;Piki* forgetBody=nullptr;
  bool member(const OriginalPikiOrigin& o,std::string& e)const override{
+  if(++visits==forgetAt)pc_p2_original_piki_origin_forget(forgetBody);
   if(!available||o.catalogFingerprint!=fingerprint||o.sourceKey!=source.sourceKey||o.recordUid!=source.uid||o.attempt>=source.count||o.activation!=1){e="actual selected member mismatch";return false;}return true;
  }
 };
@@ -40,5 +42,7 @@ int main(){try{
  CHECK(!resolveAttachments(saved,{stale},authority,resolved,e));CHECK(resolved[0].nativeLifetime==fresh.nativeLifetime);
  CHECK(!resolveAttachments(saved,{fresh,fresh},authority,resolved,e));CHECK(!resolveAttachments(saved,{},authority,resolved,e));
  auto wrong=saved;wrong[0].body.attempt=3;CHECK(!resolveAttachments(wrong,{fresh},authority,resolved,e)); // same shared UID cannot alias another successful attempt
+ authority.visits=0;authority.forgetAt=3;authority.forgetBody=p;
+ CHECK(!resolveAttachments(saved,{fresh},authority,resolved,e));CHECK(!currentAttachment(fresh));CHECK(resolved[0].nativeLifetime==fresh.nativeLifetime); // last authority callback cannot publish a retired handle
  pc_p2_original_piki_origin_forget(p);std::cout<<"PASS released GenPiki SDK ancestry/lifetime capture, stale reuse, pointer-free attachment bytes and fresh-handle resolution; gameplay=0 cold_graph=0\n";return 0;
  }catch(const std::exception& ex){std::cerr<<ex.what()<<'\n';return 1;}}

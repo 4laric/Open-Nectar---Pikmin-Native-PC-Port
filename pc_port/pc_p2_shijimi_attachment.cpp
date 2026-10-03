@@ -61,7 +61,10 @@ bool resolveAttachments(const std::vector<GenPikiAttachment>& saved,const std::v
  for(const auto& a:saved){const LiveGenPikiAttachment* found=nullptr;for(const auto& live:party)if(key(live.saved.body)==key(a.body)){found=&live;break;}
   if(!found)return reject(e,"source77 saved attachment absent from actual party mapping");
   auto resolved=*found;resolved.saved=a;next.push_back(std::move(resolved));}
- for(const auto& live:next)if(!currentAttachment(live)||!authority.member(live.saved.body,e))return reject(e,"source77 party source/lifetime changed during resolution");
+ for(const auto& live:next)if(!authority.member(live.saved.body,e))return reject(e,"source77 party source changed during resolution");
+ // An authority callback may retire any previously checked body. Check all
+ // incarnations after the final callback, before publishing the resolved list.
+ for(const auto& live:next)if(!currentAttachment(live))return reject(e,"source77 party lifetime changed during resolution");
  out=std::move(next);e.clear();return true;
 }
 } }
