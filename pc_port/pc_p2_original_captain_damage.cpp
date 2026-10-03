@@ -55,6 +55,37 @@ DamageResult addDamage(Navi* n,float raw,bool feedback) {
  result.refusal=Refusal::None;result.applied=damage;result.knockedOut=dead;
  return result;
 }
+DamageResult startDamage(Navi* n,float raw) {
+ const World* world=nullptr;DamageResult result;
+ result.refusal=worldFor(n,world);if(result.refusal!=Refusal::None)return result;
+ if(world->demo()==Demo::Unknown){result.refusal=Refusal::MissingMovieAuthority;return result;}
+ if(world->demo()==Demo::Playing){result.refusal=Refusal::DemoPlaying;return result;}
+ auto* native=n->getCurrState();auto* state=dynamic_cast<State*>(native);
+ if(!state||state->nativeState()!=native){result.refusal=Refusal::MissingSourceState;return result;}
+ if(!state->sourceAlive(*n)){result.refusal=Refusal::NotAlive;return result;}
+ if(state->sourceInvincible()){result.refusal=Refusal::StateInvincible;return result;}
+ const auto frames=state->actorInvincibleFrames(*n);
+ if(!frames){result.refusal=Refusal::MissingActorAuthority;return result;}
+ if(*frames){result.refusal=Refusal::ActorInvincible;return result;}
+ if(!std::isfinite(raw)||raw<0){result.refusal=Refusal::InvalidDamage;return result;}
+ const float damage=pc_p2_equipment_damage(raw);
+ if(!std::isfinite(damage)||damage<0){result.refusal=Refusal::InvalidDamage;return result;}
+ // Source startDamage's entire mutation branch is conditional on !Damaged.
+ if(state->sourceStateId()==StateId::Damaged){result.refusal=Refusal::None;return result;}
+ if(!std::isfinite(n->mHealth)){result.refusal=Refusal::InvalidHealth;return result;}
+ const float next=n->mHealth-damage;
+ if(!std::isfinite(next)){result.refusal=Refusal::InvalidDamage;return result;}
+ auto* transition=dynamic_cast<DamageTransitions*>(native);
+ if(!transition||!transition->canEnterSourceDamaged(*n)){result.refusal=Refusal::MissingDamagedTransition;return result;}
+ const bool dead=next<1.0f;
+ if(dead&&!state->canEnterSourceDead(*n)){result.refusal=Refusal::MissingDeadTransition;return result;}
+ transition->enterSourceDamaged(*n,damage);
+ auto* current=n->getCurrState();auto* damaged=dynamic_cast<State*>(current);
+ if(!damaged||damaged->nativeState()!=current||damaged->sourceStateId()!=StateId::Damaged){result.refusal=Refusal::MissingSourceState;return result;}
+ n->mHealth=next;damaged->sourceDamageFeedback(*n);
+ if(dead)damaged->enterSourceDead(*n);
+ result.refusal=Refusal::None;result.applied=damage;result.knockedOut=dead;return result;
+}
 Refusal flickAdmission(const Creature* enemy,const Navi* n) {
  const World* world=nullptr;auto refusal=worldFor(n,world);
  if(refusal!=Refusal::None)return refusal;

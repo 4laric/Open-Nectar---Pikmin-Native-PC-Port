@@ -21,7 +21,7 @@ struct TestWorld:World {
  Navi* captainAt(unsigned s)const override{return s<2?captains[s]:nullptr;}
 } world;
 const World* live=&world;
-struct SourceState:NaviState,State {
+struct SourceState:NaviState,State,DamageTransitions {
  StateId id=StateId::KokeDamage;bool alive=true,immune=false,deathReady=true;
  unsigned char frames=0;int deaths=0,feedback=0;bool wrongPointer=false,missingFrames=false;
  const NaviState* nativeState()const override{return wrongPointer?nullptr:this;}
@@ -32,6 +32,9 @@ struct SourceState:NaviState,State {
  bool canEnterSourceDead(const Navi&)const override{return deathReady;}
  void enterSourceDead(Navi&)override{++deaths;id=StateId::Dead;alive=false;}
  void sourceDamageFeedback(Navi&)override{++feedback;}
+ bool damagedReady=true;int damagedEntries=0;float healthAtDamagedEntry=0;
+ bool canEnterSourceDamaged(const Navi&)const override{return damagedReady;}
+ void enterSourceDamaged(Navi& n,float)override{++damagedEntries;healthAtDamagedEntry=n.mHealth;id=StateId::Damaged;}
 };
 int checks=0;
 void check(bool value){++checks;if(!value)throw std::runtime_error("captain damage check "+std::to_string(checks));}
@@ -86,5 +89,13 @@ int main(){
  a.current=&p1;world.d=Demo::Playing;check(flickAdmission(&enemy,&a)==Refusal::None);
  world.p=Phase::Inactive;check(flickAdmission(&enemy,&a)==Refusal::InactiveWorld);world.p=Phase::GameWorldActive;
  check(actors.retire(&enemy,eh));check(flickAdmission(&enemy,&a)==Refusal::MissingEnemy);
+ sa=SourceState();a.current=&sa;a.mHealth=3;world.d=Demo::Inactive;armor=true;
+ r=startDamage(&a,4);check(bool(r)&&r.applied==2&&a.mHealth==1&&!r.knockedOut);
+ check(sa.damagedEntries==1&&sa.healthAtDamagedEntry==3&&sa.id==StateId::Damaged&&sa.feedback==1);
+ r=startDamage(&a,20);check(bool(r)&&r.applied==0&&a.mHealth==1&&sa.damagedEntries==1&&sa.feedback==1);
+ sa.id=StateId::Walk;sa.damagedReady=false;r=startDamage(&a,0);check(r.refusal==Refusal::MissingDamagedTransition&&a.mHealth==1);
+ sa.damagedReady=true;sa.deathReady=false;r=startDamage(&a,1);check(r.refusal==Refusal::MissingDeadTransition&&a.mHealth==1&&sa.damagedEntries==1);
+ sa.deathReady=true;r=startDamage(&a,1);check(bool(r)&&r.knockedOut&&r.applied==.5f&&a.mHealth==.5f&&sa.deaths==1);
+ armor=false;
  std::cout<<"P2_ORIGINAL_CAPTAIN_DAMAGE_CONTROLS_PASS checks="<<checks<<" ordinary_gameplay=UNTESTED source_producers=UNAVAILABLE\n";
 }

@@ -34,6 +34,14 @@ public:
  // Retail optional feedback. No P1 startDamageEffect/Mods damage wrapper.
  virtual void sourceDamageFeedback(Navi&)=0;
 };
+// Ordinary InteractAttack/startDamage enters the source Damaged state before
+// subtracting health. Recovery-only source receivers need not implement this.
+class DamageTransitions {
+public:
+ virtual ~DamageTransitions()=default;
+ virtual bool canEnterSourceDamaged(const Navi&)const=0;
+ virtual void enterSourceDamaged(Navi&,float reducedDamage)=0;
+};
 // Concrete source startup owns this descriptor; Runtime only accepts the
 // canonical live query. Course loading alone does not activate the world.
 class LoadedScene {
@@ -61,7 +69,7 @@ public:
 enum class Refusal { None, MissingWorld, WrongSession, InactiveWorld,
  MissingCaptain, MissingSourceState, InvalidHealth, InvalidDamage,
  MissingMovieAuthority, DemoPlaying, NotAlive, StateInvincible, MissingActorAuthority, ActorInvincible, MissingDeadTransition,
- NotReunited, MissingEnemy };
+ NotReunited, MissingEnemy, MissingDamagedTransition };
 struct DamageResult {
  Refusal refusal=Refusal::MissingWorld;
  float applied=0;
@@ -71,6 +79,7 @@ struct DamageResult {
 // Requeries world/session/FSM/timer on each call. Raw damage is reduced once
 // here; source Flick invokes it only at Koke END, not at interaction admission.
 DamageResult addDamage(Navi*,float rawDamage,bool playFeedback);
+DamageResult startDamage(Navi*,float rawDamage);
 // InteractFlick's outer active-world + DEMO_Reunite_Captains guard. This does
 // not apply addDamage's later immunity checks early or consume RNG.
 Refusal flickAdmission(const Creature* authenticatedEnemy,const Navi*);
