@@ -66,6 +66,8 @@ int main(){
  check(!pc_p2_original_captain_world());pc_p2_original_captain_main_game_entered();check(!pc_p2_original_captain_world());
  check(!pc_p2_original_captain_actor_frames(&a,frames)&&frames==99);
  loaded=&scene;check(!pc_p2_original_captain_world()); // loaded alone is not game-active
+ check(pc_p2_original_captain_body_owned(&a)&&pc_p2_original_captain_body_owned(&b)); // loaded ownership is not activation
+ check(!pc_p2_original_captain_body_owned(&outsider));
  scene.navis[1]=nullptr;pc_p2_original_captain_main_game_entered();check(!pc_p2_original_captain_world());scene.navis[1]=&b;
  scene.navis[1]=&a;pc_p2_original_captain_main_game_entered();check(!pc_p2_original_captain_world());scene.navis[1]=&b;
  selected=false;pc_p2_original_captain_main_game_entered();check(!pc_p2_original_captain_world());selected=true;

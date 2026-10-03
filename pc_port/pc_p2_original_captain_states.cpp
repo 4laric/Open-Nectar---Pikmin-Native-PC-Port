@@ -16,6 +16,7 @@ extern bool pc_p2_original_captain_party_preflight(Navi*,p2original::captain::St
 extern bool pc_p2_original_captain_dope_preflight(Navi*,std::string&) __attribute__((weak));
 extern bool pc_p2_original_captain_container_absorb_preflight(Navi*,p2original::captain::StateId,std::string&) __attribute__((weak));
 extern bool pc_p2_source_navi_reaction_animation_key(Navi*,const NaviState*,std::uint64_t,int,std::string&) __attribute__((weak));
+extern bool pc_p2_original_captain_body_owned(const Navi*) __attribute__((weak));
 using namespace p2original::captain;
 namespace {
 struct Backup {const LoadedScene* scene=nullptr;std::uint64_t epoch=0;StateId state=StateId::Walk;};
@@ -227,7 +228,7 @@ void pc_p2_original_captain_before_transition(Navi* n){
   auto* scene=pc_p2_original_captain_loaded_scene();backups[n]={scene,scene->incarnation(),old->sourceStateId()};}
 }
 PcOriginalCaptainRoute pc_p2_original_captain_route_transition(Navi* n,int request,int& mapped){
- std::string e;if(!actor(n,e))return PcOriginalCaptainRoute::NonSource;
+ std::string e;if(!actor(n,e))return pc_p2_original_captain_body_owned&&pc_p2_original_captain_body_owned(n)?PcOriginalCaptainRoute::Refused:PcOriginalCaptainRoute::NonSource;
  if(pc_p2_original_captain_world()->phase()!=Phase::GameWorldActive)return PcOriginalCaptainRoute::Refused;
  StateId id;
  if(request==NAVISTATE_Walk)id=StateId::Walk;else if(request==NAVISTATE_Dead)id=StateId::Dead;

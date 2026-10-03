@@ -22,6 +22,7 @@ bool Navi::isAlive()
 {
 	bool alive;
 	if (pc_p2_original_captain_actor_lifetime(this, alive)) return alive;
+	if (pc_p2_original_captain_body_owned(this)) return false;
 	return Creature::isAlive();
 }
 #include "pc_p2_original_piki_origin.h"
@@ -1449,6 +1450,16 @@ void Navi::update()
 {
 #if defined(PIKI_PC_PORT)
  pc_p2_original_captain_actor_update(this);
+ // A real source scene's roster never executes the legacy manual animator,
+ // control, formation or body update below. The source common animation/AI/
+ // simulation phase integration is incomplete and explicitly refuses here.
+ // This fence also applies during Loading before the typed Walk bootstrap.
+ if(pc_p2_original_captain_body_owned(this)){
+  static bool reported[2]={};const auto* scene=pc_p2_original_captain_loaded_scene();
+  const unsigned slot=scene&&scene->captainAt(1)==this?1:0;
+  if(!reported[slot]){std::fprintf(stderr,"[original captain body refused] genuine source common update/simulation phases are not installed\n");reported[slot]=true;}
+  return;
+ }
 #endif
 #if defined(PIKI_PC_PORT)
 	PcAudioSource audioSource(mNaviID); // issue #1030: whose sounds these are
@@ -2088,6 +2099,7 @@ void Navi::releasePikis()
 void Navi::doAI()
 {
 #if defined(PIKI_PC_PORT)
+	if(pc_p2_original_captain_body_owned(this))return;
 	PcAudioSource audioSource(mNaviID); // issue #1030: whose sounds these are
 #endif
 	if (pc_demon_bound(this)) {
@@ -2371,6 +2383,9 @@ bool Navi::ignoreAtari(Creature* target)
  */
 void Navi::bounceCallback()
 {
+#if defined(PIKI_PC_PORT)
+ if(pc_p2_original_captain_body_owned(this))return;
+#endif
 	MsgBounce msg(Vector3f(0.0f, 1.0f, 0.0f));
 	sendMsg(&msg);
 }

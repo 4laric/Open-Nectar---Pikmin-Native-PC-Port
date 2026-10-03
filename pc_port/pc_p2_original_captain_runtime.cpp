@@ -92,6 +92,7 @@ State* ownedState(Navi* n,StateId id){
 }
 }
 const World* pc_p2_original_captain_world(){return runtime.valid()?&runtime:nullptr;}
+bool pc_p2_original_captain_body_owned(const Navi* n){const auto* scene=runtime.canonical();return n&&scene&&(scene->captainAt(0)==n||scene->captainAt(1)==n);}
 bool pc_p2_original_captain_body_reset_loaded(std::string& e){return runtime.loadedAfterReset(e);}
 bool pc_p2_original_captain_activate_after_bootstrap(std::string& e){return runtime.activate(e);}
 void pc_p2_original_captain_main_game_entered(){std::string e;runtime.activate(e);}
