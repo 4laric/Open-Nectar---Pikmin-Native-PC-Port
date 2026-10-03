@@ -407,6 +407,7 @@ set(PC_PORT_SOURCES
     pc_port/pc_p2_original_pelplant_native.cpp
     pc_port/pc_p2_original_foliage.cpp
     pc_port/pc_p2_original_foliage_native.cpp
+    pc_port/pc_p2_original_shijimi_group.cpp
     pc_port/pc_p2_watage_effect.cpp
     pc_port/pc_p2_watage_native.cpp
     pc_port/pc_p2_receipt_host.cpp
@@ -3402,6 +3403,12 @@ target_include_directories(pc_p2_original_foliage_test PRIVATE pc_port)
 target_compile_options(pc_p2_original_foliage_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
 add_test(NAME pc_p2_original_foliage_test COMMAND pc_p2_original_foliage_test)
 
+# Source77 child emission contract; native interaction remains a separate gate.
+add_executable(pc_p2_original_shijimi_group_test tools/test_p2_original_shijimi_group.cpp
+    pc_port/pc_p2_original_shijimi_group.cpp)
+target_include_directories(pc_p2_original_shijimi_group_test PRIVATE pc_port)
+target_compile_options(pc_p2_original_shijimi_group_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME pc_p2_original_shijimi_group_test COMMAND pc_p2_original_shijimi_group_test)
 add_executable(pc_p2_watage_test tools/test_p2_watage.cpp pc_port/pc_p2_watage_effect.cpp)
 target_include_directories(pc_p2_watage_test PRIVATE pc_port)
 target_compile_options(pc_p2_watage_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
