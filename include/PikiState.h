@@ -50,6 +50,7 @@ enum PikiStateID {
 	PIKISTATE_Unk34        = 34, // Unused
 	PIKISTATE_DenkiDying   = 35, // P2 electric-shock death reaction (#170/#408).
 	PIKISTATE_Panic        = 36, // P2 panic state, currently the gas reaction (#170/#408).
+	PIKISTATE_HanachirashiBlow = 37, // Source vector blow and nonlethal recovery.
 	PIKISTATE_Count,             // Total number of states.
 };
 
