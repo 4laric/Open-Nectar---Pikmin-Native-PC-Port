@@ -384,6 +384,8 @@ set(PC_PORT_SOURCES
     pc_port/pc_p2_breadbug_actor.cpp
     pc_port/pc_p2_breadbug_contest_host.cpp
     pc_port/pc_p2_giant_breadbug_actor.cpp
+    pc_port/pc_p2_original_frog.cpp
+    pc_port/pc_p2_original_frog_native.cpp
     pc_port/pc_p2_frog.cpp
     pc_port/pc_p2_kogane.cpp
     pc_port/pc_p2_mamuta.cpp
@@ -3334,3 +3336,10 @@ add_executable(p2_campaign_economy_test tools/test_p2_campaign_economy.cpp)
 target_include_directories(p2_campaign_economy_test PRIVATE pc_port)
 target_compile_options(p2_campaign_economy_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
 add_test(NAME p2_campaign_economy_test COMMAND p2_campaign_economy_test)
+
+add_executable(pc_p2_original_frog_test tools/test_p2_original_frog.cpp
+    pc_port/pc_p2_original_frog.cpp pc_port/pc_p2_original_spawn_plan.cpp
+    pc_port/pc_p2_original_drop.cpp pc_port/pc_p2_original_catalog.cpp)
+target_include_directories(pc_p2_original_frog_test PRIVATE pc_port)
+target_compile_options(pc_p2_original_frog_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME pc_p2_original_frog_test COMMAND pc_p2_original_frog_test)
