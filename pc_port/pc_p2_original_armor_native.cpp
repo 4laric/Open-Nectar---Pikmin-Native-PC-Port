@@ -31,8 +31,10 @@ bool Native::resources(const std::set<unsigned>& sources,std::string& e){
  if(!tekiMgr->hasModel(TEKI_Chappy)||!shape||!shape->mShape||!shape->mAnimMgr
   ||!tekiMgr->getTekiParameters(TEKI_Chappy)||!tekiMgr->getStrategy(TEKI_Chappy))return fail(e,"original Armor chassis use-list/shape/animation/parameters unavailable");
  const unsigned id=TekiMgr::getTypeId(TEKI_Chappy);
- if(!pelletMgr->getConfig(id)||!pelletMgr->pcEnsureShape(id)
-  ||tekiMgr->getTekiParameters(TEKI_Chappy)->getI(TPI_CorpseType)!=TEKICORPSE_LeaveCorpse)return fail(e,"original Armor ordinary corpse config/shape unavailable");
+ // PelletView corpses intentionally have no standalone PelletShapeObject.
+ // The required dead bank is checked by prepare_original below.
+ if(!pelletMgr->getConfig(id)
+  ||tekiMgr->getTekiParameters(TEKI_Chappy)->getI(TPI_CorpseType)!=TEKICORPSE_LeaveCorpse)return fail(e,"original Armor ordinary corpse config/type unavailable");
  return pc_p2_armor_prepare_original(sources,e);
 }
 bool Native::commonResources(const CatalogRow& row,std::string& e){return pc_p2_original_drop_resources(row,e);}
