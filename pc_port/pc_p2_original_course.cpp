@@ -3,6 +3,9 @@
 #include "pc_p2_original_gen_object.h"
 #include "pc_p2_original_group_engine.h"
 #include "pc_p2_original_pelplant_native.h"
+#include "pc_p2_original_chappy_native.h"
+#include "pc_p2_original_frog_native.h"
+#include "pc_p2_original_uji_native.h"
 #include "pc_p2_original_manifest.h"
 #include "pc_p2_original_progress.h"
 #include "Creature.h"
@@ -13,6 +16,9 @@ namespace {
 using namespace p2original;
 struct Course {
  std::unique_ptr<pelplant::Native> plants;
+ std::unique_ptr<chappy::Native> chappies;
+ std::unique_ptr<frog::Native> frogs;
+ std::unique_ptr<uji::Native> ujis;
  Dispatch dispatch;
  std::map<unsigned,GeneratorState> literal;
  std::set<const Generator*> shadows;
@@ -25,7 +31,11 @@ bool pc_p2_original_course_prepare(const std::string& fingerprint,const std::vec
  const std::vector<GeneratorState>& literal,std::function<bool(unsigned)> metColor,std::string& e){
  if(current||!metColor||rows.size()!=literal.size())return fail(e,"original course prepare requires unowned complete source inventory");
  auto next=std::make_unique<Course>();next->plants=std::make_unique<pelplant::Native>(std::move(metColor));
+ next->chappies=std::make_unique<chappy::Native>();next->frogs=std::make_unique<frog::Native>();next->ujis=std::make_unique<uji::Native>();
  if(!next->dispatch.add(0,next->plants->provider(),[](const CatalogRow& r,std::string& e){pelplant::Initial value;return pelplant::decode(r,value,e);},e))return false;
+ for(unsigned source:{2u,43u})if(!next->dispatch.add(source,next->chappies->provider(),chappy::admits,e))return false;
+ for(unsigned source:{17u,18u})if(!next->dispatch.add(source,next->frogs->provider(),frog::capability,e))return false;
+ for(unsigned source:{12u,13u,14u})if(!next->dispatch.add(source,next->ujis->provider(),uji::decode,e))return false;
  // Validate structural/source metadata atomically BEFORE publishing catalog.
  Catalog checked;
  if(!checked.install(fingerprint,rows,[&](const CatalogRow& r,std::string& e){return next->dispatch.capability(r,e);},e))return false;
@@ -109,9 +119,19 @@ bool pc_p2_original_course_load(const char* directory,const char* course,std::fu
 bool pc_p2_original_course_use_models(std::string& e){
  if(!current){e.clear();return true;}
  if(!tekiMgr)return fail(e,"original course model admission lacks native manager");
- // Family registry currently admits source0 only; explicit early chassis
- // reservation must precede startStage, unlike late physical pool reservation.
- tekiMgr->mUsingType[TEKI_Palm]=true;e.clear();return true;
+ // Explicit early chassis reservation precedes startStage. Physical preflight
+ // later verifies actual bank/corpse/drop resources and manager capacity.
+ for(const auto& entry:originalActors().rows()){
+  const unsigned source=entry.second.enemy.source;int type=-1;
+  if(source==0)type=TEKI_Palm;
+  else if(source==2||source==43)type=TEKI_Swallow;
+  else if(source==17)type=TEKI_Frog;
+  else if(source==18)type=TEKI_Frow;
+  else if(uji::species(source))type=uji::nativeType(source);
+  if(type<0)return fail(e,"original source has no early resource owner");
+  tekiMgr->mUsingType[type]=true;
+ }
+ e.clear();return true;
 }
 bool pc_p2_original_course_boot(const char* directory,const char* course,std::string& e){
  return pc_p2_original_course_load(directory,course,pc_p2_original_progress_met,e);
