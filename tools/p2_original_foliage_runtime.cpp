@@ -43,7 +43,10 @@
 namespace {
 using namespace p2original;
 using namespace p2original::foliage;
-bool human=false,refusal=false,naturalWalk=false;
+bool human=false,refusal=false,naturalWalk=false,forestBatch=false;
+unsigned firstSource(){return forestBatch?47:91;}
+unsigned secondSource(){return forestBatch?49:88;}
+const char* batchSources(){return forestBatch?"47,49":"91,88";}
 SDL_Joystick* pad=nullptr;
 void require(bool ok,const char* message){if(!ok){std::printf("FAIL ORIGINAL_FOLIAGE %s\n",message);std::fflush(nullptr);std::_Exit(1);}}
 void checked(bool ok,const std::string& e){if(!ok)std::fprintf(stderr,"ORIGINAL_FOLIAGE_ERROR %s\n",e.c_str());require(ok,"native foliage operation");}
@@ -74,7 +77,7 @@ class FoliageApp final:public PlugPikiApp {
  unsigned walked=0;std::array<bool,2> naturalTouch{};
  const std::string fingerprint=std::string(64,'f');
  CatalogRow literal(unsigned source,unsigned index,unsigned uid,const Position& at,float facing){
-  CatalogRow r;r.course="tutorial";r.member="plantsgen.txt";r.index=index;r.sourceKey="tutorial/plantsgen.txt#"+std::to_string(index);
+  CatalogRow r;r.course=forestBatch?"forest":"tutorial";r.member="plantsgen.txt";r.index=index;r.sourceKey=r.course+"/plantsgen.txt#"+std::to_string(index);
   r.enemy.source=source;r.enemy.uid=uid;r.enemy.count=1;r.enemy.position=at;r.enemy.directionDegrees=facing;return r;
  }
  int rewards(){int total=heads();for(int color=0;color<3;++color){auto* onion=itemMgr->getContainer(color);if(onion)total+=onion->getTotalStorePikis();}return total;}
@@ -95,7 +98,7 @@ class FoliageApp final:public PlugPikiApp {
   require(native->provider().size()==2&&tekiMgr->getSize()==tekiBaseline+2,"two native births; count-zero row has no actor");
   actors.fill(nullptr);Iterator it(tekiMgr);CI_LOOP(it){Creature* actor=*it;unsigned source=0,token=0;InstanceIdentity identity;
    if(!originalActors().query(actor,source,token,&identity))continue;
-   unsigned i=source==91?0:source==88?1:2;require(i<2&&!actors[i],"distinct original foliage identity");actors[i]=actor;
+   unsigned i=source==firstSource()?0:source==secondSource()?1:2;require(i<2&&!actors[i],"distinct original foliage identity");actors[i]=actor;
    require(native->owns(actor)&&identity.generator==rows[i].enemy.uid&&identity.ordinal==0&&token,"native source UID and ordinal association");
    auto* h=native->provider().lookup(actor);require(h&&h->generator==generators[i].get()&&h->token==token,"native generator and family binding");
    if(reentry)require(identity.activation==firstIdentity[i].activation+1&&identity.epoch==firstIdentity[i].epoch+1,"disc cache reentry advances epoch and activation");else firstIdentity[i]=identity;
@@ -113,14 +116,19 @@ class FoliageApp final:public PlugPikiApp {
   // plants on the east approach used by the successfully surveyed walk.
   Position a{n->mSRT.t.x+90,0,n->mSRT.t.z},b{n->mSRT.t.x+90,0,n->mSRT.t.z+70};
   a.y=mapMgr->getMinY(a.x,a.z,true);b.y=mapMgr->getMinY(b.x,b.z,true);require(std::isfinite(a.y)&&std::isfinite(b.y),"actual native arena floor");
-  rows={literal(91,0,1390538979u,a,0),literal(88,4,1381420794u,b,95)};
-  auto zero=literal(91,0,originalGeneratorUid("fixture/foliage-zero#0"),a,0);zero.course="fixture";zero.member="foliage-zero";zero.sourceKey="fixture/foliage-zero#0";zero.enemy.count=0;rows.push_back(zero);
+  if(forestBatch){
+   // Actual forest/plantsgen.txt literals #23 (Clover47) and #0 (Ooinu_s49),
+   // decoded in forest47-49-source-records.json. Only positions are relocated
+   // to the same surveyed tutorial arena; this is not forest-course admission.
+   rows={literal(47,23,1376717705u,a,0),literal(49,0,1389527839u,b,180)};
+  }else rows={literal(91,0,1390538979u,a,0),literal(88,4,1381420794u,b,95)};
+  auto zero=literal(firstSource(),0,originalGeneratorUid("fixture/foliage-zero#0"),a,0);zero.course="fixture";zero.member="foliage-zero";zero.sourceKey="fixture/foliage-zero#0";zero.enemy.count=0;rows.push_back(zero);
   native=std::make_unique<Native>();tekiBaseline=tekiMgr->getSize();pelletBaseline=pelletMgr->getSize();rewardBaseline=rewards();
   bool physical=native->provider().preflight(rows,e);
-  if(refusal){require(!physical&&native->provider().size()==0&&tekiMgr->getSize()==tekiBaseline&&pelletMgr->getSize()==pelletBaseline,"physical resource refusal before allocation");std::puts("PASS ORIGINAL_FOLIAGE_RESOURCE_REFUSAL births=0 direct_control=1 gameplay=0");std::fflush(nullptr);std::_Exit(0);}
+  if(refusal){require(!physical&&native->provider().size()==0&&tekiMgr->getSize()==tekiBaseline&&pelletMgr->getSize()==pelletBaseline,"physical resource refusal before allocation");std::puts(forestBatch?"PASS ORIGINAL_FOLIAGE_RESOURCE_REFUSAL sources=47,49 births=0 direct_control=1 gameplay=0":"PASS ORIGINAL_FOLIAGE_RESOURCE_REFUSAL births=0 direct_control=1 gameplay=0");std::fflush(nullptr);std::_Exit(0);}
   checked(physical,e);checked(native->geometryOwnershipControl(e),e);
   checked(originalActors().install(fingerprint,rows,[](const CatalogRow& r,std::string& err){return decode(r,err);},e),e);install(false);
-  std::printf("ORIGINAL_FOLIAGE_READY sources=91,88 zero_count=1 baseline=20 window=960x540 initialized_placement=1 original_positions=0 naturalinput=%d callbackcontrol=%d gameplay=0\n",int(naturalWalk),int(!naturalWalk&&!human));std::fflush(nullptr);
+  std::printf("ORIGINAL_FOLIAGE_READY sources=%s zero_count=1 baseline=20 window=960x540 initialized_placement=1 original_positions=0 naturalinput=%d callbackcontrol=%d gameplay=0\n",batchSources(),int(naturalWalk),int(!naturalWalk&&!human));std::fflush(nullptr);
  }
  void stimulus(Navi* n){
   for(unsigned i=0;i<2;++i){auto* actor=static_cast<BTeki*>(actors[i]);auto* h=native->provider().lookup(actor);require(h,"retained live native host");
@@ -172,7 +180,7 @@ public:
   if(!phase){if(n->getCurrState()->getID()!=NAVISTATE_Walk||++ready<45)return result;int live=0,red=0;Iterator it(pikiMgr);CI_LOOP(it){auto* p=static_cast<Piki*>(*it);if(p->isAlive()){++live;red+=p->mColor==Red;}}require(live==20&&red==20,"actual20 Red Pikmin baseline");setup(n);phase=1;return result;}
   if(human)return result;++age;
   if(phase==4){if(naturalWalk)input();if(age>=30){require(tekiMgr->getSize()==tekiBaseline,"normal engine recycles unloaded pool references");install(true);phase=3;age=0;}return result;}
-  if(phase==5){if(naturalWalk)input();if(age>=30){require(native->provider().size()==0&&tekiMgr->getSize()==tekiBaseline,"final normal engine pool cleanup");checkEconomy();std::puts(naturalWalk?"PASS ORIGINAL_FOLIAGE_WALK sources=91,88 naturalinput=1 callbackcontrol=0 natural_touch=2 normal_animation=1 collider_static=1 no_rewards=1 initialized_placement=1 cache_disc_reentry=1 full_course=0":"PASS ORIGINAL_FOLIAGE sources=91,88 resources=1 collider_static=1 invulnerable=1 typed_touch=1 normal_animation=1 cache_disc_reentry=1 no_rewards=1 direct_control=1 gameplay=0");std::fflush(nullptr);std::_Exit(0);}return result;}
+  if(phase==5){if(naturalWalk)input();if(age>=30){require(native->provider().size()==0&&tekiMgr->getSize()==tekiBaseline,"final normal engine pool cleanup");checkEconomy();std::printf(naturalWalk?"PASS ORIGINAL_FOLIAGE_WALK sources=%s naturalinput=1 callbackcontrol=0 natural_touch=2 normal_animation=1 collider_static=1 no_rewards=1 initialized_placement=1 cache_disc_reentry=1 full_course=0\n":"PASS ORIGINAL_FOLIAGE sources=%s resources=1 collider_static=1 invulnerable=1 typed_touch=1 normal_animation=1 cache_disc_reentry=1 no_rewards=1 direct_control=1 gameplay=0\n",batchSources());std::fflush(nullptr);std::_Exit(0);}return result;}
   checkStatic();if(phase==3&&age>=30){if(naturalWalk)input();std::string e;checked(pc_p2_original_course_unload(e),e);require(native->provider().size()==0,"final owned release");phase=5;age=0;return result;}
   if(naturalWalk){walking(n);return result;}
   if(phase==1&&age>=15){stimulus(n);phase=2;age=0;}
@@ -184,6 +192,7 @@ public:
 }
 int main(int argc,char** argv){
  human=std::getenv("P2_ORIGINAL_FOLIAGE_HUMAN")!=nullptr;refusal=std::getenv("P2_ORIGINAL_FOLIAGE_REFUSE_RESOURCES")!=nullptr;naturalWalk=!human&&std::getenv("P2_ORIGINAL_FOLIAGE_WALK")!=nullptr;
+ forestBatch=std::getenv("P2_ORIGINAL_FOLIAGE_FOREST")!=nullptr;
  SDL_setenv("PIKMIN_RANDOMIZER_TEST_BACKGROUND","1",1);SDL_setenv("SDL_AUDIODRIVER","dummy",1);SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS,"1");SDL_SetMainReady();
  pc_sim_rng_note_main_thread();std::string e;checked(pc_sim_rng_begin_offline(0x9188,0x8891,e),e);pc_gpu_preference_apply();pc_bbft_init(argc,argv);
  require(!pc_randomizer_enabled()&&pc_pikipelago_surface_course()&&!std::strcmp(pc_pikipelago_surface_course(),"tutorial")&&!pc_pikipelago_room_preview(),"real tutorial course assets required");

@@ -1,4 +1,4 @@
-"""Stage private source91/88 native fixtures from a verified20Red tutorial baseline.
+"""Stage private original foliage fixtures from a verified20Red tutorial baseline.
 Legal files stay local. No shared assets or source course files are changed.
 """
 import argparse
@@ -83,8 +83,28 @@ def main():
     data[offset+8] = 7  # literal P1 TEKI_Palm allocation/cleanup chassis only
     overrides = {path: bytes(data)}
     mods = sorted(bank.glob('*/*.mod'))
-    if len(mods) != 24:
-        raise ValueError('Expected24 genuine source91/88 pose models')
+    report = json.loads((bank / 'foliage.json').read_text())
+    identities = {47: ('Clover', 'clover'), 49: ('Ooinu_s', 'ooinu_s'),
+                  88: ('Nekojarashi', 'nekojarashi'), 91: ('KareOoinu_s', 'kareooinu_s')}
+    expected = set()
+    sources = []
+    for name, species in report['species'].items():
+        source = species['source_id']
+        if source not in identities or identities[source][0] != name or source in sources:
+            raise ValueError('Unsupported or duplicate literal foliage identity')
+        sources.append(source)
+        if not 2 <= len(species['poses']) <= 64:
+            raise ValueError('Incomplete foliage pose bank')
+        for index, pose in enumerate(species['poses']):
+            filename = f'flora_{name}_{identities[source][1]}_{index:02}.mod'
+            if pose['file'] != filename:
+                raise ValueError('Literal foliage pose filename changed')
+            model = bank / name / filename
+            if digest(model.read_bytes()) != pose['sha256']:
+                raise ValueError('Foliage pose hash differs from converter evidence')
+            expected.add(model)
+    if not sources or set(mods) != expected:
+        raise ValueError('Foliage model closure differs from source report')
     for mod in mods:
         overrides['dataDir/courses/pikmin2room/' + mod.name] = mod.read_bytes()
     out.mkdir(parents=True)
@@ -94,6 +114,7 @@ def main():
     receipt = dict(baseline=str(baseline), source_default_sha256=digest(original),
                    overrides={name:digest(data) for name,data in overrides.items()},
                    foliage_bank_sha256=digest((out/'foliage-bank.txt').read_bytes()),
+                   sources=sorted(sources), pose_models=len(mods),
                    starting_pikmin=20, chassis_id=7, chassis_count=0,
                    window='960x540 centered', ordinary_gameplay=False,
                    original_positions=False, whole_course=False,
