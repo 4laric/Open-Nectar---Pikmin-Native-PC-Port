@@ -76,7 +76,7 @@ class FoliageApp final:public PlugPikiApp {
  std::array<float,2> health{};
  int ready=0,phase=0,age=0,pelletBaseline=0,rewardBaseline=0,tekiBaseline=0;
  bool captainSeen=false;
- unsigned walked=0;std::array<bool,2> naturalTouch{};
+ unsigned walked=0;std::array<bool,2> naturalTouch{};Vector3f walkRetreat;
  const std::string fingerprint=std::string(64,'f');
  ActorRegistry caveRegistry;
  struct CaveLeaf{Creature* actor=nullptr;unsigned row=0,ordinal=0,token=0;std::uint64_t handle=0;Vector3f centre,child;float health=0;};
@@ -168,7 +168,7 @@ class FoliageApp final:public PlugPikiApp {
   // positions are fixture relocations, not proof of original course geometry.
   // The west site sits above a steep tutorial terrain edge. Put both control
   // plants on the east approach used by the successfully surveyed walk.
-  Position a{n->mSRT.t.x+90,0,n->mSRT.t.z},b{n->mSRT.t.x+90,0,n->mSRT.t.z+70};
+  walkRetreat=n->mSRT.t;Position a{n->mSRT.t.x+90,0,n->mSRT.t.z},b{n->mSRT.t.x+90,0,n->mSRT.t.z+70};
   a.y=mapMgr->getMinY(a.x,a.z,true);b.y=mapMgr->getMinY(b.x,b.z,true);require(std::isfinite(a.y)&&std::isfinite(b.y),"actual native arena floor");
   if(brownLargeBatch){
    // Literal Last #0 uses source object0004's constructor birthType0 default.
@@ -216,8 +216,8 @@ class FoliageApp final:public PlugPikiApp {
    if(h->active&&h->touched){naturalTouch[walked]=true;input();phase=2;age=0;
     std::printf("ORIGINAL_FOLIAGE_NATURAL_TOUCH source=%u captain=%.3f,%.3f,%.3f plant=%.3f,%.3f,%.3f frame=%.3f naturalinput=1 callbackcontrol=0\n",h->row.enemy.source,n->mSRT.t.x,n->mSRT.t.y,n->mSRT.t.z,actors[walked]->mSRT.t.x,actors[walked]->mSRT.t.y,actors[walked]->mSRT.t.z,h->frame);std::fflush(nullptr);
    }else {point(n,collisionCentre[walked]);if(age%120==0){std::printf("ORIGINAL_FOLIAGE_WALK_PROGRESS source=%u captain=%.3f,%.3f,%.3f goal=%.3f,%.3f,%.3f velocity=%.3f,%.3f,%.3f\n",h->row.enemy.source,n->mSRT.t.x,n->mSRT.t.y,n->mSRT.t.z,collisionCentre[walked].x,collisionCentre[walked].y,collisionCentre[walked].z,n->mVelocity.x,n->mVelocity.y,n->mVelocity.z);std::fflush(nullptr);}require(age<600,"SDL walking must reach real foliage touch");}
-  }else if(phase==2){input();auto* h=native->provider().lookup(actors[walked]);require(h,"natural animation host retained");
-   if(!h->active&&!h->touched){std::printf("ORIGINAL_FOLIAGE_NATURAL_END source=%u frame=%.3f naturalinput=1 callbackcontrol=0\n",h->row.enemy.source,h->frame);std::fflush(nullptr);++walked;age=0;if(walked==2){require(naturalTouch[0]&&naturalTouch[1],"actual captain naturally touched both original species");reenter();}else phase=1;}
+  }else if(phase==2){point(n,walkRetreat);auto* h=native->provider().lookup(actors[walked]);require(h,"natural animation host retained");
+   if(!h->active&&!h->touched){std::printf("ORIGINAL_FOLIAGE_NATURAL_END source=%u frame=%.3f naturalinput=1 callbackcontrol=0 retreat_input=1\n",h->row.enemy.source,h->frame);std::fflush(nullptr);++walked;age=0;if(walked==2){require(naturalTouch[0]&&naturalTouch[1],"actual captain naturally touched both original species");reenter();}else phase=1;}
    else require(age<900,"natural touched motion completes through normal engine clock");
   }
  }
