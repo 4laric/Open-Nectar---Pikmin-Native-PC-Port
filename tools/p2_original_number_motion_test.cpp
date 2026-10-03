@@ -52,5 +52,8 @@ int main(){
  hidden.position.y=-100;
  check(hiddenFloor(hidden,false,false,hit,applied)&&!applied&&hidden.position.y==-100);
  check(hiddenFloor(hidden,true,true,hit,applied)&&!applied&&hidden.position.y==-100);
+ hidden.position.y=-std::numeric_limits<float>::max();hidden.radius=std::numeric_limits<float>::max();
+ const auto extreme=hidden;const auto previousContact=hit;applied=false;
+ check(!hiddenFloor(hidden,true,false,hit,applied)&&hidden.position.y==extreme.position.y&&hit.overlap==previousContact.overlap&&!applied);
  std::printf("Original number source motion: %u controls passed\n",checks);
 }

@@ -38,6 +38,22 @@ reader; verified direct One/Five LOD radii are 20.60190773010254/41.036273956298
 centered on the actual source CollTree sphere. The actual simulation viewport
 roster and capture phase remain required. Actual wrapper and gameplay remain open.
 
+The native camera adapter is wired to the real outer section's selected roster,
+captures its section-owned captain camera after Pcam update and before AI, and
+closes after AI. Section exit/day-end revokes it before camera disposal. The
+ordinary single viewport is supported; split/netplay, movies/transitions, pause,
+memcard and initial setup remain unavailable rather than supplying guessed LOD.
+This is compiled owner wiring, not a runtime camera or Five qualification.
+
+`number_room` exposes source authored makeRoom/makeOneRoom quarter-turn matrices
+and vertex transforms. It retains separate degree conversion multiplies, source
+JMath LUT indexing/initializer values, explicit makeTR fused arithmetic and
+PSMTXMultVec paired-lane order. The LUT quarter values agree with independent
+libm and 100-digit decimal evaluation; no original PPC runtime-table identity is
+claimed. In particular, the 180-degree transform has a nonzero sine and cannot
+use a quantized quarter-turn matrix. Planes/spheres still need the source raw
+PPC reciprocal-square-root estimate; host sqrt cannot establish that step.
+
 No producer installs this factory yet. The pure ledger, animation and geometry
 controls and compiled production objects are engineering evidence. They do not
 prove a physical Egg birth, carry, source Onyon delivery or campaign SAVE.

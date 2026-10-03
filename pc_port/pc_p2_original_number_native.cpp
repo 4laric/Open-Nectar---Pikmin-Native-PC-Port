@@ -199,7 +199,9 @@ bool pc_p2_original_number_update(Pellet* p){
  if(binding->second.profile->size!=Size::One)fault("numeric update has no admitted size adapter");
  std::string e;if(!current(e))fault(e);
  const auto expectedHandle=binding->second.handle;const auto* expectedLedger=binding->second.ledger;
- const auto sameBinding=[&](){auto now=bindings.find(p);return now!=bindings.end()&&now->second.handle==expectedHandle&&now->second.ledger==expectedLedger;};
+ const auto expectedSession=selectedSession,expectedCampaign=selectedCampaign;
+ const auto sameBinding=[&](){auto now=bindings.find(p);return now!=bindings.end()&&now->second.handle==expectedHandle&&now->second.ledger==expectedLedger&&
+  pc_randomizer_original_session()&&pc_randomizer_session_fingerprint()==expectedSession&&pc_randomizer_original_campaign()==expectedCampaign;};
  // Candidate physical hook; resources still refuse before producer RNG until
  // actual selected-scene source map lists/Plat events are admitted.
  const int state=p->getState();
@@ -246,12 +248,13 @@ bool pc_p2_original_number_update(Pellet* p){
  trace.hardIntersect=false;
  if(!pc_p2_original_number_trace_platforms(p,trace,nullptr,contacts,e))fault(e);
  if(!sameBinding())return true;
+ // Source first-floor bounce callback precedes floor assignment and force.
+ if(contacts.floor&&!previousFloor){p->bounceCallback();if(!sameBinding())return true;}
  if(contacts.floor&&!motion::finishSimple(trace.velocity,contacts.floorNormal,dt,picked,false,trace.velocity))fault("numeric source floor force invalid");
  p->mGroundTriangle=contacts.floor;p->mPreviousTriangle=contacts.floor;p->mCurrCollisionModel=contacts.floorModel;p->mCollPlatform=contacts.floorPlatform;
  if(contacts.floor){
   binding->second.floorNormal.set(contacts.floorNormal.x,contacts.floorNormal.y,contacts.floorNormal.z);
   p->mCollNormal=&binding->second.floorNormal;p->setCreatureFlag(CF_IsOnGround);
-  if(!previousFloor){p->bounceCallback();if(!sameBinding())return true;}
  }else{p->mCollNormal=nullptr;p->resetCreatureFlag(CF_IsOnGround);}
  p->mSRT.t.set(trace.position.x,trace.position.y+(picked?4.0f:0.0f),trace.position.z);
  p->mVelocity.set(trace.velocity.x,trace.velocity.y,trace.velocity.z);

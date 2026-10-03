@@ -87,6 +87,7 @@ bool hiddenFloor(rigid::Trace& trace,bool hidden,bool floor,Contact& out,bool& a
  if(!finite(candidate.velocity))return false;
  Contact contact;contact.normal={0,1,0};contact.point=candidate.position;contact.point.y-=candidate.radius;
  contact.overlap=candidate.position.y-trace.position.y;
+ if(!finite(contact.point)||!std::isfinite(contact.overlap))return false;
  trace=candidate;out=contact;applied=true;return true;
 }
 }}
