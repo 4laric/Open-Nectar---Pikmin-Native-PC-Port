@@ -937,7 +937,8 @@ public:
      const float guideDistance=distance(n->mSRT.t,goal);
      const float guideSpeed=std::hypot(n->mVelocity.x,n->mVelocity.z),guideTarget=std::hypot(n->mTargetVelocity.x,n->mTargetVelocity.z);
      require(std::isfinite(guideSpeed)&&std::isfinite(guideTarget),"guide velocity/target finite observation required");
-     const auto command=guidePulse.observe(receiverWaypoint,guideDistance);
+     const bool slippingGuide=n->mGroundTriangle&&MapCode::getSlipCode(n->mGroundTriangle)>0;
+     const auto command=guidePulse.observe(receiverWaypoint,guideDistance,slippingGuide);
      if(command==PcKochappyGuideInput::Refuse)std::printf("P2_PURPLE_KOCHAPPY_GUIDE_REFUSAL age=%d guide=%d remaining=%.9g observations=%d last_progress=%d bursts=%d best=%.9g walk_remaining=%d neutral_remaining=%d actor_writes=0\n",age,receiverWaypoint,guideDistance,guidePulse.elapsed,guidePulse.lastProgress,guidePulse.pulses,guidePulse.best,guidePulse.walk,guidePulse.neutral);
      require(command!=PcKochappyGuideInput::Refuse,"guide braking geometry invalid");
      if(guideDistance<12.f)std::printf("P2_PURPLE_KOCHAPPY_GUIDE_BRAKE age=%d waypoint=%d distance=%.6f speed=%.6f target=%.6f neutral=%d ordinary_input=1 actor_writes=0\n",age,receiverWaypoint,guideDistance,guideSpeed,guideTarget,int(command==PcKochappyGuideInput::Neutral));

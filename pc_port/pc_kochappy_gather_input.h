@@ -195,7 +195,7 @@ enum class PcKochappyGuideInput { Walk, Neutral, Refuse };
 struct PcKochappyGuidePulse {
  int guide=-1,walk=0,neutral=0,elapsed=0,lastProgress=0,pulses=0;
  float best=-1;
- PcKochappyGuideInput observe(int currentGuide,float remaining){
+ PcKochappyGuideInput observe(int currentGuide,float remaining,bool slipping=false){
   using I=PcKochappyGuideInput;
   if(currentGuide<0||currentGuide>=128||!std::isfinite(remaining)||remaining<0||remaining>=512)return I::Refuse;
   if(currentGuide!=guide){guide=currentGuide;walk=neutral=elapsed=lastProgress=pulses=0;best=-1;}
@@ -203,10 +203,14 @@ struct PcKochappyGuidePulse {
   ++elapsed;
   if(best<0||remaining<best-.1f){best=remaining;lastProgress=elapsed;}
   if(elapsed>180||elapsed-lastProgress>=90)return I::Refuse;
+  if((!slipping||remaining<=2.f)&&walk>1)walk=1;
   if(walk>0){--walk;return I::Walk;}
   if(neutral>0){--neutral;return I::Neutral;}
   if(++pulses>64)return I::Refuse;
-  walk=1;neutral=1;return I::Walk;
+  // Actual slippery floors need sustained ordinary input to overcome native
+  // tau-based acceleration plus per-tick gravity; geometry is rechecked each
+  // tick by the caller. Revert to capture braking within two units.
+  walk=slipping&&remaining>2.f?5:1;neutral=1;return I::Walk;
  }
 };
 
