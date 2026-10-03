@@ -20,5 +20,9 @@ void pc_p2_original_corpse_view_matrix(const Pellet*,Matrix4f&);
 void pc_p2_original_corpse_collision(Pellet*);
 // Explicit session boundary; refuse while actual native corpse bindings survive.
 bool pc_p2_original_corpse_new_session(const std::string& catalog,std::string&);
+// Call BEFORE source actor/provider release or App-heap reset. Physical corpse
+// graphs cannot be restored yet: refuse unload while any body is still bound.
+// Successful course unload preserves address-free receipts for ordinary reentry.
+bool pc_p2_original_corpse_unload(std::string& error);
 // SAVE owner authenticates this address-free receipt state together with stock.
 bool pc_p2_original_corpse_snapshot(p2original::CorpseSnapshot&,std::string&);

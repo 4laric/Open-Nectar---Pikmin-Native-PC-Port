@@ -32,6 +32,10 @@ At an explicit NEW session, startup calls
 `pc_p2_original_corpse_new_session(catalog,error)` after previous bodies retire.
 Do not reset it on ordinary course reentry. Providers must kill owned corpse
 pellets before their actor; the real PelletView kill retires that actor.
+Before source actors/providers are released or the App heap is reset, call
+`pc_p2_original_corpse_unload(error)`. It refuses any still-bound native corpse
+physical graph, including a consumed body awaiting teardown. Successful unload
+preserves the receipt ledger and persistent literal configs for course reentry.
 
 `CorpseSnapshot` and its bounded schema1 codec contain address-free receipt
 state. SAVE must authenticate that payload together with Onion stock. These
