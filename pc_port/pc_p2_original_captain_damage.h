@@ -95,6 +95,13 @@ const p2original::captain::World* pc_p2_original_captain_world();
 const p2original::captain::LoadedScene* pc_p2_original_captain_loaded_scene();
 // Actual engine event hooks. No call accepts a source-ready/authentication bool.
 // An absent/wrong selected LoadedScene refuses activation and actor writes.
+// Concrete stage owner calls this AFTER genuine stage/two-body/bank reset.
+// Publishes Loading so source control/typed Walk bootstrap can bind; never
+// activates, and repeated same-incarnation calls never reset life or timers.
+bool pc_p2_original_captain_body_reset_loaded(std::string&);
+// Fresh Loading requires readonly actual typed Walk/control completion;
+// same-incarnation Inactive resume requires readonly owned-state continuation.
+bool pc_p2_original_captain_activate_after_bootstrap(std::string&);
 void pc_p2_original_captain_main_game_entered();
 void pc_p2_original_captain_main_game_left();
 void pc_p2_original_captain_movie_started(MoviePlayer*);
