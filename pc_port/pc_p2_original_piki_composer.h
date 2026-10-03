@@ -13,6 +13,10 @@ namespace p2original {namespace piki {
 // Borrowed objects are process-stable; their per-scene state remains retained
 // through checked Body/Captain retirement before native resource/heap reuse.
 // Callers requery on each scene-bound operation and never cache scene authority.
+// Animator borrows require its genuine selected-bank preparation; partial
+// construction does not expose a callable animator or grant body admission.
+NativeAnimator* nativeAnimator(const captain::LoadedScene&,std::string&);
+NativeEffects* nativeEffects(const captain::LoadedScene&,std::string&);
 Plate* nativePlate(const captain::LoadedScene&,std::string&);
 NativeServices* nativeServices(const captain::LoadedScene&,std::string&);
 PhysicalSource* nativePhysicalSource(const captain::LoadedScene&,std::string&);

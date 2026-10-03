@@ -123,6 +123,8 @@ bool prepareNativeComposition(const p2retail::SceneContext& stage,NativeCaptainR
   e.clear();return true;
  }catch(...){return fail(e,"native composition construction failed; partial owners retained");}
 }
+NativeEffects* nativeEffects(const captain::LoadedScene& scene,std::string& e){auto& o=owner();Operation op(o);return op.entered&&o.scene==&scene&&o.effects&&o.observed(e)?o.effects:nullptr;}
+NativeAnimator* nativeAnimator(const captain::LoadedScene& scene,std::string& e){auto& o=owner();Operation op(o);return op.entered&&o.scene==&scene&&o.animator&&o.prepared&&o.observed(e)?o.animator.get():nullptr;}
 Plate* nativePlate(const captain::LoadedScene& scene,std::string& e){auto& o=owner();Operation op(o);return op.entered&&o.scene==&scene&&o.plate&&o.observed(e)?o.plate.get():nullptr;}
 NativeServices* nativeServices(const captain::LoadedScene& scene,std::string& e){auto& o=owner();Operation op(o);return op.entered&&o.scene==&scene&&o.services&&o.prepared&&o.installed&&o.observed(e)?o.services.get():nullptr;}
 PhysicalSource* nativePhysicalSource(const captain::LoadedScene& scene,std::string& e){auto& o=owner();Operation op(o);return op.entered&&o.scene==&scene&&o.physical&&o.observed(e)?o.physical:nullptr;}
