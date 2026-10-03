@@ -13,7 +13,7 @@
 #include <set>
 #include <map>
 #include <cmath>
-namespace {std::map<Creature*,unsigned> caveActors;bool cavePrepared=false;}
+namespace {std::map<Creature*,unsigned> caveActors;bool cavePrepared=false;unsigned caveReserved=0,caveBorn=0;}
 namespace p2original { namespace snow { namespace {
 std::set<Native*>& instances(){static std::set<Native*> values;return values;}
 struct Heap {int prior;Heap():prior(gsys->setHeap(SYSHEAP_App)){}~Heap(){gsys->setHeap(prior);}};
@@ -66,13 +66,14 @@ Native::~Native(){if(m->provider.size()){std::fprintf(stderr,"P2_ORIGINAL_SNOW l
 Provider& Native::provider(){return m->provider;}
 void Native::retired(Creature* actor){m->provider.retired(actor);}
 } }
-void pc_p2_original_snow_resources_reset(){cavePrepared=false;}
+void pc_p2_original_snow_resources_reset(){cavePrepared=false;caveReserved=caveBorn=0;}
 void pc_p2_original_snow_forget(BTeki* actor){caveActors.erase(actor);for(auto* n:p2original::snow::instances())n->retired(static_cast<Creature*>(actor));}
 bool pc_p2_original_snow_owned(const BTeki* actor){unsigned source=0;return actor&&pc_p2_original_actor_source(static_cast<const Creature*>(actor),source)&&source==45;}
 
 namespace {bool caveRefuse(std::string& e,const char* text){e=text;return false;}}
 bool pc_p2_snow_prepare_cave(std::string& e){
  if(!caveActors.empty())return caveRefuse(e,"Snow cave resource preparation with live actors");
+ caveReserved=caveBorn=0;
  if(!gsys||!tekiMgr||!pelletMgr)return caveRefuse(e,"Snow cave native managers absent");
  const int type=TEKI_Chappy;auto* shape=tekiMgr->getTekiShapeObject(type);
  if(!shape||!shape->mShape||!shape->mAnimMgr||!tekiMgr->getTekiParameters(type)||!tekiMgr->getStrategy(type)
@@ -80,13 +81,19 @@ bool pc_p2_snow_prepare_cave(std::string& e){
  ||!pelletMgr->getConfig(TekiMgr::getTypeId(type)))return caveRefuse(e,"Snow cave chassis/corpse resources not preloaded");
  p2original::snow::Heap heap;cavePrepared=pc_p2_snow_prepare_original(e);return cavePrepared;
 }
+bool pc_p2_snow_reserve_cave(unsigned count,std::string& e){
+ if(!cavePrepared||!caveActors.empty()||caveReserved||!count||count>100||!tekiMgr||!pelletMgr
+ ||tekiMgr->getMax()-tekiMgr->getSize()<int(count)||pelletMgr->getMax()-pelletMgr->getSize()<int(count))return caveRefuse(e,"Snow cave whole-roster native capacity unavailable");
+ caveReserved=count;caveBorn=0;e.clear();return true;
+}
 bool pc_p2_snow_birth_cave(Generator* generator,const Vector3f& p,float facing,Creature*& out,std::string& e){
  out=nullptr;
- if(!cavePrepared||!generator||!tekiMgr||!pelletMgr||!std::isfinite(p.x)||!std::isfinite(p.y)||!std::isfinite(p.z)||!std::isfinite(facing))return caveRefuse(e,"Snow cave generator/transform invalid");
+ if(!cavePrepared||!caveReserved||caveBorn>=caveReserved||!generator||!tekiMgr||!pelletMgr||!std::isfinite(p.x)||!std::isfinite(p.y)||!std::isfinite(p.z)||!std::isfinite(facing))return caveRefuse(e,"Snow cave generator/transform invalid");
  if(tekiMgr->getMax()<=tekiMgr->getSize()||pelletMgr->getMax()<=pelletMgr->getSize())return caveRefuse(e,"Snow cave actor/corpse native pool full");
  p2original::snow::Heap heap;Teki* actor=tekiMgr->newTeki(TEKI_Chappy);out=actor;
  if(!actor)return caveRefuse(e,"Snow cave native allocation failed");
  if(!caveActors.emplace(actor,0).second)return caveRefuse(e,"Snow cave native address already owned");
+ ++caveBorn;
  actor->mPersonality->reset();actor->mPersonality->mPosition=p;actor->mPersonality->mNestPosition=p;
  actor->mPersonality->mFaceDirection=facing;actor->reset();actor->startAI(0);
  actor->mGenerator=generator;actor->mFaceDirection=facing;actor->mSRT.r.set(0,facing,0);actor->mVelocity.set(0,0,0);
