@@ -152,6 +152,9 @@ struct WindInteraction final : Interaction {
     }
     bool actNavi(Navi* n) immut override {
         if(!n||!n->getCurrState()||!n->mStateMachine)return false;
+        // Authenticate the body lifetime, not a receiver-level alive filter:
+        // retail direct Wind/Flick permit dead bodies; the wind producer
+        // separately enforces its genuine source CF_IsAlive target filter.
         bool alive;const auto* world=pc_p2_original_captain_world();if(!world||world->phase()!=p2original::captain::Phase::GameWorldActive||!pc_p2_original_captain_actor_lifetime(n,alive))return false;
         int mapped=-1;if(pc_p2_original_captain_route_transition(n,NAVISTATE_HanachirashiFlick,mapped)!=PcOriginalCaptainRoute::Handled||mapped!=NAVISTATE_HanachirashiFlick)return false;
         if(generated&&p2original::captain::flickAdmission(mOwner,n)!=p2original::captain::Refusal::None)return false;

@@ -92,11 +92,12 @@ bool lost(BTeki* a,const Actor& s,unsigned count){if(!s.target||!s.target->isAli
 void flick(BTeki* a,bool nearby){
  if(pikiMgr){Iterator it(pikiMgr);CI_LOOP(it){auto* p=static_cast<Piki*>(*it);if(!p||!p->isAlive())continue;bool attached=p->getStickObject()==a&&!p->isStickToMouth();if(!attached&&(!nearby||distance(vec(p->getPosition()),vec(a->getPosition()))>=40))continue;
   if(attached)p->endStickObject();pc_p2_hanachirashi_flick_piki(a,p);}}
- if(nearby)for(Navi* n:pc_p2_navis())if(n&&n->isAlive()&&distance(vec(n->getPosition()),vec(a->getPosition()))<40)pc_p2_hanachirashi_flick_navi(a,n);
+ // Retail EnemyFunc::flickNearbyNavi applies distance, not an alive predicate.
+ if(nearby)for(Navi* n:pc_p2_navis())if(n&&distance(vec(n->getPosition()),vec(a->getPosition()))<40)pc_p2_hanachirashi_flick_navi(a,n);
 }
 bool windTick(BTeki* a,Actor& s,float dt,const Sample& pose){
  s.scale=std::min(1.f,s.scale+3*dt);V emitter=add(vec(a->getPosition()),yaw(pose.emitter,a->getDirection()));V impulse;bool success=false;
- for(Navi* n:pc_p2_navis())if(n&&n->isAlive()&&wind(emitter,a->getDirection(),vec(n->getPosition()),s.scale*300,true,impulse))pc_p2_hanachirashi_wind_navi(a,n,native(impulse));
+ for(Navi* n:pc_p2_navis())if(p2hana::naviTargetAlive(n)&&wind(emitter,a->getDirection(),vec(n->getPosition()),s.scale*300,true,impulse))pc_p2_hanachirashi_wind_navi(a,n,native(impulse));
  if(pikiMgr){Iterator it(pikiMgr);CI_LOOP(it){auto* p=static_cast<Piki*>(*it);if(p&&p->isAlive()&&wind(emitter,a->getDirection(),vec(p->getPosition()),s.scale*300,false,impulse))success=pc_p2_hanachirashi_wind_piki(a,p,native(impulse));}}
  return success; // Retail stores the last in-cone Pikmin receiver result.
 }
