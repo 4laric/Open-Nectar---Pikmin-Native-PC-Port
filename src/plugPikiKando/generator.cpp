@@ -904,10 +904,17 @@ void Generator::write(RandomAccessStream& output)
 		PRINT("**** WRITE CREATE COUNT !! %d\n", mAliveCount);
 		output.writeShort(mAliveCount);
 		output.writeShort(mLatestSpawnDay);
-		output.writeShort(getRebirthDay());
+#if defined(PIKI_PC_PORT)
+        // Original objects own literal respawn metadata without a P1 GenType.
+        const int cacheRebirthDay = dynamic_cast<GenObjectOriginalEnemy*>(mGenObject)
+            ? mRespawnInterval : getRebirthDay();
+#else
+        const int cacheRebirthDay = getRebirthDay();
+#endif
+		output.writeShort(cacheRebirthDay);
 		output.writeShort(mDayLimit);
 		PRINT("****** GENERATOR WRITE @ %d (count=%d saveday=%d interval=%d limit=%d)\n", output.getPosition(), mAliveCount,
-		      mLatestSpawnDay, getRebirthDay(), mDayLimit);
+		      mLatestSpawnDay, cacheRebirthDay, mDayLimit);
 	}
 
 	if (ramMode) {
