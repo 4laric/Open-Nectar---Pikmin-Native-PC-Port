@@ -10,6 +10,10 @@
 void bytes(const std::filesystem::path& p,const std::string& b){std::filesystem::create_directories(p.parent_path());std::ofstream f(p,std::ios::binary);f.write(b.data(),b.size());assert(f.good());}
 std::string cacheImage(){std::string b(P2CaveCacheBanks::imageSize,0);auto put=[&](unsigned p,unsigned n){for(int i=3;i>=0;--i){b[p+i]=char(n);n>>=8;}};put(4,P2CaveCacheBanks::heapSize);for(unsigned i=0;i<5;++i){unsigned p=8+P2CaveCacheBanks::heapSize+i*37;b[p]=char(255);put(p+1,i);}return b;}
 int main(int argc,char** argv){
+    if(argc==3&&std::string(argv[1])=="--randomizer-seed"){
+        assert(pc_randomizer_init(argc,argv)&&pc_randomizer_authored_cave_route().present&&!pc_randomizer_resumed());
+        std::cout<<"PASS actual bootstrap selected authored route before load; no native scene/body/SAVE\n";return 0;
+    }
     assert(argc==2);const auto root=std::filesystem::absolute(argv[1])/std::to_string(std::chrono::steady_clock::now().time_since_epoch().count());assert(!std::filesystem::exists(root));std::filesystem::create_directories(root);std::filesystem::current_path(root);
     P2AuthoredCaveRoute r;r.present=true;r.seed=42;r.token=std::string(32,'a');r.surface={1,1,"stages/forest.ini",P2AuthoredCaveSession::hash("surface"),{1,30,2}};r.floor={1,1,"stages/generated-forest.ini",P2AuthoredCaveSession::hash("floor"),{3,30,4}};r.exit={10,20,30};
     std::ostringstream routeBytes;routeBytes<<"P2_AUTHORED_CAVE_ROUTE 1 "<<r.seed<<' '<<r.token;r.surface.write(routeBytes);r.floor.write(routeBytes);r.exit.write(routeBytes);routeBytes<<" END\n";r.routeSha=P2AuthoredCaveSession::hash(routeBytes.str());
