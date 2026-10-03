@@ -45,6 +45,10 @@ void run() {
         auto* body=dynamic_cast<Piki*>(pikiMgr->birth());
         require(body!=nullptr,"actual manager physical birth");
         ++physicalBirths;
+        // Match the native GenObjectPiki::birth population registration before
+        // init/free can transfer the body between the work/free counters.
+        GameStat::workPikis.inc(color);
+        GameStat::update();
         {
             PcOriginalPikiInitScope source(body);
             require(source.valid(),"exact body source scope held");
@@ -63,10 +67,12 @@ void run() {
             require(before.profile==after.profile && before.simState==after.simState
                     && before.simDraws==after.simDraws,"no host simulation RNG draws in physical original initializer");
             require(field()==21 && body->isAlive(),"actual physical new body alive in native manager");
+            require(GameStat::mapPikis==21,"new physical body counted in native field capacity");
         }
         require(!pc_p2_original_piki_init_held(body),"source scope expires before gameplay");
         body->kill(false);
         require(field()==20,"owned native body killed and pool baseline restored");
+        require(GameStat::mapPikis==20,"native population counters restored after owned kill");
         require(pikiMgr==mgr && naviMgr==captains,"live managers preserved");
     }
     std::printf("PASS ORIGINAL_PIKI_INIT checks=%u physical_births=%u source_rgb=3 initializer_only=1 original_genpiki=0 wild_ai=0 full_course=0\n",checks,physicalBirths);
