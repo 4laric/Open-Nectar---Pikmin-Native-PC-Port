@@ -10,6 +10,7 @@ namespace p2original {
 // Identical runtime/save cap; consumed receipts count toward the bound.
 constexpr std::size_t corpsePayloadMaxBytes=1024*1024;
 constexpr std::size_t corpseSnapshotMaxRecords=(corpsePayloadMaxBytes-80)/33;
+bool validCorpseIdentity(const InstanceIdentity&,const std::string& catalog);
 // SAVE schema 1: only logical source identity and reward state. No native
 // addresses, transient handles, actor liveness, treasures or Pokos are saved.
 struct CorpseRecord {
