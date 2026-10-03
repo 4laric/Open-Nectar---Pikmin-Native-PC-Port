@@ -5,6 +5,13 @@ authenticated prepared floor snapshot/context, selected-ledger birth authority,
 and an authored-placement lookup. Placement yaw is in radians; the retail plan
 stores degrees. No default authority or engineering placement exists.
 
+The floor owner's `p2retail::cargoPlacement(NativeFloor&)` adapter, published at
+`3a24500edd928e0bcae39048903c5562f97e3069`, has this exact callback signature.
+It obtains the row from authenticated floor-plan bytes while SceneOps owns the
+prepared scene, then converts authored degrees to radians. The borrowed
+NativeFloor must outlive all callbacks, including partial release. This adapter
+does not supply Config.context or the independent birth authority.
+
 Call preflight after selecting the original session and binding the master
 treasury SOURCE, before native cargo allocation. It verifies the complete
 aggregate through authenticated input buffers and loads converted models from
