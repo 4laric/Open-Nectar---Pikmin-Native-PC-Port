@@ -4,6 +4,7 @@
 #include "Generator.h"
 #include "Graphics.h"
 #include "Camera.h"
+#include "Stickers.h"
 #include "sysNew.h"
 #include <array>
 #include <cmath>
@@ -11,6 +12,7 @@
 #include <map>
 #include <cstdio>
 #include <cstdlib>
+extern Matrix4f invCamMat;
 namespace p2original { namespace blackpom {
 namespace {
 const char* clips[]={"wait","dead","type1","type2","type3","type4"};
@@ -21,6 +23,18 @@ struct AppHeap {int previous;AppHeap():previous(gsys->setHeap(SYSHEAP_App)){}~Ap
 struct Native::Impl {
  Mechanic& mechanic;p2posefamily::Bank bank{"ORIGINAL_BLACKPOM"};
  p2poseload::Shared shared;std::array<std::vector<Shape*>,6> shapes;
+ struct Sphere {int joint;Vector3f offset;float radius;};
+ std::array<Sphere,7> spheres;
+ std::array<std::vector<std::array<Matrix4f,6>>,6> jointFrames;
+ struct Tree {
+  std::array<ObjCollInfo,7> nodes;
+  std::array<CollPart,7> parts;
+  std::array<u32,7> ids{};
+  CollInfo own{7,parts.data(),ids.data()};
+  CollInfo* previous=nullptr;
+  std::array<CollPart*,7> resolved{};
+ };
+ std::map<Pom*,std::unique_ptr<Tree>> trees;
  std::map<Pom*,unsigned> actors;unsigned reserved=0;bool loaded=false;
  explicit Impl(Mechanic& core):mechanic(core){}
  bool load(std::string& e){
@@ -44,6 +58,31 @@ struct Native::Impl {
    if(shapes[i].empty())return refuse(e,"BlackPom physical poses missing");
   }
   if(in>>extra)return refuse(e,"BlackPom resource index trailing data");
+  std::ifstream joints("p2-original-blackpom-joints.txt");
+  if(!(joints>>magic)||magic!="P2_ORIGINAL_BLACKPOM_JOINTS_1")return refuse(e,"BlackPom actual collision joint bank absent");
+  for(unsigned i=0;i<7;++i){
+   unsigned part;int joint,parent;std::string id,code;float x,y,z,radius;
+   if(!(joints>>word>>part>>joint>>parent>>id>>code>>x>>y>>z>>radius)||word!="collider"||part!=i
+     ||joint!=(i<2?0:int((i-1)*2))||parent!=(i?0:-1)||id!=(i==1?"slot":"none")
+     ||code!=(i==1?"st__":"____")||radius!=(i==0?45.f:i==1?30.f:10.f)
+     ||x!=(i==0?5.f:i==1?-7.5f:7.5f)||y!=(i<2?0.f:5.f)||z!=0.f)
+    return refuse(e,"BlackPom original collider topology mismatch");
+   spheres[i]={joint,Vector3f(x,y,z),radius};
+  }
+  for(unsigned motion=0;motion<6;++motion){
+   jointFrames[motion].resize(durations[motion]);
+   for(int frame=0;frame<durations[motion];++frame)for(unsigned joint=0;joint<6;++joint){
+    int actualFrame,actualJoint;
+    if(!(joints>>word>>name>>actualFrame>>actualJoint)||word!="joint"||name!=clips[motion]
+       ||actualFrame!=frame||actualJoint!=int(joint*2))return refuse(e,"BlackPom source collision joint sequence incomplete");
+    auto& matrix=jointFrames[motion][frame][joint];matrix.makeIdentity();
+    for(int r=0;r<3;++r)for(int c=0;c<4;++c){float v;
+     if(!(joints>>v)||!std::isfinite(v))return refuse(e,"BlackPom source collision joint matrix invalid");
+     matrix.mMtx[r][c]=v;
+    }
+   }
+  }
+  if(joints>>extra)return refuse(e,"BlackPom source joint bank trailing data");
   loaded=true;return true;
  }
 };
@@ -78,12 +117,39 @@ bool Native::bind(Pom* body,unsigned token,std::string& e){
   return refuse(e,"BlackPom root lacks actual original source identity");
  // Mark ownership before callback: a failed partial bind still needs release.
  it->second=token;
- if(!m->mechanic.bind(body,identity,token,e)||!m->mechanic.start(body,e))return false;
+ if(!m->mechanic.bind(body,identity,token,e))return false;
+ {
+  AppHeap heap;
+  auto tree=std::make_unique<Impl::Tree>();
+  for(unsigned i=0;i<7;++i){
+   auto& node=tree->nodes[i];const auto& sphere=m->spheres[i];
+   // The six anonymous retail ids repeat. Give them internal lookup ids only;
+   // source slot id/code remain literal slot/st__ for ordinary press contacts.
+   const u32 id=i==1?0x736c6f74u:0x62703030u+i;
+   node.mId.setID(id);node.mCode.setID(i==1?0x73745f5fu:0x5f5f5f5fu);
+   node.mRadius=sphere.radius;node.mCentrePosition=sphere.offset;node.mJointIndex=-1;
+   if(i)tree->nodes[0].add(&node);
+  }
+  tree->own.initInfoTree(&tree->nodes[0]);
+  for(unsigned i=0;i<7;++i){
+   tree->resolved[i]=tree->own.getSphere(tree->nodes[i].mId.mId);
+   if(!tree->resolved[i])return refuse(e,"BlackPom actual slot collision tree unresolved");
+   tree->resolved[i]->mIsUpdateActive=false;tree->resolved[i]->mJointMatrix.makeIdentity();
+  }
+  tree->previous=body->mCollInfo;body->mCollInfo=&tree->own;m->trees.emplace(body,std::move(tree));
+ }
+ if(!m->mechanic.start(body,e)||!follow(body,e))return false;
  e.clear();return true;
 }
 bool Native::release(Pom* body,std::string& e){
  auto it=m->actors.find(body);if(it==m->actors.end())return refuse(e,"BlackPom release does not own root");
  if(it->second){if(!m->mechanic.release(body,e))return false;it->second=0;}
+ auto tree=m->trees.find(body);
+ if(tree!=m->trees.end()){
+  Stickers attached(body);Iterator sticker(&attached);
+  CI_LOOP(sticker){if(*sticker)return refuse(e,"BlackPom collider release still has attached references");}
+  body->mCollInfo=tree->second->previous;m->trees.erase(tree);
+ }
  // Floor owner retires its original registry handle before freeing manager slot.
  unsigned source=0,token=0;if(originalActors().query(body,source,token))return refuse(e,"BlackPom registry authority must retire before pool reuse");
  // Revoke leaf dispatch before kill enters native retirement hooks.
@@ -94,6 +160,12 @@ bool Native::nativeRetired(Pom* body,std::string& e){
  unsigned source=0,token=0;
  if(originalActors().query(body,source,token))return refuse(e,"BlackPom native retirement still has original registry authority");
  if(it->second&&!m->mechanic.release(body,e))return false;
+ auto tree=m->trees.find(body);
+ if(tree!=m->trees.end()){
+  Stickers attached(body);Iterator sticker(&attached);
+  CI_LOOP(sticker){if(*sticker)return refuse(e,"BlackPom retired collider still has attached references");}
+  body->mCollInfo=tree->second->previous;m->trees.erase(tree);
+ }
  m->actors.erase(it);e.clear();return true;
 }
 bool Native::cancel(std::string& e){
@@ -101,6 +173,42 @@ bool Native::cancel(std::string& e){
  m->reserved=0;e.clear();return true;
 }
 bool Native::owns(const Creature* body)const{return m->actors.count(const_cast<Pom*>(dynamic_cast<const Pom*>(body)))!=0;}
+bool Native::collider(const Pom* body,unsigned part,Vector3f& center,float& radius)const{
+ auto it=m->actors.find(const_cast<Pom*>(body));if(it==m->actors.end()||!it->second||part>=7)return false;
+ unsigned source=0,token=0;
+ if(!originalActors().query(body,source,token)||source!=6||token!=it->second)return false;
+ unsigned motion;float frame;
+ if(!m->mechanic.pose(body,motion,frame)||motion>=6||!std::isfinite(frame)||frame<0)return false;
+ const auto& sphere=m->spheres[part];
+ const int sourceFrame=std::min(durations[motion]-1,int(std::min(frame,float(durations[motion]-1))));
+ const auto& local=m->jointFrames[motion][sourceFrame][sphere.joint/2];
+ Matrix4f root,world;root.makeSRT(Vector3f(1,1,1),Vector3f(0,body->mFaceDirection,0),body->mSRT.t);root.multiplyTo(local,world);
+ const auto& p=sphere.offset;
+ center.set(world.mMtx[0][3]+world.mMtx[0][0]*p.x+world.mMtx[0][1]*p.y+world.mMtx[0][2]*p.z,
+            world.mMtx[1][3]+world.mMtx[1][0]*p.x+world.mMtx[1][1]*p.y+world.mMtx[1][2]*p.z,
+            world.mMtx[2][3]+world.mMtx[2][0]*p.x+world.mMtx[2][1]*p.y+world.mMtx[2][2]*p.z);
+ radius=sphere.radius;return true;
+}
+bool Native::follow(Pom* body,std::string& e){
+ auto tree=m->trees.find(body);if(tree==m->trees.end())return refuse(e,"BlackPom follow lacks actual collider tree");
+ unsigned motion;float frame;
+ if(!m->mechanic.pose(body,motion,frame)||motion>=6||!std::isfinite(frame)||frame<0)return refuse(e,"BlackPom follow lacks original motion");
+ const int sourceFrame=int(std::min(frame,float(durations[motion]-1)));
+ for(unsigned i=0;i<7;++i){Vector3f center;float radius;
+  if(!collider(body,i,center,radius))return refuse(e,"BlackPom collider lost qualified mechanic/source identity");
+  auto* part=tree->second->resolved[i];part->mCentre=center;part->mRadius=radius;
+  Matrix4f root,world,cameraRotation;
+  root.makeSRT(Vector3f(1,1,1),Vector3f(0,body->mFaceDirection,0),Vector3f(0,0,0));
+  root.multiplyTo(m->jointFrames[motion][sourceFrame][m->spheres[i].joint/2],world);
+  world.mMtx[0][3]=world.mMtx[1][3]=world.mMtx[2][3]=0;
+  cameraRotation.makeIdentity();
+  for(int r=0;r<3;++r)for(int c=0;c<3;++c)cameraRotation.mMtx[r][c]=invCamMat.mMtx[c][r];
+  // Native CollPart::getMatrix multiplies invCamMat again. Cancel its camera
+  // rotation so attached actors follow source world joints during simulation.
+  cameraRotation.multiplyTo(world,part->mJointMatrix);
+ }
+ e.clear();return true;
+}
 bool Native::draw(Pom* body,Graphics& gfx){
  auto it=m->actors.find(body);if(it==m->actors.end())return false;
  if(!it->second||!gfx.mCamera)return true;

@@ -38,6 +38,11 @@ public:
  // Abort unused reservations after the floor owner releases every partial root.
  bool cancel(std::string&);
  bool draw(Pom*,Graphics&);
+ // Seven original collider parts, evaluated from every integer source BCA
+ // frame. Part 1 is the authored slot/st__ receptor, radius30. Never P1 CollInfo.
+ bool collider(const Pom*,unsigned part,Vector3f& center,float& radius)const;
+ // Simulation update only: seats actual collider tree, independently of draw.
+ bool follow(Pom*,std::string&);
  bool owns(const Creature*)const;
 private:
  struct Impl;std::unique_ptr<Impl> m;
