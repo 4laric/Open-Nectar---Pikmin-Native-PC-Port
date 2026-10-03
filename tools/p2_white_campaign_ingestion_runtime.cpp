@@ -18,6 +18,7 @@
 #include "NaviMgr.h"
 #include "NaviState.h"
 #include "CPlate.h"
+#include "Collision.h"
 #include "Kontroller.h"
 #include "Camera.h"
 #include "KeyConfig.h"
@@ -115,6 +116,14 @@ public:int idle()override{
  if(n&&n->getCurrState()){initialized=true;p2_fixture_require_captain(GameStat::orimaDead,n->getCurrState()->getID()==NAVISTATE_Dead,std::getenv("P2_WHITE_ADULT_FORCE_DOWN")?0.f:n->mHealth,frame);}
  else if(initialized){std::puts("P2_FIXTURE_CAPTAIN_DOWN missing_initialized_captain_or_state outcome=BLOCKED");std::fflush(nullptr);std::_Exit(86);}
  require(frame<5000,"ordinary adult frame backstop");
+ if((phase==5||phase==6||phase==10)&&frame%30==0&&n&&n->getCurrState()&&pikiMgr){
+  auto*grab=n->getCurrState()->getID()==NAVISTATE_ThrowWait?static_cast<NaviThrowWaitState*>(n->getCurrState()):nullptr;
+  auto*hand=n->mCollInfo?n->mCollInfo->getSphere('rhnd'):nullptr;
+  std::printf("P2_WHITE_ADULT_GRAB_NATIVE frame=%d phase=%d movie=%d nstate=%d held=%p pending=%p holding=%d timeout=%.3f n_x=%.3f n_y=%.3f n_z=%.3f hand=%d hand_x=%.3f hand_y=%.3f hand_z=%.3f\n",frame,phase,int(gameflow.mMoviePlayer&&gameflow.mMoviePlayer->mIsActive),n->getCurrState()->getID(),grab?(void*)grab->mHeldThrowPiki:nullptr,grab?(void*)grab->mPendingThrowPiki:nullptr,grab?int(grab->mIsHoldingThrowPiki):0,grab?grab->mPendingThrowPikiTimeout:0.f,n->mSRT.t.x,n->mSRT.t.y,n->mSRT.t.z,int(hand!=nullptr),hand?hand->mCentre.x:0.f,hand?hand->mCentre.y:0.f,hand?hand->mCentre.z:0.f);
+  Iterator observed(pikiMgr);CI_LOOP(observed){auto*p=static_cast<Piki*>(*observed);if(!p->isAlive())continue;
+   std::printf("P2_WHITE_ADULT_GRAB_BODY frame=%d body=%p restored=%d captured=%d white=%d state=%d mode=%d owned=%d ground=%d holding=%d stick=%d x=%.3f y=%.3f z=%.3f\n",frame,(void*)p,int(restored.count(p)!=0),int(captured.count(p)!=0),int(pc_p2_is_white(p)),p->getState(),p->mMode,int(p->mNavi==n),int(p->isCreatureFlag(CF_IsOnGround)),int(p->isHolding()),int(p->isStickTo()||p->getStickObject()!=nullptr),p->mSRT.t.x,p->mSRT.t.y,p->mSRT.t.z);
+  }
+ }
  if(gameflow.mMoviePlayer&&gameflow.mMoviePlayer->mIsActive){if(phase==0)gameflow.mMoviePlayer->requestSkip();return result;}
  if(!n||!n->getCurrState()||!pikiMgr||!itemMgr||!tekiMgr||!flowCont.mCurrentStage)return result;
  if(phase==0&&n->getCurrState()->getID()==NAVISTATE_Starting)return result;
