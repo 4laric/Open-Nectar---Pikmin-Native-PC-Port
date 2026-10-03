@@ -92,7 +92,7 @@ Vector3f pressAim(Teki* enemy,Teki* partner){
         Vector3f away=goal-partner->mSRT.t;away.y=0;away.normalise();
         // Aim at the outside face with ordinary cursor input so the live arc
         // does not intercept the vulnerable Red before physical press contact.
-        goal=goal+away*12.f;
+        goal=goal+away*6.f;
     }
     return goal;
 }
