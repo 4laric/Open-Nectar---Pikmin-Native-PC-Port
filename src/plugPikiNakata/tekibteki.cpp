@@ -1,4 +1,6 @@
 #include "pc_p2_original_drop_engine.h"
+#include "pc_p2_original_corpse_native.h"
+#include "pc_p2_original_actor.h"
 #include "pc_p2_original_pelplant_native.h"
 #include "pc_p2_demon_host.h"
 #ifdef PIKI_PC_PORT
@@ -13,6 +15,7 @@
 #include "pc_p2_dangomushi.h"
 #include "pc_p2_hanachirashi.h"
 #include "pc_p2_catfish.h"
+#include "pc_p2_catfish_source.h"
 #include "pc_p2_mar.h"
 #include "pc_p2_tadpole.h"
 #include "pc_p2_hana.h"
@@ -134,6 +137,12 @@ DEFINE_PRINT("teki");
  */
 void BTeki::viewStartTrembleMotion(f32 motionSpeed)
 {
+#if defined(PIKI_PC_PORT) && PIKI_PC_PORT
+    if(pc_p2_catfish_source_carry_start(this,true)){
+        if(motionSpeed<=0)pc_p2_catfish_source_carry_stop(this);
+        return;
+    }
+#endif
 	startMotion(TekiMotion::Type5);
 	setTekiOption(TEKIOPT_ManualAnimation);
 	mMotionSpeed = motionSpeed;
@@ -144,6 +153,9 @@ void BTeki::viewStartTrembleMotion(f32 motionSpeed)
  */
 void BTeki::viewSetMotionSpeed(f32 speed)
 {
+#if defined(PIKI_PC_PORT) && PIKI_PC_PORT
+    if(speed<=0?pc_p2_catfish_source_carry_stop(this):pc_p2_catfish_source_carry_start(this))return;
+#endif
 	mMotionSpeed = speed;
 }
 
@@ -160,6 +172,9 @@ void BTeki::viewDoAnimation()
  */
 void BTeki::viewFinishMotion()
 {
+#if defined(PIKI_PC_PORT) && PIKI_PC_PORT
+    if(pc_p2_catfish_source_carry_finish(this))return;
+#endif
 	mTekiAnimator->finishMotion(PaniMotionInfo(PANI_NO_MOTION, this));
 }
 
@@ -804,6 +819,9 @@ void BTeki::doAI()
 	if (pc_p2_catfish_suppress_ai(this)) {
 		return;
 	}
+	if (pc_p2_hanachirashi_suppress_ai(this)) {
+		return;
+	}
 	if (pc_p2_hana_suppress_ai(this)) {
 		return;
 	}
@@ -895,7 +913,7 @@ void BTeki::dieSoon()
 	if (pc_held_part_p2_source(this)) pc_held_part_drop(this, "dieSoon");
 #endif
 	clearTekiOption(TEKIOPT_Alive | TEKIOPT_Visible | TEKIOPT_ShadowVisible | TEKIOPT_Atari);
-	if (getParameterI(TPI_CorpseType) == TEKICORPSE_LeaveCorpse) {
+	if (pc_p2_original_corpse_leaves(this,getParameterI(TPI_CorpseType) == TEKICORPSE_LeaveCorpse)) {
 		createSoulEffect();
 		u32 typeID = TekiMgr::getTypeId(mTekiType);
 		ID32 id(typeID);
@@ -927,6 +945,8 @@ void BTeki::dieSoon()
 		}
 #endif
 
+		unsigned originalSource=0;
+		if (pc_p2_original_actor_source(this,originalSource)) vec1.set(mSRT.t);
 		becomePellet(typeID, vec1, getDirection());
 		PRINT_NAKATA("dieSoon:%08x:pellet:%08x\n", this, mPellet);
 		if (!mPellet) {

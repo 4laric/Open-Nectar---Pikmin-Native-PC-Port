@@ -3,6 +3,9 @@
 class BTeki;
 bool pc_p2_catfish_mouth_resources(std::string& error);
 bool pc_p2_catfish_mouth_birth(BTeki* actor,std::string& error);
+// Authored source body ownership lasts through the corpse actor lifecycle.
+bool pc_p2_catfish_mouth_owns_body(BTeki* actor);
+bool pc_p2_catfish_mouth_body_intact(BTeki* actor);
 bool pc_p2_catfish_mouth_follow(BTeki* actor,const std::string& clip,float sourceFrame);
 int pc_p2_catfish_mouth_eat(BTeki* actor);
 int pc_p2_catfish_mouth_swallow(BTeki* actor);

@@ -266,6 +266,9 @@ set(PC_PORT_SOURCES
     pc_port/pc_p2_original_spawn_plan.cpp
     pc_port/pc_p2_original_catalog.cpp
     pc_port/pc_p2_original_actor.cpp
+    pc_port/pc_p2_original_corpse_profile.cpp
+    pc_port/pc_p2_original_corpse_ledger.cpp
+    pc_port/pc_p2_original_corpse_native.cpp
     pc_port/pc_p2_original_lifecycle.cpp
     pc_port/pc_p2_original_group.cpp
     pc_port/pc_p2_original_progress.cpp
@@ -424,7 +427,12 @@ set(PC_PORT_SOURCES
     pc_port/pc_p2_original_catfish.cpp
     pc_port/pc_p2_original_catfish_native.cpp
     pc_port/pc_p2_catfish_mouth.cpp
+    pc_port/pc_p2_catfish_source.cpp
     pc_port/pc_p2_catfish.cpp
+    pc_port/pc_p2_original_hanachirashi.cpp
+    pc_port/pc_p2_original_hanachirashi_native.cpp
+    pc_port/pc_p2_hanachirashi_source.cpp
+    pc_port/pc_p2_hanachirashi_receiver.cpp
     pc_port/pc_p2_hanachirashi.cpp
     pc_port/pc_p2_dangomushi.cpp
     pc_port/pc_p2_snakejoint.cpp
@@ -3202,6 +3210,14 @@ if(NOT PIKMIN_NATIVE_JAUDIO)
 endif()
 
 if(PIKMIN_BUILD_TESTS AND NOT ANDROID)
+add_executable(pc_p2_original_corpse_ledger_test tools/pc_p2_original_corpse_ledger_test.cpp
+    pc_port/pc_p2_original_corpse_ledger.cpp)
+target_include_directories(pc_p2_original_corpse_ledger_test PRIVATE pc_port)
+add_test(NAME p2_original_corpse_ledger COMMAND pc_p2_original_corpse_ledger_test)
+add_executable(pc_p2_original_corpse_profile_test tools/pc_p2_original_corpse_profile_test.cpp
+    pc_port/pc_p2_original_corpse_profile.cpp)
+target_include_directories(pc_p2_original_corpse_profile_test PRIVATE pc_port)
+add_test(NAME p2_original_corpse_profile COMMAND pc_p2_original_corpse_profile_test)
 add_executable(pc_midday_audio_fence_test tools/pc_midday_audio_fence_test.cpp pc_port/pc_midday_audio_fence.cpp)
 target_include_directories(pc_midday_audio_fence_test PRIVATE pc_port)
 target_link_libraries(pc_midday_audio_fence_test PRIVATE ${SDL2_LIBRARIES})
@@ -3333,3 +3349,24 @@ add_executable(pc_p2_catfish_mouth_test tools/test_p2_catfish_mouth.cpp)
 target_include_directories(pc_p2_catfish_mouth_test PRIVATE pc_port)
 target_compile_options(pc_p2_catfish_mouth_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
 add_test(NAME pc_p2_catfish_mouth_test COMMAND pc_p2_catfish_mouth_test)
+
+add_executable(pc_p2_catfish_source_test tools/test_p2_catfish_source.cpp)
+target_include_directories(pc_p2_catfish_source_test PRIVATE pc_port)
+target_compile_options(pc_p2_catfish_source_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME pc_p2_catfish_source_test COMMAND pc_p2_catfish_source_test)
+add_executable(pc_p2_original_hanachirashi_test tools/test_p2_original_hanachirashi.cpp
+    pc_port/pc_p2_original_hanachirashi.cpp pc_port/pc_p2_original_spawn_plan.cpp
+    pc_port/pc_p2_original_drop.cpp pc_port/pc_p2_original_catalog.cpp)
+target_include_directories(pc_p2_original_hanachirashi_test PRIVATE pc_port)
+target_compile_options(pc_p2_original_hanachirashi_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME pc_p2_original_hanachirashi_test COMMAND pc_p2_original_hanachirashi_test)
+
+add_executable(pc_p2_hanachirashi_source_test tools/test_p2_hanachirashi_source.cpp)
+target_include_directories(pc_p2_hanachirashi_source_test PRIVATE pc_port)
+target_compile_options(pc_p2_hanachirashi_source_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME pc_p2_hanachirashi_source_test COMMAND pc_p2_hanachirashi_source_test)
+# Actual shared receiver compiled with small observable engine doubles.
+add_executable(pc_p2_source_flick_receiver_test tools/test_p2_source_flick_receiver.cpp pc_port/pc_p2_hanachirashi_receiver.cpp)
+target_include_directories(pc_p2_source_flick_receiver_test BEFORE PRIVATE tools/source_flick_stubs pc_port)
+target_compile_options(pc_p2_source_flick_receiver_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME pc_p2_source_flick_receiver_test COMMAND pc_p2_source_flick_receiver_test)

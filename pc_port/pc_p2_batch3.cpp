@@ -4,6 +4,7 @@
 #include "pc_p2_dangomushi.h"
 #include "pc_p2_hanachirashi.h"
 #include "pc_p2_catfish.h"
+#include "pc_p2_catfish_source.h"
 // Family-owned batch-3 P2 visual registration: aquatic (#374), flying (#375)
 // and snagret (#376).
 //
@@ -45,6 +46,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include "pc_p2_body_coll.h"
+#include "pc_p2_catfish_mouth.h"
 #include <fstream>
 #include <map>
 #include <set>
@@ -454,7 +456,8 @@ void pc_p2_batch3_update(BTeki* actor, float seconds) {
     if (!actor) return;
     auto boundKey = actors.find(actor);
     if (boundKey == actors.end()) return;
-    pc_p2_body_coll_assign(actor, boundKey->second);
+    if (!pc_p2_catfish_mouth_owns_body(actor))
+        pc_p2_body_coll_assign(actor, boundKey->second);
     const p2motion::Tunables& tune = p2motion::tunables();
     const float speed = actor->mVelocity.x * actor->mVelocity.x + actor->mVelocity.z * actor->mVelocity.z;
     gates[actor].update(speed, seconds, tune);
@@ -846,6 +849,13 @@ bool pc_p2_batch3_draw(BTeki* actor, Graphics& gfx, const Matrix4f& matrix, bool
     const int motion = actor->mTekiAnimator->getCurrentMotionIndex();
     const char* name = nullptr;
     float forcedPhase = -1.0f;
+    bool sourceCorpse=false;
+    if(corpse){const char* forced=nullptr;float phase=0;
+        if(pc_p2_catfish_source_corpse_clip(actor,forced,phase)){
+            if(!bank.clips.count(forced)){std::fprintf(stderr,"P2_ORIGINAL_CATFISH missing corpse Carry clip\n");std::abort();}
+            name=forced;forcedPhase=phase;sourceCorpse=true;
+        }
+    }
     // Family-owned source behavior: a registered Tadpole forces the exact source
     // clip/phase for its FSM state instead of the generic P1-velocity pick.
     if (!corpse) {
@@ -856,7 +866,7 @@ bool pc_p2_batch3_draw(BTeki* actor, Graphics& gfx, const Matrix4f& matrix, bool
             forcedPhase = phase;
         }
     }
-    if (corpse) {
+    if (corpse && !sourceCorpse) {
         name = firstClip(bank, deadClips, int(sizeof(deadClips) / sizeof(deadClips[0])));
     } else if (!name && (motion == TekiMotion::Damage || motion >= TekiMotion::Type1)) {
         name = firstClip(bank, attackClips, int(sizeof(attackClips) / sizeof(attackClips[0])));
@@ -893,8 +903,9 @@ bool pc_p2_batch3_draw(BTeki* actor, Graphics& gfx, const Matrix4f& matrix, bool
     // Death clips stop at their last visible pose (#895, p2motion::isDeathClip).
     auto holdIt = bank.hold.find(name);
     const size_t holdIndex = holdIt != bank.hold.end() && holdIt->second < poses.size() ? holdIt->second : poses.size() - 1;
-    size_t index = timing.index(phase, corpse);
-    if ((corpse || p2motion::isDeathClip(name)) && index > holdIndex) index = holdIndex;
+    const bool freezeCorpse=corpse&&!sourceCorpse;
+    size_t index = timing.index(phase, freezeCorpse);
+    if ((freezeCorpse || p2motion::isDeathClip(name)) && index > holdIndex) index = holdIndex;
     Shape* shape = poses.at(index < poses.size() ? index : poses.size() - 1);
     // Decoded pose vectors drive the draw (#895); see pc_p2_batch2.cpp.
     auto bakedIt = bank.baked.find(name);
@@ -909,9 +920,9 @@ bool pc_p2_batch3_draw(BTeki* actor, Graphics& gfx, const Matrix4f& matrix, bool
             tune.lerp = interpIt != bank.interp.end() && interpIt->second;
             const float clampedPhase =
                 phase != phase ? 0.0f : (phase < 0.0f ? 0.0f : (phase > 1.0f ? 1.0f : phase));
-            float drawFrame = corpse ? float(timing.duration - 1)
+            float drawFrame = freezeCorpse ? float(timing.duration - 1)
                                      : clampedPhase * float(timing.duration - 1);
-            if ((corpse || p2motion::isDeathClip(name)) && holdIndex < frames.size()
+            if ((freezeCorpse || p2motion::isDeathClip(name)) && holdIndex < frames.size()
                     && drawFrame > float(frames[holdIndex]))
                 drawFrame = float(frames[holdIndex]);
             const auto& bakedVec = bakedIt->second;
