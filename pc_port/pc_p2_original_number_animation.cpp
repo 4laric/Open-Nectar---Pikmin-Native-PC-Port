@@ -65,6 +65,8 @@ bool Animation::sample(float frame,std::array<float,12>& out)const noexcept{
 }
 bool CarryPlayer::start(float dt)noexcept{
  if(!std::isfinite(dt)||dt<0||!std::isfinite(30*dt))return false;
+ // Retail repick cannot interrupt an outstanding finish-motion tail.
+ if(mFinish)return true;
  mTimer=0;mStep=30*dt;mFinish=false;return true;
 }
 bool CarryPlayer::advance(float dt,bool picked)noexcept{

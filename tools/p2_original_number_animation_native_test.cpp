@@ -25,7 +25,8 @@ int main(int argc,char** argv){
  for(unsigned i=0;i<30;++i)check(p.advance(1.0f/60,true),"player advances with captured step");
  check(p.sampleFrame()==30,"loop end event waits for integer timer past30");
  check(p.advance(1.0f/60,true)&&p.sampleFrame()==10,"loop returns to10 and discards overshoot");
- p.finish();for(unsigned i=0;i<30;++i)check(p.advance(1.0f/60,false),"finish leaves loop and advances towardEND");
+ p.finish();check(p.start(1.0f/60)&&p.sampleFrame()==10&&near(p.step(),1)&&p.finishing(),"quick repick retains finishing tail and cached step");
+ for(unsigned i=0;i<30;++i)check(p.advance(1.0f/60,false),"finish leaves loop and advances towardEND");
  check(p.sampleFrame()==40&&p.finishing(),"finish reaches last actual pose beforeEND");
  check(p.advance(1.0f/60,false)&&p.sampleFrame()==0&&near(p.step(),0)&&!p.finishing(),"unpickedEND restarts zero and stops");
  check(p.start(2.0f/30)&&p.advance(0,true),"overshoot setup");for(unsigned i=0;i<15;++i)check(p.advance(0,true),"overshoot advances");
