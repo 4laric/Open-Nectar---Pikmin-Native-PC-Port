@@ -54,8 +54,18 @@ runner build and actual physical gameplay remain required. Animated joint data
 has independent asset-producer validation; this does not prove stick/contact
 behavior in gameplay.
 
-Repugnant Appendage immunity requires the captain upgrade owner's API. Generic
-item geometry must use source55 root+500 for all drops while retaining common
-number-pellet velocities; its shared owner is implementing that API. Retail wind
+Repugnant Appendage immunity requires the captain upgrade owner's API. Source55
+item geometry is registered before provider preflight against held-treasure
+commit 9a2aaba90. It uses real root+500 for all drops and zero velocity only
+for held treasure; common number-pellet velocity RNG is unchanged. The callback
+implements the ordinary state; the retail Bittered fallback awaits the stone API. Retail wind
 and landing effects, shadow offsets/radius, dynamic reaction save serialization,
 and gameplay/save-resume qualification remain open. These are not PASS claims.
+
+The held-treasure dependency is composed in merge 6ef1c473f. Dense legal draw
+bank SHA189b8cdc2a06f0721a75993b060a0c70807529ac046075c1bc7977ed1344ccce
+contains 462 frames across eleven clips and has independent native decoder
+validation. Startup must stage it privately with the complete joint bank.
+Prior runner pin 3ca6fe3dd production and both focused tests passed; its ELF SHA
+is 72ae1e046f17cf59c13523b51b87cf7810bccd1a0f642d486b70c5b0013e05ff.
+This receipt does not qualify the later geometry/dependency composition or gameplay.
