@@ -429,15 +429,18 @@ void receiverWallCache(){
  }
  require(!receiverRouteWalls.empty(),"route original walls missing");receiverRouteShape=shape;
 }
-void receiverCheckSphere(RouteVec center,double rejectRadius,const char* role="original-route",int actor=-1,int guide=-1,int sample=-1){
+void receiverCheckSphere(RouteVec center,double rejectRadius,const char* role="original-route",int actor=-1,int guide=-1,int sample=-1,bool currentContact=false){
  require(rvfinite(center)&&std::isfinite(rejectRadius)&&rejectRadius>0,"route invalid sphere");
  for(const auto& w:receiverRouteWalls){
   if(center.x<std::min({w.a.x,w.b.x,w.c.x})-rejectRadius||center.x>std::max({w.a.x,w.b.x,w.c.x})+rejectRadius
    ||center.y<std::min({w.a.y,w.b.y,w.c.y})-rejectRadius||center.y>std::max({w.a.y,w.b.y,w.c.y})+rejectRadius
    ||center.z<std::min({w.a.z,w.b.z,w.c.z})-rejectRadius||center.z>std::max({w.a.z,w.b.z,w.c.z})+rejectRadius)continue;
   double d=routeTriangleDistance(center,w.a,w.b,w.c);
-  if(!(std::isfinite(d)&&d>rejectRadius))std::printf("P2_PURPLE_KOCHAPPY_WALL_REFUSAL role=%s generator=%d guide=%d sample=%d source_face=%d center=%.9f,%.9f,%.9f reject_radius=%.9f triangle_distance=%.9f a=%.9f,%.9f,%.9f b=%.9f,%.9f,%.9f c=%.9f,%.9f,%.9f read_only=1 actor_writes=0\n",role,actor,guide,sample,w.sourceFace,center.x,center.y,center.z,rejectRadius,d,w.a.x,w.a.y,w.a.z,w.b.x,w.b.y,w.b.z,w.c.x,w.c.y,w.c.z);
-  require(std::isfinite(d)&&d>rejectRadius,"route unsafe static wall contact/shortcut");
+  const double scale=std::max({1.,rejectRadius,std::fabs(center.x),std::fabs(center.y),std::fabs(center.z),std::fabs(w.a.x),std::fabs(w.a.y),std::fabs(w.a.z),std::fabs(w.b.x),std::fabs(w.b.y),std::fabs(w.b.z),std::fabs(w.c.x),std::fabs(w.c.y),std::fabs(w.c.z)});
+  const bool safe=currentContact?pc_kochappy_current_wall_contact(d,rejectRadius,scale):std::isfinite(d)&&d>rejectRadius;
+  if(currentContact&&!safe)std::printf("P2_PURPLE_KOCHAPPY_CURRENT_PENETRATION role=%s generator=%d face=%d radius=%.9f distance=%.9f coordinate_scale=%.9f float_tolerance=%.9f forecast_padding_unchanged=1 actor_writes=0\n",role,actor,w.sourceFace,rejectRadius,d,scale,pc_kochappy_current_wall_tolerance(rejectRadius,scale));
+  if(!safe)std::printf("P2_PURPLE_KOCHAPPY_WALL_REFUSAL role=%s generator=%d guide=%d sample=%d source_face=%d center=%.9f,%.9f,%.9f reject_radius=%.9f triangle_distance=%.9f a=%.9f,%.9f,%.9f b=%.9f,%.9f,%.9f c=%.9f,%.9f,%.9f read_only=1 actor_writes=0\n",role,actor,guide,sample,w.sourceFace,center.x,center.y,center.z,rejectRadius,d,w.a.x,w.a.y,w.a.z,w.b.x,w.b.y,w.b.z,w.c.x,w.c.y,w.c.z);
+  require(safe,"route unsafe static wall contact/shortcut");
  }
 }
 void receiverRouteClearance(Navi* n,int target){
@@ -608,19 +611,19 @@ class PurpleKochappyApp:public PlugPikiApp {
   if(contact==PcKochappyPrefixContact::Wait){input();return true;}
   // All original grounded/dry/normal>.5 contacts are required before any
   // footprint/path admission or movement. A transient does not bypass them.
-  bool allSafeFormed=true;
+  bool allSafeControlled=true;
   for(Piki* p:current){
    Vector3f target;PcKochappyCrowdObservation observation;
    require(CrowdObserver::target(*p,*n,target,observation),"prefix actual owned Crowd target missing/unsupported");
    const float targetSpan=distance(n->mSRT.t,target);
    require(std::isfinite(targetSpan)&&targetSpan<512.f,"prefix Crowd target outside verified span");width=std::max(width,targetSpan);
-   allSafeFormed=allSafeFormed&&observation.state==1&&!observation.tripping&&!observation.route;
+   allSafeControlled=allSafeControlled&&observation.valid()&&!observation.tripping&&!observation.route;
    // Check every ACTUAL body and owned slot footprint against source walls;
    // this is refreshed native geometry, not a rigid future-party translation.
    const float r=p->mCollisionRadius;
    require(std::isfinite(r)&&r>0.f,"prefix invalid native body radius");
    const float offset=p->isCreatureFlag(CF_EnableGroundOffset)?p->mGroundOffset:0.f;
-   receiverCheckSphere({p->mSRT.t.x,p->mSRT.t.y-offset+r,p->mSRT.t.z},r+.10,"prefix-current-body",int(p->mGenerator->_70),prefixProgress.guide);
+   receiverCheckSphere({p->mSRT.t.x,p->mSRT.t.y-offset+r,p->mSRT.t.z},r,"prefix-current-body",int(p->mGenerator->_70),prefixProgress.guide,-1,true);
    if(!prefixNeutralDone)continue;
    auto* floor=mapMgr->getCurrTri(target.x,target.z,true);const float y=mapMgr->getMinY(target.x,target.z,true);
    require(floor&&std::isfinite(y)&&std::isfinite(floor->mTriangle.mNormal.y)&&floor->mTriangle.mNormal.y>.5f,
@@ -632,12 +635,12 @@ class PurpleKochappyApp:public PlugPikiApp {
    const float right=n->mKontroller->getSubStickX(),up=n->mKontroller->getSubStickY();
    const float rightLength=std::hypot(right,up),previous=n->mPrevCStick.length(),targetSpeed=n->mTargetVelocity.length();
    const int edge=pc_kochappy_neutral_edge(prefixEdgeSent,n->mPlateDirLocked,n->mIsCStickNeutral,
-    roster&&allSafeFormed,n->mFormationBand,rightLength,previous,targetSpeed,pc_window_get_stick_dead_zone());
+    roster&&allSafeControlled,n->mFormationBand,rightLength,previous,targetSpeed,pc_window_get_stick_dead_zone());
    require(edge>=0,"prefix unsupported ordinary neutral inputs");
-   const bool ready=allSafeFormed&&!n->mPlateDirLocked&&n->mIsCStickNeutral&&rightLength<=.05f&&previous<=.05f&&targetSpeed<50.f;
+   const bool ready=allSafeControlled&&!n->mPlateDirLocked&&n->mIsCStickNeutral&&rightLength<=.05f&&previous<=.05f&&targetSpeed<50.f;
    const int setup=prefixNeutral.observe(ready);
-   std::printf("P2_PURPLE_KOCHAPPY_PREFIX_NEUTRAL age=%d observations=%d formed=%d locked=%d neutral=%d band=%d right=%.6f previous=%.6f target_speed=%.6f edge=%d edge_verified=%d ready=%d actor_writes=0\n",
-    age,prefixNeutral.observations,int(allSafeFormed),int(n->mPlateDirLocked),int(n->mIsCStickNeutral),n->mFormationBand,rightLength,previous,targetSpeed,edge,int(prefixEdgeVerified),int(ready));
+   std::printf("P2_PURPLE_KOCHAPPY_PREFIX_NEUTRAL age=%d observations=%d controlled=%d locked=%d neutral=%d band=%d right=%.6f previous=%.6f target_speed=%.6f edge=%d edge_verified=%d ready=%d actor_writes=0\n",
+    age,prefixNeutral.observations,int(allSafeControlled),int(n->mPlateDirLocked),int(n->mIsCStickNeutral),n->mFormationBand,rightLength,previous,targetSpeed,edge,int(prefixEdgeVerified),int(ready));
    require(setup>=0,"prefix bounded ordinary neutral setup exhausted");
    if(edge>0){prefixEdgeSent=true;prefixEdgeAge=age;input(0,0,0,edge,0);}else input();
    prefixNeutralDone=setup==1;return true;

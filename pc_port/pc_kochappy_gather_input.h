@@ -1,5 +1,6 @@
 #pragma once
 #include <cmath>
+#include <limits>
 
 // Input planning only. Recruitment remains the native strict XZ radius test.
 enum class PcKochappyGatherInput { Refuse, Cursor, Walk };
@@ -135,3 +136,16 @@ public:
  int observations=0;
  int observe(bool ready){if(observations>=90)return -1;++observations;return ready?1:0;}
 };
+
+// Coordinates/radii originate as native float. Eight relative float ulps
+// cover the two quantized endpoints and sphere-centre additions; distance
+// evaluation itself uses double. This is only a CURRENT contact tolerance,
+// never prospective route/slot padding.
+inline double pc_kochappy_current_wall_tolerance(double radius,double coordinateScale){
+ if(!std::isfinite(radius)||radius<=0||!std::isfinite(coordinateScale)||coordinateScale<1||coordinateScale<radius)return -1;
+ return 8.*std::numeric_limits<float>::epsilon()*coordinateScale;
+}
+inline bool pc_kochappy_current_wall_contact(double distance,double radius,double coordinateScale){
+ const double tolerance=pc_kochappy_current_wall_tolerance(radius,coordinateScale);
+ return std::isfinite(distance)&&distance>=0&&tolerance>=0&&distance+tolerance>=radius;
+}

@@ -192,4 +192,12 @@ int main(){
  PcKochappyPrefixNeutralGate stalledSetup;
  for(int i=0;i<90;++i)CHECK(stalledSetup.observe(false)==0);
  CHECK(stalledSetup.observe(false)==-1);
+ CHECK(pc_kochappy_current_wall_contact(8.499937478,8.5,2208.129883));
+ CHECK(pc_kochappy_current_wall_contact(8.5,8.5,2208.129883));
+ CHECK(!pc_kochappy_current_wall_contact(8.45,8.5,2208.129883));
+ CHECK(!pc_kochappy_current_wall_contact(-1,8.5,2208.129883));
+ CHECK(!pc_kochappy_current_wall_contact(NAN,8.5,2208.129883));
+ CHECK(!pc_kochappy_current_wall_contact(8.5,8.5,NAN));
+ CHECK(!pc_kochappy_current_wall_contact(8.5,8.5,1));
+ CHECK(!(8.499937478>8.5+.10)); // Prospective reserve still refuses same touching pose.
 }
