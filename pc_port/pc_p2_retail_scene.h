@@ -56,3 +56,8 @@ const p2retail::SceneContext* pc_p2_retail_scene_committed() noexcept;
 // A committed scene alone is not a running World: the source World lifecycle
 // owner supplies the actual game/movie/pause boundary before this can be true.
 bool pc_p2_retail_scene_game_active() noexcept;
+// Typed live consumers must match the actual scene, serial and authenticated
+// selection before asking about activity. Installation or reunion alone never
+// grants activity; movie, pause, UI and day-end exclusions remain source-owned.
+bool pc_p2_retail_scene_current_activity(const p2retail::SceneIdentity&,
+    std::uint64_t nativeSerial,std::uint64_t selectionRevision) noexcept;
