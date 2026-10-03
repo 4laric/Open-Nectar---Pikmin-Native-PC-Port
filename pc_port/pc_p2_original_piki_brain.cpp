@@ -100,10 +100,16 @@ bool execBore(Handle h,BoreState& b,Services& s,float dt,int& result,std::string
 
 }
 bool brainCleanup(Handle h,RuntimeState& r,Services& s,std::string& e){
- if(r.brain.action==Action::None)return true;
- if(r.brain.action==Action::Free)return s.freeEffects(h,false,e);
- if(r.brain.slot!=-1&&!s.releaseSlot(h,r.brain.navi,r.brain.slot,e))return false;
- r.brain.slot=-1;r.brain.navi=nullptr;return true;
+ bool complete=true;
+ if(r.brain.freeEffectsOwned||r.brain.action==Action::Free){
+  if(s.freeEffects(h,false,e))r.brain.freeEffectsOwned=false;else complete=false;
+ }
+ if(r.brain.action==Action::Formation&&r.brain.slot!=-1){
+  std::string slotError;
+  if(s.releaseSlot(h,r.brain.navi,r.brain.slot,slotError)){r.brain.slot=-1;r.brain.navi=nullptr;}
+  else{if(complete)e=slotError;else e+="; "+slotError;complete=false;}
+ }
+ return complete;
 }
 bool brainCleanupAll(Handle h,RuntimeState& r,Services& s,std::string& e){
  bool clean=brainCleanup(h,r,s,e);
@@ -117,8 +123,10 @@ bool brainCleanupAll(Handle h,RuntimeState& r,Services& s,std::string& e){
 }
 bool brainFree(Handle h,RuntimeState& r,Services& s,std::string& e){
  if(r.brain.pendingSlot!=-1)return fail(e,"source Free transition cannot discard pending Formation slot");
- if(!brainCleanup(h,r,s,e)||!s.motion(h,Motion::Wait,e)||!s.freeEffects(h,true,e))return false;
- r.brain=BrainState{};
+ if(!brainCleanup(h,r,s,e)||!s.motion(h,Motion::Wait,e))return false;
+ r.brain.freeEffectsOwned=true; // Own callback attempts before native writes.
+ if(!s.freeEffects(h,true,e))return false;
+ r.brain=BrainState{};r.brain.freeEffectsOwned=true;
  h.body->mNavi=nullptr;h.body->mTargetVelocity.set(0,0,0);
  return true;
 }
@@ -147,6 +155,11 @@ bool brainFormation(Handle h,RuntimeState& r,Services& s,Navi* n,std::string& e)
  if(r.brain.pendingSlot!=-1)return fail(e,"source Formation still owns a pending cleanup slot");
  CaptainFrame frame;if(!n||!s.captainFrame(n,frame,e)||!frame.alive||!frame.formationable)return false;
  if(!s.supports(h,Motion::Run2,e))return false;
+ // Retail Brain::start cleans the old action before Formation::init. The
+ // whistle path already does so before LookAt. Do not duplicate one body in
+ // a single source plate through a direct same-captain reinit request.
+ if(r.brain.action==Action::Formation&&r.brain.navi==n&&r.brain.slot>=0)
+  return fail(e,"source Formation reinit requires old Brain cleanup first");
  int slot=-1;bool allocated=s.allocateSlot(h,n,slot,e);
  if(slot>=0){r.brain.pendingSlot=slot;r.brain.pendingNavi=n;}
  if(!allocated||slot<0)return fail(e,"source Formation has no committed actual CPlate slot");

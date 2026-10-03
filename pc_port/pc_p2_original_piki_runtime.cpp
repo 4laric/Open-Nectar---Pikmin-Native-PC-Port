@@ -56,16 +56,19 @@ bool parameter(const std::string& raw,const char* key,float& out){
  if(!(stream>>type>>value)||type!=4||!std::isfinite(value))return false;
  out=value;return true;
 }
-bool canonical(std::string& e){
+enum class PhaseUse { Action, Bootstrap };
+bool canonical(std::string& e,PhaseUse use=PhaseUse::Action){
  auto* loaded=pc_p2_original_captain_loaded_scene();auto* world=pc_p2_original_captain_world();
  if(!services||!loaded||&services->scene()!=loaded||!world||!loaded->incarnation()
  ||loaded->incarnation()!=world->incarnation()||loaded->selectedCampaign()!=world->selectedCampaign()
  ||loaded->selectedFingerprint()!=world->selectedFingerprint()||loaded->sourceCatalog()!=world->sourceCatalog()
- ||world->phase()!=captain::Phase::GameWorldActive)return fail(e,"SourcePiki has no canonical active source scene");
+ ||loaded->captainAt(0)!=world->captainAt(0)||loaded->captainAt(1)!=world->captainAt(1)
+ ||(world->phase()!=captain::Phase::GameWorldActive
+   &&!(use==PhaseUse::Bootstrap&&world->phase()==captain::Phase::Loading)))return fail(e,"SourcePiki has no canonical active source scene");
  return true;
 }
-bool body(const Piki* p,PcP2SourceBody& out,std::string& e){
- if(!canonical(e)||!p)return false;
+bool body(const Piki* p,PcP2SourceBody& out,std::string& e,PhaseUse use=PhaseUse::Action){
+ if(!canonical(e,use)||!p)return false;
  auto kind=pc_p2_source_body_query(p,out);
  if(kind!=PcP2SourceBodyKind::GenPiki)return fail(e,"SourcePiki runtime currently requires actual GenPiki lifetime producer");
  if(kind==PcP2SourceBodyKind::GenPiki){
@@ -98,8 +101,9 @@ bool cleanup(Entry& x,std::string& e){
  auto& r=x.runtime;
  if(r.state==State::GoHang)r.collisionFlick=true;
  if(r.state==State::Hanged)r.atari=true;
- if(r.state==State::Flying){
+ if(r.state==State::Flying||r.throwEffectsOwned){
   if(!services->throwEffects(x.handle,false,e))return false;
+  r.throwEffectsOwned=false;
   r.forceActive=false;r.moveVelocity=true;
  }
  return true;
@@ -121,7 +125,7 @@ bool enter(Entry& x,State state,std::string& e){
  }
  if(state==State::Flying){
   r.flowerFalling=false;r.flyingFrames=0;r.moveVelocity=false;r.forceActive=true;
-  return services->throwEffects(x.handle,true,e);
+  r.throwEffectsOwned=true;return services->throwEffects(x.handle,true,e);
  }
  return true;
 }
@@ -148,7 +152,7 @@ bool parseParameters(const std::string& pb,const std::string& nb,float g,Paramet
 }
 bool installServices(Services& s)noexcept {if(services)return services==&s;services=&s;return true;}
 static bool initializeImpl(Piki* p,std::string& e){
- PcP2SourceBody b;if(!body(p,b,e))return false;
+ PcP2SourceBody b;if(!body(p,b,e,PhaseUse::Bootstrap))return false;
  if(actors.count(p))return fail(e,"SourcePiki already initialized; forget old lifetime before reuse");
  Entry x;x.handle={p,b.nativeLifetime};x.scene=services->scene().incarnation();
  x.pikiBytes=services->pikiParameterBytes();x.naviBytes=services->naviParameterBytes();
@@ -161,7 +165,11 @@ static bool initializeImpl(Piki* p,std::string& e){
  auto inserted=actors.emplace(p,std::move(x));auto& pending=inserted.first->second;
  try{
   if(services->motion(pending.handle,Motion::Wait,e)&&brainFree(pending.handle,pending.runtime,*services,e)&&!ownerReentered){
-   pending.committed=true;return true;
+   PcP2SourceBody after;
+   if(body(p,after,e,PhaseUse::Bootstrap)&&after.nativeLifetime==pending.handle.lifetime
+      &&pending.pikiBytes==services->pikiParameterBytes()&&pending.naviBytes==services->naviParameterBytes()
+      &&!ownerReentered){pending.committed=true;return true;}
+   e="SourcePiki bootstrap lifetime/scene/selected parameters changed during callbacks";
   }
  }catch(...){e="source initialization callback threw; pending ownership retained";}
  std::string cleanupError;
@@ -359,6 +367,42 @@ static bool collisionImpl(Handle h,const CollEvent& event,std::string& e){
  }
  return true;
 }
+bool slotsChanged(const std::vector<SlotChange>& changes,std::string& e){
+ ReadOperation op;
+ auto* scene=pc_p2_original_captain_loaded_scene();auto* world=pc_p2_original_captain_world();
+ if(!services||!scene||&services->scene()!=scene||!world||!scene->incarnation()
+    ||scene->incarnation()!=world->incarnation()||scene->selectedCampaign()!=world->selectedCampaign()
+    ||scene->selectedFingerprint()!=world->selectedFingerprint()||scene->sourceCatalog()!=world->sourceCatalog())
+  return fail(e,"source slot notification lacks exact canonical lifetime scene");
+ struct Update {BrainState* brain;bool pending;int slot;};std::vector<Update> updates;updates.reserve(changes.size());
+ for(std::size_t j=0;j<changes.size();++j){
+  const auto& change=changes[j];OriginalPikiBodyHandle live;auto i=actors.find(change.handle.body);
+  bool captain=false;for(unsigned k=0;k<2;++k)if(change.captain&&scene->captainAt(k)==change.captain&&world->captainAt(k)==change.captain)captain=true;
+  if(!captain||change.oldSlot<0||change.newSlot< -1||!change.handle.lifetime||i==actors.end()
+    ||i->second.scene!=scene->incarnation()||i->second.handle.lifetime!=change.handle.lifetime
+    ||!pc_p2_original_piki_body_handle(change.handle.body,live)||live.nativeLifetime!=change.handle.lifetime)
+   return fail(e,"stale or foreign source CPlate slot notification");
+  for(std::size_t k=0;k<j;++k){const auto& other=changes[k];
+   if((other.handle.body==change.handle.body&&other.captain==change.captain)||(other.captain==change.captain
+     &&(other.oldSlot==change.oldSlot||(change.newSlot>=0&&other.newSlot==change.newSlot))))
+    return fail(e,"duplicate source CPlate slot notification");
+  }
+  auto& brain=i->second.runtime.brain;
+  if(brain.action==Action::Formation&&brain.navi==change.captain&&brain.slot==change.oldSlot)
+   updates.push_back({&brain,false,change.newSlot});
+  else if(brain.pendingNavi==change.captain&&brain.pendingSlot==change.oldSlot)
+   updates.push_back({&brain,true,change.newSlot});
+  else return fail(e,"source CPlate notification does not match retained Brain slot ownership");
+ }
+ if(!op.complete(true,e))return false;
+ // Whole batch validates before any slot write. Notifications never erase
+ // owners or start actions, so callbacks can safely retain their Entry refs.
+ for(auto& update:updates){
+  if(update.pending){update.brain->pendingSlot=update.slot;if(update.slot==-1)update.brain->pendingNavi=nullptr;}
+  else update.brain->slot=update.slot;
+ }
+ return true;
+}
 static bool retireImpl(Piki* p,std::string& e){
  auto i=actors.find(p);if(i==actors.end())return true;
  OriginalPikiBodyHandle live;
@@ -366,8 +410,10 @@ static bool retireImpl(Piki* p,std::string& e){
  // A stale/reused physical address receives no cleanup or field mutations.
  if(!services||services->scene().incarnation()!=i->second.scene||!pc_p2_original_piki_body_handle(p,live)||live.nativeLifetime!=i->second.handle.lifetime)
   return fail(e,"SourcePiki retirement requires original exact live native lifetime");
- bool stateClean=cleanup(i->second,e);
- std::string brainError;bool brainClean=brainCleanupAll(i->second.handle,i->second.runtime,*services,brainError);
+ bool stateClean=false;try{stateClean=cleanup(i->second,e);}catch(...){e="SourcePiki state cleanup callback threw; ownership retained";}
+ std::string brainError;bool brainClean=false;
+ try{brainClean=brainCleanupAll(i->second.handle,i->second.runtime,*services,brainError);}
+ catch(...){brainError="SourcePiki Brain cleanup callback threw; ownership retained";}
  if(!brainClean){if(stateClean)e=brainError;else e+="; "+brainError;}
  if(!stateClean||!brainClean||ownerReentered)return false; // Explicit owner remains for retry.
  actors.erase(i);return true;
@@ -378,6 +424,42 @@ static bool retireSceneImpl(std::string& e){
   std::string actorError;if(!retireImpl(p,actorError)){if(complete)e=actorError;complete=false;}
  }
  return complete;
+}
+bool owned()noexcept{return !actors.empty();}
+bool retired(std::string& e){ReadOperation op;if(!op.complete(true,e))return false;return actors.empty()||fail(e,"SourcePiki runtime retains native owners");}
+bool canRetireScene(std::string& e){
+ ReadOperation op;
+ // Empty is an observation of this concrete registry only, not a physical
+ // factory/body/bank acceptance fallback or a source readiness grant.
+ if(actors.empty())return op.complete(true,e);
+ auto* scene=pc_p2_original_captain_loaded_scene();
+ if(!services||!scene||&services->scene()!=scene||!scene->incarnation())
+  return fail(e,"SourcePiki retirement preflight lost canonical live scene");
+ try{
+  for(const auto& actor:actors){const auto& entry=actor.second;OriginalPikiBodyHandle live;
+   if(entry.scene!=scene->incarnation()||!pc_p2_original_piki_body_handle(entry.handle.body,live)||live.nativeLifetime!=entry.handle.lifetime)
+    return fail(e,"SourcePiki retirement preflight found stale native lifetime");
+   const auto& brain=entry.runtime.brain;
+   if((brain.freeEffectsOwned||brain.action==Action::Free)&&!services->canRemoveFreeEffects(entry.handle,e))return false;
+   if((entry.runtime.throwEffectsOwned||entry.runtime.state==State::Flying)&&!services->canRemoveThrowEffects(entry.handle,e))return false;
+   if(brain.action==Action::Formation&&brain.slot>=0&&!services->canReleaseSlot(entry.handle,brain.navi,brain.slot,e))return false;
+   if(brain.pendingSlot>=0&&!services->canReleaseSlot(entry.handle,brain.pendingNavi,brain.pendingSlot,e))return false;
+  }
+ }catch(...){return fail(e,"SourcePiki readonly retirement preflight callback threw");}
+ return op.complete(true,e);
+}
+bool readOwnership(Ownership& out,std::string& e){
+ ReadOperation op;Ownership observed;
+ for(const auto& actor:actors){
+  const auto& entry=actor.second;const auto& brain=entry.runtime.brain;++observed.entries;
+  if(entry.committed)++observed.committed;else ++observed.pendingInitializations;
+  if(brain.action==Action::Formation&&brain.slot>=0)++observed.formationSlots;
+  if(brain.pendingSlot>=0)++observed.pendingSlots;
+  if(brain.freeEffectsOwned)++observed.freeEffectOwners;
+  if(entry.runtime.throwEffectsOwned)++observed.throwEffectOwners;
+ }
+ if(!op.complete(true,e))return false;
+ out=observed;return true;
 }
 bool initialize(Piki* p,std::string& e){OwnerOperation op(e);return op.admitted()&&op.complete(initializeImpl(p,e),e);}
 bool frame(Handle h,Frame& out,std::string& e){ReadOperation op;Frame next;if(!frameImpl(h,next,e)||!op.complete(true,e))return false;out=next;return true;}
@@ -399,3 +481,8 @@ bool retireScene(std::string& e){OwnerOperation op(e);return op.admitted()&&op.c
 void forget(Piki* p)noexcept{try{std::string error;retire(p,error);}catch(...){ }}
 void sceneExit()noexcept{try{std::string error;retireScene(error);}catch(...){ }}
 } }
+
+bool pc_p2_original_piki_runtime_owned()noexcept{return p2original::piki::owned();}
+bool pc_p2_original_piki_runtime_can_retire(std::string& e){return p2original::piki::canRetireScene(e);}
+bool pc_p2_original_piki_runtime_retire(std::string& e){return p2original::piki::retireScene(e);}
+bool pc_p2_original_piki_runtime_retired(std::string& e){return p2original::piki::retired(e);}
