@@ -103,6 +103,7 @@ bool Reader::frame(const Navi* n,piki::CaptainFrame& out,std::string& e)const {
  const auto timer=nativecontrol::sceneAnimationTimer(n);
  if((!timer&&world->phase()!=Phase::Loading)||!pc_p2_original_captain_actor_timers(n,timers)||!pc_p2_original_captain_actor_lifetime(n,alive)
   ||!m->bank->jointWorld(const_cast<Navi*>(n),10,joint,e)||!m->plate->storage().state(const_cast<Navi*>(n),plate,e))return false;
+ if(!plate.maxPositionKnown)return fail(e,"Actual source CPlate maxPositionOffset is not initialized");
  piki::CaptainFrame f;f.position=n->mSRT.t;f.velocity=n->mVelocity;f.face=n->mFaceDirection;f.sceneAnimationTimer=timer?*timer:0;
  f.rhnd={joint[0]*3+joint[3],joint[4]*3+joint[7],joint[8]*3+joint[11]};f.plateOffset=plate.maxPositionOffset;
  f.throwWait=typed->sourceStateId()==StateId::ThrowWait;f.throwing=typed->sourceStateId()==StateId::Throw;f.follow=typed->sourceStateId()==StateId::Follow;
