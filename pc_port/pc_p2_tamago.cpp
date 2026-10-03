@@ -550,6 +550,7 @@ int pc_p2_tamago_birth_bigfoot(BTeki* boss, unsigned generator, const Vector3f& 
         const float vy = p2tamagopolicy::bigFootFallSpeed(member, rnd01());
         child->inputPosition(pos);
         child->startAI(0);
+        child->resetCreatureFlag(CF_IsOnGround); // pooled/reset contact is not a fall impact
         child->setDirection(yaw);
         child->mHealth = LIFE;
         child->mVelocity.set(0.0f, vy, 0.0f);
