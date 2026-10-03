@@ -1977,6 +1977,64 @@ void testAftermathCursorAimCorpse()
     CHECK(other.current() == p2autoplay::State::Aftermath && other.command().moveX > 0.9f, "cursor-aim/other_species_walks_onto");
 }
 
+void testOrdinaryCorpseResupply()
+{
+    setEnv("PIKMIN_RANDOMIZER_AUTOPLAY_POWER", nullptr);
+    setEnv("PIKMIN_RANDOMIZER_AUTOPLAY_RESUPPLY", nullptr);
+    for (int scenario = 0; scenario < 6; ++scenario) {
+        p2autoplay::Config cfg;
+        cfg.wantSquad = 15;
+        cfg.ordinaryResupply = scenario != 1;
+        p2autoplay::Brain brain(cfg);
+        auto s = liveSenses();
+        s.fieldPikmin = 20;
+        brain.update(0.05f, s);
+        brain.update(0.05f, s);
+        s.targetToken = 1221001;
+        s.targetSource = 35;
+        s.targetAlive = true;
+        s.targetDist = 100;
+        s.tgtX = 100;
+        brain.update(0.05f, s);
+        brain.update(0.05f, s);
+        s.targetHealthFrac = 0.5f;
+        brain.update(0.05f, s);
+        s.targetAlive = false;
+        s.targetDead = true;
+        s.pelletExists = true;
+        s.carryWant = 10;
+        s.fieldPikmin = scenario == 3 ? 10 : 8;
+        s.hasOnion = true;
+        s.onionStored = scenario == 2 ? 0 : 20;
+        s.onionX = -500;
+        s.onionDist = 500;
+        s.trackingPart = scenario == 4;
+        s.receiptSeen = scenario == 5;
+        brain.update(0.05f, s);
+        for (int i = 0; i < 120; ++i) brain.update(0.05f, s);
+        auto markers = brain.takeMarkers();
+        if (scenario == 0) {
+            CHECK(brain.current() == p2autoplay::State::WithdrawSeek, "ordinary-resupply/short_crew_returns_to_onion");
+            CHECK(hasMarker(markers, "AUTOPLAY_ORDINARY_RESUPPLY"), "ordinary-resupply/names_real_stock_and_attempt");
+            CHECK(brain.command().moveX < 0, "ordinary-resupply/steers_through_normal_pad");
+            CHECK(s.fieldPikmin == 8 && s.onionStored == 20, "ordinary-resupply/does_not_synthesize_stock");
+            s.containerOpen = true;
+            brain.update(0.05f, s);
+            brain.update(0.05f, s);
+            CHECK(brain.current() == p2autoplay::State::WithdrawMenu && brain.command().menuHold,
+                  "ordinary-resupply/withdraws_through_real_menu_input");
+            for (int i = 0; i < 240; ++i) brain.update(0.05f, s);
+            s.containerOpen = false;
+            s.fieldPikmin = 10; // sensed result of a real withdrawal, not a bot write
+            brain.update(0.05f, s);
+            brain.update(0.05f, s);
+            CHECK(brain.current() == p2autoplay::State::Aftermath, "ordinary-resupply/preserves_dead_engagement");
+        } else {
+            CHECK(!hasMarker(markers, "AUTOPLAY_ORDINARY_RESUPPLY"), "ordinary-resupply/guards_disabled_empty_enough_part_and_receipt");
+        }
+    }
+}
+
 void testAftermathNoWhistle()
 {
     // bot-v5 (v4b diagnosis): aftermath HOLDS whistle (B) while standing
@@ -4370,6 +4428,7 @@ int main()
     testResupply();
     testAftermathEscortExtension();
     testAftermathNoWhistle();
+    testOrdinaryCorpseResupply();
     testTitanAftermathRegroup();
     testObstacleWorkAndDetourProgress();
     testTitanRegroupWalksToStrays();
