@@ -11,6 +11,7 @@
 #include "pc_p2_retail_treasure_policy.h"
 #include "pc_p2_campaign_treasure_config.h"
 #include "pc_p2_original_captain_damage.h"
+#include "pc_p2_original_captain_scene.h"
 #include "pc_campaign_ui_observer.h"
 #include "NaviMgr.h"
 #include "gameflow.h"
@@ -33,11 +34,6 @@
 #include <array>
 #include <chrono>
 #include <random>
-
-// Actual common captain owner can retain an unpublished Loading bank before
-// the complete source body roster is admitted. It still pins this map context.
-bool pc_p2_original_captain_scene_owned(const p2retail::SceneContext&) noexcept;
-bool pc_p2_original_captain_scene_revoke(const p2retail::SceneContext&,std::string&);
 
 namespace p2retail {namespace {
 std::uint64_t nextSerial=1;
