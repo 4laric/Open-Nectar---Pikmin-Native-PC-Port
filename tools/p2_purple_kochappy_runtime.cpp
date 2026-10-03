@@ -943,6 +943,17 @@ public:
      if(command==PcKochappyGuideInput::Refuse)std::printf("P2_PURPLE_KOCHAPPY_GUIDE_REFUSAL age=%d guide=%d remaining=%.9g observations=%d last_progress=%d bursts=%d best=%.9g walk_remaining=%d neutral_remaining=%d actor_writes=0\n",age,receiverWaypoint,guideDistance,guidePulse.elapsed,guidePulse.lastProgress,guidePulse.pulses,guidePulse.best,guidePulse.walk,guidePulse.neutral);
      require(command!=PcKochappyGuideInput::Refuse,"guide braking geometry invalid");
      if(guideDistance<12.f)std::printf("P2_PURPLE_KOCHAPPY_GUIDE_BRAKE age=%d waypoint=%d distance=%.6f speed=%.6f target=%.6f neutral=%d ordinary_input=1 actor_writes=0\n",age,receiverWaypoint,guideDistance,guideSpeed,guideTarget,int(command==PcKochappyGuideInput::Neutral));
+     if(guideDistance<12.f&&!n->mGroundTriangle){
+      auto* floor=mapMgr->getCurrTri(n->mSRT.t.x,n->mSRT.t.z,true);
+      const float floorY=mapMgr->getMinY(n->mSRT.t.x,n->mSRT.t.z,true);
+      const float offset=n->isCreatureFlag(CF_EnableGroundOffset)?n->mGroundOffset:0.f;
+      const bool wait=floor&&pc_kochappy_air_contact_wait(rvfinite({n->mSRT.t.x,n->mSRT.t.y,n->mSRT.t.z}),
+        n->mInWaterTimer==0,false,0.f,floorY,floor->mTriangle.mNormal.y,n->mSRT.t.y,offset,n->mCollisionRadius);
+      std::printf("P2_PURPLE_KOCHAPPY_GUIDE_CONTACT_WAIT age=%d guide=%d floor_y=%.6f floor_normal=%.6f body_y=%.6f offset=%.6f radius=%.6f admitted_wait=%d actual_contact=0 clocks_retained=1 SDL_full_neutral=1 actor_writes=0\n",
+        age,receiverWaypoint,floorY,floor?floor->mTriangle.mNormal.y:0.f,n->mSRT.t.y,offset,n->mCollisionRadius,int(wait));
+      require(wait,"guide captain air contact unsafe for ordinary settling");
+      guidePulse.cancelBurst();input();return result;
+     }
      if(command==PcKochappyGuideInput::Neutral)input();
      else if(guideDistance<12.f){
       require(pc_window_get_control_mode()==PC_CONTROL_CLASSIC&&pc_window_get_stick_invert()==0,

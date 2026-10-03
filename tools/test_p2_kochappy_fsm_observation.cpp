@@ -222,6 +222,9 @@ int main(){
  const float retainedBest=slipCadence.best;
  slipCadence.cancelBurst();
  CHECK(slipCadence.walk==0&&slipCadence.neutral==0&&slipCadence.elapsed==retainedElapsed&&slipCadence.lastProgress==retainedLastProgress&&slipCadence.best==retainedBest);
+ CHECK(pc_kochappy_air_contact_wait(true,true,false,0.f,100.f,.968204f,100.058f,0.f,8.5f));
+ CHECK(!pc_kochappy_air_contact_wait(true,true,false,0.f,100.f,.968204f,109.f,0.f,8.5f));
+ CHECK(!pc_kochappy_air_contact_wait(true,false,false,0.f,100.f,.968204f,100.058f,0.f,8.5f));
  PcKochappyGuidePulse guideStall;
  for(int i=0;i<90;++i)CHECK(guideStall.observe(0,10)!=PcKochappyGuideInput::Refuse);
  CHECK(guideStall.observe(0,10)==PcKochappyGuideInput::Refuse);
