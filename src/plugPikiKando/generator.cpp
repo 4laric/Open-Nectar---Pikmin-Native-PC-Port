@@ -15,6 +15,7 @@
 #if defined(PIKI_PC_PORT)
 #include "pc_randomizer.h"
 #include "pc_p2_original_group_engine.h"
+#include "pc_p2_original_course.h"
 #include "pc_p2_original_gate_native.h"
 #include "pc_p2_original_bridge_native.h"
 #include "pc_p2_original_gen_object.h"
@@ -551,6 +552,9 @@ void Generator::updateUseList()
  */
 bool Generator::isExpired()
 {
+#if defined(PIKI_PC_PORT)
+ bool sourceExpired=false;if(pc_p2_original_course_item_expired(this,sourceExpired))return sourceExpired;
+#endif
 	if (mDayLimit == -1) {
 		return false;
 	}

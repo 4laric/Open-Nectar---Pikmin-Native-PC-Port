@@ -26,6 +26,7 @@
 #include "pc_p2_original_piki_native.h"
 #include "pc_p2_campaign_treasure_held.h"
 #include "Creature.h"
+#include "Stream.h"
 #include "teki.h"
 #include "Pellet.h"
 #include <fstream>
@@ -34,6 +35,7 @@
 #include <cstdlib>
 #include <algorithm>
 #include <filesystem>
+#include <cmath>
 namespace {
 using namespace p2original;
 struct Course {
@@ -61,6 +63,11 @@ struct Course {
  bool loaded=false;
  std::string course;
  std::vector<CalendarLoad> plannedLoads;
+ std::set<unsigned> freshEnemies;
+ std::map<unsigned,int> enemyExpiry;
+ std::map<unsigned,int> itemExpiry;
+ std::map<unsigned,unsigned> selectedEnemies;
+ std::map<unsigned,std::pair<unsigned,int>> itemMetadata;
 };
 std::unique_ptr<Course> current;
 CalendarLedger calendarLedger;
@@ -89,13 +96,13 @@ bool pc_p2_original_course_prepare(const std::string& fingerprint,const std::vec
  for(unsigned source:{95u,96u})if(!next->dispatch.add(source,next->cannons->provider(),cannon::decode,e))return false;
  // Validate structural/source metadata atomically BEFORE publishing catalog.
  Catalog checked;
- if(!checked.install(fingerprint,rows,[&](const CatalogRow& r,std::string& e){return next->dispatch.capability(r,e);},e))return false;
+ if(!checked.install(fingerprint,rows,[&](const CatalogRow& r,std::string& e){if(pc_randomizer_original_session()){e.clear();return true;}return next->dispatch.capability(r,e);},e))return false;
  for(const auto& s:literal){auto* r=checked.find(s.uid);std::string bytes;
   if(!r||s.count!=r->enemy.count||s.epoch||s.activation||s.dayNum||s.deathCount
    ||!encodeOriginalState(fingerprint,s,bytes,e)||!next->literal.emplace(s.uid,s).second)
    return fail(e,"original literal inventory is incomplete, duplicated or contains runtime state");
  }
- if(!originalActors().install(fingerprint,rows,[&](const CatalogRow& r,std::string& e){return next->dispatch.capability(r,e);},e))return false;
+ if(!originalActors().install(fingerprint,rows,[&](const CatalogRow& r,std::string& e){if(pc_randomizer_original_session()){e.clear();return true;}return next->dispatch.capability(r,e);},e))return false;
  next->plants->onIdentity([](Creature* actor,std::string& identity,std::string& e){
   unsigned source=0,token=0;InstanceIdentity id;
   if(!originalActors().query(actor,source,token,&id)||source!=0)return fail(e,"original plant lost full course identity");
@@ -133,7 +140,15 @@ bool pc_p2_original_course_start(GeneratorList* list,std::string& e){
   if(found==current->literal.end())return fail(e,"original native list has unknown source object");
   inventory[found->first].push_back(g);
  }
- if(inventory.size()!=current->literal.size())return fail(e,"original native list omitted source objects");
+ if(current->selectedSession){
+  for(unsigned uid:current->freshEnemies)if(!inventory.count(uid))return fail(e,"original native list omitted selected calendar enemy");
+  for(const auto& entry:inventory){
+   const auto* row=originalActors().find(entry.first);if(!row||!current->dispatch.capability(*row,e))return false;
+   if(!current->freshEnemies.count(entry.first)){
+    for(auto* g:entry.second)if(!g->readFromRam())return fail(e,"original disc enemy was not selected by literal calendar");
+   }
+  }
+ }else if(inventory.size()!=current->literal.size())return fail(e,"original native list omitted source objects");
  std::set<const Generator*> shadows;
  for(const auto& entry:inventory){Generator* cached=nullptr;Generator* disc=nullptr;GroupBinding selected;
   for(auto* g:entry.second){GroupBinding b;
@@ -146,13 +161,18 @@ bool pc_p2_original_course_start(GeneratorList* list,std::string& e){
    }
   }
   if(cached&&disc)shadows.insert(disc); // exact literal validation already passed
-  bindings.push_back(selected);
+  if(current->selectedSession&&disc){
+   const auto deadline=current->enemyExpiry.find(entry.first);
+   if(deadline==current->enemyExpiry.end())return fail(e,"original selected enemy lacks calendar expiry authority");
+   if(deadline->second>=0&&(selected.state.dayLimit<0||deadline->second<selected.state.dayLimit))selected.state.dayLimit=deadline->second;
+  }
+  bindings.push_back(selected);current->selectedEnemies.emplace(entry.first,originalActors().find(entry.first)->enemy.source);
  }
  // Family reservations observe the same shared pools. Check the aggregate
  // inventory first so individually valid families cannot oversubscribe them.
  unsigned roots=0,pellets=0;
- for(const auto& row:originalActors().rows()){
-  const auto& r=row.second.enemy;roots+=r.count;
+ for(const auto& entry:current->selectedEnemies){
+  const auto& r=originalActors().find(entry.first)->enemy;roots+=r.count;
   if(r.source==16)roots+=r.count; // one captured original Egg per Honeywisp
   if(!foliage::supported(r.source)){
    const unsigned cargo=(r.source==0||!corpseDisabled(r.source))?1:0;
@@ -172,13 +192,13 @@ bool pc_p2_original_course_start(GeneratorList* list,std::string& e){
  // Shared Chappy bank is published once with the full source union; later
  // family preflights must not add a missing Fire/Hairy variant to live data.
  std::set<unsigned> chappySources;
- for(const auto& entry:originalActors().rows()){
-  const auto source=entry.second.enemy.source;
+ for(const auto& entry:current->selectedEnemies){
+  const auto source=entry.second;
   if(source==2||source==33||source==43)chappySources.insert(source);
   if(!pc_p2_original_corpse_resources(source,e))return false;
  }
  if(!chappySources.empty()&&!pc_p2_chappy_prepare_original(chappySources,e))return false;
- if(!pc_p2_original_course_install(bindings,current->dispatch,e))return false;
+ if(!pc_p2_original_course_install(bindings,current->dispatch,e,current->selectedSession))return false;
  current->shadows=std::move(shadows);current->started=true;e.clear();return true;
 }
 bool pc_p2_original_course_finish(std::string& e){
@@ -192,6 +212,16 @@ bool pc_p2_original_course_finish(std::string& e){
  current.reset();e.clear();return true;
 }
 bool pc_p2_original_course_prepared(){return bool(current);}
+bool pc_p2_original_course_item_expired(const Generator* g,bool& expired){
+ if(!current||!current->selectedSession||!pc_randomizer_original_session()||!g)return false;
+ const auto metadata=current->itemMetadata.find(g->_70);if(metadata==current->itemMetadata.end())return false;
+ const auto selected=current->itemExpiry.find(g->_70);
+ if(selected==current->itemExpiry.end()){std::fprintf(stderr,"P2_ORIGINAL_ITEM_EXPIRY_AUTHORITY_MISSING uid=%u\n",g->_70);std::abort();}
+ int deadline=metadata->second.second;
+ if(selected->second>=0&&(deadline<0||selected->second<deadline))deadline=selected->second;
+ expired=deadline>=0&&std::int64_t(deadline)<std::int64_t(originalProgress().context().day);return true;
+}
+
 void pc_p2_original_course_retired(Creature* actor){if(current)current->dispatch.retired(actor);}
 bool pc_p2_original_course_shadow(const Generator* g){return current&&current->shadows.count(g);}
 bool pc_p2_original_course_load(const char* directory,const char* course,std::function<bool(unsigned)> metColor,std::string& e){
@@ -283,6 +313,27 @@ bool pc_p2_original_course_load(const char* directory,const char* course,std::fu
  for(const auto& row:onyons)if(!checkItem(row))return false;
  for(const auto& row:gates)if(!checkItem(row))return false;
  for(const auto& row:bridges)if(!checkItem(row))return false;
+ // Item manifests retain all-calendar source authority. Install only rows
+ // whose exact UID/key/raw-member hash belongs to this selected calendar load.
+ if(selectedSession){
+  const auto selectItems=[&](auto& rows){
+   rows.erase(std::remove_if(rows.begin(),rows.end(),[&](const auto& row){
+    for(const auto& load:plannedLoads)for(const auto& source:load.member->sources)
+     if(source.uid==row.uid)return false;
+    return true;
+   }),rows.end());
+   for(const auto& row:rows){bool matched=false;
+    for(const auto& load:plannedLoads)for(const auto& source:load.member->sources)if(source.uid==row.uid){
+     if(source.kind!="item"||row.sourceKey!=selected+"/"+load.member->name+"#"+std::to_string(source.index)||row.sourceSha!=load.member->sha)
+      return fail(e,"original active item calendar authority mismatch");
+     matched=true;
+    }
+    if(!matched)return fail(e,"original active item calendar entry missing");
+   }
+   return true;
+  };
+  if(!selectItems(onyons)||!selectItems(gates)||!selectItems(bridges))return false;
+ }
  if(!pc_p2_original_course_prepare(manifest.fingerprint,manifest.rows,manifest.literal,std::move(metColor),e))return false;
  const auto rollback=[&](){
   // No source body has been born during installation.
@@ -294,20 +345,31 @@ bool pc_p2_original_course_load(const char* directory,const char* course,std::fu
  if(hasGates&&!gates.empty()){
   if(!pc_p2_original_gate_install(gates,e)){rollback();return false;}current->gates=true;
  }
- if(hasBridges){
+ if(hasBridges&&!bridges.empty()){
   if(!pc_p2_original_bridge_install(bridges,e)){rollback();return false;}current->bridges=true;
  }
  if(hasPikis){
   if(!pc_p2_original_piki_install(pikiAtlas,pikiActive,e,pikiExpiry)){rollback();return false;}
   current->pikis=true;
  }
- if(hasOnyons){
+ if(hasOnyons&&!onyons.empty()){
   auto progress=[](){const auto& s=originalProgress().snapshot();return PcOriginalOnyonProgress{std::uint8_t(s.container&7),std::uint8_t(s.boot&7)};};
   auto boot=[](int species){std::string e;if(!originalProgress().boot(unsigned(species),e)){std::fprintf(stderr,"P2_ORIGINAL_ONYON_BOOT_FAIL %s\n",e.c_str());std::abort();}};
   if(!pc_p2_original_onyon_install(onyons,progress,boot,e)){rollback();return false;}
   current->onyons=true;
  }
  current->selectedSession=selectedSession;current->course=selected;current->plannedLoads=std::move(plannedLoads);
+ if(selectedSession)for(const auto& load:current->plannedLoads)for(const auto& source:load.member->sources)if(source.kind=="teki"){
+  const auto* row=originalActors().find(source.uid);
+  if(!row||row->sourceKey!=selected+"/"+load.member->name+"#"+std::to_string(source.index)
+   ||!current->enemyExpiry.emplace(source.uid,load.expiry).second){rollback();return fail(e,"original selected enemy calendar authority mismatch");}
+  current->freshEnemies.insert(source.uid);
+ }
+ if(selectedSession)for(const auto& load:current->plannedLoads)for(const auto& source:load.member->sources)if(source.kind=="item")
+  if(!current->itemExpiry.emplace(source.uid,load.expiry).second){rollback();return fail(e,"original selected item calendar duplicated");}
+ for(const auto& row:onyons)current->itemMetadata.emplace(row.uid,std::make_pair(unsigned(row.resurrectionDays),row.dayLimit));
+ for(const auto& row:gates)current->itemMetadata.emplace(row.uid,std::make_pair(unsigned(row.resurrectionDays),row.dayLimit));
+ for(const auto& row:bridges)current->itemMetadata.emplace(row.uid,std::make_pair(unsigned(row.resurrectionDays),row.dayLimit));
  e.clear();return true;
 }
 bool pc_p2_original_course_use_models(std::string& e){
@@ -315,8 +377,14 @@ bool pc_p2_original_course_use_models(std::string& e){
  if(!tekiMgr)return fail(e,"original course model admission lacks native manager");
  // Explicit early chassis reservation precedes startStage. Physical preflight
  // later verifies actual bank/corpse/drop resources and manager capacity.
- for(const auto& entry:originalActors().rows()){
-  const unsigned source=entry.second.enemy.source;int type=-1;
+ std::set<unsigned> sources;
+ if(current->selectedSession){
+  if(!generatorList||!generatorList->mGenListHead)return fail(e,"original model admission lacks selected native inventory");
+  for(auto* node=generatorList->mGenListHead->mChild;node;node=node->mNext){auto* g=static_cast<Generator*>(node);if(auto* object=dynamic_cast<GenObjectOriginalEnemy*>(g->mGenObject)){
+   const auto* row=originalActors().find(object->mState.uid);if(!row||!current->dispatch.capability(*row,e))return false;sources.insert(row->enemy.source);
+  }}
+ }else for(const auto& entry:originalActors().rows())sources.insert(entry.second.enemy.source);
+ for(unsigned source:sources){int type=-1;
   if(source==0)type=TEKI_Palm;
   else if(foliage::supported(source))type=TEKI_Palm;
   else if(source==1||source==15)type=TEKI_Chappy;
@@ -354,4 +422,59 @@ bool pc_p2_original_course_loaded(std::string& e){
  if(!current||!current->selectedSession){e.clear();return true;}
  if(!current->started||current->loaded)return fail(e,"original calendar successful-load event outside fresh admitted scene");
  if(!calendarLedger.commit(current->course,current->plannedLoads,e))return false;current->loaded=true;e.clear();return true;
+}
+
+bool pc_p2_original_course_read_plan(bool& defaultLoaded,bool& dayLoaded,bool& initLoaded,bool& plantsLoaded,std::string& e){
+ if(!current||!current->selectedSession||current->started||!pc_randomizer_original_session())return fail(e,"original native plan read outside selected fresh scene");
+ defaultLoaded=dayLoaded=initLoaded=plantsLoaded=false;
+ std::set<unsigned> seen;
+ for(const auto& load:current->plannedLoads){
+  if(!load.member)return fail(e,"original native plan lost immutable member");
+  std::string member=load.member->name;
+  if(member=="defaultgen.txt")member="default.gen";else if(member=="initgen.txt")member="init.gen";else if(member=="plantsgen.txt")member="plants.gen";
+  else{if(member.size()<4||member.substr(member.size()-4)!=".txt")return fail(e,"original native member suffix invalid");member.replace(member.size()-4,4,".gen");}
+  const std::string role="p2-original/native/"+current->course+"/"+member;std::string bytes;
+  if(!pc_randomizer_original_input(role,bytes,e)||bytes.size()>4*1024*1024||bytes.size()<24)return fail(e,"original selected native stream missing or outside bound");
+  // The native legacy reader accepts old versions and updates Navi before
+  // checking the object list. Reject malformed selected headers first.
+  if(bytes.compare(0,4,"1.0v"))return fail(e,"original native member header version mismatch");
+  RamStream header(bytes.data(),int(bytes.size()));header.readInt();
+  for(unsigned i=0;i<4;++i)if(!std::isfinite(header.readFloat()))return fail(e,"original native starting transform is nonfinite");
+  if(header.readInt()!=int(load.member->sources.size()))return fail(e,"original native member declared count mismatch");
+  GeneratorMgr* manager=nullptr;
+  switch(load.category){case 0:manager=generatorMgr;break;case 1:manager=plantGeneratorMgr;break;case 2:manager=onceGeneratorMgr;break;case 5:manager=dailyGeneratorMgr;break;
+   case 3:case 4:manager=new GeneratorMgr;manager->setName(load.member->name.c_str());limitGeneratorMgr->add(manager);break;
+   default:return fail(e,"original native plan category invalid");}
+  if(!manager)return fail(e,"original native manager unavailable");
+  RamStream input(bytes.data(),int(bytes.size()));manager->read(input,load.category!=0);
+  if(input.getPosition()!=int(bytes.size())||manager->originalSourceCount()!=int(load.member->sources.size()))return fail(e,"original native stream changed declared source prefix");
+  auto* generator=manager->originalSourceHead();
+  for(const auto& source:load.member->sources){
+   if(!generator||generator->_70!=source.uid||!seen.insert(source.uid).second||generator->readFromRam()||generator->mGenArea||generator->mGenType)
+    return fail(e,"original native source order UID or typed controller mismatch");
+   unsigned uid=0;const char* kind=nullptr;
+   if(auto* object=dynamic_cast<GenObjectOriginalEnemy*>(generator->mGenObject)){
+    uid=object->mState.uid;kind="teki";
+    const auto literal=current->literal.find(uid);
+    if(literal==current->literal.end()||generator->mCarryOverFlags!=literal->second.reserved)return fail(e,"original native enemy common header mismatch");
+   }
+   else if(auto* object=dynamic_cast<GenObjectOriginalPiki*>(generator->mGenObject)){uid=object->uid;kind="piki";}
+   else if(auto* object=dynamic_cast<GenObjectOriginalOnyon*>(generator->mGenObject)){uid=object->uid;kind="item";}
+   else if(auto* object=dynamic_cast<GenObjectOriginalGate*>(generator->mGenObject)){uid=object->uid;kind="item";}
+   else if(auto* object=dynamic_cast<GenObjectOriginalBridge*>(generator->mGenObject)){uid=object->uid;kind="item";}
+   if(!kind||uid!=source.uid||kind!=source.kind)return fail(e,"original native source kind lacks its actual typed provider");
+   if(source.kind=="item"){
+    auto metadata=current->itemMetadata.find(uid);if(metadata==current->itemMetadata.end())return fail(e,"original typed item immutable common metadata missing");
+    generator->mRespawnInterval=int(metadata->second.first);generator->mDayLimit=metadata->second.second;
+   }
+   generator=generator->mNextGenerator;
+  }
+  if(generator)return fail(e,"original native member has extra undeclared source object");
+  // Resource-use observations follow complete per-member identity validation;
+  // whole-course admission still precedes every physical actor birth.
+  manager->updateUseList();
+  if(load.category==0)defaultLoaded=true;else if(load.category==1)plantsLoaded=true;else if(load.category==2)initLoaded=true;else if(load.category==5)dayLoaded=true;
+ }
+ if(!defaultLoaded)return fail(e,"original literal calendar omitted default source member");
+ e.clear();return true;
 }

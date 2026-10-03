@@ -6,10 +6,10 @@ using namespace p2original;
 static unsigned checks=0;
 static void check(bool b){++checks;if(!b)throw std::runtime_error("group control "+std::to_string(checks));}
 struct Provider:GroupProvider {
- int storage[10]{};unsigned births=0,releases=0,binds=0;bool admitted=true,reserved=true,releaseOK=true,bindOK=true,nullFirst=false,duplicate=false;
+ int storage[10]{};unsigned births=0,releases=0,binds=0,preflightRows=0,reserveRows=0;bool admitted=true,reserved=true,releaseOK=true,bindOK=true,nullFirst=false,duplicate=false;
  std::vector<std::string> events;std::function<void(Creature*)> onRelease;
- bool preflight(const std::vector<CatalogRow>&,std::string&)override{events.push_back("preflight");return admitted;}
- bool reserve(const std::vector<CatalogRow>&,std::string&)override{events.push_back("reserve");return reserved;}
+ bool preflight(const std::vector<CatalogRow>& rows,std::string&)override{preflightRows=unsigned(rows.size());events.push_back("preflight");return admitted;}
+ bool reserve(const std::vector<CatalogRow>& rows,std::string&)override{reserveRows=unsigned(rows.size());events.push_back("reserve");return reserved;}
  bool birth(const CatalogRow&,Generator*,unsigned n,const Position& p,float facing,Creature*& out,std::string&)override{
   events.push_back("birth"+std::to_string(n));check(p.y==float(n+10));check(std::fabs(facing-1.57079637f)<0.000001f);
   out=(nullFirst&&n==0)?nullptr:reinterpret_cast<Creature*>(&storage[duplicate?0:n]);++births;return true;
@@ -108,5 +108,19 @@ int main(){
  check(roundTrip.encode(unchanged,e)&&unchanged.size()==125);
  IncarnationFrontier typedRestored;check(typedRestored.decode(std::string(64,'a'),unchanged,e));
  check(typedRestored.nextActivation(0x52000001u,typedActivation,e)&&typedActivation==2);
+ // Calendar admission selects a strict subset without deleting inactive authority.
+ CatalogRow inactive=row;inactive.index=1;inactive.sourceKey="tutorial/defaultgen.txt#1";inactive.enemy.uid=originalGeneratorUid(inactive.sourceKey);
+ ActorRegistry calendarRegistry;check(calendarRegistry.install(std::string(64,'c'),{row,inactive},[](const CatalogRow&,std::string&){return true;},e));
+ GroupCourse calendarCourse(calendarRegistry);Provider calendarProvider;GeneratorState active;active.uid=row.enemy.uid;active.count=row.enemy.count;
+ check(!calendarCourse.install({{generator,active}},calendarProvider,e));check(calendarProvider.events.empty());
+ check(calendarCourse.install({{generator,active}},calendarProvider,e,true));
+ check(calendarProvider.preflightRows==1&&calendarProvider.reserveRows==1&&calendarProvider.births==0);
+ check(calendarRegistry.rows().size()==2&&calendarRegistry.find(inactive.enemy.uid));check(calendarCourse.owns(generator));
+ check(calendarCourse.unload(e));calendarProvider.events.clear();
+ int secondNative=0;auto* secondGenerator=reinterpret_cast<Generator*>(&secondNative);
+ check(!calendarCourse.install({{generator,active},{secondGenerator,active}},calendarProvider,e,true));check(calendarProvider.events.empty());
+ check(calendarCourse.install({},calendarProvider,e,true));check(calendarProvider.preflightRows==0&&calendarProvider.reserveRows==0&&calendarProvider.births==0);
+ check(calendarRegistry.rows().size()==2&&calendarCourse.unload(e));calendarProvider.events.clear();
+ active.uid=0x12345678;check(!calendarCourse.install({{generator,active}},calendarProvider,e,true));check(calendarProvider.events.empty());
  std::cout<<"PASS original native group coordinator "<<checks<<" controls\n";
 }

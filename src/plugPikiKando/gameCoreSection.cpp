@@ -1649,6 +1649,17 @@ void GameCoreSection::initStage()
 	if(livingSurfaceCache&&!hasAuthoritativeStageCache){
         std::fprintf(stderr,"Living surface checkpoint lost its authoritative stage cache\n");std::abort();
     }
+#if defined(PIKI_PC_PORT)
+ if(pc_randomizer_original_session()){
+  // This loader uses the authenticated literal calendar and native files only.
+  std::string error;
+  if(livingSurfaceCache||hasAuthoritativeStageCache){std::fprintf(stderr,"P2_ORIGINAL_TYPED_CACHE_GRAPH_UNQUALIFIED\n");std::abort();}
+  if(!pc_p2_original_course_read_plan(useDefault,useDay,useInit,usePlant,error)){std::fprintf(stderr,"P2_ORIGINAL_NATIVE_PLAN_FAIL %s\n",error.c_str());std::abort();}
+  mNavi->reset();
+  if(mNavi2){Vector3f side(cosf(mNavi->mFaceDirection),0,-sinf(mNavi->mFaceDirection));mNavi2->mSRT.t=mNavi->mSRT.t+side*30;mNavi2->mLastPosition=mNavi2->mSRT.t;mNavi2->mDayEndPosition=mNavi2->mSRT.t;mNavi2->mFaceDirection=mNavi->mFaceDirection;mNavi2->mSRT.r=mNavi->mSRT.r;mNavi2->reset();}
+ }else
+#endif
+ {
 	sprintf(path2, "%sdefault.gen", path);
 	// On a room cache-resume boot, skip the disk default.gen entirely (the
 	// generator list already came from GeneratorCache::preload); do not even
@@ -1746,6 +1757,8 @@ void GameCoreSection::initStage()
 		}
 		i++;
 	}
+
+ }
 
 #if defined(PIKI_PC_PORT)
 	// VS: la arena no tiene .gen, así que las pastillas que pone el modo se
