@@ -132,6 +132,9 @@ bool handle(const Piki*,Handle&);
 bool snapshot(Handle,RuntimeState&);
 bool frame(Handle,Frame&,std::string&);
 bool squad(Navi*,std::vector<Frame>&,std::string&);
+// Complete committed source census, including Free/held/flying bodies. Atomic
+// output in native association lifetime order; pending owners grant no actions.
+bool roster(std::vector<Frame>&,std::string&);
 // Retail -1 prioritizes the selected body maturity; 0..2 rotates explicit priority.
 bool sortFormation(Handle,int happa,std::string&);
 bool transition(Handle,State,std::string&);

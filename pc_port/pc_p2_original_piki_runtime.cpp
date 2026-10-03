@@ -499,6 +499,41 @@ bool readOwnership(Ownership& out,std::string& e){
 bool initialize(Piki* p,std::string& e){OwnerOperation op(e);return op.admitted()&&op.complete(initializeImpl(p,e),e);}
 bool frame(Handle h,Frame& out,std::string& e){ReadOperation op;Frame next;if(!frameImpl(h,next,e)||!op.complete(true,e))return false;out=next;return true;}
 bool squad(Navi* n,std::vector<Frame>& out,std::string& e){ReadOperation op;std::vector<Frame> next;if(!squadImpl(n,next,e)||!op.complete(true,e))return false;out=std::move(next);return true;}
+bool roster(std::vector<Frame>& out,std::string& e){
+ ReadOperation op;
+ if(ownerMutationActive||!canonical(e))return fail(e,"SourcePiki roster unavailable during owner mutation or inactive scene");
+ auto* scene=pc_p2_original_captain_loaded_scene();auto* world=pc_p2_original_captain_world();
+ const auto incarnation=scene->incarnation();
+ const auto campaign=scene->selectedCampaign(),fingerprint=scene->selectedFingerprint(),catalog=scene->sourceCatalog();
+ Navi* captains[2]={scene->captainAt(0),scene->captainAt(1)};
+ std::vector<Handle> census;std::vector<Frame> next;
+ try{
+  for(const auto& actor:actors)if(actor.second.committed)census.push_back(actor.second.handle);
+  std::sort(census.begin(),census.end(),[](Handle a,Handle b){return a.lifetime<b.lifetime;});
+  for(std::size_t i=1;i<census.size();++i)if(census[i-1].lifetime==census[i].lifetime)
+   return fail(e,"SourcePiki roster contains duplicate native lifetimes");
+  next.reserve(census.size());
+  for(auto h:census){Frame f;if(!frameImpl(h,f,e))return false;next.push_back(f);}
+  // Re-read selected/body authority after the complete pass, then inspect the
+  // real native associations without another Services callback between tokens.
+  for(auto h:census)if(!current(h,e))return false;
+  if(&services->scene()!=scene||pc_p2_original_captain_loaded_scene()!=scene||pc_p2_original_captain_world()!=world
+    ||scene->incarnation()!=incarnation||world->incarnation()!=incarnation
+    ||scene->selectedCampaign()!=campaign||world->selectedCampaign()!=campaign
+    ||scene->selectedFingerprint()!=fingerprint||world->selectedFingerprint()!=fingerprint
+    ||scene->sourceCatalog()!=catalog||world->sourceCatalog()!=catalog||world->phase()!=captain::Phase::GameWorldActive)
+   return fail(e,"SourcePiki roster scene authority changed during inspection");
+  for(unsigned k=0;k<2;++k)if(scene->captainAt(k)!=captains[k]||world->captainAt(k)!=captains[k])
+   return fail(e,"SourcePiki roster captain binding changed during inspection");
+  std::size_t committed=0;
+  for(const auto& actor:actors)if(actor.second.committed)++committed;
+  if(committed!=census.size())return fail(e,"SourcePiki committed census changed during inspection");
+  for(auto h:census)if(!pc_p2_original_piki_body_current(h.body,h.lifetime))
+   return fail(e,"SourcePiki roster native lifetime changed during inspection");
+  if(!op.complete(true,e))return false;
+  out=std::move(next);return true;
+ }catch(...){return fail(e,"SourcePiki roster inspection threw; output unchanged");}
+}
 bool transition(Handle h,State s,std::string& e){OwnerOperation op(e);return op.admitted()&&op.complete(transitionImpl(h,s,e),e);}
 bool animate(Handle h,float dt,std::string& e){OwnerOperation op(e);return op.admitted()&&op.complete(animateImpl(h,dt,e),e);}
 bool update(Handle h,float dt,std::string& e){OwnerOperation op(e);return op.admitted()&&op.complete(updateImpl(h,dt,e),e);}
