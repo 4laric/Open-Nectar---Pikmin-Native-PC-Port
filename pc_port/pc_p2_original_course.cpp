@@ -42,7 +42,6 @@
 namespace {
 using namespace p2original;
 struct Course {
- std::unique_ptr<captain::SourceBank> captains;
  std::unique_ptr<pelplant::Native> plants;
  std::unique_ptr<chappy::Native> chappies;
  std::unique_ptr<frog::Native> frogs;
@@ -517,5 +516,3 @@ bool pc_p2_original_course_read_plan(bool& defaultLoaded,bool& dayLoaded,bool& i
  if(!defaultLoaded)return fail(e,"original literal calendar omitted default source member");
  e.clear();return true;
 }
-
-p2original::captain::SourceBank* pc_p2_original_captain_source_bank(){return current&&current->captains&&current->captains->ready()?current->captains.get():nullptr;}
