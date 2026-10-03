@@ -87,7 +87,8 @@ The actual Stone owner must pause animation/FSM and own event backup,
 Bittered/BitterQueued and restoration. No P1 pressed/bitter flags are read.
 
 Queue contract: EnemyBase.cpp1611-1625 queues when NoInterrupt or real Stone
-start failure prevents entry. LivingState.cpp475-482 retries queued start.
+start failure prevents entry. LivingState::updateAlways in enemyBase.cpp
+475-482 retries queued start.
 Stone init clears BitterQueued (enemyBase.cpp704-705); Stone cleanup clears
 it again (745), clears Bittered and resumes motion before the empty finish
 callback. PAL LivingState also clears queued on health<=0 (478). Resetting
