@@ -4,7 +4,7 @@
 class Graphics;
 namespace p2watage {
 struct DrawStats { unsigned batches=0,quads=0,culled=0; };
-// One owner per native plant; no pointer into the plant is retained by bursts.
+// One owner per native scene; no pointer into the plant is retained by bursts.
 class NativeEffect {
 public:
  NativeEffect();~NativeEffect();
