@@ -17,7 +17,7 @@ SOURCES=(
 
 def sha(data):return hashlib.sha256(data).hexdigest()
 
-def generate(iso, selected, output):
+def generate(iso, selected, output, *, sources=SOURCES, kind="SYSTEM"):
     from experimental.pikmin2_assets import disc_files
     if output.resolve()==selected.resolve() or selected.resolve() in output.resolve().parents:
         raise ValueError("system supplement must preserve selected parent")
@@ -42,21 +42,21 @@ def generate(iso, selected, output):
     if not REQUIRED_PARENT.issubset(parent):raise ValueError("system input required parent roles absent")
     catalog=disc_files(iso);checked={};source_facts={}
     with iso.open("rb") as disc:
-        for member,role,size,digest in SOURCES:
+        for member,role,size,digest in sources:
             if role in parent:raise ValueError("system source role already selected")
             offset,actual_size=catalog[member]
             if actual_size!=size:raise ValueError("genuine system source size differs")
             disc.seek(offset);data=disc.read(size)
             if len(data)!=size or sha(data)!=digest:raise ValueError("genuine system source digest differs")
             checked[role]=data;source_facts[role]={"member":member,"offset":offset,"bytes":size,"sha256":digest}
-    receipt={"contract":"P2_SOURCE_SYSTEM_INPUTS_1","campaign_sha256":header[2],"parent_descriptor_sha256":sha(descriptor),"parent_roles":count,
+    receipt={"contract":"P2_SOURCE_"+kind+"_INPUTS_1","campaign_sha256":header[2],"parent_descriptor_sha256":sha(descriptor),"parent_roles":count,
              "roles":source_facts,"native_system":False,"native_time_mgr":False,"selected_scene":False,"gameplay":False,"save":False}
     output.mkdir(parents=True,exist_ok=False)
     for role,data in checked.items():
         target=output/role;target.parent.mkdir(parents=True,exist_ok=True);target.write_bytes(data)
     (output/"selected-roles.txt").write_text("".join(role+" "+sha(data)+"\n" for role,data in sorted(checked.items())),encoding="ascii")
     (output/"receipt.json").write_text(json.dumps(receipt,indent=2)+"\n",encoding="ascii")
-    print("SOURCE_SYSTEM_INPUTS_PASS",len(checked),"parent_roles",count)
+    print("SOURCE_"+kind+"_INPUTS_PASS",len(checked),"parent_roles",count)
     return receipt
 
 if __name__=="__main__":
