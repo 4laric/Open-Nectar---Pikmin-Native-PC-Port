@@ -94,9 +94,13 @@ public:
             }
             squad.clear();
             Iterator party(n->mPlateMgr);CI_LOOP(party) { auto* p=static_cast<Piki*>(*party);if(p&&p->isAlive()&&p->getState()==PIKISTATE_Normal) squad.push_back({p,p->getAttackPower(),p->getSpeed(.25f),p->mHappa}); }
-            if(squad.empty()) {
+            if(squad.size()!=20) {
+                Iterator gather(pikiMgr);CI_LOOP(gather) { auto* p=static_cast<Piki*>(*gather);if(p&&p->isAlive()&&p->mMode==PikiMode::FreeMode) {
+                    Vector3f previous=n->mCursorWorldPos;n->mCursorWorldPos=p->getPosition();
+                    n->callPikis(200.0f);n->mCursorWorldPos=previous;
+                } }
                 if(ticks%30==0) { Iterator pending(pikiMgr);CI_LOOP(pending) { auto* p=static_cast<Piki*>(*pending);if(p&&p->isAlive())std::printf("P2_SPICY_SETUP state=%d mode=%d captain=%d\n",p->getState(),p->mMode,p->mNavi==n); } }
-                require(setupTime<8,"no eligible actual formation after initialization");return result;
+                require(setupTime<8,"incomplete actual formation after initialization");return result;
             }
             std::string e;p2originalresource::ResourceSnapshot injected;
             injected.sprayCounts[0]=2;require(stock.restore(injected,contents,e),"fixture inventory install");
