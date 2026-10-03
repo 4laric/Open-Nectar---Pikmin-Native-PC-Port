@@ -1094,7 +1094,7 @@ void GeneratorMgr::render(Graphics& gfx)
 /**
  * @todo: Documentation
  */
-void GeneratorMgr::read(RandomAccessStream& input, bool p2)
+void GeneratorMgr::read(RandomAccessStream& input, bool p2, bool onlyNonpersistent)
 {
 	if (mGenListHead) {
 		delete mGenListHead;
@@ -1154,33 +1154,35 @@ void GeneratorMgr::read(RandomAccessStream& input, bool p2)
         else std::snprintf(sourceFile, sizeof(sourceFile), "%s", mName);
     }
 #endif
-	for (int i = 0; i < mGenCount; i++) {
+    const int sourceCount = mGenCount;
+    mGenCount = 0;
+    Generator* tail = nullptr;
+    for (int i = 0; i < sourceCount; i++) {
         const int sourceOffset = input.getPosition();
-		if (!mGenListHead) {
-			mGenListHead = new Generator();
-			mGenListHead->read(input);
+        Generator* gen = new Generator();
+        gen->read(input);
+        // Cached generators remain the sole authority for persistent actors.
+        // Read the complete literal record before filtering, retaining its
+        // original source offset for every admitted nonpersistent generator.
+        if (onlyNonpersistent && (gen->mCarryOverFlags & GENCARRY_SaveGenerator)) {
+            delete gen;
+            continue;
+        }
 #if defined(PIKI_PC_PORT)
-            if (!Generator::ramMode && flowCont.mCurrentStage) pc_randomizer_bind_generator(mGenListHead, flowCont.mCurrentStage->mStageID, sourceFile, sourceOffset, mGenListHead->_70);
+        if (!Generator::ramMode && flowCont.mCurrentStage)
+            pc_randomizer_bind_generator(gen, flowCont.mCurrentStage->mStageID, sourceFile, sourceOffset, gen->_70);
 #endif
-			mGenListHead->mMgr = this;
-			generatorList->mGenListHead->add(mGenListHead);
-		} else {
-			Generator* newGen = new Generator();
-			newGen->mMgr      = this;
-			newGen->read(input);
-#if defined(PIKI_PC_PORT)
-            if (!Generator::ramMode && flowCont.mCurrentStage) pc_randomizer_bind_generator(newGen, flowCont.mCurrentStage->mStageID, sourceFile, sourceOffset, newGen->_70);
-#endif
-
-			Generator* endList = mGenListHead;
-			for (endList; endList->mNextGenerator; endList = endList->mNextGenerator) {
-				;
-			}
-			endList->mNextGenerator = newGen;
-			newGen->mPrevGenerator  = endList;
-			generatorList->mGenListHead->add(newGen);
-		}
-	}
+        gen->mMgr = this;
+        if (tail) {
+            tail->mNextGenerator = gen;
+            gen->mPrevGenerator = tail;
+        } else {
+            mGenListHead = gen;
+        }
+        tail = gen;
+        generatorList->mGenListHead->add(gen);
+        ++mGenCount;
+    }
 
 #if defined(PIKI_PC_PORT)
 	int recognised = 0;

@@ -1678,10 +1678,17 @@ void GameCoreSection::initStage()
 	// On a room cache-resume boot, skip the disk default.gen entirely (the
 	// generator list already came from GeneratorCache::preload); do not even
 	// open the stream, so it is neither leaked nor double-read.
-	RandomAccessStream* data = (resumeRoomCache||livingSurfaceCache) ? nullptr : gsys->openFile(path2);
+    // The authored floor's ordinary receiver and ship have no persistence
+    // flags. Restore them from their unchanged native source; cache-owned
+    // generators are filtered before binding or birth, and captain pose is
+    // retained by reading with p2=true on this resume path.
+    const bool restoreFloorDefaults = livingSurfaceCache
+        && pc_p2_cave_campaign_owns_heads() && pc_p2_cave_campaign_floor() == 1;
+    RandomAccessStream* data = (resumeRoomCache || (livingSurfaceCache && !restoreFloorDefaults))
+        ? nullptr : gsys->openFile(path2);
 	if (data) {
 		PRINT("DEFAULT GEN LOADED **********************************\n");
-		generatorMgr->read(*data, false);
+		generatorMgr->read(*data, restoreFloorDefaults, restoreFloorDefaults);
 		data->close();
 		generatorMgr->updateUseList();
 		useDefault = true;
