@@ -41,11 +41,19 @@ bool pc_p2_original_captain_enter_dead(Navi* n){n->mStateMachine->transit(n,67);
 p2original::captain::WalkEnvironment* pc_p2_original_captain_walk_environment(const Navi*){return nullptr;}
 const LoadedScene* pc_p2_original_captain_loaded_scene(){return nullptr;}
 bool pc_p2_original_captain_recover_reaction(Navi* n,std::string& e){++recoveryCalls;n->mStateMachine->transit(n,48);e.clear();return true;}
+PcOriginalCaptainRoute pc_p2_original_captain_route_transition(Navi* n,int request,int& mapped){
+ if(!lifetimePresent||n!=roster||world.active!=Phase::GameWorldActive||!n->mStateMachine)return PcOriginalCaptainRoute::Refused;
+ auto it=n->mStateMachine->states.find(request);if(it==n->mStateMachine->states.end())return PcOriginalCaptainRoute::Refused;
+ auto* native=it->second;auto* typed=dynamic_cast<State*>(native);
+ if(!typed||typed->nativeState()!=native||native->getID()!=request||(typed->sourceStateId()!=StateId::Flick&&typed->sourceStateId()!=StateId::KokeDamage))return PcOriginalCaptainRoute::Refused;
+ mapped=request;return PcOriginalCaptainRoute::Handled;
+}
 bool pc_p2_original_captain_transit(Navi* n,StateId id,std::string& e){assert(id==StateId::Walk);n->mStateMachine->transit(n,48);e.clear();return true;}
 bool pc_p2_equipment_has(p2equipment::Item i){return i==p2equipment::RepugnantAppendage&&equipment;}
 int main(){
  BTeki owner;Navi n;roster=&n;Machine<Navi> machine;NaviState walk(48),dead(67);auto* receiver=pc_p2_hanachirashi_navi_state_create();machine.states={{48,&walk},{67,&dead},{38,receiver}};n.mStateMachine=&machine;machine.transit(&n,48);std::string error;
  auto* savedState=n.current;auto* savedMachine=n.mStateMachine;int absentDraws=systemControl.draws;n.current=nullptr;assert(!pc_p2_source_flick_navi(&owner,&n,80,7,0));assert(!pc_p2_hanachirashi_wind_navi(&owner,&n,Vector3f(5,40,10)));n.current=savedState;n.mStateMachine=nullptr;assert(!pc_p2_source_flick_navi(&owner,&n,80,7,0));assert(!pc_p2_hanachirashi_wind_navi(&owner,&n,Vector3f(5,40,10)));assert(systemControl.draws==absentDraws&&damageCalls==0&&selfMotion.generation==0);n.mStateMachine=savedMachine;
+ int targetDraws=systemControl.draws;const auto targetGeneration=selfMotion.generation;machine.states.erase(38);assert(!pc_p2_source_flick_navi(&owner,&n,80,7,0));assert(!pc_p2_hanachirashi_wind_navi(&owner,&n,Vector3f(5,40,10)));NaviState fakeTarget(38);machine.states[38]=&fakeTarget;assert(!pc_p2_source_flick_navi(&owner,&n,80,7,0));assert(!pc_p2_hanachirashi_wind_navi(&owner,&n,Vector3f(5,40,10)));assert(systemControl.draws==targetDraws&&selfMotion.generation==targetGeneration&&n.current==&walk&&damageCalls==0);machine.states[38]=receiver;
  NaviState spoof(38);n.current=&spoof;int beforeSpoof=systemControl.draws;assert(!pc_p2_hanachirashi_wind_navi(&owner,&n,Vector3f(5,40,10))&&systemControl.draws==beforeSpoof);n.current=&walk;
  admission=Refusal::NotReunited;int draws=systemControl.draws;assert(!pc_p2_source_flick_navi(&owner,&n,80,7,0)&&systemControl.draws==draws);admission=Refusal::None;
  assert(pc_p2_source_flick_navi(&owner,&n,80,7,0));auto* typed=dynamic_cast<State*>(n.getCurrState());assert(typed&&typed->nativeState()==receiver&&typed->sourceStateId()==StateId::Flick&&!typed->sourceInvincible());assert(typed->actorInvincibleFrames(n)==0);frames=60;assert(typed->actorInvincibleFrames(n)==60);frames=0;assert(selfMotion.motion==Motion::Jhit&&selfListener==Listener::SourceActor&&boundListener==Listener::None);
