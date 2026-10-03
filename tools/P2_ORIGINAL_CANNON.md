@@ -16,8 +16,9 @@ fields, and matching reservation. It never substitutes an AP placement.
 Research `Kabuto.cpp`, `KabutoState.cpp`, `FixKabuto.cpp`, `EnemyBase.cpp`,
 and `EnemyFunc.cpp` supply the FSM, damage and firing rules. Retail parameters
 give 95 health 850, 96 health 2000, fixed turning ratio .075 and cap 7.5
-degrees. Fixed emergence increments health by one per update and clears
-stored damage, matching `lifeIncrement()`. Each accepted damage event adds
+degrees. Fixed emergence increments health by one on state entry and clears
+stored damage, matching `StateFixAppear::init` calling `lifeIncrement()` once.
+Each accepted damage event adds
 one flick count; the retail thresholds of three mean the fourth hit starts
 flicking. Original attacks accept normal body damage instead of the P1
 Beatle armour portion gate.
@@ -41,7 +42,9 @@ bank02 files. Resident animation metadata must remain identical on reentry.
 resource and death-hook verifier. Null refuses admission. A P1 Beatle pellet
 profile cannot satisfy that callback: actual original carry minimum/maximum,
 seed yield, geometry and death creation must be wired by the shared corpse
-owner. Fitted source-mesh body collision and effects require ordinary gameplay
+owner. The producer verified the retail corpse profile for both: carry 7/15,
+seed yield 8/8, money 4, radii 34/34, height 20, offset (29,0,0), and a model-view
+corpse without an archive. Fitted source-mesh body collision and effects require ordinary gameplay
 review; portable tests and compilation do not establish those mechanics.
 
 ## Direct human gameplay script
