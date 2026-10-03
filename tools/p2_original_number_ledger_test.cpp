@@ -125,8 +125,10 @@ int main(){
  check(failedProducer.generate(identity,config,{0,0,0},failed,produced,e)&&failed.calls==1,"producer journal duplicate never retries failed pool allocation");
 
  Ledger bounded(catalog);bool filled=true;
+ check(bounded.remainingCapacity()==retainedLimit,"fresh retained capacity is available without copying report");
  for(std::size_t i=0;i<retainedLimit;++i){auto entry=pending(catalog,static_cast<unsigned>(1000+i));if(!bounded.preflightBirth(entry,37,plan,e)||!bounded.bindBirth(plan,&other,k,e)||!bounded.retire(&other,k,e)){filled=false;break;}}
  check(filled&&bounded.unload(e),"retained metadata includes all retired births to65536 bound");
+ check(bounded.remainingCapacity()==0,"retired receipts retain capacity until explicit fresh session");
  check(!bounded.preflightBirth(pending(catalog,999999),37,untouched,e)&&untouched.receipt.rootSourceType==999,"retained metadata overflow refuses before native allocation");
  static_assert(noexcept(l.owns(nullptr)),"persistent owned reader noexcept");static_assert(noexcept(l.handle(nullptr,h)),"persistent handle reader noexcept");
  std::printf("original_number_ledger checks=%u failures=%u engine=0 source_authority=caller producer_api=actual codec=0\n",checks,failures);return failures?1:0;

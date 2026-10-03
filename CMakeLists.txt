@@ -291,6 +291,7 @@ set(PC_PORT_SOURCES
     pc_port/pc_p2_original_number_geometry.cpp
     pc_port/pc_p2_original_number_animation.cpp
     pc_port/pc_p2_original_number_ledger.cpp
+    pc_port/pc_p2_original_number_native.cpp
     pc_port/pc_p2_original_resource_contents.cpp
     pc_port/pc_p2_original_piki_spawn.cpp
     pc_port/pc_p2_original_drop.cpp

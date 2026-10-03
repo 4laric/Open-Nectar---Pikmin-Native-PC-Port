@@ -39,6 +39,7 @@ public:
  bool unload(std::string&)const;
  bool freshSession(const std::string& catalogFingerprint,std::string&);
  Report report()const;
+ std::size_t remainingCapacity()const noexcept { return retainedLimit-mReceipts.size(); }
 private:
  struct Binding {p2originalresource::ChildIdentity identity;std::uint64_t handle=0;};
  bool validBirth(const Receipt&)const;
