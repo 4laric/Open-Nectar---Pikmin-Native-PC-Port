@@ -606,7 +606,7 @@ class PurpleKochappyApp:public PlugPikiApp {
   const float targetSpeed=n->mTargetVelocity.length();
   const bool edgeSent=neutralEdgeGuide==routeCatchup.guide;
   const int edge=pc_kochappy_neutral_edge(edgeSent,n->mPlateDirLocked,n->mIsCStickNeutral,
-   roster&&allSafeFormed&&targetError<60.f,n->mFormationBand,rightLength,previousLength,targetSpeed,pc_window_get_stick_dead_zone());
+   roster&&allSafeFormed,n->mFormationBand,rightLength,previousLength,targetSpeed,pc_window_get_stick_dead_zone());
   require(edge>=0,"catchup unsupported native neutral edge inputs");
   if(edgeSent&&!neutralEdgeVerified&&age>neutralEdgeAge){
    std::printf("P2_PURPLE_KOCHAPPY_NEUTRAL_EDGE_OBSERVED age=%d guide=%d locked=%d neutral=%d band=%d right=%.6f previous=%.6f target_speed=%.6f actor_writes=0\n",
