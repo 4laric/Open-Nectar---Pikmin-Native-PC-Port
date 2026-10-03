@@ -14,6 +14,7 @@
 #include "CreatureNode.h"
 #include "GameStat.h"
 #include "GameCoreSection.h"
+#include "UpdateMgr.h"
 #include "Generator.h"
 #include "Stream.h"
 #include "Interactions.h"
@@ -99,7 +100,7 @@ void run(){
  std::vector<std::unique_ptr<Generator>> generators;std::vector<std::unique_ptr<GenObjectOriginalBarrel>> objects;std::vector<Generator*> inventory;
  for(const auto& r:rows){auto g=std::make_unique<Generator>();auto* product=GenObjectFactory::getProduct(0x70326261u);auto o=std::unique_ptr<GenObjectOriginalBarrel>(dynamic_cast<GenObjectOriginalBarrel*>(product));require(o&&o->getLatestVersion()==0x42413031u,"actual p2ba BA01 factory");o->uid=r.uid;g->mGenObject=o.get();g->mGenType=nullptr;g->mCarryOverFlags=r.reserved;g->mRespawnInterval=r.resurrectionDays;g->mDayLimit=r.dayLimit;inventory.push_back(g.get());objects.push_back(std::move(o));generators.push_back(std::move(g));}
  auto missing=inventory;missing.pop_back();require(!pc_p2_original_barrel_preflight(missing,e),"full inventory preflight rejects omission");checked(pc_p2_original_barrel_preflight(inventory,e),e);
- int baseline=itemMgr->mMeltingPotMgr->getSize();
+ int baseline=itemMgr->mMeltingPotMgr->getSize();require(searchUpdateMgr,"actual search manager present");int baselineSearch=searchUpdateMgr->mClientTotal;
  for(auto* g:inventory){bool handled=false;checked(pc_p2_original_barrel_generator_init(g,handled,e),e);require(handled,"typed physical init handled");}
  require(itemMgr->mMeltingPotMgr->getSize()==baseline+int(rows.size()),"all source physical nodes adopted");
  Iterator workers(pikiMgr);workers.first();require(!workers.isDone(),"real initialized worker available");auto* worker=static_cast<Piki*>(*workers);auto* captain=naviMgr->getNavi();
@@ -128,8 +129,8 @@ void run(){
   require(pc_p2_surface_water_box(deep,0)!=sourceBox,"dead source box excluded from deep query");require(pc_p2_surface_water_restore(initialWater),"restore initial fixture water for next isolated control");
  }
  // Cache bytes above are complete before explicit stage teardown composition.
- pc_p2_original_barrel_before_teardown();require(itemMgr->mMeltingPotMgr->getSize()==baseline,"owned physical teardown preserves unrelated item nodes");
- for(size_t i=0;i<rows.size();++i){auto* g=inventory[i];require(!g->mLatestSpawnCreature,"teardown clears retired generator carrier reference");int day=g->mLatestSpawnDay;RamStream load(retired[i].data(),int(retired[i].size()));bool handled=false;checked(pc_p2_original_barrel_generator_load(g,load,handled,e),e);require(handled&&g->mLatestSpawnCreature&&state(g->mLatestSpawnCreature).phase==BarrelPhase::Retired&&g->mAliveCount==0,"cold retired cache restores carrier");require(itemMgr->mMeltingPotMgr->getSize()==baseline&&!pc_p2_original_barrel_owned(g->mLatestSpawnCreature),"cold retired restore creates no physical node");require(g->mLatestSpawnDay==day&&day==savedDay[i],"cold retired restore preserves calendar counter");require(water().boxes[size_t(sourceBoxes[i])].phase==p2water::Phase::Lowering,"cold retired cache requests its actual source water box");}
+ pc_p2_original_barrel_before_teardown();require(searchUpdateMgr->mClientTotal==baselineSearch,"owned search clients released before manager reset");require(itemMgr->mMeltingPotMgr->getSize()==baseline,"owned physical teardown preserves unrelated item nodes");
+ for(size_t i=0;i<rows.size();++i){auto* g=inventory[i];require(!g->mLatestSpawnCreature,"teardown clears retired generator carrier reference");int day=g->mLatestSpawnDay;RamStream load(retired[i].data(),int(retired[i].size()));bool handled=false;checked(pc_p2_original_barrel_generator_load(g,load,handled,e),e);require(handled&&g->mLatestSpawnCreature&&state(g->mLatestSpawnCreature).phase==BarrelPhase::Retired&&g->mAliveCount==0,"cold retired cache restores carrier");require(itemMgr->mMeltingPotMgr->getSize()==baseline&&!pc_p2_original_barrel_owned(g->mLatestSpawnCreature)&&searchUpdateMgr->mClientTotal==baselineSearch,"cold retired restore creates no physical node or search client");require(g->mLatestSpawnDay==day&&day==savedDay[i],"cold retired restore preserves calendar counter");require(water().boxes[size_t(sourceBoxes[i])].phase==p2water::Phase::Lowering,"cold retired cache requests its actual source water box");}
  pc_p2_original_barrel_before_teardown();
  // Replay previously serialized pending bytes to exercise dying-node teardown.
  auto* pendingGenerator=inventory.front();int calendar=pendingGenerator->mLatestSpawnDay;RamStream replay(pendingBytes.front().data(),112);bool handled=false;checked(pc_p2_original_barrel_generator_load(pendingGenerator,replay,handled,e),e);require(handled&&pc_p2_original_barrel_owned(pendingGenerator->mLatestSpawnCreature)&&!pendingGenerator->mLatestSpawnCreature->isAlive(),"pending replay creates actual dying physical node");require(itemMgr->mMeltingPotMgr->getSize()==baseline+1,"dying replay adopts one node");pc_p2_original_barrel_before_teardown();require(itemMgr->mMeltingPotMgr->getSize()==baseline&&!pendingGenerator->mLatestSpawnCreature&&pendingGenerator->mLatestSpawnDay==calendar,"explicit dying teardown unlinks without replaying calendar death");
