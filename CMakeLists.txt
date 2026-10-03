@@ -356,6 +356,19 @@ set(PC_PORT_SOURCES
     pc_port/pc_p2_sprays.cpp
     pc_port/pc_p2_original_resource_state.cpp
     pc_port/pc_p2_original_resource_contents.cpp
+    pc_port/pc_p2_original_gas.cpp
+    pc_port/pc_p2_original_gas_native.cpp
+    pc_port/pc_p2_original_gas_links.cpp
+    pc_port/pc_p2_original_gas_save.cpp
+    pc_port/pc_p2_original_egg.cpp
+    pc_port/pc_p2_original_egg_native.cpp
+    pc_port/pc_p2_original_egg_snapshot.cpp
+    pc_port/pc_p2_original_honey_native.cpp
+    pc_port/pc_p2_original_honey_bank.cpp
+    pc_port/pc_p2_original_contents_save.cpp
+    pc_port/pc_p2_original_wisp.cpp
+    pc_port/pc_p2_original_wisp_native.cpp
+    pc_port/pc_p2_original_resource_save.cpp
     pc_port/pc_p2_white_poison.cpp
     pc_port/pc_p2_cave.cpp
     pc_port/pc_p2_cave_campaign_cache_engine.cpp

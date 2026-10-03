@@ -18,6 +18,7 @@
 #include "system.h"
 #include "pc_p2_sprays.h"
 #include "pc_p2_original_resource_state.h"
+#include "pc_p2_original_honey_bank.h"
 #include "pc_window.h"
 #include "pc_bbft.h"
 #include "pc_gpu_preference.h"
@@ -46,6 +47,8 @@ class SpicyApp : public PlugPikiApp {
     std::vector<Baseline> squad;
     p2originalresource::ResourceState stock;
     p2originalresource::EggContents contents;
+    p2originalresource::honey::SourceBank bank;
+    p2originalresource::honey::Resources resources;
     std::vector<float> pausedRemaining;
     float phaseTime=0;
     bool input(Navi* n) {
@@ -82,7 +85,9 @@ public:
             require(!squad.empty(),"no eligible actual formation Pikmin");
             std::string e;p2originalresource::ResourceSnapshot injected;
             injected.sprayCounts[0]=2;require(stock.restore(injected,contents,e),"fixture inventory install");
-            pc_p2_sprays_bind(&stock);
+            require(!pc_p2_sprays_bind(&stock,nullptr,e),"bind accepted missing source receiver");
+            require(bank.resources(resources,e),"actual source Honey receiver bank missing");
+            require(pc_p2_sprays_bind(&stock,&resources.receiverClips[1],e),"source-clock/inventory binding");
             require(input(n),"spicy input did not consume");
             require(stock.sprayCount(p2originalresource::HoneyKind::Spicy)==1,"wrong stock decrement");
             for(const auto& b:squad) require(!b.p->mP2Spicy.active()&&b.p->getState()==PIKISTATE_P2Dope,"effect committed before animation callback");
@@ -111,7 +116,7 @@ public:
                 require(b.p->isAlive()&&b.p->mHappa==b.maturity,"survival or maturity changed");
                 require(b.p->getAttackPower()==b.attack&&b.p->getSpeed(.25f)==b.speed,"baseline effects not restored");
             }
-            pc_p2_sprays_bind(nullptr);
+            std::string e;require(pc_p2_sprays_bind(nullptr,nullptr,e),"detach");
             std::printf("P2_SPICY_RUNTIME_PASS formation=%zu actual_animation=1 source_stats=1 pause=1 refresh=1 stock_zero=1 recovery_seconds=%.3f injected_stock_and_input=1 natural_pickup=UNTESTED save_resume=UNTESTED\n",squad.size(),phaseTime);
             std::fflush(nullptr);std::_Exit(0);
         }

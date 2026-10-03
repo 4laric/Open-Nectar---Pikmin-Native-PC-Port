@@ -1,5 +1,6 @@
 #include "pc_p2_spicy_policy.h"
 #include "pc_p2_original_resource_state.h"
+#include "pc_p2_original_honey_policy.h"
 #include <cassert>
 #include <cstdio>
 #include <limits>
@@ -20,6 +21,15 @@ int main() {
     assert(!s.restore(std::numeric_limits<float>::infinity()) && s.remaining==17.25f);
     assert(!s.restore(std::numeric_limits<float>::quiet_NaN()) && s.remaining==17.25f);
     assert(s.restore(0) && !s.active());
+    // Actual shared receiver implementation, strict source event boundary.
+    honey::ReceiverClip clip;clip.duration=35;clip.keys={{14,2}};
+    honey::ReceiverClock clock;bool finishing=true;int actions=0,ends=0;
+    auto emit=[&](int key){if(key==2)++actions;if(key==1000)++ends;return true;};
+    assert(clock.advance(clip,14,finishing,emit)&&actions==0);
+    assert(clock.advance(clip,.9f,finishing,emit)&&actions==0);
+    assert(clock.advance(clip,.1f,finishing,emit)&&actions==1);
+    assert(clock.advance(clip,20,finishing,emit)&&ends==1);
+    assert(clock.advance(clip,10,finishing,emit)&&actions==1&&ends==1);
     ResourceState inventory; ResourceSnapshot snapshot; EggContents contents; std::string e;
     assert(!inventory.useSpray(HoneyKind::Spicy,e));
     assert(inventory.restore(snapshot,contents,e));
