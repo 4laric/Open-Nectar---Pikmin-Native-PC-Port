@@ -148,7 +148,15 @@ class PelplantApp final:public PlugPikiApp {
     // Disclosed family-fixture locations only; source common metadata stays
     // literal and the original-course relocation audit is a separate gate.
     float x=-1500.f-80.f*float(instances.size()),z=2800;
-    if(row==0)x=-460,z=2155;if(row==3)x=-600,z=2155;if(row==6)x=-700,z=2155;
+    if(row==0)x=-460,z=2155;if(row==3)x=-600,z=2155;if(row==6)x=-500,z=2155;
+    if(row==6){
+     // The earlier -700 site straddled the Forest camp's raised bank. Confirm
+     // the full initial ten-pellet footprint on actual engine ground queries.
+     float low=1e9f,high=-1e9f;
+     for(int dx=-60;dx<=60;dx+=60)for(int dz=-60;dz<=60;dz+=60){const float y=mapMgr->getMinY(x+dx,z+dz,true);require(std::isfinite(y),"finite diagnostic10 floor footprint");low=std::min(low,y);high=std::max(high,y);}
+     require(high-low<.25f,"diagnostic10 initial footprint lies on flat camp ground");
+     std::printf("P2_ORIGINAL_PELPLANT_FIXTURE_GROUND amount=10 x=%.2f z=%.2f samples=9 radius=60 min_y=%.3f max_y=%.3f initial_placement_only=1 original_source_position=0\n",x,z,low,high);
+    }
     Position at{x,mapMgr->getMinY(x,z,true),z};Creature* actor=nullptr;
     checked(provider.birth(source[row],generators[row].get(),ordinal,at,source[row].enemy.directionDegrees*3.14159265359f/180.f,actor,error),error);require(actor&&native->owns(actor),"real canonical native source0 actor");
     Instance i;i.actor=actor;i.row=row;i.ordinal=ordinal;Initial initial;checked(decode(source[row],initial,error),error);i.amount=initial.amount;
