@@ -21,7 +21,7 @@ CLIPS = [("wait", 1), ("dead", 40), ("type1", 30), ("type2", 30), ("type3", 40),
 
 def install(imported: Path, stage: Path, source_root: Path = Path.cwd()):
     sys.path.insert(0, str(source_root.resolve()))
-    from experimental.pikmin2_convert import blocks
+    from experimental.pikmin2_convert import blocks, u16, u32
     from experimental.pikmin2_purple import bca_pose
     from experimental.pikmin2_rigid import joint_matrices
     from experimental.pikmin2_breadbug_assets import collision_nodes
@@ -41,6 +41,28 @@ def install(imported: Path, stage: Path, source_root: Path = Path.cwd()):
     if colliders != species["collision"] or len(colliders) != 7:
         raise ValueError("BlackPom source collision topology mismatch")
     joint_lines = ["P2_ORIGINAL_BLACKPOM_JOINTS_1"]
+    model_blocks = blocks(model)
+    materials = model_blocks["MAT3"]
+    table = u32(materials, 20)
+    names = []
+    for index in range(u16(materials, table)):
+        start = table + u16(materials, table + 6 + index * 4)
+        names.append(materials[start:materials.index(b"\0", start)].decode("shift_jis"))
+    hierarchy = model_blocks["INF1"]
+    at = u32(hierarchy, 20)
+    material = 0
+    petal_shapes = []
+    while True:
+        kind, index = u16(hierarchy, at), u16(hierarchy, at + 2)
+        at += 4
+        if kind == 0:
+            break
+        if kind == 0x11:
+            material = index
+        if kind == 0x12 and names[material] == "hanabira1_v":
+            petal_shapes.append(index)
+    if petal_shapes != [0]:
+        raise ValueError("BlackPom source petal material mapping changed")
     for i, collider in enumerate(colliders):
         joint_lines.append("collider " + " ".join(map(str, [i, collider["joint"],
             -1 if collider["parent"] is None else collider["parent"], collider["id"],
@@ -74,7 +96,7 @@ def install(imported: Path, stage: Path, source_root: Path = Path.cwd()):
             actual_duration, pose = bca_pose(animation, frame, len(species["joints"]), allow_scale=True)
             if actual_duration != duration:
                 raise ValueError("BlackPom source animation duration mismatch")
-            matrices = joint_matrices(blocks(model), local_overrides=pose)
+            matrices = joint_matrices(model_blocks, local_overrides=pose)
             for joint in sorted({c["joint"] for c in colliders}):
                 joint_lines.append("joint " + " ".join(map(str, [name, frame, joint,
                     *(value for row in matrices[joint] for value in row)])))
@@ -89,6 +111,10 @@ def install(imported: Path, stage: Path, source_root: Path = Path.cwd()):
             raise ValueError("BlackPom pose destination already exists")
     for src, filename in pending:
         shutil.copyfile(src, target / filename)
+    # Original setPomColor(Purple) writes TEV RGB(28,0,52) on hanabira1_v.
+    # PVW uses an explicitly approximate diffuse multiplier; alpha is retained
+    # opaque rather than incorrectly copying retail's unused TEV alpha zero.
+    lines.append("petal 0 28 0 52 255")
     (stage / "p2-original-blackpom-bank.txt").write_text("\n".join(lines) + "\n")
     (stage / "p2-original-blackpom-joints.txt").write_text("\n".join(joint_lines) + "\n")
     (stage / "blackpom-source-resource.json").write_text(json.dumps(species, indent=2) + "\n")
