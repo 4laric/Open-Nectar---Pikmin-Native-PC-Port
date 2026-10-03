@@ -6,7 +6,9 @@
 class Navi;class Graphics;
 namespace p2original { namespace captain {
 // Actual Game::IPikiAnims identities, never P1 PaniMotion IDs.
-enum class Motion:unsigned {Asibumi=1,Damage=4,Dead=5,Fue=10,Getup=14,Jhit=22,Jkoke=23,Nigeru=28,Run2=29,Walk=30,Wait=31,Throw=33,ThrowWait=34};
+enum class Motion:unsigned {Akubi=0,Asibumi=1,Chatting=3,Damage=4,Dead=5,Fue=10,Furimuku=11,Gattu=13,Getup=14,Jhit=22,Jkoke=23,Nigeru=28,Run2=29,Walk=30,Wait=31,Kizuku=32,Throw=33,ThrowWait=34,Nuku=42,Nuku3=43,Jump=50,Sagasu2=54,Punch=64,Punch2=65,Punch3=66};
+enum class Animator {Self,Bound};
+enum class Listener {None,SourceActor};
 struct MotionState {Motion motion=Motion::Wait;float frame=0;std::uint64_t generation=0;bool finishing=false,complete=false;};
 enum class SourceResource {Parameters,AnimRegistry,Collision,DownStudio,DownAnimation};
 struct SourceParameters {
@@ -32,9 +34,18 @@ public:
  // wrong/duplicate Native NaviMgr slot pointers are refused.
  bool bindRoster(Navi* olimar,Navi* louie,std::string&);
  bool supports(Navi*,Motion,std::string&)const;
+ // State-style wrapper: start both, SourceActor Self listener, no Bound listener.
  bool start(Navi*,Motion,std::string&);
+ bool startMotion(Navi*,Motion self,Motion bound,Listener selfListener,Listener boundListener,std::string&);
+ bool startAnimator(Navi*,Animator,Motion,bool preserveFrame,Listener,std::string&);
+ bool advanceAnimator(Navi*,Animator,float,const std::function<bool(int)>&,std::string&);
+ bool stateAnimator(const Navi*,Animator,MotionState&,std::string&)const;
  // Only genuine locomotion transitions preserve the bound source frame.
  bool startPreservingFrame(Navi*,Motion,std::string&);
+ bool enableMotionBlend(Navi*,std::string&);
+ bool boundMotionLock(const Navi*,int& sourceMotion,std::string&)const;
+ // State-style advance: Self first, then Bound with no listener. A Bound
+ // SourceActor listener requires explicit advanceAnimator for both channels.
  // Amount is actual source animation frames chosen by the source FSM owner.
  // Strict authored keys emit when key.frame < int(timer); END1000 once.
  // The callback may change source motion/state. Generation changes stop old
