@@ -447,6 +447,7 @@ set(PC_PORT_SOURCES
     pc_port/pc_p2_retail_start.cpp
     pc_port/pc_p2_retail_geometry.cpp
     pc_port/pc_p2_retail_scene_map.cpp
+    pc_port/pc_p2_retail_exit.cpp
     pc_port/pc_p2_retail_cave_foliage.cpp
     pc_port/pc_p2_retail_cave_blackpom.cpp
     pc_port/pc_p2_retail_cave_placement.cpp
@@ -3749,6 +3750,10 @@ add_executable(pc_p2_retail_scene_input_test tools/p2_retail_scene_input_test.cp
 target_include_directories(pc_p2_retail_scene_input_test PRIVATE pc_port)
 target_compile_options(pc_p2_retail_scene_input_test PRIVATE -UNDEBUG)
 add_test(NAME p2_retail_scene_input COMMAND pc_p2_retail_scene_input_test)
+add_executable(pc_p2_retail_exit_test tools/p2_retail_exit_test.cpp)
+target_include_directories(pc_p2_retail_exit_test PRIVATE pc_port)
+target_compile_options(pc_p2_retail_exit_test PRIVATE -UNDEBUG)
+add_test(NAME p2_retail_exit COMMAND pc_p2_retail_exit_test)
 
 add_executable(pc_p2_retail_start_test tools/p2_retail_start_test.cpp pc_port/pc_p2_retail_start.cpp)
 target_include_directories(pc_p2_retail_start_test PRIVATE pc_port)
