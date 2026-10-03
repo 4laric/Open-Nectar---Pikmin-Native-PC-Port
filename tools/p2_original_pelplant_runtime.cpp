@@ -117,6 +117,7 @@ class PelplantApp final:public PlugPikiApp {
   const bool physical=provider.preflight(source,error);
   if(refusal){require(!physical&&provider.size()==0&&tekiMgr->getSize()==rootsBefore&&pelletMgr->getSize()==pelletsBefore,"physical refusal before actor birth");std::puts("PASS P2_ORIGINAL_PELPLANT_RESOURCE_REFUSAL actor_births=0 owned_cleanup=1 gameplay=0");std::fflush(nullptr);std::_Exit(0);}
   checked(physical,error);
+  checked(native->geometryOwnershipControl(error),error);
   for(int control=0;control<7;++control){auto invalid=source;
    if(control==0)invalid[0].enemy.generatorVersion="0002";
    if(control==1)invalid[0].enemy.generatorTail.pop_back();
