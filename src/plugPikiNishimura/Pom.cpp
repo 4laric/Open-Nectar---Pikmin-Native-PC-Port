@@ -135,6 +135,9 @@ void Pom::refresh(Graphics& gfx)
  */
 void Pom::drawShape(Graphics& gfx)
 {
+	// Source owner draws its actual sampled bank during refresh. Do not also
+	// draw the inherited P1 flower or read its uninitialized material context.
+	if (p2original::blackpom::Native::owner(this)) return;
 	if (isAlive()) {
 		gfx.useMatrix(Matrix4f::ident, 0);
         // Materials are shared by all flowers: tint only this draw and restore.
