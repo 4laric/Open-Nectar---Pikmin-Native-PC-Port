@@ -1,6 +1,7 @@
 cmake_minimum_required(VERSION 3.20)
 project(OriginalSentinelProviderChecks LANGUAGES C CXX)
 set(CMAKE_CXX_STANDARD 17)
+enable_testing()
 get_filename_component(SENTINEL_SOURCE "${CMAKE_CURRENT_LIST_DIR}/../.." ABSOLUTE)
 # Private composition includes the real owner-pinned Honey factory. Production
 # course admission remains separate until actual source77 native gameplay passes.
