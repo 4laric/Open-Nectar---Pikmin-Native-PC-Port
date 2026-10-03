@@ -56,7 +56,7 @@ bool parseAIConstantsParameters(const std::string& bytes,AIConstantsParameters& 
  // admit zero but reject negative resource/count/debt values; angle is any
  // finite source degree value, not a fabricated 0..360 range or clamp.
  if(!ended||!seen[0]||next.gravity<=0||next.dopeCount<0||next.debt<0)return fail(e,"missing/unsafe AIConstants source values");
- out=next;return true;
+ out=next;e.clear();return true;
 }
 bool parseTimeParameters(const std::string& bytes,TimeParameters& out,std::string& e){
  std::vector<std::string> stream;if(!tokens(bytes,stream,e))return false;
@@ -82,6 +82,6 @@ bool parseTimeParameters(const std::string& bytes,TimeParameters& out,std::strin
  ||n.midMorning<=n.morningStart||n.morningEnd<=n.midMorning||n.eveningStart<=n.morningEnd
  ||n.midEveningStart<=n.eveningStart||n.midEveningEnd<n.midEveningStart||n.eveningEnd<=n.midEveningEnd
  ||24-n.eveningEnd+n.morningStart<=0)return fail(e,"unsafe TimeMgr source interval/divisor");
- out=n;return true;
+ out=n;e.clear();return true;
 }
 }

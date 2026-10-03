@@ -44,6 +44,10 @@ int main(int argc,char** argv){
  check(parseTimeParameters(replace(timeText,"{fp11} 4 17.5","{fp11} 4 16.5"),t,e),"zero plateau has no actual denominator; accepted");
  badTime(timeText.substr(0,timeText.rfind('}')));badTime("}"+timeText);badTime(timeText+std::string(1,'\0'));
  for(std::size_t n=0;n<=timeText.rfind('}');++n)badTime(timeText.substr(0,n));
+ check(!parseAIConstantsParameters("end",a,e)&&!e.empty(),"AI refusal supplies diagnostic");
+ check(parseAIConstantsParameters(ai,a,e)&&e.empty(),"AI success after refusal clears stale diagnostic");
+ check(!parseTimeParameters("{_eof}",t,e)&&!e.empty(),"Time refusal supplies diagnostic");
+ check(parseTimeParameters(timeText,t,e)&&e.empty(),"Time success after refusal clears stale diagnostic");
  check(argc==3,"actual staged AI/timeText byte paths required");
  const auto actualAI=read(argv[1]),actualTime=read(argv[2]);
  check(parseAIConstantsParameters(actualAI,a,e)&&a.gravity==560&&a.dopeCount==10&&a.debt==10000&&a.cameraAngle==290,"actual staged AI source bytes");
