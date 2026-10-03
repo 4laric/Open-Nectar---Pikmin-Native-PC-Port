@@ -1,5 +1,6 @@
 #pragma once
 #include <cstdint>
+#include <array>
 #include <functional>
 #include <memory>
 #include <string>
@@ -37,6 +38,10 @@ public:
  // Called only after actual native bootstrap/reset has completed. Rebind or
  // wrong/duplicate Native NaviMgr slot pointers are refused.
  bool bindRoster(Navi* olimar,Navi* louie,std::string&);
+ // Current authored source joint transformed by this actual actor SRT.
+ bool jointWorld(Navi*,unsigned sourceJoint,std::array<float,12>&,std::string&);
+ // Simulation owner calls after actor movement; does not depend on a draw.
+ bool syncGeometry(Navi*,std::string&);
  bool supports(Navi*,Motion,std::string&)const;
  // State-style wrapper: start both, SourceActor Self listener, no Bound listener.
  bool start(Navi*,Motion,std::string&);

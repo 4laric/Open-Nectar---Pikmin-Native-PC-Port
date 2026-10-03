@@ -188,6 +188,10 @@ public:
 	u8 mPartType;                  // _5C, part type (see CollPartType)
 	CollInfo* mParentInfo;         // _60, owning CollInfo (for resolving indices to pointers)
 	CollPartUpdater* mPartUpdater; // _64, optional runtime updater (overrides shape-based update)
+#if defined(PIKI_PC_PORT)
+ // Source providers can publish simulation world matrices without a draw.
+ bool mSourceWorldMatrix = false;
+#endif
 };
 
 /**

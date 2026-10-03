@@ -405,6 +405,9 @@ ID32 CollPart::getCode()
  */
 Matrix4f CollPart::getMatrix()
 {
+	#if defined(PIKI_PC_PORT)
+ if(mSourceWorldMatrix){Matrix4f out=mJointMatrix;out.setTranslation(mCentre);return out;}
+#endif
 	Matrix4f collMat = mJointMatrix;
 	Matrix4f outMat;
 	invCamMat.multiplyTo(collMat, outMat);
