@@ -231,7 +231,7 @@ bool NativeFloor::knownSourceBirth(const p2original::InstanceIdentity& identity,
  return refuse(error,"retail parent incarnation was never physically associated");
 }
 bool NativeFloor::placement(const SceneIdentity& identity,unsigned row,unsigned ordinal,Placement& out,std::string& error)const{
- if(!m->prepared||!(m->context.scene==identity))return refuse(error,"retail placement outside prepared selected scene");
+ if(!m->prepared||!(m->context.scene==identity)||!m->scene.owns(identity))return refuse(error,"retail placement outside actual owned prepared selected scene");
  FloorPlan verified;
  if(!parseFloorPlan(m->plan.authenticatedBytes,identity.layoutSha256,verified,error))return false;
  for(const auto& candidate:verified.actors)if(candidate.row==row&&candidate.ordinal==ordinal){
