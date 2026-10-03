@@ -338,7 +338,7 @@ public:
             }
         }
         // Only virtual-pad input. Gather, approach, aim during A hold, release.
-        if(age<90){input(KBBTN_B);return result;}
+        if(age<(!std::strcmp(mode,"red-electric")?30:90)){input(KBBTN_B);return result;}
         if (!std::strcmp(mode,"red-electric") && redApproach < 2) {
             Vector3f away=enemy->mSRT.t-partner->mSRT.t;
             away.y=0;
@@ -350,8 +350,9 @@ public:
             }
             // Walk around the live arc to the outside of its endpoint. This
             // uses ordinary pad movement; no enemy/Pikmin/receiver state writes.
-            Vector3f goal=enemy->mSRT.t+away*100.f;
-            if (redApproach==0) goal=goal+redApproachSide*110.f;
+            Vector3f goal=enemy->mSRT.t+away*70.f;
+            if (redApproach==0) goal=goal+redApproachSide*50.f;
+            if(age%30==0){std::printf("P2_ELECBUG_RED_ROUTE phase=%d captain=%.3f,%.3f,%.3f goal=%.3f,%.3f,%.3f distance=%.3f ordinary_pad=1\n",redApproach,n->mSRT.t.x,n->mSRT.t.y,n->mSRT.t.z,goal.x,goal.y,goal.z,distance(n->mSRT.t,goal));std::fflush(nullptr);}
             if (distance(n->mSRT.t,goal)>20.f) {
                 neutralThrowTicks=0;point(n,goal,true);return result;
             }
