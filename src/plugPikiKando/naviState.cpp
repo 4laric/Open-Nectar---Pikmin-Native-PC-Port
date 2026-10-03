@@ -3709,7 +3709,7 @@ void NaviStartingState::init(Navi* navi)
 		mWalkTargetPos   = ufo->getGoalPos();
 	}
 #if defined(PIKI_PC_PORT)
-	else if (pc_pikipelago_surface_course() && !std::strcmp(pc_pikipelago_surface_course(), "tutorial")) {
+	else if (pc_pikipelago_surface_course()) {
 		// The opt-in bootstrap has no ship; no authored landing walk exists.
 		mWalkTargetPos = navi->mSRT.t;
 	}
@@ -3752,7 +3752,7 @@ void NaviStartingState::exec(Navi* navi)
 		mWalkTargetPos = ufo->getGoalPos();
 	}
 #if defined(PIKI_PC_PORT)
-	else if (pc_pikipelago_surface_course() && !std::strcmp(pc_pikipelago_surface_course(), "tutorial")) {
+	else if (pc_pikipelago_surface_course()) {
 		// GenMgr may place the captain after init; use the current position.
 		// Preserve the ordinary delay/start animation and Walk transition.
 		mWalkTargetPos = navi->mSRT.t;
