@@ -28,6 +28,20 @@ P2CaveCampaignParty fixture(){
 }
 int main(int argc,char** argv){
     auto p=fixture();check(p.valid(),"valid full typed fixture");
+    auto unadopted=p;unadopted.origins.clear();
+    for(const auto& body:p.bodies)check(unadopted.retainOrigin(body),"unadopted source provenance retains immutable origin");
+    check(unadopted.valid()&&wire(unadopted)==wire(p),"unadopted source repeat preserves keys and origin ledger");
+    for(const auto& body:p.bodies)check(unadopted.retainOrigin(body),"repeated source origin retained idempotently");
+    check(wire(unadopted)==wire(p),"source repeat never duplicates ledger");
+    auto conflicting=p.bodies[0];conflicting.originPosition.x+=1;
+    const auto retained=wire(unadopted);
+    check(!unadopted.retainOrigin(conflicting)&&wire(unadopted)==retained,"conflicting source origin refused without rewriting identity");
+    auto generated=p;generated.bodies.resize(1);generated.origins.clear();
+    auto& generatedBody=generated.bodies[0];generatedBody.sourceKey.clear();generatedBody.catalogFingerprint.clear();
+    generatedBody.sourceRecord=0;generatedBody.sourceAttempt=0;generatedBody.sourceActivation=0;generatedBody.originGenerator=123;
+    check(generated.retainOrigin(generatedBody)&&generated.valid(),"unadopted generator provenance retains immutable origin");
+    const auto generatedWire=wire(generated);
+    check(generated.retainOrigin(generatedBody)&&wire(generated)==generatedWire,"repeated generator origin stable without duplicate");
     P2CaveCampaignParty parsed;std::istringstream input(wire(p));
     check(parsed.read(input),"read typed fixture");check(wire(parsed)==wire(p),"exact float/species/provenance roundtrip");
     auto bad=p;bad.origins[1].sourceAttempt=bad.origins[0].sourceAttempt;bad.origins[1].originPosition.x+=20;

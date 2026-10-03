@@ -78,7 +78,7 @@ bool pc_p2_cave_campaign_party_capture(P2CaveCampaignParty& party,bool inside){
         if(!b.valid()||!assets(b.species)){
             std::printf("P2_CAMPAIGN_BODY_CAPTURE species=%d growth=%d owner=%d player=%d mode=%d health=%.9g max=%.9g assets=%d\n",b.species,b.growth,b.owner,b.player,b.mode,b.health,b.maxHealth,int(assets(b.species)));
             return held("invalid_body_fields");}
-        if(prior==nextProvenance.end()&&(b.originGenerator||!b.sourceKey.empty()))captured.origins.push_back(b);
+        if(!captured.retainOrigin(b))return held("conflicting_body_origin");
         nextProvenance[p]=b;
         captured.bodies.push_back(b);}
     auto& heads=inside?captured.floorHeads:captured.surfaceHeads;heads.clear();
@@ -181,6 +181,10 @@ void pc_p2_cave_campaign_party_restore(const P2CaveCampaignParty& party){
         n->mHealth=c.health;n->mSRT.t=vector(c.position);n->mFaceDirection=c.face;}
     for(std::size_t i=0;i<party.bodies.size();++i){const auto& b=party.bodies[i];Piki* p=matched[i];
         if(!p){p=static_cast<Piki*>(pikiMgr->birth());if(!p)invalid("body birth capacity");
+            // Native generator/Onion births register work before the action
+            // moves that population into formation/free mode. Register each
+            // newly born restored body once, using its actual base colour.
+            GameStat::workPikis.inc(b.species<=2?b.species:Red);GameStat::update();
             p->init(b.owner>=0?naviMgr->getNavi(b.owner):naviMgr->getNavi());p->resetPosition(vector(b.position));}
         if(!pc_p2_set_species(p,b.species))invalid("body species");
         if(b.species==3)pc_p2_make_purple(p);if(b.species==4)pc_p2_make_white(p);

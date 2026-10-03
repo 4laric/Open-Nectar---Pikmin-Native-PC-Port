@@ -85,6 +85,13 @@ struct P2CaveCampaignParty {
     std::vector<P2CavePartyBody> origins;
     std::vector<P2CavePartyHead> surfaceHeads,floorHeads;
     std::array<P2CavePartyPoint,2> surfaceHomes{};
+    bool retainOrigin(const P2CavePartyBody& body){
+        if(!body.originGenerator&&body.sourceKey.empty())return true;
+        if(!body.valid())return false;
+        for(const auto& origin:origins)
+            if(origin.key==body.key)return body.sameOrigin(origin);
+        origins.push_back(body);return true;
+    }
     bool valid()const{
         if(!present)return !inside&&captains.empty()&&bodies.empty()&&origins.empty()&&surfaceHeads.empty()&&floorHeads.empty();
         if(!std::isfinite(surfaceTime)||surfaceTime<0||surfaceTime>=24
