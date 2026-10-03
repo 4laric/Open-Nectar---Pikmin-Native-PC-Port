@@ -1,20 +1,16 @@
 cmake_minimum_required(VERSION 3.20)
 project(OriginalSentinelProviderChecks LANGUAGES C CXX)
 set(CMAKE_CXX_STANDARD 17)
+enable_testing()
 get_filename_component(SENTINEL_SOURCE "${CMAKE_CURRENT_LIST_DIR}/../.." ABSOLUTE)
 # Private composition includes the real owner-pinned Honey factory. Production
 # course admission remains separate until actual source77 native gameplay passes.
 set(PIKMIN_ORIGINAL_SENTINEL ON CACHE BOOL "Link original plant source77 factory and attachment consumers")
 add_subdirectory("${SENTINEL_SOURCE}/tools/original_resource_build" resources)
-# The generic runner hashes selected targets at the graph root. The producer
-# target is declared in the nested engine entry; keep its actual binary here.
-add_executable(pc_p2_original_shijimi_group_test
- "${SENTINEL_SOURCE}/tools/test_p2_original_shijimi_group.cpp"
- "${SENTINEL_SOURCE}/pc_port/pc_p2_original_shijimi_group.cpp")
-target_include_directories(pc_p2_original_shijimi_group_test PRIVATE "${SENTINEL_SOURCE}/pc_port")
-target_compile_options(pc_p2_original_shijimi_group_test PRIVATE -Wall -Wextra -Werror -UNDEBUG)
-enable_testing()
-add_test(NAME pc_p2_original_shijimi_group_test COMMAND pc_p2_original_shijimi_group_test)
+# Root owns this single pure control declaration; expose its executable at the
+# private graph root for worker hashing without injecting a second test target.
+set_target_properties(pc_p2_original_shijimi_group_test PROPERTIES
+ RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 add_executable(p2_original_shijimi_honey_identity
  "${SENTINEL_SOURCE}/tools/test_p2_original_shijimi_honey.cpp"
  "${SENTINEL_SOURCE}/pc_port/pc_p2_original_shijimi_honey.cpp"
