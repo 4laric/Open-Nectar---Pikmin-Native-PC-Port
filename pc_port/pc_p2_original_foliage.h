@@ -21,6 +21,9 @@ public:
  virtual bool allocate(Host&,const Position&,float,std::string&)=0;
  virtual bool cleanup(Host&,std::string&)=0;
  virtual bool touchSound(Host&,Creature*,std::string&)=0;
+ // Retail virtual touched(), after motion reset and before becoming active.
+ // Quake has no contact collider. Plain admitted species require no effect.
+ virtual bool touched(Host&,Creature*,std::string&){return true;}
 };
 class Provider final:public GroupProvider {
 public:
@@ -45,6 +48,7 @@ private:
  bool prepare(const std::vector<CatalogRow>&,bool cave,std::string&);
  bool reserveMode(const std::vector<CatalogRow>&,bool cave,std::string&);
  bool birthMode(const CatalogRow&,Generator*,unsigned,const Position&,float,bool cave,Creature*&,std::string&);
+ bool activate(Host&,Creature*,std::string&);
  Engine& mEngine; bool mPrepared=false,mReserved=false,mCave=false;
  std::map<unsigned,CatalogRow> mAdmitted;
  std::map<unsigned,unsigned> mRemaining;
