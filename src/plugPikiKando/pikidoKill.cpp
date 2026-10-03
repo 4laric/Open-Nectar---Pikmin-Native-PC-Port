@@ -40,7 +40,6 @@ DEFINE_PRINT("pikidoKill");
 void Piki::doKill()
 {
 	pc_p2_purple_flight_cancel(this);
-    pc_p2_cave_campaign_party_forget(this);
 	pc_p2_purple_impact_forget(this);
 	pc_p2_gas_cloud_end(this, true);
 	if (mRouteHandle) {
