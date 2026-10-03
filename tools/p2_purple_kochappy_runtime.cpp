@@ -527,6 +527,7 @@ class PurpleKochappyApp:public PlugPikiApp {
  int frame=0,age=0,phase=0,start=0,settled=0,throwCount=0;
  int receiverWaypoint=0;
  bool gatherDiverted=false;
+ bool nearThrowStarted=false,nearThrowReleased=false;int nearThrowAge=0;
  PcKochappyReentryProgress reentryProgress;
  PcKochappyRouteCatchup routeCatchup;
  NearLayoutPlan near;
@@ -813,7 +814,7 @@ public:
   if(phase==4){
    if(n->getPlatePikis()<20){input(KeyConfig::_instance->mSetCursorKey.mBind);return result;}
    if(distance(n->mSRT.t,enemy->mSRT.t)>120){if(nearLayout())near.clearance(n,enemy->mSRT.t);point(n,enemy->mSRT.t,true,0,nearLayout()?115.f:15.f);return result;}
-   phase=5;start=age;input();
+   phase=5;start=age;input();if(nearLayout())return result;
   }
   const bool active=pc_p2_kochappy_stun_active(enemy);
   const auto fsm=pc_p2_kochappy_fsm_observe(enemy);
@@ -838,6 +839,23 @@ public:
   if(phase==7&&wasActive&&!active&&enemy->mHealth<=0){require(fsm.terminal&&!fsm.stunPaused,"terminal interruption missing ownFSM terminal/unpause");deathDuringStun=true;}
   wasActive=active;
   if(phase==5&&!active){
+   if(nearLayout()){
+    Vector3f aim=enemy->mSRT.t;aim.x+=40;
+    Piki* next=nullptr;Iterator current(pikiMgr);CI_LOOP(current){Piki* p=static_cast<Piki*>(*current);if(p==n->mNextThrowPiki&&p->isAlive())next=p;}
+    if(age%15==0)std::printf("P2_PURPLE_KOCHAPPY_SELECTION_OBSERVE age=%d navi_state=%d next_class=%d next_state=%d purple_state=%d preferred=%d cursor_error=%.4f started=%d released=%d ordinary_input=1 actor_writes=0\n",age,n->getCurrState()->getID(),next?pc_throw_selection_class(next):-1,next?next->getState():-1,purple->getState(),pc_preferred_throw_color_for(n),distance(n->mCursorWorldPos,aim),int(nearThrowStarted),int(nearThrowReleased));
+    if(nearThrowReleased){input(KeyConfig::_instance->mSetCursorKey.mBind);require(age-start<450,"ordinary Purple landing/impact not observed");return result;}
+    if(!nearThrowStarted){
+     if(n->getCurrState()->getID()!=NAVISTATE_Walk){input();require(age-start<90,"ordinary Gather release did not reach Walk");return result;}
+     nearThrowStarted=true;
+    }
+    ++nearThrowAge;
+    if(next==purple&&purple->getState()==PIKISTATE_Hanged&&distance(n->mCursorWorldPos,aim)<12){
+     nearThrowReleased=true;input();std::printf("P2_PURPLE_KOCHAPPY_PURPLE_RELEASE age=%d observed_Hanged=1 ordinary_A_release=1 selection_setter=0 actor_writes=0\n",age);std::fflush(nullptr);return result;
+    }
+    const bool cycle=next&&next!=purple&&nearThrowAge%12==0;
+    point(n,aim,false,KeyConfig::_instance->mThrowKey.mBind|(cycle?KBBTN_DPAD_RIGHT:0));
+    require(nearThrowAge<150,"ordinary held Purple selection timeout");return result;
+   }
    const int cycle=(age-start)%150;
    // Cycle once while holding A: the native selection path chooses Purple.
    Vector3f aim=enemy->mSRT.t;aim.x+=40; // ordinary cursor target near quake radius, no actor relocation
