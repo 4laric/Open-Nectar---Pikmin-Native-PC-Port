@@ -2439,6 +2439,7 @@ void pc_randomizer_save_campaign(const void* source) {
     std::printf("[Pikmin Randomizer] CAMPAIGN_SAVED generation=%llu\n", generation);
     std::fflush(stdout);
 }
+uint64_t pc_randomizer_active_campaign_generation(){return enabled?campaignGeneration:0;}
 
 bool pc_randomizer_thelynk() { return enabled && thelynk; }
 bool pc_randomizer_thelynk_part(unsigned model, bool received) {

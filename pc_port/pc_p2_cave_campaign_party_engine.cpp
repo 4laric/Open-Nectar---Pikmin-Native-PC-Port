@@ -30,7 +30,7 @@ bool near(const Vector3f& p,const P2CavePartyPoint& q){return std::fabs(p.x-q.x)
 [[noreturn]] void invalid(const char* why){std::fprintf(stderr,"Invalid native cave party: %s\n",why);std::abort();}
 bool assets(int species){return (species!=3||pc_p2_purples_enabled())&&(species!=4||pc_p2_whites_enabled());}
 bool sameSource(const P2CavePartyBody& a,const P2CavePartyBody& b){
-    return !a.sourceKey.empty()&&a.sourceKey==b.sourceKey&&a.sourceRecord==b.sourceRecord
+    return !a.sourceKey.empty()&&a.sourceKey==b.sourceKey&&a.catalogFingerprint==b.catalogFingerprint&&a.sourceRecord==b.sourceRecord
         &&a.sourceAttempt==b.sourceAttempt&&a.sourceActivation==b.sourceActivation;}
 }
 bool pc_p2_cave_campaign_party_capture(P2CaveCampaignParty& party,bool inside){
@@ -55,6 +55,7 @@ bool pc_p2_cave_campaign_party_capture(P2CaveCampaignParty& party,bool inside){
             const auto association=birthOrigins.find(p);
             if(association!=birthOrigins.end()){
                 b.sourceKey=association->second.sourceKey;b.sourceRecord=association->second.sourceRecord;
+                b.catalogFingerprint=association->second.catalogFingerprint;
                 b.sourceAttempt=association->second.sourceAttempt;b.sourceActivation=association->second.sourceActivation;}
             if(p->mGenerator){b.originGenerator=pc_randomizer_generator_id(p->mGenerator);
                 if(!b.originGenerator)return false;}}
@@ -82,9 +83,10 @@ bool pc_p2_cave_campaign_party_capture(P2CaveCampaignParty& party,bool inside){
 void pc_p2_cave_campaign_party_forget(Piki* body){provenance.erase(body);birthOrigins.erase(body);}
 void pc_p2_cave_campaign_party_scene_exit(){provenance.clear();birthOrigins.clear();}
 bool pc_p2_cave_campaign_party_associate_birth(Piki* body,const char* sourceKey,
-    std::uint32_t recordUid,std::uint32_t attempt,std::uint64_t activation){
+    std::uint32_t recordUid,std::uint32_t attempt,std::uint64_t activation,const char* catalogFingerprint){
     if(!body||!sourceKey||!sourceKey[0])return false;
     P2CavePartyBody origin;origin.sourceKey=sourceKey;origin.sourceRecord=recordUid;
+    if(catalogFingerprint)origin.catalogFingerprint=catalogFingerprint;
     origin.sourceAttempt=attempt;origin.sourceActivation=activation;
     if(!origin.sourceValid()||birthOrigins.count(body)||provenance.count(body))return false;
     birthOrigins.emplace(body,std::move(origin));return true;
@@ -170,7 +172,7 @@ void pc_p2_cave_campaign_party_restore(const P2CaveCampaignParty& party){
         p->mSRT.t=vector(b.position);p->mFaceDirection=b.face;
         p->changeMode(b.mode,b.owner>=0?naviMgr->getNavi(b.owner):nullptr);
         if(!b.sourceKey.empty()&&!birthOrigins.count(p)){
-            if(!pc_p2_cave_campaign_party_associate_birth(p,b.sourceKey.c_str(),b.sourceRecord,b.sourceAttempt,b.sourceActivation))
+            if(!pc_p2_cave_campaign_party_associate_birth(p,b.sourceKey.c_str(),b.sourceRecord,b.sourceAttempt,b.sourceActivation,b.catalogFingerprint.c_str()))
                 invalid("captured source origin bind");}
         provenance[p]=b;
         std::printf("P2_CAMPAIGN_BODY_RESTORE key=%llu species=%d growth=%d owner=%d runtime_uid=%u origin_uid=%u\n",

@@ -12,4 +12,5 @@ void pc_p2_cave_campaign_party_scene_exit();
 // Original source owner supplies actual source record/attempt/activation only
 // after a successful native birth. No pointer/position identity inference.
 bool pc_p2_cave_campaign_party_associate_birth(Piki* body,const char* sourceKey,
-    std::uint32_t recordUid,std::uint32_t attempt,std::uint64_t activation);
+    std::uint32_t recordUid,std::uint32_t attempt,std::uint64_t activation,
+    const char* catalogFingerprint=nullptr);

@@ -190,6 +190,7 @@ void pc_randomizer_observe_obstacle(int stage, int kind, float x, float z, bool 
 bool pc_randomizer_resumed();
 bool pc_randomizer_load_campaign(void* destination);
 void pc_randomizer_save_campaign(const void* source);
+uint64_t pc_randomizer_active_campaign_generation();
 // Netplay M4 lane B2 (issue #885). The day-end save barrier: active only in
 // a netplay session with the external-state stream on; then memoryCard.cpp
 // calls pc_randomizer_save_campaign_netplay (flush, local checkpoint, bulk

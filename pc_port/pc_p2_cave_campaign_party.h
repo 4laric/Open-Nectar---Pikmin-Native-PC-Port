@@ -31,24 +31,27 @@ struct P2CavePartyBody {
     std::uint32_t originGenerator=0;
     P2CavePartyPoint originPosition;
     std::string sourceKey;
+    std::string catalogFingerprint;
     std::uint32_t sourceRecord=0,sourceAttempt=0;
     std::uint64_t sourceActivation=0;
     bool sourceValid()const{
-        if(sourceKey.empty())return sourceRecord==0&&sourceAttempt==0&&sourceActivation==0;
+        if(sourceKey.empty())return catalogFingerprint.empty()&&sourceRecord==0&&sourceAttempt==0&&sourceActivation==0;
         if(sourceKey=="-"||sourceKey.size()>256||sourceAttempt>65535||sourceActivation==0)return false;
+        if(catalogFingerprint.size()!=64)return false;
+        for(char c:catalogFingerprint)if(!((c>='0'&&c<='9')||(c>='a'&&c<='f')))return false;
         for(unsigned char c:sourceKey)if(c<=32||c>=127)return false;
         return true;
     }
     float health=0,maxHealth=0,face=0;P2CavePartyPoint position;
     bool sameOrigin(const P2CavePartyBody& other)const{
         return originRealm==other.originRealm&&originGenerator==other.originGenerator
-            &&sourceKey==other.sourceKey&&sourceRecord==other.sourceRecord
+            &&sourceKey==other.sourceKey&&catalogFingerprint==other.catalogFingerprint&&sourceRecord==other.sourceRecord
             &&sourceAttempt==other.sourceAttempt&&sourceActivation==other.sourceActivation
             &&originPosition.x==other.originPosition.x&&originPosition.y==other.originPosition.y
             &&originPosition.z==other.originPosition.z;
     }
     bool sameSource(const P2CavePartyBody& other)const{
-        return !sourceKey.empty()&&sourceKey==other.sourceKey&&sourceRecord==other.sourceRecord
+        return !sourceKey.empty()&&sourceKey==other.sourceKey&&catalogFingerprint==other.catalogFingerprint&&sourceRecord==other.sourceRecord
             &&sourceAttempt==other.sourceAttempt&&sourceActivation==other.sourceActivation;
     }
     bool valid()const{return species>=0&&species<=4&&growth>=0&&growth<=2
@@ -128,9 +131,10 @@ struct P2CaveCampaignParty {
             if(!(in>>count)||count>(records==&parsed.bodies?100u:256u))return false;
             for(unsigned i=0;i<count;++i){P2CavePartyBody b;
                 if(!(in>>b.species>>b.growth>>b.owner>>b.player>>b.mode>>b.generator>>b.key>>b.originRealm>>b.originGenerator
-                    >>b.sourceKey>>b.sourceRecord>>b.sourceAttempt>>b.sourceActivation
+                    >>b.sourceKey>>b.catalogFingerprint>>b.sourceRecord>>b.sourceAttempt>>b.sourceActivation
                     >>b.health>>b.maxHealth>>b.face)||!b.position.read(in)||!b.originPosition.read(in))return false;
                 if(b.sourceKey=="-")b.sourceKey.clear();
+                if(b.catalogFingerprint=="-")b.catalogFingerprint.clear();
                 records->push_back(b);}}
         for(auto* heads:{&parsed.surfaceHeads,&parsed.floorHeads}){
             if(!(in>>count)||count>100)return false;
@@ -150,7 +154,8 @@ struct P2CaveCampaignParty {
         for(const auto* records:{&bodies,&origins}){out<<' '<<records->size();
             for(const auto& b:*records){out<<' '<<b.species<<' '<<b.growth<<' '<<b.owner<<' '<<b.player<<' '<<b.mode<<' '<<b.generator
                 <<' '<<b.key<<' '<<b.originRealm<<' '<<b.originGenerator
-                <<' '<<(b.sourceKey.empty()?"-":b.sourceKey)<<' '<<b.sourceRecord<<' '<<b.sourceAttempt<<' '<<b.sourceActivation
+                <<' '<<(b.sourceKey.empty()?"-":b.sourceKey)<<' '<<(b.catalogFingerprint.empty()?"-":b.catalogFingerprint)
+                <<' '<<b.sourceRecord<<' '<<b.sourceAttempt<<' '<<b.sourceActivation
                 <<' '<<b.health<<' '<<b.maxHealth<<' '<<b.face;
                 b.position.write(out);b.originPosition.write(out);}}
         for(const auto* heads:{&surfaceHeads,&floorHeads}){out<<' '<<heads->size();

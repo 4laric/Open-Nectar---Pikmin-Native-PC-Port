@@ -2,6 +2,7 @@
 #include "pc_p2_cave_campaign_cache.h"
 #include "pc_p2_cave_campaign_cache_engine.h"
 #include "pc_p2_cave_campaign_party_engine.h"
+#include "pc_p2_cave_survivor_permit.h"
 #include "pc_p2_cave_rooms_engine.h"
 #include "pc_p2_cave_geometry_engine.h"
 #include "pc_p2_cave_items_engine.h"
@@ -34,6 +35,18 @@ Config config;
 StageInfo* surfaceStage=nullptr;
 StageInfo* floorStage=nullptr;
 bool prepared=false,sceneReady=false,restored=false,requested=false,pending=false;
+bool detaching=false,restoringParty=false;
+std::uint64_t permitGeneration=0;
+std::array<std::uint8_t,32> permitSha{};
+void clearPermit(){detaching=false;restoringParty=false;permitGeneration=0;permitSha.fill(0);}
+bool adoptPermit(){
+    std::uint64_t generation=0;std::array<std::uint8_t,32> digest{};
+    if(!pc_randomizer_checkpoint_info(&generation,digest.data())||!generation
+        ||generation!=pc_randomizer_active_campaign_generation())return false;
+    bool nonzero=false;for(auto byte:digest)nonzero|=byte!=0;
+    if(!nonzero)return false;
+    permitGeneration=generation;permitSha=digest;return true;
+}
 [[noreturn]] void invalid(const char* why){std::fprintf(stderr,"Invalid ordinary generated cave: %s\n",why);std::abort();}
 bool inside(){return pc_randomizer_generated_cave_cache().inside;}
 bool safe(){return sceneReady&&pc_randomizer_ready()&&naviMgr&&naviMgr->getActiveNavi()
@@ -76,6 +89,7 @@ void moveParty(P2CaveCampaignParty& party,bool entering){
 }
 void pc_p2_cave_campaign_prepare(){
     prepared=false;surfaceStage=nullptr;floorStage=nullptr;
+    clearPermit();
     if(!pc_randomizer_generated_cave())return;
     std::ifstream in("p2-cave-campaign.txt");std::string magic,version,extra;
     if(!(in>>magic>>version>>config.seed>>config.token>>config.surface>>config.floor
@@ -100,6 +114,7 @@ void pc_p2_cave_campaign_prepare(){
 }
 void pc_p2_cave_campaign_select_stage(){
     if(!pc_randomizer_generated_cave())return;
+    clearPermit();
     if(!prepared)invalid("provider not prepared");
     if(inside()){
         const auto& party=pc_randomizer_generated_cave_party();
@@ -138,7 +153,10 @@ void pc_p2_cave_campaign_scene_setup(){
             if(!party.valid())invalid("invalid destination landing geometry");
             pc_randomizer_generated_cave_party_set(party);
         }
-        pc_p2_cave_campaign_party_restore(party);restored=true;}
+        if(!adoptPermit())invalid("party restore without authenticated selected checkpoint");
+        restoringParty=true;
+        pc_p2_cave_campaign_party_restore(party);
+        restoringParty=false;restored=true;}
     pending=false;
     if(inside()){
         pc_p2_cave_bud_setup();pc_p2_cave_items_setup();
@@ -148,6 +166,7 @@ void pc_p2_cave_campaign_scene_setup(){
 }
 void pc_p2_cave_campaign_scene_exit(){
     if(!pc_randomizer_generated_cave())return;
+    detaching=pending&&permitGeneration!=0;
     sceneReady=false;pc_p2_cave_items_shutdown();pc_p2_cave_geometry_shutdown();pc_p2_cave_rooms_shutdown();
     pc_p2_cave_campaign_party_scene_exit();
 }
@@ -189,6 +208,7 @@ bool pc_p2_cave_campaign_commit_transition(){
     std::uint64_t savedGeneration=0;
     pc_randomizer_checkpoint_info(&savedGeneration,nullptr);
     if(savedGeneration<=oldGeneration){
+        clearPermit();
         pc_p2_cave_campaign_cache_restore_image(oldImage);
         pc_randomizer_generated_cave_cache_set(oldBanks);
         pc_randomizer_generated_cave_party_set(oldParty);
@@ -199,12 +219,22 @@ bool pc_p2_cave_campaign_commit_transition(){
     // realm; preserve the actual checkpoint as the boundary authority.
     std::printf("P2_CAMPAIGN_BOUNDARY_SAVE generation=%llu options_failed=%d\n",
         static_cast<unsigned long long>(savedGeneration),int(gameflow.mMemoryCard.didSaveFail()));
+    if(!adoptPermit())invalid("committed boundary checkpoint proof unavailable");
     pending=true;sceneReady=false;
     std::printf("P2_CAMPAIGN_BOUNDARY_COMMITTED floor=%d bodies=%zu surface_heads=%zu floor_heads=%zu\n",
         int(entering),party.bodies.size(),party.surfaceHeads.size(),party.floorHeads.size());
     return true;
 }
 bool pc_p2_cave_campaign_restored_party(){return pc_randomizer_generated_cave()&&restored;}
+bool pc_p2_cave_campaign_survivor_permit(const std::string& sourceKey,std::uint32_t recordUid,
+    std::uint32_t attempt,std::uint64_t activation,const std::string& catalogFingerprint,
+    std::uint64_t* generation,std::uint8_t sha[32]){
+    if(!pc_randomizer_generated_cave())return false;
+    const auto& party=pc_randomizer_generated_cave_party();
+    return p2CaveSurvivorPermit(party,detaching||restoringParty,permitGeneration,
+        pc_randomizer_active_campaign_generation(),permitSha,sourceKey,recordUid,attempt,
+        activation,catalogFingerprint,generation,sha);
+}
 bool pc_p2_cave_campaign_owns_heads(){
     if(!pc_randomizer_generated_cave()||!prepared)return false;
     const auto& party=pc_randomizer_generated_cave_party();

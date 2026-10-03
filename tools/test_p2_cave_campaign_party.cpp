@@ -1,4 +1,5 @@
 #include "pc_p2_cave_campaign_party.h"
+#include "pc_p2_cave_survivor_permit.h"
 #include <cstdlib>
 #include <fstream>
 #include <iostream>
@@ -16,6 +17,7 @@ P2CaveCampaignParty fixture(){
     b.health=.75f;b.maxHealth=1;b.face=1.5f;b.position={10.125f,2.5f,-11.75f};
     b.originRealm=0;b.originPosition={21.5f,22.25f,23.125f};
     b.sourceKey="source:forest:piki";b.sourceRecord=0;b.sourceAttempt=4;b.sourceActivation=97;
+    b.catalogFingerprint=std::string(64,'c');
     p.bodies.push_back(b);p.origins.push_back(b);
     b.key=2;b.species=3;b.sourceAttempt=5;b.position.x+=.125f;
     p.bodies.push_back(b);p.origins.push_back(b);
@@ -31,6 +33,8 @@ int main(int argc,char** argv){
     auto bad=p;bad.origins[1].sourceAttempt=bad.origins[0].sourceAttempt;bad.origins[1].originPosition.x+=20;
     check(!bad.valid(),"duplicate source at different position refused");
     bad=p;bad.bodies[0].sourceActivation++;check(!bad.valid(),"changed survivor activation refused");
+    bad=p;bad.bodies[0].catalogFingerprint[0]='d';check(!bad.valid(),"changed survivor catalog refused");
+    bad=p;bad.bodies[0].catalogFingerprint.clear();check(!bad.valid(),"missing survivor catalog refused");
     bad=p;bad.bodies[0].originPosition.z++;check(!bad.valid(),"changed survivor origin position refused");
     bad=p;bad.origins.clear();check(!bad.valid(),"missing origin ledger refused");
     bad=p;bad.origins[0].sourceKey="-";check(!bad.valid(),"wire sentinel cannot be source identity");
@@ -51,6 +55,25 @@ int main(int argc,char** argv){
     check(bad.valid(),"surface sunset retires living replay while retaining floor head bank");
     bad=p;bad.surfaceTime=24;check(!bad.valid(),"outside clock range refused");
     bad=p;bad.surfaceTime=std::numeric_limits<float>::quiet_NaN();check(!bad.valid(),"nonfinite surface clock refused");
+    bad=p;bad.captains.resize(1);
+    std::array<std::uint8_t,32> digest{};digest[0]=79;digest[31]=131;
+    const auto source=p.bodies[0];std::uint64_t admitted=17;std::uint8_t admittedSha[32]={};
+    auto permit=[&](const P2CaveCampaignParty& state,bool scoped,std::uint64_t proof,std::uint64_t active){
+        return p2CaveSurvivorPermit(state,scoped,proof,active,digest,source.sourceKey,source.sourceRecord,
+            source.sourceAttempt,source.sourceActivation,source.catalogFingerprint,&admitted,admittedSha);};
+    check(permit(p,true,8,8),"actual selected source survivor admitted");
+    check(admitted==8&&admittedSha[0]==79&&admittedSha[31]==131,"generation and full digest returned");
+    check(!permit(p,false,8,8),"ordinary death context cannot use stale saved survivor");
+    check(admitted==8&&admittedSha[0]==79,"failed permit preserves output");
+    check(!permit(p,true,0,0),"unsaved state has no permit");
+    check(!permit(p,true,8,9),"different adopted generation refused");
+    check(permit(p,true,3,3),"explicitly selected older valid SAVE admitted");
+    bad=p;bad.bodies.erase(bad.bodies.begin());check(!permit(bad,true,8,8),"loss tombstone cannot authorize resurrection");
+    bad=p;bad.bodies[0].catalogFingerprint[0]='d';bad.origins[0].catalogFingerprint[0]='d';
+    check(!permit(bad,true,8,8),"different immutable source catalog refused");
+    bad=p;bad.inside=false;bad.resumeLiving=false;bad.bodies.clear();
+    check(!permit(bad,true,8,8),"sunset stock authority cannot authorize living replay");
+    digest.fill(0);check(!permit(p,true,8,8),"missing authenticated digest refused");
     bad=p;bad.captains.resize(1);
     const auto before=wire(parsed);auto truncated=wire(p);truncated.resize(truncated.size()/2);
     std::istringstream partial(truncated);check(!parsed.read(partial),"partial record refused");
