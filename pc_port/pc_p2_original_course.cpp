@@ -12,6 +12,8 @@
 #include "teki.h"
 #include <fstream>
 #include <memory>
+#include <cstdio>
+#include <cstdlib>
 namespace {
 using namespace p2original;
 struct Course {
@@ -135,4 +137,12 @@ bool pc_p2_original_course_use_models(std::string& e){
 }
 bool pc_p2_original_course_boot(const char* directory,const char* course,std::string& e){
  return pc_p2_original_course_load(directory,course,pc_p2_original_progress_met,e);
+}
+void pc_p2_original_course_day_advanced(){
+ const char* catalog=std::getenv("PIKMIN_P2_ORIGINAL_CATALOG");
+ if(!catalog||!*catalog||!originalProgress().ready()||!originalProgress().context().story)return;
+ std::string e;
+ if(!originalProgress().nextDay(e)){
+  std::fprintf(stderr,"P2_ORIGINAL_DAY_ADVANCE_FAIL %s\n",e.c_str());std::abort();
+ }
 }

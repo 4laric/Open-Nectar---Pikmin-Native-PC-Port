@@ -19,3 +19,5 @@ bool pc_p2_original_course_boot(const char* directory,const char* course,std::st
 bool pc_p2_original_course_use_models(std::string&);
 void pc_p2_original_course_retired(Creature*);
 bool pc_p2_original_course_shadow(const Generator*);
+// Called once by the real day-advance event; never derives P2 day from AP/P1.
+void pc_p2_original_course_day_advanced();
