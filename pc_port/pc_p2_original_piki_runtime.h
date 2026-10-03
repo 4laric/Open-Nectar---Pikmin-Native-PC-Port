@@ -52,6 +52,9 @@ public:
  virtual const std::string& naviParameterBytes()const=0;
  virtual bool gravity(float&,std::string&)const=0;
  virtual bool captainFrame(const Navi*,CaptainFrame&,std::string&)const=0;
+ // Genuine PhysicalSource CF_IsAlive fact. Missing producer refuses; native
+ // P1 HP/isAlive(), FSM state and provenance labels cannot supply this value.
+ virtual bool bodyAlive(Handle,bool&,std::string&)const=0;
  virtual bool supports(Handle,Motion,std::string&)const=0;
  virtual bool motion(Handle,Motion,std::string&)=0;
  virtual bool animate(Handle,float delta,std::string&)=0;
@@ -132,6 +135,9 @@ bool handle(const Piki*,Handle&);
 bool snapshot(Handle,RuntimeState&);
 bool frame(Handle,Frame&,std::string&);
 bool squad(Navi*,std::vector<Frame>&,std::string&);
+// Complete committed source census, including Free/held/flying bodies. Atomic
+// output in native association lifetime order; pending owners grant no actions.
+bool roster(std::vector<Frame>&,std::string&);
 // Retail -1 prioritizes the selected body maturity; 0..2 rotates explicit priority.
 bool sortFormation(Handle,int happa,std::string&);
 bool transition(Handle,State,std::string&);
@@ -145,6 +151,11 @@ bool applyGravity(Handle,float delta,std::string&);
 // Called from real native floor bounce, not a scripted landing assertion.
 bool bounce(Handle,std::string&);
 bool whistle(Handle,Navi*,std::string&);
+// Invocation success and retail receiver acceptance are distinct. Normal
+// receiver rejection succeeds with accepted=false; authority refusal preserves
+// accepted. newToParty is the native InteractFue flag (retail Piki ignores it;
+// NaviFollow consumes it). combine permits transfer from another captain only.
+bool whistle(Handle,Navi*,bool combine,bool newToParty,bool& accepted,std::string&);
 // Actual ActFreeArg/ActGather dismissal after genuine PartySource selection.
 bool gather(Handle,const Vector3f& goal,float radius,std::string&);
 bool launch(Handle,Navi*,const Vector3f& cursor,std::string&);
@@ -175,6 +186,9 @@ bool readOwnership(Ownership&,std::string&);
 // ordinary gameplay animation/listener callback delivery remains supported.
 bool canRetireScene(std::string&);
 bool owned()noexcept;
+// Observed exact retained FSM/pending owner, independent of action/world
+// admission. In-flight owner mutation conservatively retains every consumer.
+bool retains(Handle)noexcept;
 bool retired(std::string&);
 } }
 

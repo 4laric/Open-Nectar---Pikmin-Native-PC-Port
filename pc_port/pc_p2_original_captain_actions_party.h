@@ -48,6 +48,8 @@ public:
  virtual bool members(const Navi&,std::vector<Member>&,std::string&)const=0;
  virtual bool togglePlayer(Navi&,Navi&,std::string&)=0;
  virtual bool changeVoice(Navi&,std::string&)=0;
+ // Completed authenticated receiver invocation; retail accepted=false is
+ // ignored by the source transfer loop, but missing/stale authority refuses.
  virtual bool whistleMember(Navi& caller,actions::PikiHandle,bool combine,
   bool newToParty,std::string&)=0;
  virtual bool dismissSound(Navi&,std::string&)=0;

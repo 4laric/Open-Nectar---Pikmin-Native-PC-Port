@@ -38,6 +38,7 @@ struct Services:pk::Services {
  const std::string& naviParameterBytes()const override{return resource;}
  bool gravity(float&,std::string&)const override{return false;}
  bool captainFrame(const Navi*,pk::CaptainFrame&,std::string&)const override{return false;}
+ bool bodyAlive(pk::Handle,bool& out,std::string&)const override{if(!physicalAvailable)return false;out=alive;return true;}
  bool supports(pk::Handle,pk::Motion,std::string&)const override{return false;}
  bool motion(pk::Handle,pk::Motion,std::string&) override{return false;}
  bool animate(pk::Handle,float ,std::string&) override{return false;}
@@ -89,7 +90,7 @@ struct Actor:na::ActorSource {
  bool followFeedback(Navi&,party::FollowFeedback,std::string&)override{++effects;return true;}bool enemy(party::EnemyHandle,party::EnemyFrame&,std::string&)const override{return false;}
  bool followPunch(Navi&,party::EnemyHandle,actions::Vec3,std::string&)override{++effects;return true;}
 } actor;
-std::vector<pk::Frame> frames;int transitions=0,launches=0,whistles=0,gathers=0,positions=0,controls=0;bool sdkExpire=false,sdkAvailable=true;
+std::vector<pk::Frame> frames;int transitions=0,launches=0,whistles=0,gathers=0,positions=0,controls=0;bool sdkExpire=false,sdkAvailable=true,whistleAvailable=true,whistleAccepted=true,lastCombine=false,lastNewToParty=false;int whistleInvocations=0;
 pk::Frame* find(pk::Handle h){for(auto& f:frames)if(f.handle.body==h.body&&f.handle.lifetime==h.lifetime)return &f;return nullptr;}
 }
 const LoadedScene* pc_p2_original_captain_loaded_scene(){return canonical;}const World* pc_p2_original_captain_world(){return &world;}
@@ -112,7 +113,7 @@ bool nativePhysicalFacts(Handle h,const PhysicalSource* p,PhysicalFacts& out,std
 bool transition(Handle h,State state,std::string&){auto* f=find(h);if(!f)return false;++transitions;f->state=state;if(sdkExpire)a.current=&other;return true;}
 bool position(Handle h,const Vector3f& v,std::string&){auto* f=find(h);if(!f)return false;++positions;f->position=v;return true;}
 bool sortFormation(Handle h,int,std::string&){return find(h)!=nullptr;}
-bool whistle(Handle h,Navi* n,std::string&){auto* f=find(h);if(!f)return false;++whistles;f->captain=n;return true;}
+bool whistle(Handle h,Navi* n,bool combine,bool newToParty,bool& accepted,std::string& e){auto* f=find(h);bool living;if(!f||!whistleAvailable||!services.bodyAlive(h,living,e))return false;++whistleInvocations;lastCombine=combine;lastNewToParty=newToParty;accepted=living&&whistleAccepted;if(accepted){++whistles;f->captain=n;}if(sdkExpire)a.current=&other;return true;}
 bool gather(Handle h,const Vector3f& goal,float,std::string&){auto* f=find(h);if(!f)return false;++gathers;f->position=goal;f->captain=nullptr;return true;}
 bool launch(Handle h,Navi*,const Vector3f&,std::string&){auto* f=find(h);if(!f)return false;++launches;f->state=State::Flying;return true;}
 bool Plate::slotPosition(Handle,Navi*,int,Vector3f& out,std::string&)const{out={4,5,6};return true;}
@@ -130,7 +131,7 @@ int main(int argc,char** argv){try{
  check(bridge->transitionPiki(a,{&q,20},actions::PikiState::Flying,error)&&transitions==1,"already launched Flying never reinitializes");
  check(bridge->freeMember(a,{&p,10},5,{1,2,3},true,error)&&gathers==1,"SDK positive dismissal gather");
  check(bridge->whistleMember(a,{&p,10},false,true,error)&&whistles==1,"SDK positive whistle");
- check(!bridge->whistleMember(a,{&p,10},true,false,error)&&whistles==1,"unsupported combining refuses explicitly");
+ whistleAccepted=false;check(bridge->whistleMember(a,{&p,10},true,false,error)&&whistles==1&&lastCombine&&!lastNewToParty,"typed normal rejection completes and preserves exact combining flags");whistleAccepted=true;
  actions::PikiFrame result;result.happa=99;check(!bridge->piki(a,{&p,11},result,error)&&result.happa==99,"stale exact lifetime output unchanged");
  frames[0].captain=&b;check(!bridge->transitionPiki(a,{&p,10},actions::PikiState::GoHang,error)&&transitions==1,"foreign party mutation refused");frames[0].captain=&a;
  alive=false;check(!bridge->piki(a,{&p,10},result,error)&&result.happa==99,"actual CF dead refused");std::vector<party::Member> membership;check(bridge->members(a,membership,error)&&membership.size()==2&&!membership[0].alive&&!membership[1].alive,"genuine CF-dead membership observed for literal dismissal filter");
@@ -138,6 +139,11 @@ int main(int argc,char** argv){try{
  physicalAvailable=false;membership[0].kind=99;check(!bridge->members(a,membership,error)&&membership[0].kind==99,"missing physical authority refuses membership without output change");physicalAvailable=true;
  actor.candidates={{{&p,10},nullptr},{{},&b}};check(bridge->callPikis(a,error)&&whistles==2,"ordered source census dispatches Piki and partner");
  actor.candidates={{{},&b},{{&p,10},nullptr}};party::accepted=false;int beforeWhistles=whistles;check(bridge->callPikis(a,error)&&whistles==beforeWhistles+1,"completed retail captain rejection continues ordered census");party::invocationAvailable=false;beforeWhistles=whistles;check(!bridge->callPikis(a,error)&&whistles==beforeWhistles,"missing captain authority halts census before next Piki");party::invocationAvailable=true;party::accepted=true;
+ actor.candidates={{{&p,10},nullptr},{{&q,20},nullptr}};whistleAccepted=false;int beforeInvocations=whistleInvocations;check(bridge->callPikis(a,error)&&whistleInvocations==beforeInvocations+2,"normal Piki receiver rejection continues complete ordered census");
+ alive=false;beforeInvocations=whistleInvocations;check(bridge->callPikis(a,error)&&whistleInvocations==beforeInvocations+2,"genuine CF-dead receiver rejection still completes invocations");alive=true;
+ whistleAvailable=false;beforeInvocations=whistleInvocations;check(!bridge->callPikis(a,error)&&whistleInvocations==beforeInvocations,"missing typed SDK authority stops before next candidate");whistleAvailable=true;whistleAccepted=true;
+ physicalAvailable=false;beforeInvocations=whistleInvocations;check(!bridge->whistleMember(a,{&p,10},false,true,error)&&whistleInvocations==beforeInvocations,"absent real physical fact refuses before receiver");physicalAvailable=true;
+ sdkExpire=true;check(!bridge->whistleMember(a,{&p,10},false,true,error),"typed SDK callback captain state expiry refuses continuation");sdkExpire=false;a.current=&typed;
  check(bridge->control(a,error)&&controls==1,"actual source control called once");check(bridge->moveRotation(a,false,error)&&(a.flags&CF_UsePriorityFaceDir),"physical priority face flag");
  check(bridge->togglePlayer(a,b,error),"source controller ownership toggle preserves both state identities");actor.toggleExpire=true;check(!bridge->togglePlayer(a,b,error),"unexpected target state expiry refuses toggle continuation");actor.toggleExpire=false;b.current=&typed;
  actor.expire=true;observation.face=99;check(!bridge->frame(a,observation,error)&&observation.face==99,"read callback state expiry leaves output unchanged");a.current=&typed;
