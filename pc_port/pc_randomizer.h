@@ -1,5 +1,6 @@
 #pragma once
 #include "pc_p2_surface_session.h"
+#include "pc_p2_authored_cave_session.h"
 #include "pc_p2_original_calendar.h"
 
 #include "netplay/pc_netplay_randstate.h"
@@ -8,6 +9,11 @@
 struct P2CaveCacheBanks;
 const P2CaveCacheBanks& pc_randomizer_generated_cave_cache();
 void pc_randomizer_generated_cave_cache_set(const P2CaveCacheBanks& banks);
+// Explicit bootstrap-selected authored route; no retail context admission.
+const P2AuthoredCaveRoute& pc_randomizer_authored_cave_route();
+const P2AuthoredCaveSession& pc_randomizer_authored_cave_session();
+bool pc_randomizer_authored_cave_session_set(const P2AuthoredCaveSession&);
+bool pc_randomizer_authored_cave_checkpoint_set(const P2AuthoredCaveSession&,const P2CaveCacheBanks&);
 
 // Seed-owned generated cave transport; absent for every historical seed.
 bool pc_randomizer_generated_cave();

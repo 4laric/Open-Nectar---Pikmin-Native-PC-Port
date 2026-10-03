@@ -2628,6 +2628,10 @@ endif()
 # Include the P2 ordinary delivery ledger because pc_randomizer.cpp always links
 # against its host entry points; this only changes probe linkage, not behavior.
 add_executable(pc_randomizer_probe pc_port/pc_randomizer_probe.cpp pc_port/pc_randomizer.cpp pc_port/netplay/pc_netplay_randstate.cpp pc_port/pc_randomizer_outbox.cpp pc_port/pc_p2_delivery_host.cpp pc_port/pc_p2_proxy.cpp pc_port/pc_p2_original_progress.cpp pc_port/pc_p2_original_lifecycle.cpp)
+add_executable(p2_authored_cave_session_test tools/p2_authored_cave_session_test.cpp)
+target_include_directories(p2_authored_cave_session_test PRIVATE pc_port)
+target_compile_options(p2_authored_cave_session_test PRIVATE -UNDEBUG)
+add_test(NAME p2_authored_cave_session_test COMMAND p2_authored_cave_session_test)
 target_compile_definitions(pc_randomizer_probe PRIVATE PC_RANDOMIZER_NO_ORIGINAL_ENGINE=1)
 # Same engine-header preinclude as pc_bbft_test above (pc_p2_proxy.cpp needs it).
 target_compile_options(pc_randomizer_probe PRIVATE ${NATIVE_COMPILE_OPTIONS})
