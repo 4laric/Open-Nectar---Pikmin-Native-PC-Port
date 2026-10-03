@@ -513,6 +513,7 @@ class PurpleKochappyApp:public PlugPikiApp {
  PcKochappyReentryProgress reentryProgress;
  PcKochappyRouteCatchup routeCatchup;
  PcKochappySwarmRecovery swarmRecovery;
+ PcKochappyGuidePulse guidePulse;
  PcKochappyPrefixProgress prefixProgress;
  PcKochappyPrefixContactGate prefixContact;
  PcKochappyPrefixNeutralGate prefixNeutral;
@@ -908,7 +909,8 @@ public:
      receiverObservedClearance(n,receiverWaypoint,age);
      const float guideDistance=distance(n->mSRT.t,goal);
      const float guideSpeed=std::hypot(n->mVelocity.x,n->mVelocity.z),guideTarget=std::hypot(n->mTargetVelocity.x,n->mTargetVelocity.z);
-     const auto command=pc_kochappy_guide_input(guideDistance,guideSpeed,guideTarget);
+     require(std::isfinite(guideSpeed)&&std::isfinite(guideTarget),"guide velocity/target finite observation required");
+     const auto command=guidePulse.observe(receiverWaypoint,guideDistance);
      require(command!=PcKochappyGuideInput::Refuse,"guide braking geometry invalid");
      if(guideDistance<12.f)std::printf("P2_PURPLE_KOCHAPPY_GUIDE_BRAKE age=%d waypoint=%d distance=%.6f speed=%.6f target=%.6f neutral=%d ordinary_input=1 actor_writes=0\n",age,receiverWaypoint,guideDistance,guideSpeed,guideTarget,int(command==PcKochappyGuideInput::Neutral));
      if(command==PcKochappyGuideInput::Neutral)input();else point(n,goal,true,KeyConfig::_instance->mSetCursorKey.mBind,ReceiverRouteReach);return result;
