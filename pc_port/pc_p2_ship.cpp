@@ -16,6 +16,7 @@
 #include "GameStat.h"
 #include <SDL2/SDL.h>
 #include <cstdio>
+#include <cstdlib>
 
 bool pc_p2_ship_special(const Piki* p) {
     return pc_randomizer_purple_campaign() && p && (p->mP2Purple || p->mP2White);
@@ -77,7 +78,10 @@ void pc_p2_ship_tick(Navi* navi, bool active) {
         std::string economy;
         if (pc_randomizer_white_treasure_campaign()) {
             static p2treasure::Catalog catalog;
-            static const bool catalogReady = catalog.load_retail("p2-treasure-catalog.txt");
+            static const bool catalogReady = [] {
+                const char* path = std::getenv("PIKMIN_P2_TREASURE_CATALOG");
+                return catalog.load_retail(path && path[0] ? path : "p2-treasure-catalog.txt");
+            }();
             economy = p2economy::ship_summary(p2whitetreasure::ledger.delivered, catalogReady ? &catalog : nullptr) + " | ";
         }
         char title[320];const auto& counts=p2ship::stock.counts[choice[captain]-3];
