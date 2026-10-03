@@ -21,6 +21,9 @@ bool pc_p2_original_piki_origin_associate_birth(Piki*,const OriginalPikiOrigin&)
 bool pc_p2_original_piki_origin_query(const Piki*,OriginalPikiOrigin& out);
 bool pc_p2_original_piki_origin_restore_saved(Piki*,const OriginalPikiOrigin&);
 void pc_p2_original_piki_origin_forget(Piki*);
+// After scene consumers retire their provenance and before the actor heap is
+// released. Clear live pointers only; keep catalog and consumed member history.
+void pc_p2_original_piki_origin_scene_exit() noexcept;
 // Cave owns the authenticated selected-checkpoint/transaction proof. This is
 // false outside committed teardown or scoped physical party restoration. An
 // older selected SAVE is permitted: current-scene death is not global permadeath.

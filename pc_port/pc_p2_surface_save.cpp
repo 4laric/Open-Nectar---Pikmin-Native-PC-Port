@@ -32,7 +32,7 @@
 
 namespace {
 zen::ogScrFileChkSelMgr* choice=nullptr;
-bool choosing=false, previous=false, restoring=false, restored=false, bindingParty=false;
+bool choosing=false, requested=false, restoring=false, restored=false, bindingParty=false;
 std::uint64_t selectedGeneration=0;
 std::array<std::uint8_t,32> selectedSha{};
 [[noreturn]] void invalid(const char* why){std::fprintf(stderr,"Invalid living surface SAVE: %s\n",why);std::abort();}
@@ -66,32 +66,21 @@ bool settled(){
     Generator* source;
     FOREACH_NODE_REUSE(Generator,generatorList->mGenListHead->mChild,source){
         if(source->isExpired())continue;
-        // Native saveGenerator excludes equality-day sources although init
-        // still considers them live. Do not write an orphan creature record.
-        if(source->mDayLimit==gameflow.mWorldClock.mCurrentDay)
-            return held("equality_day_source_restore_pending");
         // Native SaveCreature retains only mLatestSpawnCreature. Its exact
         // properties cannot stand in for a grouped source's other actors.
         if(source->mAliveCount<0||source->mAliveCount>1
             ||(source->mAliveCount==1&&(!source->mLatestSpawnCreature||!source->mLatestSpawnCreature->isAlive()))
             ||(source->mAliveCount==0&&source->mLatestSpawnCreature))
             return held("source_actor_cardinality_restore_pending");
-        // A fresh-process mid-day load must use only saved source records.
-        // Sources without durable generator/count state cannot preserve their
-        // absence (killed enemies, consumed items) or their remaining births.
-        if((source->mCarryOverFlags&(GENCARRY_SaveGenerator|GENCARRY_SaveSpawnCount))
-            !=(GENCARRY_SaveGenerator|GENCARRY_SaveSpawnCount))return held("nonpersistent_source_restore_pending");
-        if(source->mLatestSpawnCreature&&source->mLatestSpawnCreature->isAlive()
-            &&(source->mCarryOverFlags&(GENCARRY_SaveCreature|GENCARRY_SaveProperties))
-                !=(GENCARRY_SaveCreature|GENCARRY_SaveProperties))return held("source_properties_restore_pending");
+        if(source->mCarryOverFlags>15||source->mDayLimit<-1||source->mDayLimit>32767
+            ||!source->mGenObject||!source->mGenArea||!source->mGenType)
+            return held("unsupported_source_record");
         savedSources.insert(source);
     }
     auto serializedActor=[&](Creature* actor){
         auto* gen=actor->mGenerator;
         return gen&&savedSources.count(gen)&&gen->mLatestSpawnCreature==actor
-            &&gen->mAliveCount==1
-            &&(gen->mCarryOverFlags&(GENCARRY_SaveCreature|GENCARRY_SaveProperties))
-                ==(GENCARRY_SaveCreature|GENCARRY_SaveProperties);
+            &&gen->mAliveCount==1;
     };
     for(ObjectMgr* manager:{static_cast<ObjectMgr*>(tekiMgr),static_cast<ObjectMgr*>(bossMgr),static_cast<ObjectMgr*>(pelletMgr)}){
         Iterator actors(manager);CI_LOOP(actors){auto* actor=static_cast<Creature*>(*actors);
@@ -104,7 +93,9 @@ bool settled(){
     Iterator bodies(pikiMgr);CI_LOOP(bodies){auto* body=static_cast<Piki*>(*bodies);
         // Party3 authenticates original-source flags, but the physical source
         // factory/cache restore composition is still unqualified here.
-        if(body->isAlive()&&(body->mGenerator||body->mP2Bulbmin||body->mMode>1||body->isHolding()))
+        OriginalPikiBody originalBody;
+        if(body->isAlive()&&(body->mGenerator||pc_p2_original_piki_body_query(body,originalBody)
+            ||body->mP2Bulbmin||body->mMode>1||body->isHolding()))
             return held("unsupported_body_state");}
     if(!itemMgr->getPikiHeadMgr())return held("missing_head_manager");
     Iterator heads(itemMgr->getPikiHeadMgr());CI_LOOP(heads){auto* h=static_cast<PikiHeadItem*>(*heads);
@@ -116,15 +107,68 @@ bool settled(){
         switch(item->mObjType){
         case OBJTYPE_Goal:case OBJTYPE_Ufo:case OBJTYPE_Pikihead:
         case OBJTYPE_SluiceSoft:case OBJTYPE_SluiceHard:case OBJTYPE_SluiceBomb:case OBJTYPE_SluiceBombHard:
-        case OBJTYPE_WorkObject:case OBJTYPE_BoBase:case OBJTYPE_Ivy:case OBJTYPE_Rope:case OBJTYPE_Fulcrum:
-        case OBJTYPE_SunsetStart:case OBJTYPE_SunsetGoal:break;
+        break;
         default:return held("world_item_restore_pending");
         }
     }
     if(!workObjectMgr)return held("missing_work_object_manager");
-    Iterator works(workObjectMgr);CI_LOOP(works){auto* work=static_cast<Creature*>(*works);
-        if(work&&!serializedActor(work))return held("work_object_source_authority_missing");}
+    Iterator works(workObjectMgr);CI_LOOP(works){auto* work=static_cast<WorkObject*>(*works);
+        if(!work)continue;
+        if(!serializedActor(work))return held("work_object_source_authority_missing");
+        if(!work->isBridge()&&!work->isHinderRock())return held("work_object_codec_unsupported");
+        if(work->isHinderRock()){
+            const auto* rock=static_cast<HinderRock*>(work);
+            if(rock->mState==1||rock->mPushingPikmin||rock->mPushMoveTimer!=0)
+                return held("work_object_transition_in_progress");
+        }
+    }
     return true;
+}
+// The mid-day card needs a full exact source snapshot even when authored
+// carry flags intentionally discard it at sunset. These transient flags never
+// become gameplay policy: the authenticated descriptor keeps the authored
+// values and both live continuation and cold restoration restore them.
+class SurfaceSourceSerialization {
+    struct Live {Generator* gen;unsigned flags;int dayLimit;};
+    std::vector<Live> originals;
+public:
+    explicit SurfaceSourceSerialization(P2SurfaceSession& session){
+        session.sources.clear();
+        Generator* gen;
+        FOREACH_NODE_REUSE(Generator,generatorList->mGenListHead->mChild,gen){
+            if(gen->isExpired())continue;
+            originals.push_back({gen,gen->mCarryOverFlags,gen->mDayLimit});
+            session.sources.push_back({gen->mCarryOverFlags,gen->mDayLimit,gen->mAliveCount,
+                gen->mLatestSpawnDay,gen->mRespawnInterval,
+                {gen->mGenPosition.x,gen->mGenPosition.y,gen->mGenPosition.z},
+                {gen->mGenOffset.x,gen->mGenOffset.y,gen->mGenOffset.z}});
+            gen->mCarryOverFlags=GENCARRY_SaveGenerator|GENCARRY_SaveSpawnCount
+                |GENCARRY_SaveCreature|GENCARRY_SaveProperties;
+            if(gen->mDayLimit==gameflow.mWorldClock.mCurrentDay)++gen->mDayLimit;
+        }
+    }
+    ~SurfaceSourceSerialization(){for(const auto& live:originals){
+        live.gen->mCarryOverFlags=live.flags;live.gen->mDayLimit=live.dayLimit;}}
+};
+void restoreSourcePolicy(const P2SurfaceSession& saved,bool afterLoad){
+    if(saved.sources.empty())return; // Legacy restricted version1 descriptor.
+    std::vector<bool> seen(saved.sources.size(),false);
+    Generator* gen;
+    FOREACH_NODE_REUSE(Generator,generatorList->mGenListHead->mChild,gen){
+        const int index=gen->mGeneratorListIdx;
+        if(index<0||std::size_t(index)>=saved.sources.size()||seen[index]
+            ||!gen->readFromRam()||gen->mCarryOverFlags!=15)invalid("cold source policy identity mismatch");
+        if(afterLoad&&(gen->mAliveCount!=saved.sources[index].aliveCount
+            ||(gen->mAliveCount==1&&(!gen->mLatestSpawnCreature||!gen->mLatestSpawnCreature->isAlive()))
+            ||(gen->mAliveCount==0&&gen->mLatestSpawnCreature)))invalid("cold source actor restoration failed");
+        seen[index]=true;
+        const auto& source=saved.sources[index];
+        gen->mGenPosition.set(source.position.x,source.position.y,source.position.z);
+        gen->mGenOffset.set(source.offset.x,source.offset.y,source.offset.z);
+        gen->mLatestSpawnDay=source.latestSpawnDay;gen->mRespawnInterval=source.respawnInterval;
+        if(afterLoad){gen->mCarryOverFlags=source.flags;gen->mDayLimit=source.dayLimit;}
+    }
+    for(bool found:seen)if(!found)invalid("cold source policy record absent");
 }
 bool commit(){
     if(!settled())return false;
@@ -143,6 +187,8 @@ bool commit(){
     // replace a prior scene cache while gameplay continues.
     const PcP2CampaignLiveCache oldCache;
     const auto oldPlayState=gameflow.mPlayState;
+    SurfaceSourceSerialization serialization(next);
+    if(!next.valid())return held("invalid_authored_source_policy");
     std::string reason;
     if(!pc_p2_campaign_flush(reason))return held(reason.c_str());
     pc_randomizer_surface_session_set(next);
@@ -184,8 +230,18 @@ bool pc_p2_surface_save_resume_scene(){
 }
 bool pc_p2_surface_save_owns_heads(){return restoring&&pc_randomizer_surface_session().present;}
 bool pc_p2_surface_save_living_scene(){return restoring||restored;}
+void pc_p2_surface_save_sources_preinit(){
+    if(!restoring)return;
+    if(!sameProof())invalid("selected checkpoint changed before source init");
+    restoreSourcePolicy(pc_randomizer_surface_session(),false);
+}
+void pc_p2_surface_save_sources_loaded(){
+    if(!restoring)return;
+    if(!sameProof())invalid("selected checkpoint changed during source restore");
+    restoreSourcePolicy(pc_randomizer_surface_session(),true);
+}
 void pc_p2_surface_save_scene_setup(){
-    choosing=false;previous=false;choice=nullptr;
+    choosing=false;requested=false;choice=nullptr;
     if(restoring){
         if(!sameProof())invalid("selected checkpoint changed before cold restore");
         const auto& saved=pc_randomizer_surface_session();
@@ -221,9 +277,9 @@ void pc_p2_surface_save_scene_exit(){
 void pc_p2_surface_save_before_day_cleanup(){
     if(pc_randomizer_enabled())pc_randomizer_surface_session_set(P2SurfaceSession{});
 }
+void pc_p2_surface_save_request(){if(choice&&!choosing)requested=true;}
 bool pc_p2_surface_save_update(Controller* input){
-    const auto* keys=SDL_GetKeyboardState(nullptr);
-    const bool down=keys&&keys[SDL_SCANCODE_F11];const bool pressed=down&&!previous;previous=down;
+    const bool pressed=requested;requested=false;
     if(!choice)return false;
     if(!choosing){
         if(!pressed||!settled())return false;
