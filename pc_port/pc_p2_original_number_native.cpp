@@ -95,6 +95,10 @@ PcOriginalNumberAuthority::~PcOriginalNumberAuthority(){
 bool pc_p2_original_number_resources(const p2originalresource::ContentsRequirements& requirements,std::string& e){
  if(!requirements.pelletOne&&!requirements.pelletFive){e.clear();return true;}
  if(requirements.pelletFive)return fail(e,"Five literal source LOD/rigid physics adapter is not implemented");
+ // Retail One applies its floor-normal force after tracing; P1's earlier
+ // horizontal damping/gravity ordering cannot qualify the physical path.
+ // Keep this closure held before ANY producer RNG until that adapter lands.
+ if(requirements.pelletOne)return fail(e,"One source floor-force/gravity ordering adapter is not implemented");
  if(!current(e)||!gsys||!pelletMgr||pelletMgr->getMax()<=0||pelletMgr->getMax()>4096)return fail(e,"numeric physical manager unavailable");
  if(!ledger->remainingCapacity())return fail(e,"numeric retained receipt capacity exhausted before producer RNG");
  if(ready){e.clear();return true;}

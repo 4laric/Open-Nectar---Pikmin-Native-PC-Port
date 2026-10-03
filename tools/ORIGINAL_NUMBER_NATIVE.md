@@ -4,7 +4,10 @@ The One candidate uses the verified private `number1_{blue,red,yellow}.mod`
 and `number1_carry.txt` resources under `assets/p2-original/numbers/`. Each
 resource is checked against its converter output hash before any model load.
 Legal assets remain local and ignored. Five refuses before fresh producer RNG
-until its source LOD and rigid physics adapter exists.
+until its source LOD and rigid physics adapter exists. One also holds before
+producer RNG until the source post-trace floor-force/gravity ordering adapter
+replaces native P1 horizontal damping. Fixed simple dynamics and zero particles
+alone do not establish source movement.
 
 No producer installs this factory yet. The pure ledger, animation and geometry
 controls and compiled production objects are engineering evidence. They do not
