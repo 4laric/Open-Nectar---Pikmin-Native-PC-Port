@@ -170,12 +170,18 @@ bool pc_p2_retail_treasure_cargo_abort_prepared(p2retailcargo::PodTeardown teard
 bool pc_p2_retail_treasure_cargo_release_collected(std::string& error){
     return pc_p2_retail_treasure_cargo_release_collected([](std::string& e){return pc_p2_original_pod_release(e);},error);
 }
-bool pc_p2_retail_treasure_cargo_release_collected(p2retailcargo::PodTeardown teardown,std::string& error){
+bool pc_p2_retail_treasure_cargo_can_release_collected(std::string& error){
     if(!current())return fail(error,"cargo release has no selected floor");
     for(const auto& item:records)if(!p2treasurestate::state.seen(catalog,item.second.id))return fail(error,"uncollected original cargo needs actual graph retention/restore");
     p2originalpod::Snapshot receiver;
-    if(!teardown||!pc_p2_original_pod_snapshot(config.floor.scene,receiver)||!receiver.committed)
+    if(!pc_p2_original_pod_snapshot(config.floor.scene,receiver)||!receiver.committed||!same(receiver.floor,config.floor))
         return fail(error,"cargo release has no committed matching receiver");
+    if(pc_p2_original_pod_pending()||!receiver.pending.empty())return fail(error,"receiver still owns unfinished cargo or a transaction");
+    error.clear();return true;
+}
+bool pc_p2_retail_treasure_cargo_release_collected(p2retailcargo::PodTeardown teardown,std::string& error){
+    if(!teardown)return fail(error,"cargo release has no receiver teardown operation");
+    if(!pc_p2_retail_treasure_cargo_can_release_collected(error))return false;
     TeardownScope transaction;
     if(!teardown(error))return false;
     if(pc_p2_original_pod_owned())return fail(error,"receiver owner did not finish collected teardown");
