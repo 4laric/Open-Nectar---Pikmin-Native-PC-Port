@@ -157,8 +157,32 @@ bool NativeFloor::verifyAbsent(const CaveDescriptor&,unsigned,const ContentRow& 
                               const BirthIdentity& expected,const LiveBinding& binding)const{
  return m->context.scene==identity&&binding.identity==expected&&m->scene.absent(row,expected,m->context,binding);
 }
+FloorPhase NativeFloor::phase()const noexcept{
+ if(m->releasing||m->cleaning)return FloorPhase::Releasing;
+ if(m->committed)return FloorPhase::Committed;
+ if(m->begun)return FloorPhase::Installing;
+ if(m->prepared||m->scenePreparationOwned)return FloorPhase::Preparing;
+ return FloorPhase::Empty;
+}
+bool NativeFloor::bindingFacts(Snapshot& out,std::uint64_t& epoch,FloorPhase& outPhase,std::string& error)const{
+ const auto currentPhase=phase();
+ if((currentPhase!=FloorPhase::Installing&&currentPhase!=FloorPhase::Committed)||!m->prepared||!m->begun||
+    !m->scenePreparationOwned||m->expectedBirths.empty()||!m->scene.owns(m->context.scene))
+  return refuse(error,"retail binding facts are not owned by an installing/committed native scene");
+ const auto selectedEpoch=m->expectedBirths.front().epoch;
+ if(!selectedEpoch)return refuse(error,"retail binding census has no floor epoch");
+ for(const auto& birth:m->expectedBirths)if(birth.epoch!=selectedEpoch)return refuse(error,"retail binding census has mixed floor epochs");
+ out=m->context;epoch=selectedEpoch;outPhase=currentPhase;error.clear();return true;
+}
+bool NativeFloor::bindingCurrent(const SceneIdentity& scene,std::uint64_t epoch)const noexcept{
+ const auto currentPhase=phase();
+ if((currentPhase!=FloorPhase::Installing&&currentPhase!=FloorPhase::Committed)||!m->prepared||!m->begun||
+    !m->scenePreparationOwned||!(scene==m->context.scene)||!epoch||m->expectedBirths.empty()||!m->scene.owns(scene))return false;
+ for(const auto& birth:m->expectedBirths)if(birth.epoch!=epoch)return false;
+ return true;
+}
 bool NativeFloor::installed(Snapshot& out,std::uint64_t& epoch,std::string& error)const{
- if(!m->committed||!m->prepared||!m->begun||!m->scenePreparationOwned||m->cleaning||m->releasing||m->expectedBirths.empty())
+ if(!m->committed||!m->prepared||!m->begun||!m->scenePreparationOwned||m->cleaning||m->releasing||m->expectedBirths.empty()||!m->scene.owns(m->context.scene))
   return refuse(error,"retail physical floor is not committed/readable");
  const auto selectedEpoch=m->expectedBirths.front().epoch;
  if(!selectedEpoch)return refuse(error,"retail installed census has no floor epoch");
@@ -167,14 +191,15 @@ bool NativeFloor::installed(Snapshot& out,std::uint64_t& epoch,std::string& erro
 }
 bool NativeFloor::current(const SceneIdentity& scene,std::uint64_t epoch)const noexcept{
  if(!m->committed||!m->prepared||!m->begun||!m->scenePreparationOwned||m->cleaning||m->releasing||
-    !(scene==m->context.scene)||!epoch||m->expectedBirths.empty())return false;
+    !(scene==m->context.scene)||!epoch||m->expectedBirths.empty()||!m->scene.owns(scene))return false;
  for(const auto& birth:m->expectedBirths)if(birth.epoch!=epoch)return false;
  return true;
 }
-bool NativeFloor::expectedSourceBirth(const Creature* pointer,unsigned token,const p2original::InstanceIdentity& identity,
-                                     BirthIdentity& out,Snapshot& floor,std::string& error)const{
+bool NativeFloor::boundSourceBirth(const Creature* pointer,unsigned token,const p2original::InstanceIdentity& identity,
+                                     BirthIdentity& out,Snapshot& floor,FloorPhase& outPhase,std::string& error)const{
  Snapshot selected;std::uint64_t epoch=0;
- if(!installed(selected,epoch,error))return false;
+ FloorPhase selectedPhase;
+ if(!bindingFacts(selected,epoch,selectedPhase,error))return false;
  unsigned source=0,actualToken=0;p2original::InstanceIdentity actual;
  if(!pointer||!token||!p2original::originalActors().query(pointer,source,actualToken,&actual)||
     token!=actualToken||!(identity==actual)||actual.catalog!=selected.scene.layoutSha256)
@@ -182,9 +207,16 @@ bool NativeFloor::expectedSourceBirth(const Creature* pointer,unsigned token,con
  for(const auto& actor:m->actors)if(actor.actor==pointer&&actor.registered&&actor.token==token&&actor.source==source){
   if(actor.origin.epoch!=actual.epoch||actor.origin.activation!=actual.activation||actor.origin.ordinal!=actual.ordinal)
    return refuse(error,"retail installed actor differs from issued census");
-  out=actor.origin;floor=std::move(selected);error.clear();return true;
+  out=actor.origin;floor=std::move(selected);outPhase=selectedPhase;error.clear();return true;
  }
  return refuse(error,"retail source actor is outside owned installed census");
+}
+bool NativeFloor::expectedSourceBirth(const Creature* pointer,unsigned token,const p2original::InstanceIdentity& identity,
+                                     BirthIdentity& out,Snapshot& floor,std::string& error)const{
+ BirthIdentity issued;Snapshot selected;FloorPhase selectedPhase;
+ if(!boundSourceBirth(pointer,token,identity,issued,selected,selectedPhase,error))return false;
+ if(selectedPhase!=FloorPhase::Committed)return refuse(error,"retail source actor is not in a committed floor");
+ out=std::move(issued);floor=std::move(selected);error.clear();return true;
 }
 bool NativeFloor::knownSourceBirth(const p2original::InstanceIdentity& identity,BirthIdentity& out,Snapshot& floor,std::string& error)const{
  Snapshot selected;std::uint64_t epoch=0;
