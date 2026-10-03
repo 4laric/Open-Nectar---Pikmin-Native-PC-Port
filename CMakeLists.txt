@@ -366,6 +366,8 @@ set(PC_PORT_SOURCES
     pc_port/pc_p2_cave_carry.cpp
     pc_port/pc_p2_enemy.cpp
     pc_port/pc_p2_sheargrub.cpp
+    pc_port/pc_p2_original_snow.cpp
+    pc_port/pc_p2_original_snow_native.cpp
     pc_port/pc_p2_original_red.cpp
     pc_port/pc_p2_original_red_native.cpp
     pc_port/pc_p2_kochappy.cpp
@@ -3329,6 +3331,35 @@ add_test(NAME p2_campaign_economy_test COMMAND p2_campaign_economy_test)
 add_executable(pc_p2_original_red_test tools/test_p2_original_red.cpp
     pc_port/pc_p2_original_red.cpp pc_port/pc_p2_original_spawn_plan.cpp
     pc_port/pc_p2_original_drop.cpp pc_port/pc_p2_original_catalog.cpp)
+<<<<<<< HEAD
 target_include_directories(pc_p2_original_red_test PRIVATE pc_port)
 target_compile_options(pc_p2_original_red_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
 add_test(NAME pc_p2_original_red_test COMMAND pc_p2_original_red_test)
+=======
+target_include_directories(pc_p2_original_cannon_test PRIVATE pc_port)
+target_compile_options(pc_p2_original_cannon_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME pc_p2_original_cannon_test COMMAND pc_p2_original_cannon_test)
+add_executable(pc_p2_original_cannon_stones_test tools/test_p2_original_cannon_stones.cpp pc_port/pc_p2_cannon_stone.cpp)
+target_include_directories(pc_p2_original_cannon_stones_test PRIVATE pc_port)
+target_compile_options(pc_p2_original_cannon_stones_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME pc_p2_original_cannon_stones_test COMMAND pc_p2_original_cannon_stones_test)
+
+add_executable(pc_p2_original_hanachirashi_test tools/test_p2_original_hanachirashi.cpp
+    pc_port/pc_p2_original_hanachirashi.cpp pc_port/pc_p2_original_spawn_plan.cpp
+    pc_port/pc_p2_original_drop.cpp pc_port/pc_p2_original_catalog.cpp)
+target_include_directories(pc_p2_original_hanachirashi_test PRIVATE pc_port)
+target_compile_options(pc_p2_original_hanachirashi_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME pc_p2_original_hanachirashi_test COMMAND pc_p2_original_hanachirashi_test)
+
+add_executable(pc_p2_hanachirashi_source_test tools/test_p2_hanachirashi_source.cpp)
+target_include_directories(pc_p2_hanachirashi_source_test PRIVATE pc_port)
+target_compile_options(pc_p2_hanachirashi_source_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME pc_p2_hanachirashi_source_test COMMAND pc_p2_hanachirashi_source_test)
+
+add_executable(pc_p2_original_snow_test tools/test_p2_original_snow.cpp
+    pc_port/pc_p2_original_snow.cpp pc_port/pc_p2_original_spawn_plan.cpp
+    pc_port/pc_p2_original_catalog.cpp pc_port/pc_p2_original_drop.cpp)
+target_include_directories(pc_p2_original_snow_test PRIVATE pc_port)
+target_compile_options(pc_p2_original_snow_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME pc_p2_original_snow_test COMMAND pc_p2_original_snow_test)
+>>>>>>> 30f22f149 (Add source45 YellowKochappy cave physical provider and shared source FSM)
