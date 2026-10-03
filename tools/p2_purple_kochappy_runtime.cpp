@@ -100,6 +100,7 @@ struct CrowdObserver:ActCrowd {
 };
 SDL_Joystick* pad=nullptr;
 bool human(){return std::getenv("P2_PURPLE_KOCHAPPY_HUMAN")!=nullptr;}
+bool recoveryOnly(){const char* value=std::getenv("P2_PURPLE_KOCHAPPY_RECOVERY_ONLY");return value&&!std::strcmp(value,"1");}
 void require(bool yes,const char* message){if(!yes){std::printf("FAIL P2_PURPLE_KOCHAPPY %s\n",message);std::fflush(nullptr);std::_Exit(1);}}
 float distance(const Vector3f& a,const Vector3f& b){float x=a.x-b.x,z=a.z-b.z;return std::sqrt(x*x+z*z);}
 void input(unsigned keys=0,int x=0,int y=0,int cx=0,int cy=0){
@@ -793,7 +794,13 @@ public:
    if(cycle==18)++throwCount;
    require(throwCount<8,"natural Purple receiver/Fit not observed after bounded throws");
   }
-  if(phase==6){input();if(age-start>60){require(std::fabs(counter-lastCounter)>.001f,"animator failed toresume");require(pc_kochappy_clock_resumed(pausedFsm,fsm),"ownFSM clock failed toresume naturally");recovered=true;phase=7;start=age;}}
+  if(phase==6){input();if(age-start>60){require(std::fabs(counter-lastCounter)>.001f,"animator failed toresume");require(pc_kochappy_clock_resumed(pausedFsm,fsm),"ownFSM clock failed toresume naturally");recovered=true;
+   if(recoveryOnly()){
+    require(sawPause&&sawFit&&activeSeconds>=10&&!active&&enemy->isAlive()&&enemy->mHealth>0,"ordinary live recovery prerequisites missing");
+    std::printf("PASS P2_PURPLE_KOCHAPPY_ORDINARY_RECOVERY startingRed=20 startingPurple=0 Violet_throw_pluck=1 natural_impact=1 motion_pause_resume=1 RedFit10=1 ownFSM_resumed=1 actor_writes=0 terminal_interruption_tested=0 tutorial_AP_gate=OPEN age=%d recovery_seconds=%.6f\n",age,activeSeconds);
+    std::fflush(nullptr);std::_Exit(0);
+   }
+   phase=7;start=age;}}
   if(phase==7){
    // Further ordinary throws allow natural damage/death to interrupt another
    // overlay. Success requires the observed active->terminal boundary.
@@ -812,6 +819,8 @@ public:
 };
 }
 int main(int argc,char**argv){
+ const char* recovery=std::getenv("P2_PURPLE_KOCHAPPY_RECOVERY_ONLY");
+ require(!recovery||(!std::strcmp(recovery,"1")&&!human()),"recovery-only requires explicit ordinary automated opt-in");
  require(std::getenv("PIKMIN_P2_TEST_START_DAY")&&!std::strcmp(std::getenv("PIKMIN_P2_TEST_START_DAY"),"5"),"inherit existing test-only actual day5 bootstrap");
  SDL_setenv("SDL_AUDIODRIVER","dummy",1);SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS,"1");SDL_SetMainReady();pc_gpu_preference_apply();pc_bbft_init(argc,argv);
  require(pc_pikipelago_room_preview(),"engineering room-preview required; tutorial/AP acceptance OPEN");
