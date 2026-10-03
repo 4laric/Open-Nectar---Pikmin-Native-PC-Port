@@ -15,8 +15,15 @@ int main(){
   const float angle=p2original::cannon::pikminFlickAngle(face,false,1000.0f);
   assert(std::fabs(-std::sin(angle)-std::sin(face))<1e-5f);
   assert(std::fabs(-std::cos(angle)-std::cos(face))<1e-5f);
-  assert(p2original::cannon::pikminFlickAngle(face,true,1000.0f)==1000.0f);
+  assert(p2original::cannon::pikminFlickAngle(face,true,-1000.0f)<-10);
  }
+ constexpr float pi=3.14159265358979323846f;
+ assert(std::fabs(p2original::cannon::nearbyFlickAngle(6,false,-1000)-(6+pi))<1e-5f); // nearby is not rounded
+ assert(std::fabs(p2original::cannon::pikminFlickAngle(6,false,-1000)-(6-pi))<1e-5f); // sticker rounds once
+ assert(std::fabs(p2original::cannon::pikminFlickAngle(0,true,-1000)-(-1000+3*pi))<1e-4f); // preserve sentinel, once only
+ assert(p2original::cannon::flickNearby(0,0,44.9f));
+ assert(!p2original::cannon::flickNearby(0,0,45)); // strict boundary
+ assert(!p2original::cannon::flickNearby(0,10,44)); // full3D, not XZ sweep
  using p2original::cannon::FlickKey;using p2original::cannon::flickKey;
  assert(flickKey(false,30.0f/30.0f,0.0f)==FlickKey::None);
  assert(flickKey(false,31.0f/30.0f,0.0f)==FlickKey::FlickDead);

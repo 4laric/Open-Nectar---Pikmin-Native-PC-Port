@@ -53,6 +53,18 @@ review; portable tests and compilation do not establish those mechanics.
 
 ## Direct human gameplay script
 
+Original95/96 flicks now use the shared retail source Pikmin/Navi vector
+receivers, composed from PR162 through 0a3e9fb56232e19cde96c0e743ad660344666287.
+Pikmin lose no HP and use the source 10-percent leaf reaction; captain damage
+is applied by the source Koke END. Kabuto's literal order is nearby captains,
+nearby Pikmin, then stickers; the nearby condition is strict full3D range45
+and excludes this actor's stickers. Nearby angles add PI without rounding;
+sticker angles add PI and round once, preserving backward sentinel semantics.
+Each sticker consumes the literal shake chance draw even at chance1. The
+receiver permits repeated accepted Blow reactions as retail does. Counter
+reset occurs at Flick KEY2, not emergence/hiding sticker reactions. The AP75
+legacy receiver remains on its existing path.
+
 Use the current original starting-Pikmin overlay: exactly 20 Pikmin, a centered
 960x540 native window, a freshly generated private arena and private save/logs.
 
@@ -63,7 +75,8 @@ Use the current original starting-Pikmin overlay: exactly 20 Pikmin, a centered
    Switch captains and repeat. Let 96 fire and confirm a straight trajectory.
    Observe real damage/press hits and the authored Stone destruction sequence.
 3. Attack both from multiple body angles. Confirm health loss, the fourth-hit
-   flick trigger, Pikmin detachment/damage, and fixed attack/flick timing.
+   flick trigger, Pikmin detachment without HP loss, source leaf reaction,
+   captain knockback/damage, and fixed attack/flick timing.
 4. Kill both. Check actual original corpse appearance, carry threshold and
    onion seed yield against the producer's retail profile. Carry the corpses
    to completion; this gate remains open until typed corpse wiring exists.

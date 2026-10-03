@@ -13,6 +13,7 @@
 #include "pc_p2_kabuto_fsm.h"
 #include "pc_p2_original_cannon_bank.h"
 #include "pc_p2_original_cannon_combat.h"
+#include "pc_p2_hanachirashi_receiver.h"
 #include "pc_p2_attachments.h"
 #include "pc_p2_body_coll.h"
 #include "pc_p2_original_cannon_native.h"
@@ -230,6 +231,24 @@ int doFlick(BTeki* actor,bool stuckOnly=false,bool backwards=false){
     const auto f=fsms.find(static_cast<PelletView*>(actor));const bool original=f!=fsms.end()&&f->second.original;const float range=original?45.0f:120.0f;
     const Vector3f pos=actor->getPosition();
     int hit=0;
+    if(original){
+        using namespace p2original::cannon;
+        const float angle=nearbyFlickAngle(actor->getDirection(),backwards,FLICK_BACKWARDS_ANGLE);
+        auto nearby=[&](Creature* c){const Vector3f p=c->getPosition();return flickNearby(p.x-pos.x,p.y-pos.y,p.z-pos.z);};
+        // KabutoState's literal order differs from Kochappy: nearby Navi,
+        // nearby Pikmin, then stickers. Nearby excludes this enemy's stickers.
+        if(!stuckOnly){
+            for(Navi* n:pc_p2_navis())if(n&&nearby(n))
+                hit+=pc_p2_source_flick_navi(actor,n,400,1,nearbyFlickAngle(0,true,FLICK_BACKWARDS_ANGLE));
+            if(pikiMgr){Iterator it(pikiMgr);CI_LOOP(it){Piki* p=static_cast<Piki*>(*it);
+                if(p&&p->getStickObject()!=actor&&nearby(p))hit+=pc_p2_source_flick_piki(actor,p,400,angle);}}
+        }
+        std::vector<Piki*> stickers;
+        for(Creature* c=actor->mStickListHead;c;c=c->mNextSticker)if(c->isPiki())stickers.push_back(static_cast<Piki*>(c));
+        const float stickerAngle=pikminFlickAngle(actor->getDirection(),backwards,FLICK_BACKWARDS_ANGLE);
+        for(Piki* p:stickers)if(1.0f>gsys->getRand(1.0f))hit+=pc_p2_source_flick_piki(actor,p,400,stickerAngle);
+        return hit;
+    }
     std::vector<Piki*> pikis;
     if(pikiMgr){Iterator it(pikiMgr);CI_LOOP(it){Piki* q=static_cast<Piki*>(*it);if(!q||!q->isAlive())continue;
         if((!stuckOnly&&distXZ(q->getPosition(),pos)<range)||(original&&q->mStickTarget==actor))pikis.push_back(q);}}
@@ -429,7 +448,7 @@ void pc_p2_kabuto_fsm_update(BTeki* actor){
       p2attach::Affine mouth;if(!s.sockets.sample(s.socketToken,originalSockets->clip("K_attack"),56.0f,world,++s.socketTick)||!s.sockets.socket(s.socketToken,originalSockets->joint("mouth"),mouth)){std::fputs("fixed cannon mouth sampling failed\n",stderr);std::abort();}
       p2kabutostone::AttackStep step;step.birth={mouth.m[0][3],pos.y+25.0f,mouth.m[2][3]};step.slot=fleet.fire(tokenOf(actor),step.birth,s.heading,step.id,false,71.0f/30.0f);step.action=step.slot>=0?p2kabutostone::AttackAction::Fired:p2kabutostone::AttackAction::PoolFull;logStoneFire(s,gen,step);
      }
-     if(state==KB_FIXFLICK&&!s.flickDone&&s.stateTime>=(31.0f/30.0f-1e-4f)){s.flickDone=true;doFlick(actor);if(actor->mHealth<=0.0f){die(actor,s,gen,priorForDeath);break;}}
+     if(state==KB_FIXFLICK&&!s.flickDone&&s.stateTime>=(31.0f/30.0f-1e-4f)){s.flickDone=true;doFlick(actor);actor->mDamageCount=0;if(actor->mHealth<=0.0f){die(actor,s,gen,priorForDeath);break;}}
      if(s.stateTime>=seconds(s,s.clip)){
       KState next=(state==KB_FIXWAIT||state==KB_FIXTURN)?s.next:select();
       if(state==KB_FIXFLICK)next=actor->mHealth<=0.0f?KB_DEAD:KB_FIXATTACK;
@@ -515,7 +534,7 @@ void pc_p2_kabuto_fsm_update(BTeki* actor){
     case KB_FLICK:{
         stop(actor);
         const auto key=s.original?p2original::cannon::flickKey(s.flickDone,s.stateTime,actor->mHealth):p2original::cannon::FlickKey::None;
-        if((!s.original&&!s.flickDone)||key!=p2original::cannon::FlickKey::None){s.flickDone=true;int hit=doFlick(actor);std::printf("P2_KABUTO_FLICK generator=%u source_id=%u hit=%d\n",gen,s.source,hit);std::fflush(stdout);
+        if((!s.original&&!s.flickDone)||key!=p2original::cannon::FlickKey::None){s.flickDone=true;int hit=doFlick(actor);if(s.original)actor->mDamageCount=0;std::printf("P2_KABUTO_FLICK generator=%u source_id=%u hit=%d\n",gen,s.source,hit);std::fflush(stdout);
          if(key==p2original::cannon::FlickKey::FlickDead){die(actor,s,gen,priorForDeath);break;}}
         if(s.stateTime>=seconds(s,"flick")){
             // KEYEVENT_END (KabutoState.cpp:306-311): Dead, else Attack.
