@@ -550,6 +550,10 @@ void attackFollowUp(BTeki* a, Snake& s, const Vector3f& pos) {
 }
 
 void pc_p2_snakejoint_reset() {
+    for(const auto& entry:actors)if(entry.second.original){
+        std::fprintf(stderr,"P2_ORIGINAL_SNAKECROW reset with live physical actor\n");
+        std::abort();
+    }
     originalBank = false;
     actors.clear();
     corpses.clear();
