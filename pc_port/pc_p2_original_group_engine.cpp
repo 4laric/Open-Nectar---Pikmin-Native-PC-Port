@@ -30,6 +30,8 @@ bool pc_p2_original_course_install(const std::vector<p2original::GroupBinding>& 
  return groupCourse().install(bindings,provider,error);
 }
 bool pc_p2_original_course_unload(std::string& error){return groupCourse().unload(error);}
+bool pc_p2_original_incarnation_encode(std::string& bytes,std::string& error){return groupCourse().encodeFrontier(bytes,error);}
+bool pc_p2_original_incarnation_decode(const std::string& campaign,const std::string& bytes,std::string& error){return groupCourse().decodeFrontier(campaign,bytes,error);}
 bool pc_p2_original_generator_init(Generator* generator,bool& handled,std::string& error){
  if(pc_p2_original_course_shadow(generator)){handled=true;error.clear();return true;}
  handled=pc_p2_original_groups().owns(generator);if(!handled)return true;
