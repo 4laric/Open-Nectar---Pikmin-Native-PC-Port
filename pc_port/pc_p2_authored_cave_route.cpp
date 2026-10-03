@@ -4,11 +4,16 @@
 #include <sstream>
 namespace {
 bool bytes(const std::filesystem::path& path,std::string& out,std::uintmax_t limit){
-    std::error_code ec;const auto size=std::filesystem::file_size(path,ec);
-    if(ec||!size||size>limit)return false;
     std::ifstream in(path,std::ios::binary);
-    out.assign(std::istreambuf_iterator<char>(in),{});
-    return !in.bad()&&out.size()==size;
+    if(!in)return false;
+    std::string next;char block[4096];
+    while(in.read(block,sizeof(block))||in.gcount()){
+        const auto count=static_cast<std::uintmax_t>(in.gcount());
+        if(count>limit-next.size())return false;
+        next.append(block,static_cast<std::size_t>(count));
+    }
+    if(!in.eof()||next.empty())return false;
+    out=std::move(next);return true;
 }
 }
 bool pc_p2_authored_cave_route_validate(const P2AuthoredCaveRoute& selected,

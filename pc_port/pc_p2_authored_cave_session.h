@@ -42,7 +42,9 @@ struct P2AuthoredCaveRoute {
         if(markerConsumed)tag="AUTHORED_CAVE_ROUTE";else if(!(in>>tag))return false;
         if(!(in>>version>>seedText>>next.token>>next.routeSha)||tag!="AUTHORED_CAVE_ROUTE"||version!="1"
             ||!p2CaveSeedUint64(seedText,next.seed)||!next.surface.read(in)||!next.floor.read(in)||!next.exit.read(in))return false;
-        next.present=true;if(!next.valid())return false;*this=std::move(next);return true;
+        next.present=true;
+        if(!next.valid())return false;
+        *this=std::move(next);return true;
     }
     void write(std::ostream& out)const{out<<std::setprecision(std::numeric_limits<float>::max_digits10)<<" AUTHORED_CAVE_ROUTE 1 "<<seed<<' '<<token<<' '<<routeSha;surface.write(out);floor.write(out);exit.write(out);}
 };
@@ -75,7 +77,8 @@ struct P2AuthoredCaveSession {
         P2AuthoredCaveSession next;std::string tag,version;int flag=-1;
         if(!(in>>tag>>version>>flag)||tag!="AUTHORED_CAVE_SESSION"||version!="1"||(flag!=0&&flag!=1))return false;
         if(flag){if(!next.route.read(in)||!(in>>next.day>>next.surfaceCacheSha>>next.floorCacheSha>>next.activeCacheSha)||!next.party.read(in))return false;next.present=true;}
-        if(!next.valid())return false;*this=std::move(next);return true;
+        if(!next.valid())return false;
+        *this=std::move(next);return true;
     }
     void write(std::ostream& out)const{
         out<<std::setprecision(std::numeric_limits<float>::max_digits10)<<" AUTHORED_CAVE_SESSION 1 "<<int(present);

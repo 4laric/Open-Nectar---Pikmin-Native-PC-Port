@@ -1176,11 +1176,9 @@ bool pc_randomizer_init(int argc, char** argv) {
             ||!authoredCaveRoute.read(input,true)||!authoredCaveRoute.matches(generatedCaveBinding))
             fail("invalid authored cave route selection");
         const auto routePath=std::filesystem::absolute(bootstrap).parent_path()/"p2-authored-cave-route.txt";
-        std::error_code routeError;const auto routeSize=std::filesystem::file_size(routePath,routeError);
-        if(routeError||!routeSize||routeSize>65536)fail("authored cave route input missing or oversized");
-        std::ifstream routeFile(routePath,std::ios::binary);
-        const std::string routeBytes((std::istreambuf_iterator<char>(routeFile)),{});
-        if(routeBytes.size()!=routeSize||P2AuthoredCaveSession::hash(routeBytes)!=authoredCaveRoute.routeSha)
+        std::string routeBytes;
+        if(!p2treasureplacements::bounded(routePath.generic_string(),65536,routeBytes)
+            ||P2AuthoredCaveSession::hash(routeBytes)!=authoredCaveRoute.routeSha)
             fail("authored cave route input digest mismatch");
         std::string routeReason;
         if(!pc_p2_authored_cave_route_validate(authoredCaveRoute,std::filesystem::absolute(bootstrap).parent_path().generic_string(),routeReason))
