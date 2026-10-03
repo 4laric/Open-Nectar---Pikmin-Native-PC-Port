@@ -15,6 +15,7 @@
 #if defined(PIKI_PC_PORT)
 #include "pc_randomizer.h"
 #include "pc_p2_original_group_engine.h"
+#include "pc_p2_original_gate_native.h"
 #include "pc_p2_original_gen_object.h"
 #include "pc_p2_original_onyon_native.h"
 #include "pc_p2_original_piki_native.h"
@@ -239,6 +240,7 @@ void GenObjectFactory::createInstance()
 		pc_p2_original_gen_object_register();
 		pc_p2_original_onyon_register();
 		pc_p2_original_piki_register();
+        pc_p2_original_gate_register();
 #endif
 	}
 }
@@ -565,6 +567,11 @@ bool Generator::isExpired()
  */
 void Generator::loadCreature(RandomAccessStream& input)
 {
+#if defined(PIKI_PC_PORT)
+    bool gateHandled=false;std::string gateError;
+    if(!pc_p2_original_gate_generator_load(this,input,gateHandled,gateError)){std::fprintf(stderr,"P2_ORIGINAL_GATE_LOAD_FAIL %s\n",gateError.c_str());std::abort();}
+    if(gateHandled)return;
+#endif
 	if (mGenObject) {
 		BirthInfo info;
 		if (mGenType) {
@@ -627,6 +634,8 @@ void Generator::init()
     if(!pc_p2_original_onyon_generator_init(this,originalHandled,originalError)) {
         std::fprintf(stderr,"P2_ORIGINAL_ONYON_INIT_FAIL %s\n",originalError.c_str());std::abort();
     }
+    if(originalHandled)return;
+    if(!pc_p2_original_gate_generator_init(this,originalHandled,originalError)){std::fprintf(stderr,"P2_ORIGINAL_GATE_INIT_FAIL %s\n",originalError.c_str());std::abort();}
     if(originalHandled)return;
 #endif
 	// we're past our day limit, do nothing.
@@ -929,7 +938,7 @@ void Generator::write(RandomAccessStream& output)
 		output.writeShort(mLatestSpawnDay);
 #if defined(PIKI_PC_PORT)
         // Original objects own literal respawn metadata without a P1 GenType.
-        const int cacheRebirthDay = dynamic_cast<GenObjectOriginalEnemy*>(mGenObject)
+        const int cacheRebirthDay = (dynamic_cast<GenObjectOriginalEnemy*>(mGenObject) || dynamic_cast<GenObjectOriginalGate*>(mGenObject))
             ? mRespawnInterval : getRebirthDay();
 #else
         const int cacheRebirthDay = getRebirthDay();
