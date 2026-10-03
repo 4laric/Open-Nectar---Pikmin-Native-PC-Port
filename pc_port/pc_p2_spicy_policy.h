@@ -10,6 +10,12 @@ struct SpicyStatus {
     bool active() const { return remaining > 0; }
     void begin() { remaining = Duration; }
     void clear() { remaining = 0; }
+    // Validated campaign adoption preserves remaining time; no use replay.
+    bool restore(float seconds) {
+        if (!std::isfinite(seconds) || seconds < 0 || seconds > Duration) return false;
+        remaining = seconds;
+        return true;
+    }
     // Source doAnimation clock: gameplay time, never wall clock or paused UI.
     bool tick(float dt, bool gameplay) {
         if (!gameplay || !active() || !std::isfinite(dt) || dt <= 0) return false;
