@@ -1,5 +1,6 @@
 #if defined(PIKI_PC_PORT)
 #include "pc_p2_captive_navi_policy.h"
+#include "pc_p2_original_piki_init.h"
 #endif
 #include "pc_p2_purple.h"
 #include "pc_p2_purple_flight.h"
@@ -2573,7 +2574,14 @@ void Piki::init(Navi* navi)
 	mMotionSpeed      = 1.0f;
 	mNavi             = navi;
 	Creature::init();
+#if defined(PIKI_PC_PORT)
+	// P2 onInit starts Blue/Leaf with no random colour or size. The exact-body
+	// source-birth tag is consumed once; ordinary P1 init keeps both draws.
+	const bool originalP2Init = pc_p2_original_piki_init_consume(this);
+	int color = originalP2Init ? Blue : int(gsys->getRand(1.0f) * 3.0f);
+#else
 	int color = gsys->getRand(1.0f) * 3.0f;
+#endif
 	if (color >= PikiColorCount) {
 		color = Blue;
 	}
@@ -2586,8 +2594,15 @@ void Piki::init(Navi* navi)
 	mFSM->transit(this, PIKISTATE_Normal);
 	mFloweringTimer = 0;
 	mFSM->transit(this, PIKISTATE_Normal);
-	mPikiSize = pikiMgr->mPikiParms->mPikiParms.mMinPikiSize()
-	          + (pikiMgr->mPikiParms->mPikiParms.mMaxPikiSize() - pikiMgr->mPikiParms->mPikiParms.mMinPikiSize()) * gsys->getRand(1.0f);
+#if defined(PIKI_PC_PORT)
+	if (originalP2Init) {
+		mPikiSize = 1.0f; // P2 getBaseScale; species scaling is applied later.
+	} else
+#endif
+	{
+		mPikiSize = pikiMgr->mPikiParms->mPikiParms.mMinPikiSize()
+		          + (pikiMgr->mPikiParms->mPikiParms.mMaxPikiSize() - pikiMgr->mPikiParms->mPikiParms.mMinPikiSize()) * gsys->getRand(1.0f);
+	}
 	mOldFaceDirection = mFaceDirection;
 	initBirth();
 	mRouteDestinationIndex = -1;
