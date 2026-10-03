@@ -20,10 +20,26 @@
 #include <cstdio>
 #include <cstdlib>
 #include <array>
+#include <chrono>
+#include <random>
 
 namespace p2retail {namespace {
 std::uint64_t nextSerial=1;
 std::uint64_t nextActivation=1;
+// A fresh process incarnation prevents native serial/activation counters from
+// aliasing a previous run. This nonce identifies a visit; it authenticates no
+// SAVE, selected input, actor or World state.
+const std::string& processIncarnation(){
+ static const std::string nonce=[](){
+  std::random_device random;
+  const auto clock=std::uint64_t(std::chrono::high_resolution_clock::now().time_since_epoch().count());
+  std::seed_seq seed{random(),random(),random(),random(),unsigned(clock),unsigned(clock>>32)};
+  std::mt19937_64 generator(seed);std::string value;char part[17];
+  for(unsigned i=0;i<4;++i){std::snprintf(part,sizeof(part),"%016llx",(unsigned long long)generator());value+=part;}
+  return value;
+ }();
+ return nonce;
+}
 // BaseShape has no destructor for its nested arrays/registered textures. These
 // two fixed source profiles own a bounded Sys-heap model bank for this process;
 // scene retirement releases routes/stage/actors, never a borrowed texture.
@@ -133,7 +149,7 @@ public:
   context.mPlan=selected.plan;context.mPlanRole=sceneInputRole(selected.selection,SceneInput::Plan);
   context.mGeometryRole=modelRole;context.mRoutesRole=sceneInputRole(selected.selection,SceneInput::Routes);
   context.mGeometryBytes=selected.bytes[1];context.mRoutesBytes=selected.bytes[2];
-  SceneIdentity identity{selected.session,"development:"+selected.plan.cave+":floor"+std::to_string(selected.plan.floor)+":native"+std::to_string(nextSerial),selected.plan.layoutSha256,nextSerial++};
+  SceneIdentity identity{selected.session,"development:"+processIncarnation()+":"+selected.plan.cave+":floor"+std::to_string(selected.plan.floor)+":native"+std::to_string(nextSerial),selected.plan.layoutSha256,nextSerial++};
   context.mSnapshot={cave->cave,cave->source,cave->sourceSha256,cave->catalogSha256,selected.plan.floor,cave->maxFloor,identity,true,true};
   context.mStage=&stage;context.mMap=map;context.mRoutes=routes;
   // Reserve a complete independent source census before any native provider

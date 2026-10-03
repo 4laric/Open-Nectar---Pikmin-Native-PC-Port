@@ -300,7 +300,14 @@ PathFinder::PathFinder(RouteMgr::Group& group)
 	mHandleCount = 1;
 	mClientCount = 0;
 	mMaxClients  = 100;
-	mClient      = new Client[mMaxClients];
+#if defined(PIKI_PC_PORT)
+	// Construction may fail after the owned buffer was allocated. There is no
+	// destructor call for a partially constructed PathFinder.
+	try { mClient = new Client[mMaxClients]; }
+	catch (...) { delete[] mBuffer; mBuffer = nullptr; throw; }
+#else
+	mClient = new Client[mMaxClients];
+#endif
 }
 
 void PathFinder::disposeOwned()
@@ -1311,8 +1318,8 @@ void RouteMgr::construct(MapMgr* map)
 	}
 
 	mRouteGroupIDs         = new u32[mRouteCount];
-	mGroupList             = new RouteMgr::Group[mRouteCount];
-	mPathFinders           = new PathFinder*[mRouteCount];
+	mGroupList             = new RouteMgr::Group[mRouteCount]();
+	mPathFinders           = new PathFinder*[mRouteCount]();
 	RouteGroup* routeGroup = static_cast<RouteGroup*>(map->mMapModel->mRouteGroup.mChild);
 	for (int i = 0; i < mRouteCount; i++) {
 		Group& group      = mGroupList[i];
