@@ -1,6 +1,6 @@
 #include "pc_p2_original_pod.h"
 #include "pc_p2_original_pod_registry.h"
-#include "pc_p2_original_pod_paths.h"
+#include "pc_p2_original_pod_input.h"
 #include "Suckable.h"
 #include "Pellet.h"
 #include "PelletState.h"
@@ -12,11 +12,11 @@
 #include "Texture.h"
 #include "Route.h"
 #include "Shape.h"
+#include "Stream.h"
 #include "system.h"
 #include "sysNew.h"
 #include "netplay/pc_netplay_sha256.h"
 #include <cmath>
-#include <fstream>
 #include <map>
 #include <cstdio>
 #include <cstdlib>
@@ -24,6 +24,13 @@
 namespace {
 using namespace p2originalpod;
 struct HeapScope {int previous;HeapScope():previous(gsys->setHeap(SYSHEAP_App)){}~HeapScope(){gsys->setHeap(previous);}};
+struct ShapeScope {
+ Shape* previous;immut char* base1;immut char* base2;
+ ShapeScope(Shape* shape):previous(gsys->mCurrentShape),base1(gsys->mTextureBase1),base2(gsys->mTextureBase2){
+  gsys->mCurrentShape=shape;gsys->setTextureBase("","");
+ }
+ ~ShapeScope(){gsys->mCurrentShape=previous;gsys->setTextureBase(base1,base2);}
+};
 bool reject(std::string& e,const char* s){e=s;return false;}
 void fail(const char* s){std::fprintf(stderr,"P2_ORIGINAL_POD refusal: %s\n",s);std::fflush(nullptr);std::abort();}
 bool same(const p2retail::Snapshot& a,const p2retail::Snapshot& b){
@@ -38,13 +45,14 @@ bool source(const p2retail::Snapshot& f){
   &&f.catalogSha256==c->catalogSha256&&f.maxFloor==c->maxFloor
   &&!f.scene.seed.empty()&&!f.scene.visit.empty()&&f.scene.serial&&p2retail::hex64(f.scene.layoutSha256);
 }
-bool digestFile(const std::string& path,std::string& digest){
- std::ifstream in(path,std::ios::binary);if(!in)return false;
- pc_netplay_sha::Sha256 sha;char buffer[32768];std::size_t total=0;
- while(in){in.read(buffer,sizeof(buffer));auto n=in.gcount();total+=n;
-  if(total>32*1024*1024)return false;if(n)sha.update(buffer,n);}
- if(!in.eof()||!total)return false;uint8_t out[32];sha.final(out);digest=pc_netplay_sha::hex(out,32);return true;
-}
+class ModelStream final:public RamStream {
+public:
+ ModelStream(std::string& bytes):RamStream(bytes.data(),int(bytes.size())){}
+ void read(void* destination,int size)override{
+  if(size<0||mPosition<0||size>mLength-mPosition)fail("pod_verified_model_parser_bounds");
+  RamStream::read(destination,size);
+ }
+};
 class Pod final:public Suckable {
 public:
  Pod(CreatureProp* prop,Shape* shape,const Config& c,int route)
@@ -139,18 +147,20 @@ void clear(){
 
 bool pc_p2_original_pod_preflight(const p2originalpod::Config& c,ContextProvider provider,std::string& e){
  if(prepared)return reject(e,"pod_already_prepared");
- if(!gsys||!itemMgr||!itemMgr->mMeltingPotMgr||!routeMgr||!provider||!c.births||!source(c.floor)
+ if(!gsys||!itemMgr||!itemMgr->mMeltingPotMgr||!routeMgr||!provider||!c.births||!c.input||!source(c.floor)
   ||c.baseGenType!=7||!std::isfinite(c.x)||!std::isfinite(c.y)||!std::isfinite(c.z)||!std::isfinite(c.yaw))return reject(e,"pod_source_or_managers");
  p2retail::Snapshot actual;if(!provider(c.floor.scene,actual)||!same(actual,c.floor))return reject(e,"pod_unverified_scene");
  auto* wp=routeMgr->findNearestWayPoint('test',Vector3f(c.x,c.y,c.z),false);
  if(!wp||!routeMgr->getWayPoint('test',wp->mIndex))return reject(e,"pod_route_missing");
- std::string sha,modelFile;
- if(!engineModelPath(gsys->mActiveDir,gsys->mDataRoot,c.model,modelFile)
-  ||!digestFile(modelFile,sha)||sha!=convertedModelSha256)return reject(e,"pod_original_model_hash");
- if(!digestFile(c.sourceArchive,sha)||sha!=archiveSha256
-  ||!digestFile(c.sourceModel,sha)||sha!=originalModelSha256
-  ||!digestFile(c.sourceCollision,sha)||sha!=originalCollisionSha256)return reject(e,"pod_original_source_provenance");
- HeapScope heap;Shape* loaded=gsys->loadShape(c.model.c_str(),false); // The verified file, never an older cached shape.
+ std::string modelBytes,provenance;
+ if(!selectedResource(c.input,c.model,convertedModelSha256,modelBytes,e)
+  ||!selectedResource(c.input,c.sourceArchive,archiveSha256,provenance,e)
+  ||!selectedResource(c.input,c.sourceModel,originalModelSha256,provenance,e)
+  ||!selectedResource(c.input,c.sourceCollision,originalCollisionSha256,provenance,e)
+  ||!selectedResource(c.input,c.sourceTexts,originalTextsSha256,provenance,e))return false;
+ HeapScope heap;ModelStream stream(modelBytes);Shape* loaded=new Shape;ShapeScope scope(loaded);
+ loaded->mName=StdSystem::stringDup(c.model.c_str());loaded->read(stream);
+ loaded->resolveTextureNames();loaded->initialise();loaded->initIni(true);loaded->optimize();
  if(!loaded||loaded->mJointCount!=1)return reject(e,"pod_converted_model_missing");
  for(int i=0;i<loaded->mTexAttrCount;++i)if(loaded->mTexAttrList[i].mTexture)loaded->mTexAttrList[i].mTexture->attach();
  config=c;contextProvider=std::move(provider);shape=loaded;prepared=true;e.clear();return true;
@@ -160,6 +170,7 @@ bool pc_p2_original_pod_birth(const Config& c,ContextProvider provider,std::stri
  if(pod||!same(c.floor,config.floor)||c.unit!=config.unit||c.slot!=config.slot||c.baseGenType!=config.baseGenType
   ||c.x!=config.x||c.y!=config.y||c.z!=config.z||c.yaw!=config.yaw||c.model!=config.model
   ||c.sourceArchive!=config.sourceArchive||c.sourceModel!=config.sourceModel||c.sourceCollision!=config.sourceCollision
+  ||c.sourceTexts!=config.sourceTexts
   ||c.births!=config.births||!current())return reject(e,"pod_prepared_identity");
  auto* wp=routeMgr->findNearestWayPoint('test',Vector3f(c.x,c.y,c.z),false);if(!wp)return reject(e,"pod_route_changed");
  HeapScope heap;auto* prop=new CreatureProp;prop->mCreatureProps.mFriction.mValue=.1f;

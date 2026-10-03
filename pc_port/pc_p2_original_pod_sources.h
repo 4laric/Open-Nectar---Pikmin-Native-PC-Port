@@ -9,4 +9,9 @@ constexpr const char* originalModelSha256="e567b76127b7802f88fe28cdd956260fededb
 constexpr const char* originalCollisionSha256="548f59a9d8eceb3be896011a33765e8357217c66cd1587ac258253aa675ac005";
 constexpr const char* originalTextsSha256="68e497d02bfd471dca911524430b7517d4260cdd4162146bdab81c1d35728861";
 constexpr const char* convertedModelSha256="f562fb2926cc54be8875afb07d2d0effe2f2af7469f9d4ab5c7940917eb8b595";
+constexpr const char* convertedModelRole="assets/dataDir/courses/pikmin2retailpod/pod.mod";
+constexpr const char* archiveRole="p2-original/retail-cargo/pod/arc.szs";
+constexpr const char* originalModelRole="p2-original/retail-cargo/pod/pot.bmd";
+constexpr const char* originalCollisionRole="p2-original/retail-cargo/pod/coll.txt";
+constexpr const char* originalTextsRole="p2-original/retail-cargo/pod/texts.szs";
 }

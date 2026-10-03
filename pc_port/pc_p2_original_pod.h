@@ -8,15 +8,19 @@ struct Suckable;
 
 namespace p2originalpod {
 // Retail Onyon type 3, object bank 1. Ship type 4 belongs to the surface owner.
+using SourceInput=std::function<bool(const std::string& role,std::string& bytes,std::string& error)>;
 struct Config {
  p2retail::Snapshot floor;
  // Authenticated authored-layout BaseGen type 7 placement, radians. Never
  // infer the source scene from an Onion, preview receiver or active P1 stage.
  unsigned unit=0,slot=0,baseGenType=7;
  float x=0,y=0,z=0,yaw=0;
- // Engine-relative; preflight hashes the exact System/DVDOpen-resolved file.
- std::string model="courses/pikmin2retailpod/pod.mod";
- std::string sourceArchive="pod/arc.szs",sourceModel="pod/pot.bmd",sourceCollision="pod/coll.txt";
+ // Required selected-input getter; no file-path or cache fallback. These are
+ // canonical INPUT roles, and the model is parsed from the exact verified bytes.
+ SourceInput input;
+ std::string model=convertedModelRole;
+ std::string sourceArchive=archiveRole,sourceModel=originalModelRole;
+ std::string sourceCollision=originalCollisionRole,sourceTexts=originalTextsRole;
  // Independently issues the original source epoch/activation. Borrowed for
  // the floor's lifetime, never the same untrusted cargo input copied back.
  p2retail::FloorIdentityAuthority* births=nullptr;
