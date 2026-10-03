@@ -24,6 +24,8 @@ public:
  virtual bool holdFields(Navi&,float,float,float,std::string&)=0;
  virtual bool nextThrowPiki(Navi&,std::optional<actions::PikiHandle>,std::string&)=0;
  virtual bool feedback(Navi&,actions::Feedback,actions::PikiHandle,std::string&)=0;
+ // Source pmTogglePlayer changes controller/camera ownership; source FSM
+ // Follow/Change transitions remain with the typed Party caller afterwards.
  virtual bool togglePlayer(Navi&,Navi&,std::string&)=0;
  virtual bool changeVoice(Navi&,std::string&)=0;
  virtual bool dismissSound(Navi&,std::string&)=0;

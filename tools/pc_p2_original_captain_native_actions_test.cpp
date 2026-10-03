@@ -27,7 +27,7 @@ struct W:World {
  const std::string& selectedCampaign()const override{return scene.campaign;}const std::string& selectedFingerprint()const override{return scene.fingerprint;}const std::string& sourceCatalog()const override{return catalog;}
  std::uint64_t incarnation()const override{return scene.epoch;}Phase phase()const override{return value;}Demo demo()const override{return Demo::Inactive;}Navi* captainAt(unsigned i)const override{return scene.captainAt(i);}
 } world;
-const LoadedScene* canonical=&scene;bool lifetimeAvailable=true,alive=true;SourceBank* bankProvider=nullptr;
+const LoadedScene* canonical=&scene;bool lifetimeAvailable=true,alive=true,physicalAvailable=true;SourceBank* bankProvider=nullptr;
 struct Typed:NaviState,State {
  const NaviState* nativeState()const override{return this;}StateId sourceStateId()const override{return StateId::Walk;}bool sourceAlive(const Navi&)const override{return true;}bool sourceInvincible()const override{return false;}
  std::optional<std::uint8_t> actorInvincibleFrames(const Navi&)const override{return 0;}bool canEnterSourceDead(const Navi&)const override{return false;}void enterSourceDead(Navi&)override{}void sourceDamageFeedback(Navi&)override{}
@@ -65,14 +65,14 @@ struct Services:pk::Services {
  bool random(float&,std::string&) override{return false;}
 } services;
 struct Physical:pk::PhysicalSource {
- const LoadedScene& scene()const override{return ::scene;}bool readPhysical(pk::Handle,pk::PhysicalFacts& out,std::string&)const override{out.alive=alive;return true;}
+ const LoadedScene& scene()const override{return ::scene;}bool readPhysical(pk::Handle,pk::PhysicalFacts& out,std::string&)const override{if(!physicalAvailable)return false;out.alive=alive;return true;}
 } physical;
 struct PlateSource:pk::PlateSource {
  const LoadedScene& scene()const override{return ::scene;}bool readParameters(const Navi*,pk::PlateParameters&,std::string&)const override{return false;}
  bool readPose(const Navi*,pk::PlatePose&,std::string&)const override{return false;}bool setFormed(pk::Handle,Navi*,std::string&)override{return false;}
 } plateSource;
 struct Actor:na::ActorSource {
- bool expire=false;std::optional<actions::PikiHandle> next;int effects=0;std::vector<na::WhistleCandidate> candidates;
+ bool expire=false,toggleExpire=false;std::optional<actions::PikiHandle> next;int effects=0;std::vector<na::WhistleCandidate> candidates;
  const LoadedScene& scene()const override{return ::scene;}
  bool observe(const Navi&,na::Observation& out,std::string&)const override{out={{9,0,7},.5f,false};if(expire)a.current=&other;return true;}
  bool world(party::WorldFacts& out,std::string&)const override{out.active=true;return true;}
@@ -83,7 +83,7 @@ struct Actor:na::ActorSource {
  bool holdFields(Navi&,float,float,float,std::string&)override{++effects;if(expire)a.current=&other;return true;}
  bool nextThrowPiki(Navi&,std::optional<actions::PikiHandle> h,std::string&)override{next=h;return true;}
  bool feedback(Navi&,actions::Feedback,actions::PikiHandle,std::string&)override{++effects;return true;}
- bool togglePlayer(Navi&,Navi&,std::string&)override{++effects;return true;}bool changeVoice(Navi&,std::string&)override{++effects;return true;}
+ bool togglePlayer(Navi&,Navi& target,std::string&)override{++effects;if(toggleExpire)target.current=&other;return true;}bool changeVoice(Navi&,std::string&)override{++effects;return true;}
  bool dismissSound(Navi&,std::string&)override{++effects;return true;}bool disbandTimer(Navi&,unsigned,std::string&)override{++effects;return true;}
  bool followFrame(const Navi&,party::FollowFrame&,std::string&)const override{return true;}bool randomChoice(float& out,std::string&)override{out=.25;return true;}
  bool followFeedback(Navi&,party::FollowFeedback,std::string&)override{++effects;return true;}bool enemy(party::EnemyHandle,party::EnemyFrame&,std::string&)const override{return false;}
@@ -133,9 +133,12 @@ int main(int argc,char** argv){try{
  check(!bridge->whistleMember(a,{&p,10},true,false,error)&&whistles==1,"unsupported combining refuses explicitly");
  actions::PikiFrame result;result.happa=99;check(!bridge->piki(a,{&p,11},result,error)&&result.happa==99,"stale exact lifetime output unchanged");
  frames[0].captain=&b;check(!bridge->transitionPiki(a,{&p,10},actions::PikiState::GoHang,error)&&transitions==1,"foreign party mutation refused");frames[0].captain=&a;
- alive=false;check(!bridge->piki(a,{&p,10},result,error)&&result.happa==99,"actual CF dead refused");alive=true;
+ alive=false;check(!bridge->piki(a,{&p,10},result,error)&&result.happa==99,"actual CF dead refused");std::vector<party::Member> membership;check(bridge->members(a,membership,error)&&membership.size()==2&&!membership[0].alive&&!membership[1].alive,"genuine CF-dead membership observed for literal dismissal filter");
+ check(!bridge->freeMember(a,{&p,10},5,{1,2,3},true,error)&&gathers==1,"CF-dead member never mutated");alive=true;
+ physicalAvailable=false;membership[0].kind=99;check(!bridge->members(a,membership,error)&&membership[0].kind==99,"missing physical authority refuses membership without output change");physicalAvailable=true;
  actor.candidates={{{&p,10},nullptr},{{},&b}};check(bridge->callPikis(a,error)&&whistles==2,"ordered source census dispatches Piki and partner");
  check(bridge->control(a,error)&&controls==1,"actual source control called once");check(bridge->moveRotation(a,false,error)&&(a.flags&CF_UsePriorityFaceDir),"physical priority face flag");
+ check(bridge->togglePlayer(a,b,error),"source controller ownership toggle preserves both state identities");actor.toggleExpire=true;check(!bridge->togglePlayer(a,b,error),"unexpected target state expiry refuses toggle continuation");actor.toggleExpire=false;b.current=&typed;
  actor.expire=true;observation.face=99;check(!bridge->frame(a,observation,error)&&observation.face==99,"read callback state expiry leaves output unchanged");a.current=&typed;
  check(!bridge->holdFields(a,1,2,3,error),"write callback exact state expiry refuses continuation");actor.expire=false;a.current=&typed;
  sdkExpire=true;check(!bridge->transitionPiki(a,{&p,10},actions::PikiState::GoHang,error),"SDK callback state expiry refuses continuation");sdkExpire=false;a.current=&typed;

@@ -41,10 +41,20 @@ struct Bridge::Impl {
   if(!f())return false;
   return check(&n,e)&&n.getCurrState()==state&&pc_p2_original_captain_world()==world?true:fail(e,"native source action callback expired captain binding");
  }
- bool read(PikiHandle h,piki::Frame& out,std::string& e)const{
+ // Membership observation retains genuine CF-dead bodies so retail dismissal
+ // can filter them; mutation/held-body reads separately require CF_IsAlive.
+ bool observe(PikiHandle h,piki::Frame& out,piki::PhysicalFacts& facts,std::string& e)const{
   if(!h.actor||!h.lifetime)return fail(e,"native source action missing exact Piki handle");
-  piki::Handle current;if(!piki::handle(h.actor,current)||current.lifetime!=h.lifetime||!piki::frame(current,out,e))return fail(e,"native source action Piki lifetime expired");
-  piki::PhysicalFacts facts;return piki::nativePhysicalFacts(current,&physical,facts,e)&&facts.alive?true:fail(e,"native source action Piki CF is not alive");
+  piki::Handle current;piki::Frame next;piki::PhysicalFacts physicalFacts;
+  if(!piki::handle(h.actor,current)||current.lifetime!=h.lifetime||!piki::frame(current,next,e))return fail(e,"native source action Piki lifetime expired");
+  if(!piki::nativePhysicalFacts(current,&physical,physicalFacts,e))return false;
+  out=next;facts=physicalFacts;return true;
+ }
+ bool read(PikiHandle h,piki::Frame& out,std::string& e)const{
+  piki::Frame next;piki::PhysicalFacts facts;
+  if(!observe(h,next,facts,e))return false;
+  if(!facts.alive)return fail(e,"native source action Piki CF is not alive");
+  out=next;return true;
  }
 };
 Bridge::Bridge(std::unique_ptr<Impl> p):m(std::move(p)){}Bridge::~Bridge()=default;
@@ -89,8 +99,8 @@ bool Bridge::throwPiki(Navi& n,PikiHandle h,Vec3 v,std::string& e){if(!finite(v)
 bool Bridge::feedback(Navi& n,actions::Feedback f,PikiHandle h,std::string& e){return m->operation(n,e,[&]{piki::Frame observed;return (!h.actor||m->read(h,observed,e))&&m->source.feedback(n,f,h,e);});}
 bool Bridge::world(party::WorldFacts& out,std::string& e)const{party::WorldFacts f;if(!m->check(nullptr,e)||!m->source.world(f,e)||!m->check(nullptr,e))return false;if(!f.active)return fail(e,"source world facts disagree with actual active phase");out=f;return true;}
 bool Bridge::captain(const Navi& n,party::CaptainFacts& out,Vec3& position,std::string& e)const{party::CaptainFacts f;Observation observation;if(!m->operation(const_cast<Navi&>(n),e,[&]{if(!m->source.observe(n,observation,e)||!m->check(&n,e)||!pc_p2_original_captain_actor_lifetime(&n,f.alive))return false;auto* s=dynamic_cast<State*>(const_cast<Navi&>(n).getCurrState());f.state=s->sourceStateId();f.controller=n.mKontroller!=nullptr;f.movieActor=observation.movieActor;return finite(vec(n.mSRT.t));}))return false;position=vec(n.mSRT.t);out=f;return true;}
-bool Bridge::members(const Navi& n,std::vector<party::Member>& out,std::string& e)const{std::vector<party::Member> next;if(!m->operation(const_cast<Navi&>(n),e,[&]{std::vector<piki::Frame> list;if(!piki::squad(const_cast<Navi*>(&n),list,e))return false;for(const auto& f:list){piki::Frame current;if(!m->read({f.handle.body,f.handle.lifetime},current,e)||current.captain!=&n)return false;next.push_back({{f.handle.body,f.handle.lifetime},vec(current.position),current.species,true,current.releasable});}return true;}))return false;out=std::move(next);return true;}
-bool Bridge::togglePlayer(Navi& a,Navi& b,std::string& e){return m->operation(a,e,[&]{return &a!=&b&&m->check(&b,e)&&m->source.togglePlayer(a,b,e);});}
+bool Bridge::members(const Navi& n,std::vector<party::Member>& out,std::string& e)const{std::vector<party::Member> next;if(!m->operation(const_cast<Navi&>(n),e,[&]{std::vector<piki::Frame> list;if(!piki::squad(const_cast<Navi*>(&n),list,e))return false;for(const auto& f:list){piki::Frame current;piki::PhysicalFacts facts;if(!m->observe({f.handle.body,f.handle.lifetime},current,facts,e)||current.captain!=&n)return false;next.push_back({{f.handle.body,f.handle.lifetime},vec(current.position),current.species,facts.alive,current.releasable});}return true;}))return false;out=std::move(next);return true;}
+bool Bridge::togglePlayer(Navi& a,Navi& b,std::string& e){return m->operation(a,e,[&]{if(&a==&b||!m->check(&b,e))return false;const auto* state=b.getCurrState();return m->source.togglePlayer(a,b,e)&&m->check(&b,e)&&b.getCurrState()==state;});}
 bool Bridge::changeVoice(Navi& n,std::string& e){return m->operation(n,e,[&]{return m->source.changeVoice(n,e);});}
 bool Bridge::whistleMember(Navi& n,PikiHandle h,bool combine,bool newToParty,std::string& e){return m->operation(n,e,[&]{piki::Frame f;if(!m->read(h,f,e))return false;if(combine)return fail(e,"actual SourcePiki combining whistle receiver is not implemented");if(!newToParty)return fail(e,"actual SourcePiki non-new whistle receiver is not implemented");return piki::whistle(handle(h),&n,e);});}
 bool Bridge::dismissSound(Navi& n,std::string& e){return m->operation(n,e,[&]{return m->source.dismissSound(n,e);});}
