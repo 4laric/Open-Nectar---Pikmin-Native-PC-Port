@@ -7,7 +7,7 @@
 class Navi;class Graphics;
 namespace p2original { namespace captain {
 // Actual Game::IPikiAnims identities, never P1 PaniMotion IDs.
-enum class Motion:unsigned {Akubi=0,Asibumi=1,Chatting=3,Damage=4,Dead=5,Fue=10,Furimuku=11,Gattu=13,Getup=14,GrowUp2=19,Jhit=22,Jkoke=23,Nigeru=28,Run2=29,Walk=30,Wait=31,Kizuku=32,Throw=33,ThrowWait=34,Nuku=42,Nuku3=43,Jump=50,Sagasu2=54,Punch=64,Punch2=65,Punch3=66};
+enum class Motion:unsigned {Akubi=0,Asibumi=1,Chatting=3,Damage=4,Dead=5,Fue=10,Furimuku=11,Gattu=13,Getup=14,GrowUp2=19,Jhit=22,Jkoke=23,Nigeru=28,Run2=29,Walk=30,Wait=31,Kizuku=32,Throw=33,ThrowWait=34,Nuku=42,Nuku3=43,Jump=50,Sagasu2=54,Mizunomi=55,Punch=64,Punch2=65,Punch3=66};
 enum class Animator {Self,Bound};
 enum class Listener {None,SourceActor,SourceState};
 struct MotionState {Motion motion=Motion::Wait;float frame=0;std::uint64_t generation=0;bool finishing=false,complete=false;};
