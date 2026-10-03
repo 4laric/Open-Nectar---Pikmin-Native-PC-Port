@@ -16,6 +16,7 @@
 #include "FlowController.h"
 #include "MoviePlayer.h"
 #include "Navi.h"
+#include "Stickers.h"
 #include "Kontroller.h"
 #include "NaviMgr.h"
 #include "NaviState.h"
