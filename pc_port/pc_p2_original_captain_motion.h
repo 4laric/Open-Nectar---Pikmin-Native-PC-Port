@@ -26,10 +26,14 @@ public:
  // Actual s03_dead1.bck presentation; Studio timing/events remain the movie
  // lifecycle owner's independently authenticated DownStudio clock.
  bool startDownMovie(Navi*,std::string&);
+ // Studio owner supplies its actual source frame, independently of FSM motion.
+ bool updateDownMovie(Navi*,float actualStudioFrame,std::string&);
  // Called only after actual native bootstrap/reset has completed. Rebind or
  // wrong/duplicate Native NaviMgr slot pointers are refused.
  bool bindRoster(Navi* olimar,Navi* louie,std::string&);
  bool start(Navi*,Motion,std::string&);
+ // Only genuine locomotion transitions preserve the bound source frame.
+ bool startPreservingFrame(Navi*,Motion,std::string&);
  // Amount is actual source animation frames chosen by the source FSM owner.
  // Strict authored keys emit when key.frame < int(timer); END1000 once.
  // The callback may change source motion/state. Generation changes stop old
