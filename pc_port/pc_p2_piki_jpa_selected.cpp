@@ -20,7 +20,8 @@ std::string compactDigest(const std::string& hex){
  unsigned accumulator=0,bits=0;std::string result;result.reserve(43);
  for(unsigned i=0;i<64;i+=2){accumulator=(accumulator<<8)|(nibble(hex[i])<<4)|nibble(hex[i+1]);bits+=8;
   while(bits>=6){bits-=6;result+=alphabet[(accumulator>>bits)&63];}}
- if(bits)result+=alphabet[(accumulator<<(6-bits))&63];return result;
+ if(bits){result+=alphabet[(accumulator<<(6-bits))&63];}
+ return result;
 }
 }
 bool selectedIdentity(const p2retail::SceneContext& scene,SelectedIdentity& out,std::string& e){
