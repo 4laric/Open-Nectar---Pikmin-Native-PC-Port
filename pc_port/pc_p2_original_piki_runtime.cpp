@@ -15,6 +15,7 @@ namespace p2original { namespace piki {
 namespace {
 struct Entry {
  Handle handle; RuntimeState runtime; Parameters params;
+ const captain::LoadedScene* sceneOwner=nullptr;
  std::uint64_t scene=0;
  std::string pikiBytes,naviBytes;
  bool committed=false;
@@ -22,21 +23,22 @@ struct Entry {
 Services* services=nullptr;
 std::unordered_map<const Piki*,Entry> actors;
 bool fail(std::string& e,const char* text){e=text;return false;}
-bool ownerBusy=false,ownerReentered=false;
+bool ownerBusy=false,ownerReentered=false,observationOnly=false,ownerMutationActive=false;
+class ObservationScope {bool previous;public:ObservationScope():previous(observationOnly){observationOnly=true;}~ObservationScope(){observationOnly=previous;}};
 class OwnerOperation {
  bool entered=false;
 public:
  explicit OwnerOperation(std::string& e){
   if(ownerBusy){ownerReentered=true;e="reentrant SourcePiki owner operation refused";return;}
-  ownerBusy=true;ownerReentered=false;entered=true;
+  ownerBusy=true;ownerReentered=false;ownerMutationActive=true;entered=true;
  }
- ~OwnerOperation(){if(entered)ownerBusy=false;}
+ ~OwnerOperation(){if(entered){ownerBusy=false;ownerMutationActive=false;}}
  bool admitted()const{return entered;}
  bool complete(bool result,std::string& e)const{
   if(ownerReentered)return fail(e,"SourcePiki service attempted reentrant owner mutation");
   return result;
  }
- void release(){if(entered){ownerBusy=false;entered=false;}}
+ void release(){if(entered){ownerBusy=false;ownerMutationActive=false;entered=false;}}
 };
 class ReadOperation {
  bool entered=false;
@@ -90,7 +92,7 @@ Entry* current(Handle h,std::string& e){
  PcP2SourceBody b;
  if(!h.body||!h.lifetime||!body(h.body,b,e)||b.nativeLifetime!=h.lifetime)return fail(e,"stale SourcePiki handle"),nullptr;
  auto i=actors.find(h.body);
- if(i==actors.end()||!i->second.committed||i->second.handle.lifetime!=h.lifetime||i->second.scene!=services->scene().incarnation())
+ if(i==actors.end()||!i->second.committed||i->second.handle.lifetime!=h.lifetime||i->second.sceneOwner!=&services->scene()||i->second.scene!=services->scene().incarnation())
  return fail(e,"SourcePiki FSM not initialized in this lifetime/scene"),nullptr;
  if(i->second.pikiBytes!=services->pikiParameterBytes()||i->second.naviBytes!=services->naviParameterBytes())
  return fail(e,"SourcePiki selected parameter bytes changed"),nullptr;
@@ -152,21 +154,27 @@ bool parseParameters(const std::string& pb,const std::string& nb,float g,Paramet
 }
 bool installServices(Services& s)noexcept {if(services)return services==&s;services=&s;return true;}
 static bool initializeImpl(Piki* p,std::string& e){
+ const auto* sceneOwner=pc_p2_original_captain_loaded_scene();
+ const auto sceneIncarnation=sceneOwner?sceneOwner->incarnation():0;
  PcP2SourceBody b;if(!body(p,b,e,PhaseUse::Bootstrap))return false;
  if(actors.count(p))return fail(e,"SourcePiki already initialized; forget old lifetime before reuse");
- Entry x;x.handle={p,b.nativeLifetime};x.scene=services->scene().incarnation();
+ Entry x;x.handle={p,b.nativeLifetime};x.sceneOwner=sceneOwner;x.scene=sceneIncarnation;
  x.pikiBytes=services->pikiParameterBytes();x.naviBytes=services->naviParameterBytes();
  float g=0;if(!services->gravity(g,e)||!parseParameters(x.pikiBytes,x.naviBytes,g,x.params,e))return false;
  for(auto m:{Motion::Wait,Motion::Walk,Motion::Run2,Motion::Hang,Motion::RollJump,Motion::Notice,Motion::Yawn,Motion::Chat,Motion::Search,Motion::Irritated,Motion::Sit,Motion::Sleep})if(!services->supports(x.handle,m,e))return false;
  // Allocate/register a pending owner BEFORE any animation/effect callback.
  // Failure leaves an owned cleanup record; an uncommitted entry is never a
  // callable runtime handle. emplace cannot fail after body fields were written.
- if(ownerReentered)return fail(e,"SourcePiki initialization preflight attempted owner mutation");
+ if(ownerReentered||!sceneOwner||sceneOwner!=pc_p2_original_captain_loaded_scene()
+    ||sceneOwner!=&services->scene()||sceneIncarnation!=services->scene().incarnation())
+  return fail(e,"SourcePiki initialization preflight changed canonical scene owner");
  auto inserted=actors.emplace(p,std::move(x));auto& pending=inserted.first->second;
  try{
   if(services->motion(pending.handle,Motion::Wait,e)&&brainFree(pending.handle,pending.runtime,*services,e)&&!ownerReentered){
    PcP2SourceBody after;
-   if(body(p,after,e,PhaseUse::Bootstrap)&&after.nativeLifetime==pending.handle.lifetime
+   if(body(p,after,e,PhaseUse::Bootstrap)&&pending.sceneOwner==pc_p2_original_captain_loaded_scene()
+      &&pending.sceneOwner==&services->scene()&&pending.scene==services->scene().incarnation()
+      &&after.nativeLifetime==pending.handle.lifetime
       &&pending.pikiBytes==services->pikiParameterBytes()&&pending.naviBytes==services->naviParameterBytes()
       &&!ownerReentered){pending.committed=true;return true;}
    e="SourcePiki bootstrap lifetime/scene/selected parameters changed during callbacks";
@@ -222,6 +230,7 @@ static bool transitionImpl(Handle h,State s,std::string& e){
 }
 static bool animateImpl(Handle h,float dt,std::string& e){auto* x=current(h,e);return x&&std::isfinite(dt)&&dt>=0&&services->animate(h,dt,e);}
 bool animationKey(Handle h,unsigned type,std::string& e){
+ if(observationOnly){ownerReentered=true;return fail(e,"authored key mutation during readonly retirement preflight refused");}
  ReadOperation op;auto* x=current(h,e);if(!x||!op.complete(true,e))return false;
  if(x->runtime.state==State::LookAt&&type==1000)x->runtime.lookSubState=2;
  return brainAnimationKey(h,x->runtime,*services,type,e)&&op.complete(true,e);
@@ -368,6 +377,7 @@ static bool collisionImpl(Handle h,const CollEvent& event,std::string& e){
  return true;
 }
 bool slotsChanged(const std::vector<SlotChange>& changes,std::string& e){
+ if(observationOnly){ownerReentered=true;return fail(e,"slot mutation during readonly retirement preflight refused");}
  ReadOperation op;
  auto* scene=pc_p2_original_captain_loaded_scene();auto* world=pc_p2_original_captain_world();
  if(!services||!scene||&services->scene()!=scene||!world||!scene->incarnation()
@@ -379,7 +389,7 @@ bool slotsChanged(const std::vector<SlotChange>& changes,std::string& e){
   const auto& change=changes[j];OriginalPikiBodyHandle live;auto i=actors.find(change.handle.body);
   bool captain=false;for(unsigned k=0;k<2;++k)if(change.captain&&scene->captainAt(k)==change.captain&&world->captainAt(k)==change.captain)captain=true;
   if(!captain||change.oldSlot<0||change.newSlot< -1||!change.handle.lifetime||i==actors.end()
-    ||i->second.scene!=scene->incarnation()||i->second.handle.lifetime!=change.handle.lifetime
+    ||i->second.sceneOwner!=scene||i->second.scene!=scene->incarnation()||i->second.handle.lifetime!=change.handle.lifetime
     ||!pc_p2_original_piki_body_handle(change.handle.body,live)||live.nativeLifetime!=change.handle.lifetime)
    return fail(e,"stale or foreign source CPlate slot notification");
   for(std::size_t k=0;k<j;++k){const auto& other=changes[k];
@@ -408,7 +418,7 @@ static bool retireImpl(Piki* p,std::string& e){
  OriginalPikiBodyHandle live;
  // Teardown is authorized by actual native lifetime, not GameWorldActive.
  // A stale/reused physical address receives no cleanup or field mutations.
- if(!services||services->scene().incarnation()!=i->second.scene||!pc_p2_original_piki_body_handle(p,live)||live.nativeLifetime!=i->second.handle.lifetime)
+ if(!services||&services->scene()!=i->second.sceneOwner||pc_p2_original_captain_loaded_scene()!=i->second.sceneOwner||services->scene().incarnation()!=i->second.scene||!pc_p2_original_piki_body_handle(p,live)||live.nativeLifetime!=i->second.handle.lifetime)
   return fail(e,"SourcePiki retirement requires original exact live native lifetime");
  bool stateClean=false;try{stateClean=cleanup(i->second,e);}catch(...){e="SourcePiki state cleanup callback threw; ownership retained";}
  std::string brainError;bool brainClean=false;
@@ -425,10 +435,11 @@ static bool retireSceneImpl(std::string& e){
  }
  return complete;
 }
-bool owned()noexcept{return !actors.empty();}
-bool retired(std::string& e){ReadOperation op;if(!op.complete(true,e))return false;return actors.empty()||fail(e,"SourcePiki runtime retains native owners");}
+bool owned()noexcept{return ownerMutationActive||!actors.empty();}
+bool retired(std::string& e){ReadOperation op;if(!op.complete(true,e))return false;return (!ownerMutationActive&&actors.empty())||fail(e,"SourcePiki runtime retains native owners or an in-flight owner operation");}
 bool canRetireScene(std::string& e){
- ReadOperation op;
+ ReadOperation op;ObservationScope observation;
+ if(ownerMutationActive)return fail(e,"SourcePiki retirement preflight refused during in-flight owner operation");
  // Empty is an observation of this concrete registry only, not a physical
  // factory/body/bank acceptance fallback or a source readiness grant.
  if(actors.empty())return op.complete(true,e);
@@ -437,7 +448,7 @@ bool canRetireScene(std::string& e){
   return fail(e,"SourcePiki retirement preflight lost canonical live scene");
  try{
   for(const auto& actor:actors){const auto& entry=actor.second;OriginalPikiBodyHandle live;
-   if(entry.scene!=scene->incarnation()||!pc_p2_original_piki_body_handle(entry.handle.body,live)||live.nativeLifetime!=entry.handle.lifetime)
+   if(entry.sceneOwner!=scene||entry.scene!=scene->incarnation()||!pc_p2_original_piki_body_handle(entry.handle.body,live)||live.nativeLifetime!=entry.handle.lifetime)
     return fail(e,"SourcePiki retirement preflight found stale native lifetime");
    const auto& brain=entry.runtime.brain;
    if((brain.freeEffectsOwned||brain.action==Action::Free)&&!services->canRemoveFreeEffects(entry.handle,e))return false;
@@ -449,7 +460,7 @@ bool canRetireScene(std::string& e){
  return op.complete(true,e);
 }
 bool readOwnership(Ownership& out,std::string& e){
- ReadOperation op;Ownership observed;
+ ReadOperation op;Ownership observed;observed.inFlightOwnerOperations=ownerMutationActive?1:0;
  for(const auto& actor:actors){
   const auto& entry=actor.second;const auto& brain=entry.runtime.brain;++observed.entries;
   if(entry.committed)++observed.committed;else ++observed.pendingInitializations;

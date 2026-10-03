@@ -162,7 +162,7 @@ void sceneExit()noexcept;
 bool retire(Piki*,std::string&);
 bool retireScene(std::string&);
 struct Ownership {
- std::uint64_t entries=0,committed=0,pendingInitializations=0;
+ std::uint64_t entries=0,committed=0,pendingInitializations=0,inFlightOwnerOperations=0;
  std::uint64_t formationSlots=0,pendingSlots=0,freeEffectOwners=0,throwEffectOwners=0;
 };
 // Observes actual retained runtime owners; no source readiness/empty fallback.
@@ -170,6 +170,8 @@ struct Ownership {
 bool readOwnership(Ownership&,std::string&);
 // Nonmutating reference preflight; actual resource owners inspect retained
 // handles, not world flags. No effect/slot cleanup is performed here.
+// Authored key/slot notifications are refused during this readonly inspection;
+// ordinary gameplay animation/listener callback delivery remains supported.
 bool canRetireScene(std::string&);
 bool owned()noexcept;
 bool retired(std::string&);
