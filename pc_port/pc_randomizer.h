@@ -1,4 +1,5 @@
 #pragma once
+#include "pc_p2_surface_session.h"
 
 #include "netplay/pc_netplay_randstate.h"
 #include <cstddef>
@@ -237,3 +238,7 @@ bool pc_randomizer_white_campaign();
 bool pc_randomizer_white_treasure_campaign();
 // Fingerprint-bound campaign choice; absent on legacy seeds means one captain.
 bool pc_randomizer_second_captain();
+
+const P2SurfaceSession& pc_randomizer_surface_session();
+void pc_randomizer_surface_session_set(const P2SurfaceSession&);
+std::uint64_t pc_randomizer_active_campaign_generation();

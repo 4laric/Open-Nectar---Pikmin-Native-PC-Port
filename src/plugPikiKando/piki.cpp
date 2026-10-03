@@ -12,6 +12,7 @@
 #include "pc_randomizer.h"
 #include "pc_bbft.h"
 #include "Piki.h"
+#include "pc_p2_cave_campaign_party_engine.h"
 #include "pc_p2_kurage_receiver.h"
 #include "AIConstant.h"
 #include "AIPerf.h"
@@ -2530,6 +2531,7 @@ void Piki::init(Navi* navi)
 {
 	pc_p2_purple_flight_cancel(this);
 	pc_p2_purple_impact_forget(this);
+    pc_p2_cave_campaign_party_forget(this);
 	mHorizontalRotation = 0.0f;
 	mVerticalRotation   = 0.0f;
 	mSRT.s.set(1.0f, 1.0f, 1.0f);

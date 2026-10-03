@@ -1,3 +1,4 @@
+#include "pc_p2_surface_save.h"
 #include "pc_p2_ship.h"
 #include "pc_p2_original_course.h"
 #include "pc_p2_original_onyon_native.h"
@@ -679,6 +680,9 @@ void GameCoreSection::enterFreePikmins()
 void GameCoreSection::cleanupDayEnd()
 {
 #if defined(PIKI_PC_PORT)
+    pc_p2_surface_save_before_day_cleanup();
+#endif
+#if defined(PIKI_PC_PORT)
     if (bossMgr) bossMgr->endPrereleaseTrap();
 #endif
 	finishPause();
@@ -1016,6 +1020,7 @@ void GameCoreSection::exitStage()
  if(!pc_p2_original_course_finish(originalError)) {
   std::fprintf(stderr,"P2_ORIGINAL_COURSE_EXIT_FAIL %s\n",originalError.c_str());std::abort();
  }
+    pc_p2_surface_save_scene_exit();
 #endif
 #if defined(PIKI_PC_PORT)
 	pc_demon_drop_scene_exit();
@@ -1876,6 +1881,12 @@ void GameCoreSection::initStage()
 		PRINT("@@@@ FREE = %d ACTIVE = %d\n", inf->mBPikiInfMgr.getFreeNum(), inf->mBPikiInfMgr.getActiveNum());
 		BaseInf* a = (BaseInf*)inf->mBPikiInfMgr.mActiveList.mChild;
 		while (a) {
+#if defined(PIKI_PC_PORT)
+            if(pc_p2_surface_save_owns_heads()){
+                BaseInf* retired=a;a=static_cast<BaseInf*>(a->mNext);
+                inf->mBPikiInfMgr.delInf(retired);continue;
+            }
+#endif
 			PikiHeadItem* item = static_cast<PikiHeadItem*>(itemMgr->birth(OBJTYPE_Pikihead));
 			if (item) {
 				a->restore(item);
@@ -1962,7 +1973,7 @@ void GameCoreSection::finalSetup()
 	PRINT("********* BONUS PIKI CHECK\n");
 	GameStat::dump();
 
-	if (playerState->mHasExtinctionDemoPlayed == false && !playerState->isTutorial() PC_NOT_VS
+	if (!pc_p2_surface_save_living_scene() && playerState->mHasExtinctionDemoPlayed == false && !playerState->isTutorial() PC_NOT_VS
 	    && ((GameStat::allPikis[Blue] == 0 && playerState->hasContainer(Blue))
 	        || (GameStat::allPikis[Red] == 0 && playerState->hasContainer(Red))
 	        || (GameStat::allPikis[Yellow] == 0 && playerState->hasContainer(Yellow)))) {
@@ -2081,6 +2092,7 @@ void GameCoreSection::finalSetup()
         std::printf("P2_SHIP_READY stored=%d controls=F10_withdraw_ShiftF10_deposit near_ship=180\n", p2ship::stock.total());
     }
 	pc_p2_snow_campaign_setup();
+    pc_p2_surface_save_scene_setup();
 	// Actor-lifetime (#397): mark the new scene ready for lifecycle fixtures.
 	pc_p2_scene_begin();
 	PRINT("====================== FINAL SETUP DONE ======================\n");
@@ -5545,6 +5557,7 @@ void GameCoreSection::draw(Graphics& gfx)
 		routeMgr->refresh(gfx);
 	}
 	pc_p2_cave_draw_transition(gfx);
+    pc_p2_surface_save_draw(gfx);
 	pc_p2_breadbug_visual_draw(gfx);
 	pc_p2_breadbug_teki_draw_nests(gfx);
 	pc_p2_giant_breadbug_visual_draw(gfx);
