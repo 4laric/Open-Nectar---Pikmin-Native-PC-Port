@@ -36,6 +36,28 @@ struct SourceFloorParameters {
  bool hasHiddenCollision=false;
 };
 bool parseSourceFloorParameters(const SelectedSceneInputs&,const SourceRoomCensus&,const SourceWaterInputs&,SourceFloorParameters&,std::string&);
+struct SourceLocalWaypoint {
+ std::array<float,4> positionRadius{};
+ std::array<int,8> fromLinks{{-1,-1,-1,-1,-1,-1,-1,-1}};
+ unsigned fromCount=0;
+};
+struct SourceRouteUnit {std::string name,raw;std::vector<SourceLocalWaypoint> waypoints;};
+struct SourceRoutePoint {
+ unsigned createdRoom=0,createdWaypoint=0,fromCount=0;
+ float radius=0;
+ bool door=false;
+ std::array<int,8> fromLinks{{-1,-1,-1,-1,-1,-1,-1,-1}};
+ std::vector<unsigned> rooms;
+};
+// Authenticated construction inputs, NOT positioned live source WayPoints.
+// getMinY and makeInvertLinks require the actual source MapMgr query owner.
+struct SourceRouteInputs {
+ std::string sha256,roomCensusSha256,waterCensusSha256,parametersSha256,poolRaw;
+ std::vector<SourceRouteUnit> units;
+ std::vector<std::vector<unsigned>> roomIndices;
+ std::vector<SourceRoutePoint> points;
+};
+bool parseSourceRouteInputs(const SelectedSceneInputs&,const SourceRoomCensus&,const SourceWaterInputs&,const SourceFloorParameters&,SourceRouteInputs&,std::string&);
 struct SourceRoomMatrix {unsigned roomIndex=0,unit=0;std::array<float,12> matrix{};};
 struct SourceRoomTriangle {std::array<unsigned,3> abc{};unsigned roomIndex=0;unsigned char mapcode=0;};
 struct SourceRoomGeometry {

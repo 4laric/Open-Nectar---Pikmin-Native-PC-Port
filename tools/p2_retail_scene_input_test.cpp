@@ -22,6 +22,13 @@ int main(){
  assert(sceneInputRole(newer,SceneInput::Parameters).empty());
  assert(!parseDevelopmentFloor(third.substr(0,third.find("floor-parameters")),parameters,error));
  assert(!parseDevelopmentFloor(successor+"floor-parameters "+hash+"\n",parameters,error));
+ auto fourth=third;fourth.replace(fourth.find("FLOOR_3"),7,"FLOOR_4");fourth+="source-routes "+hash+"\n";
+ DevelopmentFloor sourceRoutes;assert(parseDevelopmentFloor(fourth,sourceRoutes,error)&&sourceRoutes.version==4&&sourceRoutes.sha256[9]==hash);
+ assert(sceneInputRole(sourceRoutes,SceneInput::SourceRoutes)=="p2-original/retail-caves/tutorial_1/floor1/source-routes.json");
+ assert(sceneInputRole(parameters,SceneInput::SourceRoutes).empty());
+ assert(!parseDevelopmentFloor(fourth.substr(0,fourth.find("source-routes")),sourceRoutes,error)&&sourceRoutes.version==4);
+ assert(!parseDevelopmentFloor(third+"source-routes "+hash+"\n",parameters,error));
+ assert(!parseDevelopmentFloor(fourth+"extra",sourceRoutes,error));
  auto missing=successor.substr(0,successor.find("room-census"));
  assert(!parseDevelopmentFloor(missing,newer,error)&&newer.version==2&&newer.sha256[6]==hash);
  assert(!parseDevelopmentFloor(text+"room-census "+hash+"\n",newer,error));

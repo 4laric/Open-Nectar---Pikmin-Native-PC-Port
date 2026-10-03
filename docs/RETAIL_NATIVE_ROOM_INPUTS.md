@@ -22,6 +22,29 @@ is unavailable and cannot become false. Actual SceneRuntime owns the parsed
 floor parameters under the same serial/revision/thread/session lifetime guards.
 The getter is a construction view, not live trace/contact admission.
 
+`P2_RETAIL_DEVELOPMENT_FLOOR_4` preserves version 3 and requires a tenth
+`source-routes` digest for `floor<N>/source-routes.json` (256 KiB). Independent
+whole-buffer pins qualify the two root c7c28d7d profiles. Native decoding
+re-admits room/water/floor bindings, checks the retained pool member against
+the exact selected pool, and re-decodes raw original route.txt ordinals,
+decimal tokens, binary32 position/radius, and ordered links. The independently
+pinned construction recipe preserves first-created radius, shared waypoint
+membership and room mappings; ordered full-eight links are reconstructed from
+literal local prefixes. Counts include declared -1 holes, only unused tails
+are padded -1. No links are sorted or deduplicated. This bounded implementation
+does not independently implement the general original unit-pool door parser;
+whole qualified profile pins authenticate those definitions and construction.
+
+SceneRuntime owns immutable `SourceRouteInputs`; the strong construction-view
+getter requires the same current context/thread/session/serial/revision and
+refuses Releasing. These are not positioned live WayPoints. Actual source
+MapMgr.getMinY, map.linkable/inverse links, room flags/visited mutation and the
+ordered FakePiki room callback remain prerequisites. Never use routes.ini or
+native P1 openness for them. Earlier versions and existing packets are intact.
+The source exit audit also disproves a zero-platform shortcut: successful
+Hole.onSetPosition creates collision-enabled futa/side; BigFountain creates
+foun. Actual source PlatMgr, geometry and lifetime producers remain required.
+
 `parseSourceRoomCensus` verifies selected buffer/plan bindings and re-decodes
 retained original binary32 bits, A/B/C order, mapcodes, serialized unit bounds,
 vertex bounds and divider headers from the raw members. Signed zero is retained.

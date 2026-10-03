@@ -5,7 +5,7 @@
 static std::string file(const std::string& path){std::ifstream f(path,std::ios::binary);assert(f);return {std::istreambuf_iterator<char>(f),{}};}
 static std::string hash(const std::string& bytes){unsigned char d[32];pc_netplay_sha::sha256(bytes.data(),bytes.size(),d);return pc_netplay_sha::hex(d,32);}
 int main(int argc,char** argv){
- assert(argc==5);using namespace p2retail;
+ assert(argc==5||argc==6);using namespace p2retail;
  for(unsigned floor=1;floor<=2;++floor){SelectedSceneInputs input;input.selection.cave="tutorial_1";input.selection.floor=floor;input.selection.version=3;
   for(unsigned i=0;i<6;++i){input.bytes[i]=file(std::string(argv[1])+"/"+sceneInputRole(input.selection,static_cast<SceneInput>(i)));input.selection.sha256[i]=hash(input.bytes[i]);}
   input.bytes[6]=file(std::string(argv[2])+"/floor"+std::to_string(floor)+"/p2-retail-room-census.json");input.selection.sha256[6]=hash(input.bytes[6]);
@@ -71,5 +71,26 @@ int main(int argc,char** argv){
   for(const char* label:{"f013","has_hidden_collision","first_floor","bytes_base64","room_census_sha256","water_census_sha256"}){
    bad=input;const auto at=bad.bytes[8].find(label);assert(at!=std::string::npos);bad.bytes[8][at]='X';bad.selection.sha256[8]=hash(bad.bytes[8]);parameterRefuse(bad);}
   std::cout<<"floor="<<floor<<" original parameter PASS explicitf013=0 refusals="<<parameterNegatives<<"; no trace/contact grant\n";
+  if(argc==6){
+   input.selection.version=4;input.bytes[9]=file(std::string(argv[5])+"/floor"+std::to_string(floor)+"/p2-retail-source-routes.json");input.selection.sha256[9]=hash(input.bytes[9]);
+   SourceRouteInputs routes;assert(parseSourceRouteInputs(input,census,water,parameters,routes,error));
+   assert(routes.points.size()==(floor==1?6u:23u)&&routes.units.size()==census.units.size());
+   if(floor==1){assert(routes.roomIndices==std::vector<std::vector<unsigned>>({{0,1,2},{0,3},{3,4,5}}));
+    assert(routes.points[0].radius==85&&routes.points[3].radius==60&&routes.points[0].rooms==std::vector<unsigned>({0,1}));
+    assert(routes.points[3].rooms==std::vector<unsigned>({1,2}));}
+   for(const auto& point:routes.points)for(unsigned k=point.fromCount;k<8;++k)assert(point.fromLinks[k]==-1);
+   unsigned routeNegatives=0;auto routeRefuse=[&](const SelectedSceneInputs& changed){auto retained=routes;
+    assert(!parseSourceRouteInputs(changed,census,water,parameters,retained,error)&&!error.empty());
+    assert(retained.sha256==routes.sha256&&retained.units[0].raw==routes.units[0].raw&&retained.points[0].fromLinks==routes.points[0].fromLinks);++routeNegatives;};
+   bad=input;bad.selection.version=3;routeRefuse(bad);
+   bad=input;bad.bytes[9].clear();routeRefuse(bad);
+   bad=input;bad.selection.sha256[9]=std::string(64,'0');routeRefuse(bad);
+   bad=input;bad.bytes[9].pop_back();bad.selection.sha256[9]=hash(bad.bytes[9]);routeRefuse(bad);
+   bad=input;bad.bytes[9]+=std::string(256*1024,' ');bad.selection.sha256[9]=hash(bad.bytes[9]);routeRefuse(bad);
+   for(unsigned index=0;index<9;++index){bad=input;bad.bytes[index]+="tamper";routeRefuse(bad);}
+   for(const char* label:{"from_links","radius_f32_bits","room_memberships","bytes_base64","ground_heights_provided","inverse_links_provided"}){
+    bad=input;const auto at=bad.bytes[9].find(label);assert(at!=std::string::npos);bad.bytes[9][at]='X';bad.selection.sha256[9]=hash(bad.bytes[9]);routeRefuse(bad);}
+   std::cout<<"floor="<<floor<<" original routes PASS points="<<routes.points.size()<<" full8slots refusals="<<routeNegatives<<"; ground/inverse/visit unavailable\n";
+  }
  }
 }

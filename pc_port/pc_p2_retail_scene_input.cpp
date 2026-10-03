@@ -19,8 +19,8 @@ bool pc_p2_retail_scene_selection(p2retail::SelectedSceneInputs& out,bool& prese
  std::string framing;
  if(!pc_randomizer_original_input(developmentFloorRole,framing,error)||
     !parseDevelopmentFloor(framing,next.selection,error))return false;
- static constexpr std::size_t limits[]={1024*1024,64*1024*1024,4*1024*1024,64*1024,1024*1024,1024*1024,1024*1024,64*1024,64*1024};
- for(unsigned i=0;i<(next.selection.version==3?9u:next.selection.version==2?8u:6u);++i){
+ static constexpr std::size_t limits[]={1024*1024,64*1024*1024,4*1024*1024,64*1024,1024*1024,1024*1024,1024*1024,64*1024,64*1024,256*1024};
+ for(unsigned i=0;i<(next.selection.version>=3?next.selection.version+6:next.selection.version==2?8u:6u);++i){
   const auto role=sceneInputRole(next.selection,static_cast<SceneInput>(i));
   if(!pc_randomizer_original_has_input(role)){error="retail development required selected role missing: "+role;return false;}
   if(!pc_randomizer_original_input(role,next.bytes[i],error))return false;

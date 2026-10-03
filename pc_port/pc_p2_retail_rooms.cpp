@@ -152,7 +152,7 @@ SourceRoomUnit unit(const Json& j){
 }
 bool parseSourceRoomCensus(const SelectedSceneInputs& selected,SourceRoomCensus& out,std::string& error){
  try{
-  check(selected.selection.version>=2&&selected.selection.version<=3&&selected.selection.floor>=1&&selected.selection.floor<=2,"room selected version/floor");
+  check(selected.selection.version>=2&&selected.selection.version<=4&&selected.selection.floor>=1&&selected.selection.floor<=2,"room selected version/floor");
   const auto& raw=selected.bytes[6];const auto digest=hash(raw);
   // Independent qualified profile pins authenticate the raw member provenance;
   // the self-described archive hashes alone are never a trust root.
@@ -194,7 +194,7 @@ bool parseSourceRoomCensus(const SelectedSceneInputs& selected,SourceRoomCensus&
 }
 bool parseSourceWaterInputs(const SelectedSceneInputs& selected,const SourceRoomCensus& rooms,SourceWaterInputs& out,std::string& error){
  try{
-  check(selected.selection.version>=2&&selected.selection.version<=3&&selected.selection.floor>=1&&selected.selection.floor<=2,"water selected version/floor");
+  check(selected.selection.version>=2&&selected.selection.version<=4&&selected.selection.floor>=1&&selected.selection.floor<=2,"water selected version/floor");
   const auto& raw=selected.bytes[7];const auto digest=hash(raw);
   static constexpr const char* pins[]={"31f212070f0e182dcfe5cbc45cbc9f0ba01634d07f594f67d2ba33dfa8edd1fe","0e7b2ffbc7747e593c2d6e4f26620256b2f72a4f15462dcff5e5b41b76c7fdb2"};
   check(!raw.empty()&&raw.size()<=65536&&digest==selected.selection.sha256[7]&&digest==pins[selected.selection.floor-1],"water selected/profile digest");
@@ -239,7 +239,7 @@ bool parseSourceWaterInputs(const SelectedSceneInputs& selected,const SourceRoom
 }
 bool parseSourceFloorParameters(const SelectedSceneInputs& selected,const SourceRoomCensus& rooms,const SourceWaterInputs& water,SourceFloorParameters& out,std::string& error){
  try{
-  check(selected.selection.version==3&&selected.selection.floor>=1&&selected.selection.floor<=2,"floor parameters selected version/floor");
+  check(selected.selection.version>=3&&selected.selection.version<=4&&selected.selection.floor>=1&&selected.selection.floor<=2,"floor parameters selected version/floor");
   const auto& raw=selected.bytes[8];const auto digest=hash(raw);
   static constexpr const char* pins[]={"a7a0e74a3af6ccfb10921a7207a555bf7bab8c3c558baf61809f97e8d90ea85f","884d20883f48be3d266c0eb9667832a02abad1d953c966c4df2e0e5b26809631"};
   check(!raw.empty()&&raw.size()<=65536&&digest==selected.selection.sha256[8]&&digest==pins[selected.selection.floor-1],"floor parameters selected/profile digest");
@@ -288,6 +288,93 @@ bool parseSourceFloorParameters(const SelectedSceneInputs& selected,const Source
   const auto& parameters=definition.at("parameters");check(parameters.kind==Json::Object&&parameters.object.size()==next.parameters.size(),"floor source complete parameters differ");
   for(const auto& field:next.parameters)check(parameters.at(field.first.c_str()).text(field.second),"floor original parameter differs");
   next.sha256=digest;next.roomCensusSha256=actualRooms.sha256;next.waterCensusSha256=actualWater.sha256;
+  out=std::move(next);error.clear();return true;
+ }catch(const std::exception& e){error=e.what();return false;}
+}
+bool parseSourceRouteInputs(const SelectedSceneInputs& selected,const SourceRoomCensus& rooms,const SourceWaterInputs& water,const SourceFloorParameters& parameters,SourceRouteInputs& out,std::string& error){
+ try{
+  check(selected.selection.version==4&&selected.selection.floor>=1&&selected.selection.floor<=2,"source routes selected version/floor");
+  const auto& raw=selected.bytes[9];const auto digest=hash(raw);
+  static constexpr const char* pins[]={"11c2f2d65a99ab75d1e98b980318d9fd5f4961447d7a3a75440f7378118a5395","0442c04a8b073d1c6af1437d20bf1980283721771cefa1c54e3615dcef7f5568"};
+  check(!raw.empty()&&raw.size()<=256*1024&&digest==selected.selection.sha256[9]&&digest==pins[selected.selection.floor-1],"source routes selected/profile digest");
+  SourceRoomCensus actualRooms;SourceWaterInputs actualWater;SourceFloorParameters actualParameters;
+  check(parseSourceRoomCensus(selected,actualRooms,error)&&parseSourceWaterInputs(selected,actualRooms,actualWater,error)&&
+   parseSourceFloorParameters(selected,actualRooms,actualWater,actualParameters,error)&&actualRooms.sha256==rooms.sha256&&
+   actualWater.sha256==water.sha256&&actualParameters.sha256==parameters.sha256,"source routes actual input binding");
+  const auto doc=JsonReader(raw).read();const auto& plan=selected.plan;
+  check(doc.at("schema").numeric(1)&&doc.at("policy").text("authored-emergence-source-routes/1")&&
+   doc.at("cave").text(plan.cave)&&doc.at("floor").numeric(plan.floor)&&doc.at("room_census_sha256").text(actualRooms.sha256)&&
+   doc.at("water_census_sha256").text(actualWater.sha256)&&doc.at("floor_parameters_sha256").text(actualParameters.sha256)&&
+   doc.at("layout_sha256").text(plan.layoutSha256)&&doc.at("cave_source_sha256").text(plan.sourceSha256)&&
+   doc.at("catalog_sha256").text(plan.catalogSha256)&&doc.at("geometry_sha256").text(selected.selection.sha256[1])&&
+   doc.at("routes_sha256").text(selected.selection.sha256[2])&&doc.at("start_sha256").text(selected.selection.sha256[3])&&
+   doc.at("pool").at("sha256").text(selected.selection.sha256[4]),"source routes selected bindings");
+  for(const char* flag:{"native_ready","runtime_lifecycle_provided","source_route_grant"})check(doc.at(flag).kind==Json::False,"source routes input authority boundary");
+  const auto& construction=doc.at("construction");
+  check(construction.at("ground_heights_provided").kind==Json::False&&construction.at("inverse_links_provided").kind==Json::False,"source routes missing query boundary");
+  SourceRouteInputs next;next.sha256=digest;next.roomCensusSha256=actualRooms.sha256;next.waterCensusSha256=actualWater.sha256;next.parametersSha256=actualParameters.sha256;
+  const auto& pool=doc.at("pool_source");next.poolRaw=base64(text(pool.at("bytes_base64")));
+  check(next.poolRaw==selected.bytes[4]&&hash(next.poolRaw)==selected.selection.sha256[4]&&
+   pool.at("sha256").text(selected.selection.sha256[4])&&pool.at("member").text(text(doc.at("pool").at("member"))),"source routes original pool binding");
+  auto clean=[](const std::string& literal){std::istringstream lines(literal);std::string line,result;
+   while(std::getline(lines,line)){result+=line.substr(0,line.find('#'));result+=' ';}return result;};
+  auto link=[](const Json& j,unsigned count){check(j.kind==Json::Number&&std::floor(j.number)==j.number&&j.number>=-1&&j.number<double(count),"source routes link bound");return int(j.number);};
+  const auto& units=array(doc.at("units"),actualRooms.units.size());
+  for(unsigned u=0;u<units.size();++u){const auto& j=units[u];const auto& actual=actualRooms.units[u];SourceRouteUnit unit;
+   unit.name=text(j.at("name"));unit.raw=base64(text(j.at("bytes_base64")));
+   check(unit.name==actual.name&&j.at("archive_member").text(actual.archiveMember)&&j.at("archive_sha256").text(actual.archiveSha256)&&
+    j.at("member").text(actual.archiveMember+"/route.txt")&&j.at("sha256").text(hash(unit.raw)),"source routes original member binding");
+   std::istringstream source(clean(unit.raw));source.imbue(std::locale::classic());unsigned count=0;check(bool(source>>count)&&count>0&&count<=256,"source routes raw count");
+   const auto& points=array(j.at("waypoints"),count);
+   for(unsigned i=0;i<count;++i){std::string brace;int index=-1,n=-1;SourceLocalWaypoint point;
+    check(bool(source>>brace>>index>>n)&&brace=="{"&&index==int(i)&&n>=0&&n<=8,"source routes raw framing/order");point.fromCount=unsigned(n);
+    const auto& record=points[i];check(record.at("iteration").numeric(i)&&record.at("source_index").numeric(i)&&record.at("runtime_unit_index").numeric(i),"source routes local ordinal");
+    const auto& links=array(record.at("from_links"),point.fromCount);
+    for(unsigned k=0;k<point.fromCount;++k){check(bool(source>>point.fromLinks[k])&&point.fromLinks[k]==link(links[k],count),"source routes raw link mismatch");}
+    const auto& tokens=array(record.at("position_radius_tokens"),4);const auto& encodings=array(record.at("position_radius_f32_bits"),4);
+    for(unsigned k=0;k<4;++k){std::string token;check(bool(source>>token)&&tokens[k].text(token),"source routes raw decimal token mismatch");
+     std::istringstream numeric(token);numeric.imbue(std::locale::classic());float value=0;std::string trailing;
+     check(bool(numeric>>value)&&!(numeric>>trailing)&&std::isfinite(value),"source routes decimal conversion");std::uint32_t rawBits;std::memcpy(&rawBits,&value,4);
+     check(rawBits==bits(encodings[k]),"source routes decimal binary32 mismatch");point.positionRadius[k]=value;}
+    check(point.positionRadius[3]>0&&bool(source>>brace)&&brace=="}","source routes raw waypoint end");unit.waypoints.push_back(point);
+   }
+   std::string extra;check(!(source>>extra),"source routes raw trailing");next.units.push_back(std::move(unit));
+  }
+  const auto& constructedRooms=array(construction.at("rooms"),actualRooms.rooms.size());
+  for(unsigned r=0;r<constructedRooms.size();++r){const auto& record=constructedRooms[r];const auto& local=next.units[actualRooms.rooms[r].unit].waypoints;
+   check(record.at("room_index").numeric(r)&&record.at("initial_visited").kind==Json::False,"source routes room identity/initial visit");
+   std::vector<unsigned> indices;for(const auto& i:array(record.at("m_wp_indices"),local.size()))indices.push_back(integer(i,255));next.roomIndices.push_back(std::move(indices));
+  }
+  const auto& global=construction.at("waypoints");check(global.kind==Json::Array&&global.array.size()==(selected.selection.floor==1?6u:23u),"source routes global count");
+  for(unsigned i=0;i<global.array.size();++i){const auto& record=global.array[i];SourceRoutePoint point;
+   check(record.at("index").numeric(i)&&record.at("constructor_flags").numeric(0)&&record.at("after_set_close_all_flags").numeric(128),"source routes global index/flags");
+   point.createdRoom=integer(record.at("created_room"),unsigned(actualRooms.rooms.size()-1));
+   const auto& local=next.units[actualRooms.rooms[point.createdRoom].unit].waypoints;
+   point.createdWaypoint=integer(record.at("created_waypoint"),unsigned(local.size()-1));
+   check(next.roomIndices[point.createdRoom][point.createdWaypoint]==i,"source routes first-created mapping");
+   point.radius=floating(bits(record.at("radius_f32_bits")));check(point.radius==local[point.createdWaypoint].positionRadius[3],"source routes first-created radius");
+   point.door=record.at("position_rule").text("transformed-source-XZ; Y=0");
+   check(point.door||record.at("position_rule").text("transformed-source-XZ; Y=actual MapMgr.getMinY"),"source routes ground policy");
+   const auto& links=record.at("from_links");check(links.kind==Json::Array&&links.array.size()<=8,"source routes full-eight count");point.fromCount=unsigned(links.array.size());
+   for(unsigned k=0;k<point.fromCount;++k)point.fromLinks[k]=link(links.array[k],unsigned(global.array.size()));
+   const auto& memberships=record.at("room_memberships");check(memberships.kind==Json::Array&&!memberships.array.empty()&&memberships.array.size()<=actualRooms.rooms.size(),"source routes memberships bound");
+   for(const auto& member:memberships.array){const unsigned r=integer(member,unsigned(actualRooms.rooms.size()-1));
+    check(std::find(next.roomIndices[r].begin(),next.roomIndices[r].end(),i)!=next.roomIndices[r].end()&&
+     std::find(point.rooms.begin(),point.rooms.end(),r)==point.rooms.end(),"source routes membership mapping");point.rooms.push_back(r);}
+   next.points.push_back(std::move(point));
+  }
+  // The whole independently qualified profile authenticates the pool door and
+  // construction recipe. Recompute full prefix append order from literal local
+  // records; -1 holes count, unused slots stay -1, never deduplicate links.
+  std::vector<SourceRoutePoint> rebuilt(next.points.size());
+  for(unsigned r=0;r<next.roomIndices.size();++r){const auto& local=next.units[actualRooms.rooms[r].unit].waypoints;
+   for(unsigned w=0;w<local.size();++w){const unsigned index=next.roomIndices[r][w];check(index<rebuilt.size(),"source routes mapped global bound");auto& point=rebuilt[index];
+    point.rooms.push_back(r);check(point.fromCount+local[w].fromCount<=8,"source routes shared append overflow");
+    for(unsigned k=0;k<local[w].fromCount;++k){const int destination=local[w].fromLinks[k];point.fromLinks[point.fromCount+k]=destination<0?-1:int(next.roomIndices[r][unsigned(destination)]);}
+    point.fromCount+=local[w].fromCount;
+   }
+  }
+  for(unsigned i=0;i<rebuilt.size();++i)check(rebuilt[i].fromCount==next.points[i].fromCount&&rebuilt[i].fromLinks==next.points[i].fromLinks&&rebuilt[i].rooms==next.points[i].rooms,"source routes reconstructed full-eight/order mismatch");
   out=std::move(next);error.clear();return true;
  }catch(const std::exception& e){error=e.what();return false;}
 }

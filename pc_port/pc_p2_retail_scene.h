@@ -16,6 +16,7 @@ struct SourceRoomCensus;
 struct SourceWaterInputs;
 struct SourceRoomGeometry;
 struct SourceFloorParameters;
+struct SourceRouteInputs;
 
 // Borrowed from the actual selected-floor owner. Callers cannot construct or
 // replace a context. Prepared facts admit resource checks, never live gameplay.
@@ -96,6 +97,10 @@ const p2retail::SourceWaterInputs* pc_p2_retail_scene_water_inputs(const p2retai
 const p2retail::SourceRoomGeometry* pc_p2_retail_scene_source_geometry(const p2retail::SceneContext&,
     std::uint64_t nativeSerial,std::uint64_t selectionRevision) noexcept;
 const p2retail::SourceFloorParameters* pc_p2_retail_scene_floor_parameters(const p2retail::SceneContext&,
+    std::uint64_t nativeSerial,std::uint64_t selectionRevision) noexcept;
+// Immutable v4 construction inputs only. No positioned live RouteMgr,
+// ground/inverse-link result, openRoom callback or room-visited grant.
+const p2retail::SourceRouteInputs* pc_p2_retail_scene_source_route_inputs(const p2retail::SceneContext&,
     std::uint64_t nativeSerial,std::uint64_t selectionRevision) noexcept;
 namespace p2retail {
 enum class SourceWaterState { Unavailable,KnownDry };
