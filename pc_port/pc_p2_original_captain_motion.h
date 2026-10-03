@@ -8,6 +8,7 @@ namespace p2original { namespace captain {
 // Actual Game::IPikiAnims identities, never P1 PaniMotion IDs.
 enum class Motion:unsigned {Asibumi=1,Damage=4,Getup=14,Jhit=22,Jkoke=23,Nigeru=28,Run2=29,Walk=30,Wait=31};
 struct MotionState {Motion motion=Motion::Wait;float frame=0;std::uint64_t generation=0;bool finishing=false,complete=false;};
+enum class SourceResource {Parameters,AnimRegistry,Collision,DownStudio,DownAnimation};
 struct SourceParameters {
  float maximumHealth=0,moveSpeed=0,neutralStick=0,cursorStick=0;
  std::string rawSourceSha;
@@ -20,6 +21,11 @@ public:
  SourceBank();~SourceBank();
  bool prepare(std::string&);
  bool parameters(SourceParameters&,std::string&)const;
+ // Retained exact descriptor-selected source bytes; no ambient path getter.
+ bool sourceBytes(SourceResource,std::string& out,std::string&)const;
+ // Actual s03_dead1.bck presentation; Studio timing/events remain the movie
+ // lifecycle owner's independently authenticated DownStudio clock.
+ bool startDownMovie(Navi*,std::string&);
  // Called only after actual native bootstrap/reset has completed. Rebind or
  // wrong/duplicate Native NaviMgr slot pointers are refused.
  bool bindRoster(Navi* olimar,Navi* louie,std::string&);
