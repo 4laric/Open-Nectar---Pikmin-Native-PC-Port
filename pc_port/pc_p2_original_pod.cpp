@@ -3,6 +3,7 @@
 #include "Suckable.h"
 #include "Pellet.h"
 #include "PelletState.h"
+#include "DynParticle.h"
 #include "CreatureNode.h"
 #include "Collision.h"
 #include "Graphics.h"
@@ -109,11 +110,23 @@ bool current(p2retail::Snapshot* out=nullptr){
  if(!prepared||!contextProvider||!contextProvider(config.floor.scene,actual)||!source(actual)||!same(actual,config.floor))return false;
  if(out)*out=actual;return true;
 }
+bool quiet(const Vector3f& v){
+ return std::isfinite(v.x)&&std::isfinite(v.y)&&std::isfinite(v.z)
+  &&std::fabs(v.x)<=.01f&&std::fabs(v.y)<=.01f&&std::fabs(v.z)<=.01f;
+}
 bool moving(Pellet* actor,const Cargo& c){
  if(c.phase==Phase::Completed)return false;
  if(c.phase!=Phase::Bound)return true;
- return !actor||!actor->isAlive()||actor->getState()!=PELSTATE_Normal
-  ||actor->mCarrierCounter>0||actor->getPickOffset()!=0;
+ if(!actor||!actor->isAlive()||actor->getState()!=PELSTATE_Normal
+  ||actor->mCarrierCounter>0||actor->getPickOffset()!=0||!actor->onGround()
+  ||!quiet(actor->mVelocity)||!quiet(actor->mVolatileVelocity)
+  ||!quiet(actor->mAngularVelocity)||!quiet(actor->mAngularMomentum)
+  ||!quiet(actor->mAngularImpulseAccum))return true;
+ unsigned count=0;
+ for(auto* particle=actor->mParticleList;particle;particle=particle->mNextParticle){
+  if(++count>actor->mParticleCount||!quiet(particle->mWorldVelocity))return true;
+ }
+ return count!=actor->mParticleCount;
 }
 void clear(){
  if(pod)pod->live=false;if(node){node->del();node->mCreature=nullptr;}

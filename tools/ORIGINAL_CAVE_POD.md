@@ -63,6 +63,12 @@ graph, without marking them consumed or changing the ledger. Its absence or
 failure leaves the receiver/bindings unchanged. The callback must not destroy
 or rebind cargo; the floor owner retires actors after accepted release. This
 permits original leave-behind semantics once the owning retention is qualified.
+This bounded boundary requires actual `onGround`, native Normal state, no
+carriers/lift offset, finite body linear/angular/queued velocities and angular
+impulses within 0.01 units per component, and an intact native particle chain
+with finite world velocities within the same bound. Thrown, falling, sliding
+or rotating Normal-state cargo remains pending. Leaving dynamically unsettled
+cargo needs a future complete dynamic-graph retention contract and is unqualified.
 A read-only, versioned pending snapshot preserves every unfinished cargo's
 full source/floor/scene/birth identity, including quiescent ground cargo.
 Unexpected kills revoke pool-address ownership immediately and preserve only
