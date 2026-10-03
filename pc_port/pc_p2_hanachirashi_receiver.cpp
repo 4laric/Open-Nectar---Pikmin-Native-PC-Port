@@ -79,6 +79,7 @@ struct WindNaviState : NaviState,p2original::captain::State {
     p2original::captain::StateId sourceStateId()const override{return phase<=Fling?p2original::captain::StateId::Flick:p2original::captain::StateId::KokeDamage;}
     bool sourceAlive(const Navi& n)const override{return pc_p2_original_captain_actor_alive(&n);}
     bool sourceInvincible()const override{return false;}
+    bool sourceVsUsableY()const override{return false;}
     bool invincible(Navi*)override{return false;}
     std::optional<std::uint8_t> actorInvincibleFrames(const Navi& n)const override{std::uint8_t f;if(!pc_p2_original_captain_actor_frames(&n,f))return {};return f;}
     bool canEnterSourceDead(const Navi& n)const override{return pc_p2_original_captain_can_enter_dead(&n);}
