@@ -347,6 +347,7 @@ set(PC_PORT_SOURCES
     pc_port/pc_p2_cave_campaign_cache_engine.cpp
     pc_port/pc_p2_cave_campaign_party_engine.cpp
     pc_port/pc_p2_original_piki_origin.cpp
+    pc_port/pc_p2_original_piki_physical.cpp
     pc_port/pc_p2_cave_campaign.cpp
     pc_port/pc_p2_cave_dialog_window.cpp
     pc_port/pc_p2_cave_generate.cpp
@@ -3248,3 +3249,5 @@ pikmin_add_ci_fixture(original_piki_init tools/p2_original_piki_init_runtime.cpp
 add_executable(pc_p2_original_piki_spawn_test tools/pc_p2_original_piki_spawn_test.cpp pc_port/pc_p2_original_piki_spawn.cpp)
 target_include_directories(pc_p2_original_piki_spawn_test PRIVATE "${PROJECT_SOURCE_DIR}/pc_port")
 add_test(NAME p2_original_piki_spawn COMMAND pc_p2_original_piki_spawn_test)
+
+pikmin_add_ci_fixture(original_piki_physical tools/p2_original_piki_physical_runtime.cpp)

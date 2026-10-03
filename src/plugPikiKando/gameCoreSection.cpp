@@ -32,6 +32,9 @@
 #include "Generator.h"
 #include "WorkObject.h"
 #include "GameCoreSection.h"
+#if defined(PIKI_PC_PORT)
+#include "pc_p2_original_piki_origin.h"
+#endif
 #include "pc_bbft.h"
 #include "pc_p2_preview.h"
 #include "pc_p2_enemy.h"
@@ -618,6 +621,9 @@ void GameCoreSection::enterFreePikmins()
 	CI_LOOP(it)
 	{
 		Piki* piki = (Piki*)*it;
+#if defined(PIKI_PC_PORT)
+        if (pc_p2_original_piki_body_wild(piki)) continue;
+#endif
 		u32 mode   = piki->mMode;
 		if (!piki->isKinoko() && !piki->isHolding() && piki->isAlive() && (int)mode != PikiMode::FormationMode && (1 < mode - 11)) {
 			int state = piki->getState();
@@ -795,6 +801,9 @@ void GameCoreSection::cleanupDayEnd()
 		CI_LOOP(it)
 		{
 			Piki* piki = (Piki*)*it;
+#if defined(PIKI_PC_PORT)
+            if (pc_p2_original_piki_body_wild(piki)) continue;
+#endif
 			int mode   = piki->mMode;
 
 			if (piki->isKinoko()) {
@@ -1011,6 +1020,7 @@ void GameCoreSection::exitStage()
 {
 #if defined(PIKI_PC_PORT)
 	pc_p2_cave_campaign_scene_exit();
+	pc_p2_original_piki_origin_scene_exit(); // Retire canonical pointers before actor heap teardown.
 	pc_demon_drop_scene_exit();
 	pc_demon_scene_exit();
 #endif
