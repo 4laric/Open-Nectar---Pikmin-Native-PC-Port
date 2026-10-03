@@ -2,6 +2,9 @@
 #include "pc_p2_original_piki_physical_bootstrap.h"
 #include "pc_p2_original_piki_host.h"
 #include "pc_p2_retail_scene.h"
+#include "pc_p2_original_game_system.h"
+#include "pc_p2_original_system_clock.h"
+#include "pc_p2_original_system_selected.h"
 #include <array>
 class StageInfo;
 namespace p2original {namespace piki {
@@ -19,6 +22,15 @@ public:
  NativeBodyFactory& operator=(const NativeBodyFactory&)=delete;
  bool initializeAllocation(const p2retail::SceneContext&,PoolTicket,std::string&);
  bool createStartingTwenty(const p2retail::SceneContext&,std::string&);
+ // Actual owned source section initialization BEFORE Captain reset. Reads both
+ // authenticated SYSTEM resources, invokes source GameSystem::init and the
+ // literal BaseGameSection System::setFrameRate(2) event. No World activation.
+ bool prepareSourceSection(const p2retail::SceneContext&,std::string&);
+ bool sourceGameSystemState(GameSystemState&,std::string&)const;
+ bool sourceDeltaTime(float&,std::string&)const;
+ bool sourceParameters(SelectedSystemParameters&,std::string&)const;
+ bool retireSourceSection(std::string&);
+ bool sourceSectionOwned()const noexcept;
  struct BodyRead {
   PoolTicket allocation;Handle handle;OriginalPikiBody source;
   bool committed=false;std::uint8_t sourceCreatureFlags=0;
@@ -38,6 +50,17 @@ public:
  bool owned()const noexcept;
 private:
  NativeBodyFactory()=default;
+ GameSystem sourceSystem;
+ SystemClock sourceClock;
+ SelectedSystemParameters systemParameters;
+ const p2retail::SceneContext* systemStage=nullptr;
+ StageInfo* systemStageInfo=nullptr;MapMgr* systemMap=nullptr;RouteMgr* systemRoutes=nullptr;
+ std::uint64_t systemSerial=0,systemRevision=0;
+ std::string systemCampaign,systemSession,systemLayout,systemVisit;
+ bool systemInitialized=false,clockBound=false,clockInitialized=false;
+ mutable bool systemBusy=false,systemReentered=false;
+ class SystemOperation;
+ bool exactSystem(bool cleanup,std::string&)const;
  struct Entry {
   PoolTicket ticket;NativePhysicalBootstrap physical;
   OriginalPikiBody source;Handle handle;
