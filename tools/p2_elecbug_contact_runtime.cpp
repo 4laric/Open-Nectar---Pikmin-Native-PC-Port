@@ -20,9 +20,9 @@
 #include "Piki.h"
 #include "PikiState.h"
 #include "PikiMgr.h"
-#include "Pellet.h"
 #include "PikiHeadItem.h"
 #include "ItemMgr.h"
+#include "UfoItem.h"
 #include "Boss.h"
 #include "Pom.h"
 #include "pc_p2_white.h"
@@ -332,14 +332,14 @@ public:
         }
         // Only virtual-pad input. Gather, approach, aim during A hold, release.
         if(age<90){input(KBBTN_B);return result;}
-        if(electric()&&desiredSpecies()!=P2SpeciesWhite&&!aHeld&&pelletMgr){
-            bool nearPart=false;
-            Iterator parts(pelletMgr);CI_LOOP(parts){
-                Pellet* part=static_cast<Pellet*>(*parts);
-                if(part->mConfig->mPelletType()==PELTYPE_UfoPart&&part->onGround()&&part->getState()==0
-                    &&distance(n->mSRT.t,part->mSRT.t)<=part->getBottomRadius()+40.f)nearPart=true;
+        UfoItem* ship=itemMgr?itemMgr->getUfo():nullptr;
+        if(electric()&&desiredSpecies()!=P2SpeciesWhite&&!aHeld&&ship){
+            const Vector3f goal=ship->getGoalPos();
+            const Vector3f offset=goal-n->mSRT.t;
+            // Walk's recovery A action uses the offset goal, not ship origin.
+            if(offset.length()<=60.f||distance(n->mSRT.t,ship->mSRT.t)<=70.f){
+                neutralThrowTicks=0;point(n,enemy->mSRT.t,true);return result;
             }
-            if(nearPart){neutralThrowTicks=0;point(n,enemy->mSRT.t,true);return result;}
         }
         if(distance(n->mSRT.t,enemy->mSRT.t)>140.f){
             if(aHeld){for(const auto& entry:flight)witness(entry.first,"invalidated");flight.clear();aHeld=false;}
