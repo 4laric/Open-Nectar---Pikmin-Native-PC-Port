@@ -13,7 +13,7 @@ species row and all authored clips/converted meshes; an AP actor roster is not
 needed. Keep private legal assets and runtime output under ignored output.
 
 Run the native diagnostic through `scripts/run_pikmin2_fixture.py` with
-`--arg=--pikipelago-surface-course --arg=tutorial`, a fresh staged run directory,
+`--arg=--experimental-pikmin2-surface --arg=tutorial`, a fresh staged run directory,
 timeout 60 and marker `PASS P2_ORIGINAL_CHAPPY_RUNTIME`. Record exact native pin,
 executable SHA256, no-work result and observed 960x540 centered window. Its
 catalog contains only the literal tutorial/nonloop/5-29.txt#1 Red Bulborb row;
