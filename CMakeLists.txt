@@ -3467,7 +3467,7 @@ add_test(NAME p2_retail_treasure_session_test COMMAND p2_retail_treasure_session
 add_executable(p2_original_progress_test tools/pc_p2_original_progress_test.cpp pc_port/pc_p2_original_progress.cpp)
 target_include_directories(p2_original_progress_test PRIVATE pc_port)
 target_compile_options(p2_original_progress_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
-add_test(NAME p2_original_progress COMMAND p2_original_progress_test)
+add_test(NAME p2_original_progress_standalone COMMAND p2_original_progress_test)
 add_executable(p2_campaign_checkpoint_state_test tools/pc_p2_campaign_checkpoint_state_test.cpp
     pc_port/pc_p2_original_progress.cpp pc_port/pc_p2_original_lifecycle.cpp)
 target_include_directories(p2_campaign_checkpoint_state_test PRIVATE pc_port)
