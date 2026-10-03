@@ -228,8 +228,8 @@ static void podTitle(const std::string& recent) {
         SDL_SetWindowTitle(window,title.c_str());
     }
 }
-Suckable* pc_p2_preview_goal(){return pc_pikipelago_room_preview()?podAnchor:nullptr;}
-bool pc_p2_preview_is_pod(GoalItem* goal){return pc_p2_white_treasure_is_pod(goal) || (pc_pikipelago_room_preview() && podAnchor && goal==podAnchor);}
+Suckable* pc_p2_preview_goal(){if(auto* goal=pc_p2_cave_items_goal())return goal;return pc_pikipelago_room_preview()?podAnchor:nullptr;}
+bool pc_p2_preview_is_pod(GoalItem* goal){return pc_p2_cave_items_is_pod(goal) || pc_p2_white_treasure_is_pod(goal) || (pc_pikipelago_room_preview() && podAnchor && goal==podAnchor);}
 int pc_p2_preview_pokos(){return podAnchor?economy.total():-1;}
 bool pc_p2_preview_ready() { return pc_pikipelago_room_preview() && previewShape && previewTreasure; }
 bool pc_p2_preview_cargo_free_ready() { return pc_pikipelago_room_preview() && cargoFree && setupComplete; }
@@ -603,6 +603,7 @@ bool pc_p2_preview_deliver(Pellet* pellet) {
 }
 
 bool pc_p2_preview_draw_pod(GoalItem* goal,Graphics& gfx,Matrix4f& matrix) {
+    if(pc_p2_cave_items_draw_pod(goal,gfx,matrix))return true;
     if(pc_p2_white_treasure_draw_pod(goal,gfx,matrix))return true;
     if(!pc_p2_preview_is_pod(goal) || !podShape)return false;
     // Static visual uses the existing destination's suction height; animation is deferred.
