@@ -12,7 +12,7 @@ struct OnyonRecord {
  std::array<float,3> position{},offset{},rotation{}; // literal floats, degrees
 };
 bool validateOnyon(const OnyonRecord&,std::string&);
-bool onyonEligible(const OnyonRecord&,std::uint8_t booted);
+bool onyonEligible(const OnyonRecord&,std::uint8_t discoveredContainers);
 std::string onyonDigest(const OnyonRecord&);
 bool readOnyons(const std::string& path,std::vector<OnyonRecord>&,std::string&);
 }
