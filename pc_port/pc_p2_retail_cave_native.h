@@ -32,6 +32,7 @@ public:
  virtual bool suppressed(const ContentRow&,const BirthIdentity&,const Snapshot&,LiveBinding&,std::string&)=0;
  virtual bool absent(const ContentRow&,const BirthIdentity&,const Snapshot&,const LiveBinding&)const=0;
  virtual bool commit(const Snapshot&,std::string&)=0;
+ virtual bool canRelease(std::string&)const=0;
  virtual bool release(std::string&)=0;
  virtual bool retired(const BirthIdentity&,const Snapshot&,std::string&)=0;
 };
@@ -62,6 +63,7 @@ public:
  // Retained actual parent incarnation after natural death, never an output receipt.
  bool knownSourceBirth(const p2original::InstanceIdentity&,BirthIdentity&,Snapshot&,std::string&)const;
  bool placement(const SceneIdentity&,unsigned row,unsigned ordinal,Placement&,std::string&)const;
+ bool canRelease(std::string&)const override;
  bool release(std::string&)override;
  // Actual native forget event, before manager address reuse; not a death poll.
  bool retired(Creature*,std::string&);
