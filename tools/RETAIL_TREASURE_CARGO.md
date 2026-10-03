@@ -26,6 +26,17 @@ not repeat the receiver transition separately. Unfinished cargo still requires
 an actual retained graph and restore provider. These functions do not implement
 native SAVE or unfinished-ground persistence.
 
+When SceneOps owns a PodFloorLifecycle, pass its synchronous release operation
+to the PodTeardown overload. Cargo checks the receiver phase before calling it
+and actual native receiver absence afterward, then retires cargo. The selected
+prepared-context provider must survive through this operation; a revoked live
+FloorSession snapshot cannot provide teardown authority.
+
+The authenticated bank retains the original Pod archive, pot.bmd, collision and
+text sources. Its qualified receiver model uses the distinct
+`assets/dataDir/courses/pikmin2retailpod/pod.mod` role. The historical held Pod
+dependency remains hashed separately and is not drawn as the receiver.
+
 This is a native carry/body adapter. Original dynamic LOD switching, inertia,
 particle collision fidelity, animation and effects remain unqualified. Parsed
 source physics metadata does not prove that the native solver reproduces P2.
