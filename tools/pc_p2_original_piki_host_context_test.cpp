@@ -20,7 +20,13 @@ struct Manager {
 }
 int main(){
  using Binding=p2original::piki::HostUpdateBinding;std::string error;
- Manager manager;UpdateContext context;context.mIsPiki=false;
+ Manager manager;UpdateContext context;
+ require(!context.mIsPiki&&!context.mMgr&&context.mMgrSlotIndex==-1,"actual PC native constructor starts with no active registration");
+ {
+  Binding fresh;require(fresh.acquire(context,&manager.value,false,error),"actual freshly constructed nonsearch context registers");
+  require(manager.value.mClientTotal==1&&manager.clients[0]==1&&manager.active[0]==0&&!context.mIsPiki,"fresh constructor registration does not invent active membership");
+  require(fresh.release(error)&&manager.value.mClientTotal==0&&manager.clients[0]==0&&manager.active[0]==0,"fresh registration restores both native counters");
+ }
  {
   Binding owner;require(owner.acquire(context,&manager.value,true,error),"actual native search context registers");
   require(owner.phase()==Binding::Phase::Registered&&manager.value.mClientTotal==1&&manager.clients[0]==1&&manager.active[0]==1,"exact one native registration");

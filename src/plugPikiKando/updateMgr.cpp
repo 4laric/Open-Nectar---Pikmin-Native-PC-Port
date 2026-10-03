@@ -28,6 +28,11 @@ UpdateContext::UpdateContext()
 {
 	mMgr          = nullptr;
 	mMgrSlotIndex = -1;
+#if defined(PIKI_PC_PORT) && PIKI_PC_PORT
+    // addClient/removeClient observe this flag. A fresh native context has
+    // no active Piki membership until its actual owner explicitly sets it.
+    mIsPiki = false;
+#endif
 }
 
 /**
