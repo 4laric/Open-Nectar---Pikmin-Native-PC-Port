@@ -144,6 +144,7 @@ bool pc_p2_original_course_load(const char* directory,const char* course,std::fu
  SourceManifest manifest;
  if(!readSourceManifest(bytes,selected,manifest,e))return false;
  if(!originalProgress().initialize(manifest.fingerprint,e))return false;
+ if(!pc_p2_original_incarnation_initialize(manifest.fingerprint,e))return false;
  const std::string onyonPath=std::string(directory)+"/"+selected+".p2on";
  std::error_code statusError;
  const bool hasOnyons=std::filesystem::exists(onyonPath,statusError);
