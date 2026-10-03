@@ -1,4 +1,5 @@
 #include "pc_p2_original_hanachirashi.h"
+#include "pc_p2_original_hanachirashi_bank.h"
 #include <sstream>
 #include <fstream>
 #include <cassert>
@@ -53,5 +54,19 @@ int main(int argc,char** argv){
  auto original=a;original.enemy.count=1;original.enemy.deathCount=0;
  original.enemy.pelletSize=5;original.enemy.pelletMinimum=1;original.enemy.pelletMaximum=2;original.enemy.pelletProbability=0.5f;
  assert(hanachirashi::decode(original,e));assert(original.sourceKey=="tutorial/initgen.txt#29");
+ std::ostringstream clocks;clocks<<"P2_FLYING_BANK_1\nspecies Hanachirashi clips 11\n";
+ for(const auto& clip:hanachirashi::retailClocks())clocks<<"clip Hanachirashi "<<clip.first<<" "<<clip.second.duration<<" "<<clip.second.events<<" poses 2 status converted\n";
+ auto valid=clocks.str();std::istringstream good(valid);assert(hanachirashi::validateBank(good,e));
+ for(unsigned variant=0;variant<6;++variant){auto bad=valid;
+  if(variant==0)bad.replace(bad.find("attack 105"),10,"attack 104");
+  if(variant==1)bad.replace(bad.find("50:2"),4,"49:2");
+  if(variant==2)bad.replace(bad.find("clips 11"),8,"54");
+  if(variant==3)bad=bad.substr(0,bad.rfind("clip"));
+  if(variant==4)bad.replace(bad.find("converted"),9,"missing");
+  if(variant==5)bad+="AP_ACTOR 123\n";
+  std::istringstream mutation(bad);assert(!hanachirashi::validateBank(mutation,e));
+ }
+ std::istringstream source55("P2_FLYING_BANK_1\nspecies Hanachirashi 55\n"+valid.substr(valid.find("clip Hanachirashi")));assert(hanachirashi::validateBank(source55,e));
+ if(argc==2){std::ifstream actual(argv[1]);assert(hanachirashi::validateBank(actual,e));}
  std::cout<<"original Hanachirashi source/tail, grouped reservation, failed-bind cleanup and ordinal retirement passed\n";
 }
