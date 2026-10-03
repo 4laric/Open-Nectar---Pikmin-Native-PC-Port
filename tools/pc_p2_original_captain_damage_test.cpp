@@ -86,6 +86,10 @@ int main(){
  auto& actors=p2original::originalActors();check(actors.install(std::string(64,'d'),{row},[](const p2original::CatalogRow&,std::string&){return true;},e));
  int generator=0;std::uint64_t gh=0,eh=0;unsigned token=0;
  auto* gen=reinterpret_cast<Generator*>(&generator);check(actors.generator(gen,row.enemy.uid,gh,e));check(actors.actor(&enemy,row.enemy.uid,0,1,token,eh,e));
+ sa=SourceState();a.current=&sa;a.mHealth=3;armor=true;
+ r=attack(&a,&enemy,4);check(bool(r)&&r.applied==2&&a.mHealth==1&&sa.id==StateId::Damaged);
+ r=attack(&a,&outsider,4);check(r.refusal==Refusal::MissingEnemy&&a.mHealth==1);
+ armor=false;
  a.current=&p1;world.d=Demo::Playing;check(flickAdmission(&enemy,&a)==Refusal::None);
  world.p=Phase::Inactive;check(flickAdmission(&enemy,&a)==Refusal::InactiveWorld);world.p=Phase::GameWorldActive;
  check(actors.retire(&enemy,eh));check(flickAdmission(&enemy,&a)==Refusal::MissingEnemy);

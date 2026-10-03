@@ -10,6 +10,7 @@ extern bool pc_randomizer_original_session() __attribute__((weak));
 extern std::string pc_randomizer_original_campaign() __attribute__((weak));
 extern std::string pc_randomizer_session_fingerprint() __attribute__((weak));
 namespace p2original { namespace captain {
+bool selectedOriginal(){return pc_randomizer_original_session&&pc_randomizer_original_session();}
 namespace {
 Refusal worldFor(const Navi* n,const World*& world) {
  world=pc_p2_original_captain_world?pc_p2_original_captain_world():nullptr;
@@ -96,5 +97,10 @@ Refusal flickAdmission(const Creature* enemy,const Navi* n) {
  if(world->sourceCatalog().empty()||world->sourceCatalog()!=originalActors().fingerprint())return Refusal::MissingEnemy;
  if(!enemy||!originalActors().query(enemy,source,token)||!token)return Refusal::MissingEnemy;
  return Refusal::None;
+}
+DamageResult attack(Navi* n,const Creature* source,float raw){
+ const auto admitted=flickAdmission(source,n);
+ if(admitted!=Refusal::None){DamageResult result;result.refusal=admitted;return result;}
+ return startDamage(n,raw);
 }
 } }

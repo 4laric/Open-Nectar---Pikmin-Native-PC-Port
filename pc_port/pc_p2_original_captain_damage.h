@@ -80,6 +80,10 @@ struct DamageResult {
 // here; source Flick invokes it only at Koke END, not at interaction admission.
 DamageResult addDamage(Navi*,float rawDamage,bool playFeedback);
 DamageResult startDamage(Navi*,float rawDamage);
+// Actual original InteractAttack receiver; source enemy ownership and reunion
+// are established before entering startDamage. Missing source producers refuse.
+DamageResult attack(Navi*,const Creature* sourceAttacker,float rawDamage);
+bool selectedOriginal();
 // InteractFlick's outer active-world + DEMO_Reunite_Captains guard. This does
 // not apply addDamage's later immunity checks early or consume RNG.
 Refusal flickAdmission(const Creature* authenticatedEnemy,const Navi*);

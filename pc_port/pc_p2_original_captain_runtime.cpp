@@ -7,6 +7,7 @@ extern const p2original::captain::LoadedScene* pc_p2_original_captain_loaded_sce
 extern bool pc_randomizer_original_session() __attribute__((weak));
 extern std::string pc_randomizer_original_campaign() __attribute__((weak));
 extern std::string pc_randomizer_session_fingerprint() __attribute__((weak));
+extern bool pc_p2_original_captain_down_demo(p2original::captain::Demo&) __attribute__((weak));
 using namespace p2original::captain;
 namespace {
 MoviePlayer* observedMovie=nullptr;Demo observedDemo=Demo::Unknown;
@@ -23,7 +24,11 @@ public:
  const std::string& sourceCatalog()const override{return catalog;}
  std::uint64_t incarnation()const override{return epoch;}
  Phase phase()const override{return game;}
- Demo demo()const override{return !player?Demo::Absent:(player==observedMovie?observedDemo:Demo::Unknown);}
+ Demo demo()const override{
+  Demo source;
+  if(pc_p2_original_captain_down_demo&&pc_p2_original_captain_down_demo(source))return source;
+  return !player?Demo::Absent:(player==observedMovie?observedDemo:Demo::Unknown);
+ }
  Navi* captainAt(unsigned slot)const override{return slot<2?captains[slot]:nullptr;}
  void clear(){scene=nullptr;epoch=0;campaign.clear();fingerprint.clear();catalog.clear();game=Phase::Inactive;player=nullptr;captains={};alive={};frames={};}
  const LoadedScene* canonical()const {
