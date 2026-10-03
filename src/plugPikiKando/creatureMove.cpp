@@ -270,9 +270,14 @@ void Creature::moveNew(f32 deltaTime, bool applyGravity)
 				adjustedPos.y -= mGroundOffset;
 			}
 
+			// MapMgr::traceMove adds/subtracts radius around its bottom-origin
+			// input. Cancel that adapter for a source-centered corpse.
+			const bool sourceCentered = pc_p2_original_corpse_profile(pellet) != nullptr;
+			if (sourceCentered) adjustedPos.y -= mCollisionRadius;
 			// don't ignore dynamic collisions when moving
 			MoveTrace trace(adjustedPos, mVelocity, mCollisionRadius, false);
 			mapMgr->traceMove(this, trace, deltaTime);
+			if (sourceCentered) trace.mPosition.y += mCollisionRadius;
 
 			mVelocity = trace.mVelocity;
 			mSRT.t    = trace.mPosition;
