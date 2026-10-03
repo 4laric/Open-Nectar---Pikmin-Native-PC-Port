@@ -3798,7 +3798,12 @@ add_executable(p2_original_captain_native_plate_driver_test tools/pc_p2_original
     pc_port/pc_p2_original_captain_cstick.cpp pc_port/pc_p2_original_captain_control.cpp)
 target_include_directories(p2_original_captain_native_plate_driver_test BEFORE PRIVATE tools/captain_native_actions_stubs pc_port)
 target_compile_options(p2_original_captain_native_plate_driver_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_executable(p2_original_captain_native_control_test tools/pc_p2_original_captain_native_control_test.cpp
+    pc_port/pc_p2_original_captain_native_control.cpp pc_port/pc_p2_original_captain_control.cpp)
+target_include_directories(p2_original_captain_native_control_test BEFORE PRIVATE tools/captain_native_control_stubs pc_port)
+target_compile_options(p2_original_captain_native_control_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
 if(EXISTS "${P2_ORIGINAL_CAPTAIN_TEST_PARAMETERS}")
+    add_test(NAME p2_original_captain_native_control_test COMMAND p2_original_captain_native_control_test "${P2_ORIGINAL_CAPTAIN_TEST_PARAMETERS}")
     add_test(NAME p2_original_captain_native_plate_driver_test COMMAND p2_original_captain_native_plate_driver_test "${P2_ORIGINAL_CAPTAIN_TEST_PARAMETERS}")
     add_test(NAME p2_original_captain_body_phases_test COMMAND p2_original_captain_body_phases_test "${P2_ORIGINAL_CAPTAIN_TEST_PARAMETERS}")
     add_test(NAME p2_original_captain_native_phases_test COMMAND p2_original_captain_native_phases_test "${P2_ORIGINAL_CAPTAIN_TEST_PARAMETERS}")

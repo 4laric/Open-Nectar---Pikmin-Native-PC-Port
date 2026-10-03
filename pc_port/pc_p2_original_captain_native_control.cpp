@@ -21,6 +21,7 @@ struct ActorControl {
  control::RuntimeControl runtime;control::AnimationState animation;
  float animationSpeed=30;
  bool controlInFlight=false;
+ bool animating=false,animationReentered=false;
  bool controlling=false,controlReentered=false;NaviState* controlState=nullptr;
 };
 std::array<ActorControl,2> actors;
@@ -169,6 +170,11 @@ static bool animate(Navi* n,const std::function<bool(Animator,Listener,int)>& em
  // Original NaviMgr iterates open slots, including bodies with CF_IsAlive
  // clear. Common clocks/locomotion require known lifetime, not living-only AI.
  e.clear();Binding b;if(!bind(n,b,e,true,true,false))return false;auto* actor=live(n,b,e);if(!actor)return false;
+ const auto token=actor->generation,epoch=actor->incarnation;const auto* native=b.native;
+ const auto campaign=b.scene->selectedCampaign(),session=b.scene->selectedFingerprint(),catalog=b.scene->sourceCatalog();
+ if(actor->animating){actor->animationReentered=true;return fail(e,"source animation operation reentered");}
+ actor->animating=true;actor->animationReentered=false;
+ struct EndAnimation {unsigned slot;std::uint64_t generation;~EndAnimation(){if(actors[slot].generation==generation){actors[slot].animating=false;actors[slot].animationReentered=false;}}} endAnimation{b.slot,token};
  if(!pc_p2_original_captain_control_effects)return fail(e,"missing source animation observation provider");
  const auto* effects=pc_p2_original_captain_control_effects(n);if(!effects||&effects->scene()!=b.scene)return fail(e,"noncanonical source animation provider");
  AnimationFrame frame;if(!effects->animationFrame(*n,frame,e))return false;
@@ -184,11 +190,13 @@ static bool animate(Navi* n,const std::function<bool(Animator,Listener,int)>& em
  control::AnimationOutput selected;
  if(selection&&(!frame.displacementKnown||!control::updateWalkAnimation(b.params,frame.displacement,frame.deltaTime,b.frame.face,frame.faceDirectionOffset,self.motion==Motion::Jkoke,next,selected,e)))return fail(e,"source locomotion displacement is unknown or invalid");
  if(clocks&&!emit)return fail(e,"missing actual source animator event receiver");
- const auto epoch=b.scene->incarnation();const auto* native=b.state->nativeState();
  auto current=[&](){
   bool knownAlive=false;
   return pc_p2_original_captain_loaded_scene()==b.scene&&pc_p2_original_captain_world()==b.world
-   &&b.scene->incarnation()==epoch&&actor->scene==b.scene&&actor->actor==n&&actor->incarnation==epoch
+   &&b.scene->incarnation()==epoch&&b.world->phase()==Phase::GameWorldActive
+   &&b.scene->selectedCampaign()==campaign&&b.scene->selectedFingerprint()==session&&b.scene->sourceCatalog()==catalog
+   &&b.world->incarnation()==epoch&&b.world->selectedCampaign()==campaign&&b.world->selectedFingerprint()==session&&b.world->sourceCatalog()==catalog
+   &&actor->scene==b.scene&&actor->actor==n&&actor->incarnation==epoch&&actor->generation==token&&!actor->animationReentered
    &&b.scene->captainAt(b.slot)==n&&pc_p2_original_captain_actor_lifetime(n,knownAlive)&&n->getCurrState()==native
    &&pc_p2_original_captain_source_bank()==b.bank&&pc_p2_original_captain_action_source(n)==b.source
    &&pc_p2_original_captain_control_effects(n)==effects;
@@ -224,14 +232,16 @@ static bool animate(Navi* n,const std::function<bool(Animator,Listener,int)>& em
    // Literal source order saves each clock separately: moving Bound first,
    // then unlocked Self. Preserving Bound's frame cannot replace Self's frame.
    if(!b.bank->startAnimator(n,Animator::Bound,target,true,listener,e))return false;
+   if(!current())return fail(e,"source animation body expired during Bound transition");
    if(lock==-1&&!b.bank->startAnimator(n,Animator::Self,target,true,Listener::None,e))return false;
   }else {
    // Wait/ASIBUMI boundary resets Self first only when no motion blend lock.
    if(lock==-1&&!b.bank->startAnimator(n,Animator::Self,target,false,Listener::None,e))return false;
+   if(!current())return fail(e,"source animation body expired during Self transition");
    if(!b.bank->startAnimator(n,Animator::Bound,target,false,listener,e))return false;
   }
  }
- if(selection){actor->animation=next;actor->animationSpeed=selected.playbackSpeed;}
+ if(selection){if(!current())return fail(e,"source animation body expired before rate publication");actor->animation=next;actor->animationSpeed=selected.playbackSpeed;}
  return true;
 }
 bool advanceAnimation(Navi* n,const std::function<bool(Animator,Listener,int)>& emit,std::string& e){return animate(n,emit,false,true,false,e);}
