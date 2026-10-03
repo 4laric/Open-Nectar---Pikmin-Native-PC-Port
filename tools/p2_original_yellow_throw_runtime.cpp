@@ -100,7 +100,10 @@ public:int idle()override {
         stage(captain);phase=1;inputTick=0;return result;
     }
     require(live()==20&&yellow&&yellow->isAlive(),"live squad/Yellow");
-    if(phase==1&&inputTick>=90){phase=2;inputTick=0;}
+    // Release whistle and let Gather return to Walk before the A click.
+    // Holding A across the Gather exit loses the ordinary throw press edge.
+    if(phase==1&&inputTick>=90){phase=4;inputTick=0;}
+    if(phase==4&&inputTick>=15&&captain->getCurrState()->getID()==NAVISTATE_Walk){phase=2;inputTick=0;}
     if(phase==2&&yellow->getState()==PIKISTATE_Hanged){
         held=true;startY=captain->mSRT.t.y+10.0f;peak=startY;
         std::printf("ORIGINAL_YELLOW_THROW_HELD tick=%d species=%d start_y=%.3f\n",tick,pc_p2_species(yellow),startY);
