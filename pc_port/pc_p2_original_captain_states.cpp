@@ -18,6 +18,7 @@ extern bool pc_p2_original_captain_container_absorb_preflight(Navi*,p2original::
 extern bool pc_p2_source_navi_reaction_animation_key(Navi*,const NaviState*,std::uint64_t,int,std::string&) __attribute__((weak));
 extern bool pc_p2_original_captain_body_owned(const Navi*) __attribute__((weak));
 extern bool pc_p2_original_captain_pressed_fall_preflight(Navi*,p2original::captain::StateId,std::string&) __attribute__((weak));
+extern bool pc_p2_original_captain_stuck_bomb_preflight(Navi*,p2original::captain::StateId,std::string&) __attribute__((weak));
 using namespace p2original::captain;
 namespace {
 struct Backup {const LoadedScene* scene=nullptr;std::uint64_t epoch=0;StateId state=StateId::Walk;};
@@ -163,6 +164,7 @@ bool pc_p2_original_captain_core_preflight(Navi* n,StateId id,std::string& e){
  if(id==StateId::Nuku||id==StateId::NukuAdjust)return pc_p2_original_captain_pluck_preflight&&pc_p2_original_captain_pluck_preflight(n,id,e);
  if(id==StateId::Punch)return pc_p2_original_captain_punch_preflight&&pc_p2_original_captain_punch_preflight(n,e);
  if(id==StateId::Pressed||id==StateId::FallMeck)return pc_p2_original_captain_pressed_fall_preflight&&pc_p2_original_captain_pressed_fall_preflight(n,id,e);
+ if(id==StateId::Stuck||id==StateId::CarryBomb)return pc_p2_original_captain_stuck_bomb_preflight&&pc_p2_original_captain_stuck_bomb_preflight(n,id,e);
  if(id==StateId::Dope)return pc_p2_original_captain_dope_preflight&&pc_p2_original_captain_dope_preflight(n,e);
  if(id==StateId::Container||id==StateId::Absorb)return pc_p2_original_captain_container_absorb_preflight&&pc_p2_original_captain_container_absorb_preflight(n,id,e);
  if(id==StateId::Gather||id==StateId::Throw||id==StateId::ThrowWait)return pc_p2_original_captain_throw_preflight&&pc_p2_original_captain_throw_preflight(n,id,e);
