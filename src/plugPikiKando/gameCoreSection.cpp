@@ -140,6 +140,7 @@
 #if defined(PIKI_PC_PORT)
 #include "pc_p2_original_captain_damage.h"
 #include "pc_p2_original_captain_scene.h"
+#include "pc_p2_original_captain_render_policy.h"
 #include "pc_p2_retail_scene.h"
 #include "pc_p2_retail_scene_input.h"
 #include "pc_p2_retail_scene_bodies.h"
@@ -5531,6 +5532,11 @@ void GameCoreSection::endViews(Graphics& gfx, Camera* mainCamera)
  */
 void GameCoreSection::draw(Graphics& gfx)
 {
+#if defined(PIKI_PC_PORT)
+ // Pin the real native viewport for this draw only. A replacement camera keeps
+ // its viewport history; two viewports sharing a camera keep separate buffers.
+ p2original::captain::NativeViewScope captainView(gfx,mViewRectActive?unsigned(mActiveViewIndex):0u);
+#endif
 #if defined(PIKI_PC_PORT)
 	// Day-end teardown (slice lane, issue #880): the results screen exits to
 	// the quitter, whose postUpdate runs exitStage() and softReset(). A stale

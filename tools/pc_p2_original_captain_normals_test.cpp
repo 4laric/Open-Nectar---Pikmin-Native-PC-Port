@@ -3,8 +3,28 @@
 #include <cassert>
 #include <limits>
 #include <iostream>
+#include <type_traits>
+// Engineering scope-lifetime control with the same friend boundary name;
+// this stand-in is not an actual native section or a gameplay draw.
+struct Graphics {};
+struct GameCoreSection {
+ static void scopeControl(){
+  using p2original::captain::NativeViewScope;Graphics first,second;unsigned slot=77;
+  assert(!NativeViewScope::current(first,slot)&&slot==77);
+  {NativeViewScope outer(first,0);assert(NativeViewScope::current(first,slot)&&slot==0);
+   slot=77;assert(!NativeViewScope::current(second,slot)&&slot==77);
+   {NativeViewScope inner(first,1);assert(NativeViewScope::current(first,slot)&&slot==1);}
+   assert(NativeViewScope::current(first,slot)&&slot==0);
+   {NativeViewScope invalid(first,2);slot=77;assert(!NativeViewScope::current(first,slot)&&slot==77);}
+   assert(NativeViewScope::current(first,slot)&&slot==0);
+  }
+  slot=77;assert(!NativeViewScope::current(first,slot)&&slot==77);
+ }
+};
+static_assert(!std::is_constructible<p2original::captain::NativeViewScope,const Graphics&,unsigned>::value,"only native draw boundary constructs view scope");
 namespace rig=p2original::captain::rig;
 int main(){
+ GameCoreSection::scopeControl();
  const rig::Matrix identity={1,0,0,0,0,1,0,0,0,0,1,0};
  const rig::Matrix turn={0,-1,0,0,1,0,0,0,0,0,1,0};
  std::array<rig::Matrix,11> draw;draw.fill(identity);
@@ -20,6 +40,22 @@ int main(){
  // A different actual view cannot borrow the first view's prior destination.
  assert(rig::renderNormals(draw,otherView));
  assert(!rig::retainedNormal(otherView.buffer[otherView.active],8,{1,0,0},out));
+ // Real view number, never a camera pointer, selects history. Two viewports
+ // may share a camera; replacing one camera must preserve its view's buffers.
+ std::array<rig::NormalBuffers,2> views;draw.fill(identity);
+ assert(rig::renderNormals(draw,views[0]));draw[8]=turn;
+ assert(rig::renderNormals(draw,views[1]));
+ draw.fill(identity);assert(rig::renderNormals(draw,views[0]));draw[8]=turn;assert(rig::renderNormals(draw,views[1]));
+ draw[8].fill(0);assert(rig::renderNormals(draw,views[0]));assert(rig::renderNormals(draw,views[1]));
+ assert(rig::retainedNormal(views[0].buffer[views[0].active],8,{1,0,0},out)&&out.x==1&&out.y==0);
+ assert(rig::retainedNormal(views[1].buffer[views[1].active],8,{1,0,0},out)&&out.x==0&&out.y==1);
+ // Camera replacement only changes the current native compensation, not slot.
+ const auto beforeReplacement=views[0];
+ rig::Matrix replacedBasis=turn;std::array<float,9> replacedInverse;assert(rig::inverseLinear(replacedBasis,replacedInverse));
+ p2pose::Vec retained{};assert(rig::retainedNormal(views[0].buffer[views[0].active],8,{1,0,0},retained));
+ p2pose::Vec compensated={replacedInverse[0]*retained.x+replacedInverse[1]*retained.y,replacedInverse[3]*retained.x+replacedInverse[4]*retained.y,0};
+ auto replacedLit=rig::point(replacedBasis,compensated);assert(p2pose::unit(replacedLit,out)&&out.x==1&&out.y==0);
+ assert(views[0].active==beforeReplacement.active&&views[0].buffer[0].matrix==beforeReplacement.buffer[0].matrix&&views[0].buffer[1].matrix==beforeReplacement.buffer[1].matrix);
  // Failed finite validation does not swap or partially overwrite a buffer.
  const auto saved=history;draw[10][0]=std::numeric_limits<float>::infinity();
  assert(!rig::renderNormals(draw,history)&&history.active==saved.active);
