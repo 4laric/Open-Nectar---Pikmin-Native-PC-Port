@@ -148,6 +148,11 @@ bool applyGravity(Handle,float delta,std::string&);
 // Called from real native floor bounce, not a scripted landing assertion.
 bool bounce(Handle,std::string&);
 bool whistle(Handle,Navi*,std::string&);
+// Invocation success and retail receiver acceptance are distinct. Normal
+// receiver rejection succeeds with accepted=false; authority refusal preserves
+// accepted. newToParty is the native InteractFue flag (retail Piki ignores it;
+// NaviFollow consumes it). combine permits transfer from another captain only.
+bool whistle(Handle,Navi*,bool combine,bool newToParty,bool& accepted,std::string&);
 // Actual ActFreeArg/ActGather dismissal after genuine PartySource selection.
 bool gather(Handle,const Vector3f& goal,float radius,std::string&);
 bool launch(Handle,Navi*,const Vector3f& cursor,std::string&);
