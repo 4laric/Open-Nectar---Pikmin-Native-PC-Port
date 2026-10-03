@@ -40,7 +40,7 @@ bool Provider::preflight(const std::vector<CatalogRow>& rows,std::string& e){
  if(!mHosts.empty())return fail(e,"GasHiba preflight has owned actors");
  mPrepared=mReserved=false;mAdmitted.clear();mRemaining.clear();mUsed.clear();
  Resources r;if(!mEngine.resources(r,e))return false;
- if(!r.parametersLoaded||!valid(r.parameters)||!r.model||!r.collider||!r.effects||!r.clips[0]||!r.clips[1])return fail(e,"GasHiba source parameters/rig/collider/clips/effects unresolved");
+ if(!r.parametersLoaded||!valid(r.parameters)||!r.model||!r.collider||!r.clips[0]||!r.clips[1])return fail(e,"GasHiba source parameters/rig/collider/clips unresolved");
  std::map<unsigned,CatalogRow> admitted;
  for(const auto& row:rows){if(row.enemy.source!=21)continue;
   if(!decode(row,e)||!mEngine.commonResources(row,e))return false;

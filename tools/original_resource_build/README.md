@@ -17,14 +17,21 @@ actual captured Egg. Reserve five Eggs; never confuse row counts with actors.
 - Qurione GroupProvider lifecycle with literal fly/slide tail, actual engine
   birth/capture operations, source animation IDs, flying-only collision,
   KEYEVENT_2 release, endpoint repositioning, scale and visibility/death rules.
+- Egg GroupProvider with literal source row admission, actual capture/drop
+  operations, ground/bounce/contact rules and source retained invulnerability.
+- Gas linked-structure producer adapter and bounded versioned checkpoint codec;
+  physical read/apply preserves the exact source incarnation and generator-death
+  state without repeating births, RNG or death callbacks.
 - Egg contents with exact source RNG order, live spray flags, typed actual
   manager births, source Mitite group failure fallback, stable child identities,
   idempotent failed/successful/consumed records and snapshot validation.
 
 Core tests use fake Engine adapters and establish policy only. The Gas native
-bridge requires genuine effect/audio/story-link Services and refuses missing
-backends. Existing P1 attack effects/sound approximations are not used. Qurione,
-Egg and ItemHoney concrete native hosts, physical checkpoint payloads and
+bridge requires actual story-link Services. Source JPA/audio may be safely
+deferred as an explicit presentation limitation; this never changes emission,
+damage, immunity, death or source-item mechanics. Existing P1 attack effects/sound
+approximations are not used. Qurione,
+Egg and ItemHoney concrete native hosts, campaign checkpoint integration and
 ordinary gameplay acceptance remain outstanding. No provider is yet admitted.
 
 ## Build
@@ -32,7 +39,9 @@ ordinary gameplay acceptance remain outstanding. No provider is yet admitted.
 Configure `tools/original_resource_build` in a new private build directory using
 Ninja and the maintained GCC toolchain. Build `pikmin_pc`,
 `p2_original_gas_policy`, `p2_original_wisp_policy`, and
-`p2_original_egg_contents_policy`. Record exact source pin, output directory,
+`p2_original_egg_contents_policy`, `p2_original_egg_policy`,
+`p2_original_gas_links_policy`, and `p2_original_gas_save_policy`.
+Record exact source pin, output directory,
 executable SHA256, build log and a no-work Ninja dry run.
 
 ## Short ordinary human acceptance script (pending native admission)

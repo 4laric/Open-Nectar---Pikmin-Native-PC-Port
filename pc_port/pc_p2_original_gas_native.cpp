@@ -1,5 +1,8 @@
 #include "pc_p2_original_gas_native.h"
+#include "pc_p2_original_gas_clock.h"
+#include "pc_p2_original_gas_save.h"
 #include "pc_p2_original_drop_engine.h"
+#include "pc_p2_original_actor.h"
 #include "pc_p2_pose_family.h"
 #include "pc_p2_original_pelplant_geometry.h"
 #include "pc_p2_flyer_coll.h"
@@ -47,7 +50,9 @@ struct Native::Impl final:Engine {
   if(!gsys||!tekiMgr||!pikiMgr)return fail(e,"GasHiba real managers unavailable");
   auto* chassis=tekiMgr->getTekiShapeObject(TEKI_Palm);
   if(!chassis||!chassis->mShape||!chassis->mAnimMgr||!tekiMgr->getTekiParameters(TEKI_Palm)||!tekiMgr->getStrategy(TEKI_Palm))return fail(e,"GasHiba inert allocation chassis not preloaded before stage start");
-  if(!services.sourceEffectsAndSoundsReady(e))return false;
+  if(!services.linksReady(e))return false;
+  resource.effects=services.sourceEffectsAndSoundsReady();
+  if(!resource.effects)std::printf("P2_ORIGINAL_GAS_PRESENTATION_DEFERRED source_jpa=0 source_audio=0 mechanics=required\n");
   // Failed admission may retry after resources are repaired. Discard parsed
   // vectors/borrowed bank owners; never append a second attempt to the first.
   motions={};bank.reset();shared={};
@@ -73,7 +78,7 @@ struct Native::Impl final:Engine {
   }
   if(in>>word)return fail(e,"GasHiba trailing bank data");
   if(!bank.owner()||!pelplant::Geometry::admits(*bank.owner())||!bank.clip("wait")||!bank.clip("attack"))return fail(e,"GasHiba flattened owned pose geometry unavailable");
-  resource.parametersLoaded=resource.model=resource.collider=resource.effects=true;resource.clips.fill(true);loaded=true;return true;
+  resource.parametersLoaded=resource.model=resource.collider=true;resource.clips.fill(true);loaded=true;return true;
  }
  bool resources(Resources& out,std::string& e)override{Heap heap;if(!load(e))return false;out=resource;return true;}
  bool commonResources(const CatalogRow& row,std::string& e)override{return pc_p2_original_drop_resources(row,e);}
@@ -148,18 +153,50 @@ Provider& Native::provider(){return m->provider;}
 bool Native::owns(const Creature* actor)const{return m->tracks.count(const_cast<Creature*>(actor))!=0;}
 void Native::onDeath(std::function<bool(Creature*,std::string&)> fn){m->deathCallback=std::move(fn);}
 void Native::forget(BTeki* actor){auto i=m->tracks.find(actor);if(i!=m->tracks.end()){std::string e;if(!m->services.gasEffect(actor,false,m->services.surfaceStory(),e)){std::fprintf(stderr,"P2_ORIGINAL_GAS forget refusal: %s\n",e.c_str());std::abort();}i->second->collision.detach(actor);m->tracks.erase(i);}m->provider.retiredNative(actor);}
-bool Native::tick(BTeki* actor,float dt,std::string& e){Heap heap;auto* h=m->provider.lookup(actor);if(!h)return fail(e,"GasHiba tick outside provider");auto& t=*m->tracks.at(actor);const auto& motion=m->motions[t.motion];
+bool Native::tick(BTeki* actor,float dt,std::string& e){Heap heap;auto* h=m->provider.lookup(actor);if(!h)return fail(e,"GasHiba tick outside provider");auto& t=*m->tracks.at(actor);
  actor->mGrid.updateGrid(actor->mSRT.t);actor->mGrid.updateAIGrid(actor->mSRT.t,false);
  // Retail attack has source loop [0,3] and finishMotion exits that loop to
  // duration4 before KEYEVENT_END. Wait is one static frame. No half-clip events.
- Event event=Event::None;t.frame+=dt*30;
- if(t.motion==1){if(t.finish&&t.frame>=motion.duration)event=Event::End;else if(!t.finish&&t.frame>3)t.frame=std::fmod(t.frame,3.0f);}
+ Event event=Event::None;
+ if(t.motion==1&&advanceAttack(t.frame,dt,t.finish))event=Event::End;
  if(!m->provider.tick(actor,dt,event,e))return false;
  actor->mStoredDamage=0;actor->mHealth=h->health;t.presented.advance(dt);m->follow(*h);return true;
 }
 bool Native::draw(BTeki* actor,Graphics& gfx,const Matrix4f& view,std::string& e){auto* h=m->provider.lookup(actor);if(!h||!gfx.mCamera)return fail(e,"GasHiba draw outside owned native state");auto& t=*m->tracks.at(actor);const auto* clip=m->bank.clip(clips[t.motion]);
  float frame=std::min(t.frame,float(m->motions[t.motion].duration-1));if(!clip||!p2pose::present(t.presented,clips[t.motion],clip->poses.size(),[clip](std::size_t i)->const p2pose::Pose&{return clip->poses[i];},clip->frames,frame,p2motion::tunables(),clip->seamContinuous).ok)return fail(e,"GasHiba source pose draw failed");
  gfx.useMatrix(Matrix4f::ident,0);auto& shape=t.geometry->shape;shape.updateAnim(gfx,view,nullptr,actor);shape.drawshape(gfx,*gfx.mCamera,nullptr);return true;
+}
+bool Native::snapshot(BTeki* actor,Snapshot& out,std::string& e)const{
+ auto* h=m->provider.lookup(actor);auto t=m->tracks.find(actor);unsigned source=0,token=0;Snapshot next;
+ if(!h||t==m->tracks.end()||!originalActors().query(actor,source,token,&next.identity)||source!=21||token!=h->token)return fail(e,"GasHiba checkpoint lacks exact original incarnation");
+ next.state=h->state;next.position=h->position;next.facing=actor->mFaceDirection;next.health=h->health;next.timer=h->timer;
+ next.sourceFrame=t->second->frame;next.motion=t->second->motion;next.finishMotion=t->second->finish;next.checkLinks=h->checkLinks;next.living=h->flags.living;next.generatorDeathCommitted=t->second->generatorDeathCommitted;
+ bool bridge=false;
+ if(h->bridge&&(!m->services.linkIdentity(h->bridge,next.bridge,bridge)||!bridge))return fail(e,"GasHiba checkpoint Bridge lost source identity");
+ if(h->gate&&(!m->services.linkIdentity(h->gate,next.gate,bridge)||bridge))return fail(e,"GasHiba checkpoint Gate lost source identity");
+ out=std::move(next);e.clear();return true;
+}
+bool Native::restore(BTeki* actor,const Snapshot& saved,std::string& e){
+ std::string validated;if(!encodeSnapshot(saved,validated,e))return false;
+ Heap heap;auto* h=m->provider.lookup(actor);auto t=m->tracks.find(actor);InstanceIdentity current;unsigned source=0,token=0;
+ if(!h||t==m->tracks.end()||!originalActors().query(actor,source,token,&current)||source!=21||token!=h->token||!(current==saved.identity)||saved.motion>1)return fail(e,"GasHiba restore must bind exact saved source incarnation");
+ for(float v:{saved.position.x,saved.position.y,saved.position.z,saved.facing,saved.health,saved.timer,saved.sourceFrame})if(!std::isfinite(v))return fail(e,"GasHiba checkpoint nonfinite state");
+ const bool dead=saved.state==State::Dead,attack=saved.state==State::Attack;
+ if((saved.state!=State::Dead&&saved.state!=State::Wait&&!attack)||saved.health<0||saved.health>h->parameters.maxHealth||saved.timer<0||saved.sourceFrame<0||saved.sourceFrame>m->motions[saved.motion].duration
+  ||saved.motion!=(attack?1u:0u)||saved.generatorDeathCommitted!=dead||(dead&&(saved.health!=0||saved.living))
+  ||(!saved.bridge.empty()&&!saved.gate.empty())||(saved.checkLinks&&(!saved.bridge.empty()||!saved.gate.empty())))return fail(e,"GasHiba checkpoint state invariants invalid");
+ void* bridge=nullptr;void* gate=nullptr;
+ if(!saved.bridge.empty()&&!m->services.resolveLink(saved.bridge,true,bridge,e))return false;
+ if(!saved.gate.empty()&&!m->services.resolveLink(saved.gate,false,gate,e))return false;
+ Flags flags=h->flags;flags.living=saved.living;flags.untargetable=dead;flags.lifeGauge=!dead;flags.invulnerable=dead;flags.damageAnimation=!dead;
+ // Physical fields restore without RNG, source births, consumption or death
+ // callbacks. The calling checkpoint layer already restored logical counters.
+ if(!m->flags(*h,flags,e)||!m->motion(*h,saved.motion,e))return false;
+ h->flags=flags;h->state=saved.state;h->position=saved.position;h->health=saved.health;h->timer=saved.timer;h->checkLinks=saved.checkLinks;h->bridge=bridge;h->gate=gate;h->deathReported=dead;h->effectActive=attack;
+ auto& track=*t->second;track.frame=saved.sourceFrame;track.finish=saved.finishMotion;track.generatorDeathCommitted=dead;
+ actor->mSRT.t.set(saved.position.x,saved.position.y,saved.position.z);actor->mFaceDirection=saved.facing;actor->mSRT.r.set(0,saved.facing,0);actor->mHealth=saved.health;actor->mStoredDamage=0;
+ if(dead)actor->mGenerator=nullptr;
+ m->follow(*h);if(!m->gasEffect(*h,attack,e))return false;e.clear();return true;
 }
 } }
 namespace {

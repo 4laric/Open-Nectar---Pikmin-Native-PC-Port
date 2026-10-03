@@ -6,6 +6,7 @@ using namespace p2original;
 struct Fake : gas::Engine {
  gas::Parameters p;unsigned draws=0,scans=0,finished=0,deaths=0,cleaned=0,actors=0;int stage=0;
  bool gateLiving=true,useBridge=true,useGate=false,failCleanup=false,nullBirth=false;float draw=0.5f;
+ std::function<bool(gas::Host&,std::string&)> deathCallback;
  Fake(){p.waitTime=2;p.activeTime=3;p.attackStartTime=1;p.stopTime=10;p.maxHealth=100;p.attackDamage=5;p.attackRadius=50;p.maxAttackRange=20;p.maxAttackAngle=10;}
  bool resources(gas::Resources& r,std::string&)override{r.parameters=p;r.parametersLoaded=r.model=r.collider=r.effects=true;r.clips.fill(true);return true;}
  bool commonResources(const CatalogRow&,std::string&)override{return true;}
@@ -22,7 +23,7 @@ struct Fake : gas::Engine {
  bool gateAlive(void*,bool& alive,std::string&)override{alive=gateLiving;return true;}
  bool gasScan(gas::Host&,std::string&)override{++scans;return true;}
  bool attackSound(gas::Host&,std::string&)override{return true;}
- bool death(gas::Host&,std::string&)override{++deaths;return true;}
+ bool death(gas::Host& h,std::string& e)override{++deaths;return deathCallback?deathCallback(h,e):true;}
  bool cleanup(gas::Host&,std::string& e)override{if(failCleanup){e="injected cleanup failure";return false;}++cleaned;return true;}
 };
 CatalogRow row(){CatalogRow r;r.enemy.source=21;r.enemy.uid=123;r.enemy.count=2;r.sourceKey="day5:pipe";return r;}
@@ -35,6 +36,7 @@ int main(){
  assert(provider.preflight({r},e));bad=r;bad.enemy.pelletMaximum++;assert(!provider.reserve({bad},e));assert(provider.reserve({r},e));
  Creature* a=start(provider,r,e);auto* h=provider.lookup(a);assert(h&&h->timer==1&&f.draws==1&&!h->flags.living);
  Creature* duplicate=nullptr;assert(!provider.birth(r,reinterpret_cast<Generator*>(1),0,{},0,duplicate,e));
+ assert(!provider.birth(r,reinterpret_cast<Generator*>(99),0,{},0,duplicate,e));
  assert(provider.tick(a,1,gas::Event::None,e));assert(h->state==gas::State::Wait&&!h->flags.living); // strict timer == threshold
  assert(provider.tick(a,0.01f,gas::Event::None,e));assert(h->state==gas::State::Attack&&h->timer==0&&h->effectActive);
  assert(provider.tick(a,1,gas::Event::None,e)&&f.scans==0); // strict attackStart
@@ -47,10 +49,10 @@ int main(){
  auto attacker=reinterpret_cast<Creature*>(2);
  assert(!provider.damage(a,attacker,true,{},100,e));assert(!provider.damage(a,nullptr,false,{},100,e));
  assert(!provider.damage(a,attacker,false,{0,20,0},100,e));assert(!provider.damage(a,attacker,false,{0,-10,0},100,e));
- assert(provider.damage(a,attacker,false,{1000,19,1000},100,e)); // source damage has no horizontal bound
+ assert(provider.damage(a,attacker,false,{1000,19,1000},101,e)&&h->health==0); // source damage has no horizontal bound
  assert(provider.tick(a,0,gas::Event::None,e)&&h->state==gas::State::Dead&&f.deaths==1);
  assert(provider.size()==1&&!h->flags.living&&h->flags.untargetable&&h->flags.invulnerable&&!h->flags.lifeGauge);
- assert(provider.tick(a,10,gas::Event::End,e)&&f.deaths==1);assert(!provider.damage(a,attacker,false,{},1,e));
+ assert(provider.tick(a,10,gas::Event::End,e)&&f.deaths==1);assert(provider.damage(a,attacker,false,{},1,e)&&h->health==0);
  assert(!provider.release(a,2,e));f.failCleanup=true;assert(!provider.release(a,1,e)&&provider.size()==1);f.failCleanup=false;
  assert(provider.release(a,1,e)&&provider.size()==0);assert(provider.preflight({r},e)&&provider.reserve({r},e));
  a=start(provider,r,e);assert(f.draws==2);assert(provider.release(a,1,e));
@@ -67,5 +69,22 @@ int main(){
  Fake null;null.nullBirth=true;gas::Provider np(null);r.enemy.deathCount=1;assert(np.preflight({r},e)&&np.reserve({r},e)&&null.actors==2);
  a=reinterpret_cast<Creature*>(3);assert(np.birth(r,reinterpret_cast<Generator*>(1),0,{},0,a,e)&&!a&&null.draws==0);
  assert(!np.birth(r,reinterpret_cast<Generator*>(1),0,{},0,a,e));
+ // Retained dead pipe remains registered until the actual native family forget.
+ // Exercise the real original GroupCourse/ActorRegistry retirement boundary.
+ Fake native;gas::Provider nativeProvider(native);ActorRegistry registry;GroupCourse course(registry);
+ auto original=row();original.course="tutorial";original.member="defaultgen.txt";original.sourceKey="tutorial/defaultgen.txt#0";
+ original.enemy.uid=originalGeneratorUid(original.sourceKey);original.enemy.count=1;
+ assert(registry.install(std::string(64,'a'),{original},[](const CatalogRow&,std::string&){return true;},e));
+ GeneratorState state;state.uid=original.enemy.uid;state.count=1;state.reserved=5;
+ auto* generator=reinterpret_cast<Generator*>(77);assert(course.install({{generator,state}},nativeProvider,e));
+ Math math;auto floor=[](const Position&,float& y,std::string&){y=0;return true;};
+ assert(course.initialize(generator,5,true,math,floor,e));
+ a=reinterpret_cast<Creature*>(std::uintptr_t(101));h=nativeProvider.lookup(a);assert(h);unsigned source=0,token=0;
+ native.deathCallback=[&](gas::Host& host,std::string& error){return course.death(host.generator,host.creature,error);};
+ assert(registry.query(a,source,token)&&source==21);assert(nativeProvider.damage(a,attacker,false,{},100,e));
+ assert(nativeProvider.tick(a,0,gas::Event::None,e)&&native.deaths==1&&nativeProvider.size()==1&&registry.query(a,source,token));
+ unsigned alive=1;GeneratorState after;assert(course.state(generator,after,alive)&&after.deathCount==1&&alive==0);
+ assert(nativeProvider.release(a,token,e)&&course.retiredNative(a,e)&&!registry.query(a,source,token));
+ assert(course.retiredNative(a,e)&&course.unload(e));
  std::cout<<"Original GasHiba source policy checks passed (fake engine; no gameplay claim)\n";
 }
