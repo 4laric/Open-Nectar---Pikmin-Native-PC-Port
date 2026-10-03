@@ -947,8 +947,9 @@ public:
       auto* floor=mapMgr->getCurrTri(n->mSRT.t.x,n->mSRT.t.z,true);
       const float floorY=mapMgr->getMinY(n->mSRT.t.x,n->mSRT.t.z,true);
       const float offset=n->isCreatureFlag(CF_EnableGroundOffset)?n->mGroundOffset:0.f;
+      const bool dry=floor&&!n->mIsInWater&&pc_p2_surface_water_attribute(n,MapCode::getAttribute(floor))!=ATTR_Water;
       const bool wait=floor&&pc_kochappy_air_contact_wait(rvfinite({n->mSRT.t.x,n->mSRT.t.y,n->mSRT.t.z}),
-        n->mInWaterTimer==0,false,0.f,floorY,floor->mTriangle.mNormal.y,n->mSRT.t.y,offset,n->mCollisionRadius);
+        dry,false,0.f,floorY,floor->mTriangle.mNormal.y,n->mSRT.t.y,offset,n->mCollisionRadius);
       std::printf("P2_PURPLE_KOCHAPPY_GUIDE_CONTACT_WAIT age=%d guide=%d floor_y=%.6f floor_normal=%.6f body_y=%.6f offset=%.6f radius=%.6f admitted_wait=%d actual_contact=0 clocks_retained=1 SDL_full_neutral=1 actor_writes=0\n",
         age,receiverWaypoint,floorY,floor?floor->mTriangle.mNormal.y:0.f,n->mSRT.t.y,offset,n->mCollisionRadius,int(wait));
       require(wait,"guide captain air contact unsafe for ordinary settling");
