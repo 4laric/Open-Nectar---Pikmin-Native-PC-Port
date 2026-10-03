@@ -87,9 +87,9 @@ public:int idle()override{
         b=1;
         if(!std::isfinite(bx)||!std::isfinite(bz))finish(18);
         if(std::hypot(bx,bz)>100){move(tx,tz);return;}
-        // Qualified White input convention: 22 PAD units stays in the native
-        // cursor look band; pulse corrections and observe the resulting cursor.
-        if(ticks%10==0&&n->mNaviCamera){
+        // Qualified White axis convention: 22 PAD units stays in the native
+        // cursor look band. Stop corrections at the observed target tolerance.
+        if(n->mNaviCamera){
             const float dx=tx-n->mCursorWorldPos.x,dz=tz-n->mCursorWorldPos.z,d=std::hypot(dx,dz);
             if(!std::isfinite(d))finish(18);
             if(d>8){const auto& axis=n->mNaviCamera->mViewXAxis;
