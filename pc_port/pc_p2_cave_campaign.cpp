@@ -182,11 +182,15 @@ void pc_p2_cave_campaign_scene_setup(){
         if(party.landing){
             if(!mapMgr)invalid("landing without destination map");
             auto land=[](P2CavePartyPoint& point){
-                auto* triangle=mapMgr->getCurrTri(point.x,point.z,true);
+                float height=0.f;
+                // One upward static collision query supplies BOTH the footing
+                // identity and its height. An underside cannot hide wet ground,
+                // and absence cannot turn into getMinY's synthetic zero.
+                auto* triangle=mapMgr->getStaticGroundBelow(point.x,point.z,1000000.f,height);
                 if(!triangle)invalid("destination landing has no collision footing");
                 const auto attribute=MapCode::getAttribute(triangle);
                 if(attribute==ATTR_Water||attribute==ATTR_Hole)invalid("destination landing has unsafe footing");
-                point.y=mapMgr->getMinY(point.x,point.z,true);
+                point.y=height;
                 if(!point.valid())invalid("destination landing height invalid");
             };
             for(auto& c:party.captains)land(c.position);
