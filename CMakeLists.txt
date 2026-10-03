@@ -417,6 +417,12 @@ set(PC_PORT_SOURCES
     pc_port/pc_p2_bud_conversion_origin.cpp
     pc_port/pc_p2_source_body.cpp
     pc_port/pc_p2_original_piki_native.cpp
+    # SourcePiki runtime/Brain + genuine source CPlate leaf (#1301).
+    # Listing these does not install Services or activate source actors.
+    pc_port/pc_p2_original_piki_runtime.cpp
+    pc_port/pc_p2_original_piki_brain.cpp
+    pc_port/pc_p2_original_piki_plate.cpp
+    pc_port/pc_p2_original_piki_native_facts.cpp
     pc_port/pc_p2_original_bulblax_snagret.cpp
     pc_port/pc_p2_original_bulblax_snagret_native.cpp
     pc_port/pc_p2_cave_dialog_window.cpp
@@ -3470,6 +3476,16 @@ add_test(NAME pc_p2_original_frog_test COMMAND pc_p2_original_frog_test)
 pikmin_add_ci_fixture(original_onyon tools/p2_original_onyon_runtime.cpp)
 
 add_executable(pc_p2_original_onyon_test tools/test_p2_original_onyon.cpp pc_port/pc_p2_original_onyon.cpp)
+add_executable(pc_p2_original_piki_plate_test tools/pc_p2_original_piki_plate_test.cpp
+    pc_port/pc_p2_original_piki_plate.cpp pc_port/pc_p2_original_progress.cpp)
+target_include_directories(pc_p2_original_piki_plate_test PRIVATE pc_port)
+target_compile_options(pc_p2_original_piki_plate_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+add_test(NAME p2_original_piki_plate COMMAND pc_p2_original_piki_plate_test)
+add_executable(pc_p2_original_piki_native_facts_test tools/pc_p2_original_piki_native_facts_test.cpp
+    pc_port/pc_p2_original_piki_native_facts.cpp pc_port/pc_p2_original_progress.cpp)
+target_include_directories(pc_p2_original_piki_native_facts_test PRIVATE pc_port)
+target_compile_options(pc_p2_original_piki_native_facts_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+add_test(NAME p2_original_piki_native_facts COMMAND pc_p2_original_piki_native_facts_test)
 target_include_directories(pc_p2_original_onyon_test PRIVATE "${PROJECT_SOURCE_DIR}/pc_port")
 
 add_executable(pc_p2_original_red_test tools/test_p2_original_red.cpp
