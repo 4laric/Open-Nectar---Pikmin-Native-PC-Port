@@ -1,4 +1,5 @@
 #include "pc_p2_source_body.h"
+#include "pc_p2_sprays.h"
 #include "pc_p2_surface_save.h"
 #include "pc_p2_original_foliage_native.h"
 #include "pc_p2_ship.h"
@@ -1033,6 +1034,7 @@ void GameCoreSection::prepareBadEnd()
 void GameCoreSection::exitStage()
 {
 #if defined(PIKI_PC_PORT)
+ pc_p2_spicy_save_roster_bind(nullptr);
  pc_p2_original_number_lod_release_views(this);
  // Normal day-end/cache writes precede scene exit. Release original groups
  // while their actual generators, actor pools and family resources are alive.
@@ -1615,6 +1617,7 @@ void GameCoreSection::initStage()
 	// limit plus a small margin, so keep that relationship to the configured
 	// limit instead of the default.
 	pikiMgr->create((pc_randomizer_original_session() ? 100 : pc_settings_get_piki_limit()) + 2);
+	pc_p2_spicy_save_roster_bind(pikiMgr);
 #else
 	pikiMgr->create(MAX_PIKI_ON_FIELD + 2); // This has a capacity of 102 for some reason.
 #endif

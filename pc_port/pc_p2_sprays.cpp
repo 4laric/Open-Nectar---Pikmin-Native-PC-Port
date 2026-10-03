@@ -21,6 +21,7 @@
 namespace {
 p2originalresource::ResourceState* inventory = nullptr;
 p2originalresource::honey::ReceiverClip growup;
+PikiMgr* saveRoster = nullptr;
 bool gameplay() {
     return gsys && playerState && !playerState->mInDayEnd
         && gameflow.mMoviePlayer && !gameflow.mMoviePlayer->mIsActive
@@ -90,9 +91,12 @@ bool pc_p2_spicy_save_observation(const Piki* p, float& remaining, bool& pending
     pendingDope = pending;
     return true;
 }
+void pc_p2_spicy_save_roster_bind(PikiMgr* roster) noexcept { saveRoster = roster; }
+bool pc_p2_spicy_save_roster_bound() noexcept { return saveRoster != nullptr; }
 bool pc_p2_spicy_save_preflight(std::string& error) {
-    if (!pikiMgr) { error = "spicy_missing_roster"; return false; }
-    Iterator bodies(pikiMgr);
+    if (!saveRoster) { error = "spicy_missing_roster"; return false; }
+    if (saveRoster != pikiMgr) { error = "spicy_roster_owner_mismatch"; return false; }
+    Iterator bodies(saveRoster);
     CI_LOOP(bodies) {
         auto* p = static_cast<Piki*>(*bodies);
         if (!p || !p->isAlive()) continue;

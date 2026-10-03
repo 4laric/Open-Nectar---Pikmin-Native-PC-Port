@@ -22,6 +22,7 @@
 #include "pc_p2_cave_campaign_cache.h"
 #include "pc_randomizer.h"
 #include "MemoryCard.h"
+#include "GameExitSection.h"
 #include "pc_p2_original_resource_state.h"
 #include "pc_p2_original_honey_bank.h"
 #include "pc_window.h"
@@ -152,6 +153,19 @@ public:
             require(!pc_p2_sprays_bind(&stock,nullptr,e),"bind accepted missing source receiver");
             if(!bank.resources(resources,e))require(false,e.c_str());
             require(pc_p2_sprays_bind(&stock,&resources.receiverClips[1],e),"source-clock/inventory binding");
+            require(pc_p2_spicy_save_roster_bound(),"actual GameCore did not bind its roster");
+            auto* liveRoster=pikiMgr;
+            pikiMgr=reinterpret_cast<PikiMgr*>(std::uintptr_t(1));
+            require(!pc_p2_spicy_save_preflight(e)&&e=="spicy_roster_owner_mismatch","mismatched roster was dereferenced");
+            pikiMgr=liveRoster;
+            pc_p2_spicy_save_roster_bind(nullptr);
+            // Explicit stale-global diagnostic: no tick occurs with this
+            // poisoned pointer, and unbound preflight must never dereference it.
+            pikiMgr=reinterpret_cast<PikiMgr*>(std::uintptr_t(1));
+            require(!pc_p2_spicy_save_roster_bound()&&!pc_p2_spicy_save_preflight(e)
+                &&e=="spicy_missing_roster","revoked roster read stale global");
+            pikiMgr=liveRoster;pc_p2_spicy_save_roster_bind(liveRoster);
+            std::puts("P2_SPICY_SAVE_LIFETIME_CONTROL actual_GameCore_bound=1 mismatched_poisoned_global_not_read=1 revoked_poisoned_global_not_read=1 diagnostic_rebind=1 title_card_save=UNTESTED");
             float observed=12.5f;bool pending=true;
             require(!pc_p2_spicy_save_observation(nullptr,observed,pending)&&observed==12.5f&&pending,"null observation changed outputs");
             require(pc_p2_spicy_save_preflight(e),"normal zero-effect roster refused");
@@ -206,7 +220,14 @@ public:
                 require(b.p->getAttackPower()==b.attack&&b.p->getSpeed(.25f)==b.speed,"baseline effects not restored");
             }
             std::string e;require(pc_p2_sprays_bind(nullptr,nullptr,e),"detach");
-            std::printf("P2_SPICY_RUNTIME_PASS formation=%zu actual_animation=1 source_stats=1 pause=1 refresh=1 stock_zero=1 recovery_seconds=%.3f injected_stock_and_input=1 natural_pickup=UNTESTED save_resume=UNTESTED\n",squad.size(),phaseTime);
+            const auto formation=squad.size();const float recoverySeconds=phaseTime;
+            // Actual Appdown constructor revokes before resetting its heap.
+            // Do not read stage actors or fixture members after this boundary.
+            GameExitSection exit;
+            require(!pc_p2_spicy_save_roster_bound()&&!pc_p2_spicy_save_preflight(e)
+                &&e=="spicy_missing_roster","actual GameExit retained stale save roster");
+            std::puts("P2_SPICY_SAVE_EXIT_CONTROL actual_GameExit_Appdown=1 roster_revoked_before_heap_reset=1 title_day_end_card_save=UNTESTED");
+            std::printf("P2_SPICY_RUNTIME_PASS formation=%zu actual_animation=1 source_stats=1 pause=1 refresh=1 stock_zero=1 recovery_seconds=%.3f injected_stock_and_input=1 natural_pickup=UNTESTED save_resume=UNTESTED\n",formation,recoverySeconds);
             std::fflush(nullptr);std::_Exit(0);
         }
         return result;

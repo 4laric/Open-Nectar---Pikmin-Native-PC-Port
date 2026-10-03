@@ -4,7 +4,6 @@
 #include "pc_randomizer.h"
 #include "pc_p2_cave_campaign_cache_engine.h"
 #include "pc_p2_sprays.h"
-#include "PikiMgr.h"
 #include <cstdlib>
 #endif
 #include "BaseInf.h"
@@ -941,9 +940,10 @@ void MemoryCard::saveCurrentGame()
 	}
 	// Direct native SAVE UI paths may bypass Party capture. Never write a
 	// pending reaction or active effect into a format without its continuation.
-	// Before a living roster exists (title/new-file UI), there is no effect.
+	// Scene exit/reset explicitly revokes the roster before its heap dies;
+	// the legacy global manager pointer may remain nonnull at title/new-file UI.
 	std::string spicyHold;
-	if(pikiMgr && !pc_p2_spicy_save_preflight(spicyHold)){
+	if(pc_p2_spicy_save_roster_bound() && !pc_p2_spicy_save_preflight(spicyHold)){
 		mDidSaveFail=true;gsys->mIsCardSaving=FALSE;
 		OSReport("[PC Port] Spicy SAVE held before card I/O: %s\n",spicyHold.c_str());
 		return;
