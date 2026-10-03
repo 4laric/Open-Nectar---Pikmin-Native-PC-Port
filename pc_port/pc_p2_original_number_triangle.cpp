@@ -62,6 +62,13 @@ float fused(float a, float b, float c) noexcept {
  const double residual = add64(sub64(product,sub64(sum,virtualC)),sub64(c,virtualC));
  volatile float rounded = static_cast<float>(sum);
  float result = rounded;
+ // The nearest/even overflow midpoint rounds to infinity, but a nonzero exact
+ // residual toward zero makes the correct binary32 result the largest finite
+ // value. Handle this before the finite-neighbor midpoint correction below.
+ constexpr double overflowMidpoint = 0x1.ffffffp127;
+ if (std::isinf(result) && std::fabs(sum) == overflowMidpoint &&
+     ((sum > 0.0 && residual < 0.0) || (sum < 0.0 && residual > 0.0)))
+  result = std::copysign(std::numeric_limits<float>::max(),result);
  if (residual != 0.0 && std::isfinite(result)) {
   const float neighbor = std::nextafter(result,residual > 0.0 ?
        std::numeric_limits<float>::infinity() : -std::numeric_limits<float>::infinity());
@@ -141,6 +148,15 @@ bool sourceFma(float a, float b, float c, float& output) noexcept {
  output = result;
  return true;
 }
+bool sourceVectorLength(Vec3 v, float& output) noexcept {
+ if (!environment() || !finite(v)) return false;
+ const float xx=mul(v.x,v.x), yy=mul(v.y,v.y), zz=mul(v.z,v.z);
+ const float guard=add(zz,add(xx,yy));
+ if (!std::isfinite(guard)) return false;
+ float candidate=0.0f;
+ if (guard>0.0f && !sourceSqrt(add(zz,fused(v.x,v.x,yy)),candidate)) return false;
+ output=candidate;return true;
+}
 bool makePlanes(const Vertices& v, Plane& face, std::array<Plane,3>& edges) noexcept {
  if (!environment() || !finite(v)) return false;
  Plane candidate;
@@ -186,5 +202,130 @@ bool build(const Vertices& v, Geometry& output) noexcept {
   return false;
  output = candidate;
  return true;
+}
+namespace {
+bool validSphere(const Sphere& sphere) noexcept {
+ return finite(sphere.center) && std::isfinite(sphere.radius) && sphere.radius >= 0.0f;
+}
+bool validPlane(const Plane& plane) noexcept {
+ return finite(plane.normal) && std::isfinite(plane.offset);
+}
+bool normaliseContact(Vec3& v, bool fusedSquares, float& length) noexcept {
+ const float squared = fusedSquares ? dot(v,v) :
+     add(add(mul(v.x,v.x),mul(v.y,v.y)),mul(v.z,v.z));
+ if (!sourceSqrt(squared,length)) return false;
+ if (length > 0.0f) {
+  const float inverse = divide(1.0f,length);
+  v = {mul(v.x,inverse),mul(v.y,inverse),mul(v.z,inverse)};
+ } else {
+  length = 0.0f; // Source normalise's nonpositive return value.
+ }
+ return finite(v);
+}
+bool edgeResult(const Sphere& sphere, Vec3 normal, float length,
+                float parameter, EdgeContact& candidate) noexcept {
+ candidate.normal = length == 0.0f ? Vec3{} : normal;
+ candidate.strength = sub(sphere.radius,length);
+ candidate.parameter = parameter;
+ return finite(candidate.normal) && std::isfinite(candidate.strength) &&
+        std::isfinite(candidate.parameter);
+}
+bool contactResult(const Sphere& sphere, Vec3 normal, float strength,
+                   ContactKind kind, unsigned index, Contact& candidate) noexcept {
+ candidate.normal = normal;
+ candidate.strength = strength;
+ candidate.kind = kind;
+ candidate.edgeIndex = index;
+ candidate.point = subtract(sphere.center,
+        {mul(normal.x,sphere.radius),mul(normal.y,sphere.radius),mul(normal.z,sphere.radius)});
+ return finite(candidate.point) && finite(candidate.normal) && std::isfinite(strength);
+}
+}
+Result intersectEdge(const Sphere& sphere, Vec3 start, Vec3 end, EdgeContact& output) noexcept {
+ if (!environment() || !validSphere(sphere) || !finite(start) || !finite(end))
+  return Result::Invalid;
+ Vec3 direction = subtract(end,start);
+ float edgeLength;
+ // @80416574: rounded y square, then x and z fused squares.
+ if (!normaliseContact(direction,true,edgeLength)) return Result::Invalid;
+ const Vec3 startSeparation = subtract(sphere.center,start);
+ const float parameter = dot(startSeparation,direction);
+ if (!std::isfinite(parameter)) return Result::Invalid;
+ EdgeContact candidate;
+ if (parameter < 0.0f || parameter > edgeLength) {
+  // Source always tests start first, then end; it does not select the nearest
+  // endpoint from the parameter. Acceptance is <=, unlike the interior <.
+  for (unsigned i=0; i<2; ++i) {
+   const Vec3 endpoint = i == 0 ? start : end;
+   const Vec3 separation = subtract(endpoint,sphere.center);
+   float distance;
+   if (!sourceSqrt(dot(separation,separation),distance)) return Result::Invalid;
+   if (distance <= sphere.radius) {
+    Vec3 normal = subtract(sphere.center,endpoint);
+    float normalLength;
+    // @80416688 /80416794: stored Vector3 normalisation uses three rounded
+    // squares and two additions, despite fused endpoint acceptance above.
+    if (!normaliseContact(normal,false,normalLength) ||
+        !edgeResult(sphere,normal,normalLength,static_cast<float>(i),candidate))
+     return Result::Invalid;
+    output = candidate;
+    return Result::Hit;
+   }
+  }
+  return Result::Miss;
+ }
+ const Vec3 projection = {mul(direction.x,parameter),mul(direction.y,parameter),
+                          mul(direction.z,parameter)};
+ Vec3 perpendicular = subtract(startSeparation,projection);
+ float distance;
+ // @80416838: interior normalisation again uses fused squares.
+ if (!normaliseContact(perpendicular,true,distance)) return Result::Invalid;
+ if (!(distance < sphere.radius)) return Result::Miss;
+ if (!edgeResult(sphere,perpendicular,distance,parameter,candidate)) return Result::Invalid;
+ output = candidate;
+ return Result::Hit;
+}
+Result sweep(const Vertices& v, const Geometry& geometry, const Sphere& sphere,
+             SweepType type, Contact& output) noexcept {
+ if (!environment() || !finite(v) || !validSphere(sphere) ||
+     !validPlane(geometry.face)) return Result::Invalid;
+ for (const auto& plane : geometry.edges)
+  if (!validPlane(plane)) return Result::Invalid;
+ if (type != SweepType::InsidePlane && type != SweepType::IntersectPlane)
+  return Result::Invalid;
+ const float distance = sub(dot(sphere.center,geometry.face.normal),geometry.face.offset);
+ if (!std::isfinite(distance)) return Result::Invalid;
+ if (type == SweepType::InsidePlane) {
+  if (std::fabs(distance) > sphere.radius) return Result::Miss;
+ } else {
+  const float lower = sub(-sphere.radius,5.0f);
+  if (!std::isfinite(lower)) return Result::Invalid;
+  if (distance > sphere.radius || distance < lower) return Result::Miss;
+ }
+ bool inside = true;
+ for (const auto& plane : geometry.edges) {
+  const float edgeDistance = sub(dot(sphere.center,plane.normal),plane.offset);
+  if (!std::isfinite(edgeDistance)) return Result::Invalid;
+  if (edgeDistance > 0.0f) inside = false;
+ }
+ Contact candidate;
+ if (inside) {
+  if (!contactResult(sphere,geometry.face.normal,sub(sphere.radius,distance),
+                     ContactKind::Face,3,candidate)) return Result::Invalid;
+  output = candidate;
+  return Result::Hit;
+ }
+ for (unsigned i=0; i<3; ++i) {
+  EdgeContact edge;
+  const Result result = intersectEdge(sphere,v[i],v[(i+1)%3],edge);
+  if (result == Result::Invalid) return result;
+  if (result == Result::Hit) {
+   if (!contactResult(sphere,edge.normal,edge.strength,ContactKind::Edge,i,candidate))
+    return Result::Invalid;
+   output = candidate;
+   return Result::Hit;
+  }
+ }
+ return Result::Miss;
 }
 } }

@@ -1,4 +1,7 @@
 #include "pc_p2_original_number_five_motion.h"
+#include "pc_p2_original_number_triangle.h"
+#include <cstdint>
+#include <cstring>
 #include <cmath>
 #include <cstdio>
 #include <limits>
@@ -7,7 +10,7 @@ using namespace p2originalnumber;
 namespace {
 bool near(float a,float b,float tolerance=.0001f){return std::fabs(a-b)<=tolerance;}
 bool near(rigid::Vec3 a,rigid::Vec3 b){return near(a.x,b.x)&&near(a.y,b.y)&&near(a.z,b.z);}
-float length(rigid::Vec3 a){return std::sqrt(a.x*a.x+a.y*a.y+a.z*a.z);}
+std::uint32_t bits(float value){std::uint32_t out;std::memcpy(&out,&value,sizeof(out));return out;}
 struct Call {bool platform,receiver;rigid::Trace request;float dt;};
 // Focused orchestration controls only. This is not an admitted gameplay world
 // or a substitute for the native provider's actual triangles/platforms.
@@ -81,7 +84,7 @@ int main(){
  auto noRest=state();noRest.body.hasCollided=true;ControlTraces noProbeFloor;
  check(fiveMotion::update(noRest,.1f,params,options,&noProbeFloor,report,error)&&!report.resting&&report.halfSteps==2&&report.mapCalls==10&&report.platformCalls==10,"rest probe without actual floor proceeds to both halfsteps");
  auto boundary=state();boundary.body.hasCollided=true;boundary.body.current.velocity={10,0,0};ControlTraces threshold;threshold.mapProbeFloor=true;
- check(fiveMotion::update(boundary,.1f,params,options,&threshold,report,error)&&threshold.probes()==0&&report.halfSteps==2,"velocity threshold10 is strict");
+ check(fiveMotion::update(boundary,.1f,params,options,&threshold,report,error)&&threshold.probes()==1&&report.resting&&report.halfSteps==0,"source estimated length of velocity10 is below strict threshold10");
  boundary=state();boundary.body.hasCollided=true;boundary.body.current.momentum={200,0,0};ControlTraces momentumThreshold;momentumThreshold.mapProbeFloor=true;
  check(fiveMotion::update(boundary,.1f,params,options,&momentumThreshold,report,error)&&momentumThreshold.probes()==0,"angular momentum threshold100 is strict after damping");
  boundary=state();boundary.body.hasCollided=true;fiveMotion::Options nonNormal=options;nonNormal.normalState=false;ControlTraces normalThreshold;normalThreshold.mapProbeFloor=true;
@@ -90,9 +93,15 @@ int main(){
  check(fiveMotion::update(picked,.1f,params,carrying,&pickedTrace,report,error)&&pickedTrace.probes()==0&&near(picked.body.current.velocity.y,-56),"picked rigid Five still receives source gravity and skips resting");
  auto accelerated=state();accelerated.acceleration={3,99,4};fiveMotion::Options flick=options;flick.collisionFlick=true;ControlTraces flickTrace;
  check(fiveMotion::update(accelerated,.1f,params,flick,&flickTrace,report,error)&&near(accelerated.body.current.position,{.3f,-1.4f,.4f}),"source collision flick adds horizontal acceleration before both halfsteps");
- check(near(length(accelerated.body.current.velocity),std::sqrt(56.f*56.f+25.f)-5)&&near(accelerated.acceleration,{}),"source subtracts acceleration magnitude then clears");
+ // Independent exact-Fraction binary32 oracle: separately rounded square
+ // guard; q=round(roundFMA(x,x,round(y*y))+round(z*z)); estimate coefficient
+ // integer interpolation; estimate*q -> RNE f32; inverse, normal components,
+ // speed-acceleration and final component products each separately RNE f32.
+ // Input (3,-56,4): source speed=0x4260e73d, accel5=0x409ffdd0.
+ // These constants do not call production helpers to construct expectations.
+ check(bits(accelerated.body.current.velocity.x)==0x402eed4bu&&bits(accelerated.body.current.velocity.y)==0xc24c14d7u&&bits(accelerated.body.current.velocity.z)==0x40693c63u&&near(accelerated.acceleration,{}),"source raw estimate normalize/subtract exact golden f32 components");
  auto unapplied=state();unapplied.acceleration={0,3,0};ControlTraces unappliedTrace;
- check(fiveMotion::update(unapplied,.1f,params,options,&unappliedTrace,report,error)&&near(unapplied.body.current.velocity.y,-53),"unapplied acceleration Y still participates in source final magnitude subtraction");
+ check(fiveMotion::update(unapplied,.1f,params,options,&unappliedTrace,report,error)&&bits(unapplied.body.current.velocity.y)==0xc25400a2u&&bits(unapplied.body.current.velocity.x)==0&&bits(unapplied.body.current.velocity.z)==0,"unapplied acceleration Y still participates in source final magnitude subtraction");
  auto greater=state();greater.acceleration={100,0,0};ControlTraces greaterTrace;
  check(fiveMotion::update(greater,.001f,params,options,&greaterTrace,report,error)&&near(greater.body.current.velocity.y,-.56f),"acceleration greater than speed retains original speed, not zero/clamp subtraction");
  auto particle=state();particle.body.current.velocity={0,-10,0};ControlTraces particleTraces;particleTraces.particleContact=true;
@@ -135,6 +144,15 @@ int main(){
  check(!fiveMotion::update(eventRefusal,.01f,params,eventOptions,&failedEventTrace,report,error)&&eventRefusal.body.current.velocity.y==-10,"provider ignoring event refusal still refuses atomically");
  simpleEvents.refuse=true;simpleEventState=state();simpleEventState.body.current.velocity={10,0,0};simpleEventTrace=ControlTraces{};simpleEventTrace.simpleFloor=true;
  check(!fiveMotion::update(simpleEventState,.1f,params,simpleEventsOptions,&simpleEventTrace,report,error)&&!simpleEventState.previousFloor&&simpleEventState.body.current.velocity.x==10,"simple lifetime event refusal precedes floor commit");
+ // Exact-Fraction oracle gives raw length10 = 0x411ffdd0, not float10.
+ float literalLength=123;
+ check(triangle::sourceVectorLength({10,0,0},literalLength)&&bits(literalLength)==0x411ffdd0u&&literalLength<10,"direct source velocity10 estimate threshold golden");
+ check(triangle::sourceVectorLength({100,0,0},literalLength)&&bits(literalLength)==0x42c805ddu&&literalLength>100,"direct source momentum100 estimate threshold golden");
+ check(triangle::sourceVectorLength({3,-56,4},literalLength)&&bits(literalLength)==0x4260e73du,"direct source mixed vector guarded FMA length golden");
+ check(triangle::sourceVectorLength({},literalLength)&&bits(literalLength)==0,"zero vector guard returns zero");
+ for(const rigid::Vec3 input:{rigid::Vec3{std::numeric_limits<float>::quiet_NaN(),0,0},rigid::Vec3{0,std::numeric_limits<float>::infinity(),0},rigid::Vec3{std::numeric_limits<float>::max(),0,0}}){
+  literalLength=123;check(!triangle::sourceVectorLength(input,literalLength)&&literalLength==123,"nonfinite/overflow source vector length refusal preserves output");
+ }
  std::printf("original_number_five_motion checks=%u failures=%u actual_world=0 native=0 gameplay=0 save=0\n",checks,failures);
  return failures?1:0;
 }

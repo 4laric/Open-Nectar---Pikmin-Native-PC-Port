@@ -172,6 +172,23 @@ int main() {
  const float maximum=std::numeric_limits<float>::max();
  check(t::sourceFma(maximum,2,-maximum,value) && value==maximum,
        "fused product overflow cancellation remains finite");
+ // Independent factorisation of the exact overflow midpoint:
+ // (31 * 2^100) * (1082401 * 8) = (2^25 - 1) * 2^103.
+ const float midpointA=std::ldexp(31.0f,100), midpointB=1082401.0f*8.0f;
+ check(t::sourceFma(midpointA,midpointB,-1,value) && bits(value)==0x7f7fffffu,
+       "positive overflow midpoint tiny negative residual finite");
+ value=123;
+ check(!t::sourceFma(midpointA,midpointB,0,value) && value==123,
+       "positive overflow exact midpoint ties to infinity atomic refusal");
+ check(!t::sourceFma(midpointA,midpointB,1,value) && value==123,
+       "positive overflow midpoint positive residual atomic refusal");
+ check(t::sourceFma(-midpointA,midpointB,1,value) && bits(value)==0xff7fffffu,
+       "negative overflow midpoint tiny positive residual finite");
+ value=123;
+ check(!t::sourceFma(-midpointA,midpointB,0,value) && value==123,
+       "negative overflow exact midpoint ties to infinity atomic refusal");
+ check(!t::sourceFma(-midpointA,midpointB,-1,value) && value==123,
+       "negative overflow midpoint negative residual atomic refusal");
  check(t::sourceSqrt(1,value) && value != std::sqrt(1.0f),"raw source sqrt is not libm sqrt");
  check(t::sourceSqrt(-0.0f,value) && bits(value)==0x80000000u,"negative zero preserved");
  check(t::sourceSqrt(0.0f,value) && bits(value)==0,"positive zero preserved");
@@ -234,6 +251,95 @@ int main() {
  check(!t::rawReciprocalSqrt(2,estimate) && estimate==456,"directed rounding estimate refusal");
  check(!t::build(flat,g) && flatten(g)==sentinel,"directed rounding geometry refusal");
  check(std::fesetround(rounding)==0,"restore rounding control");
+ // Sweep boundary controls use explicit unit planes to isolate source gates;
+ // this is a pure arithmetic fixture, not a native scene/provenance claim.
+ t::Geometry unit;
+ unit.face.normal={0,1,0};
+ t::Contact contact; contact.point={99,98,97}; contact.normal={88,87,86};
+ contact.strength=75; contact.kind=t::ContactKind::Edge; contact.edgeIndex=2;
+ const auto unchanged=[&]() {
+  return contact.point.x==99 && contact.point.y==98 && contact.point.z==97 &&
+         contact.normal.x==88 && contact.normal.y==87 && contact.normal.z==86 &&
+         contact.strength==75 && contact.kind==t::ContactKind::Edge && contact.edgeIndex==2;
+ };
+ const t::Contact contactSentinel=contact;
+ check(t::sweep(flat,unit,{{1,1,1},1},t::SweepType::InsidePlane,contact)==t::Result::Hit &&
+       contact.kind==t::ContactKind::Face && contact.edgeIndex==3 && contact.strength==0 &&
+       contact.point.y==0,"inside plane upper boundary inclusive face");
+ check(t::sweep(flat,unit,{{1,-1,1},1},t::SweepType::InsidePlane,contact)==t::Result::Hit &&
+       contact.strength==2 && contact.point.y==-2,"inside plane lower boundary inclusive");
+ contact=contactSentinel;
+ check(t::sweep(flat,unit,{{1,std::nextafter(1.0f,inf),1},1},t::SweepType::InsidePlane,contact)
+       ==t::Result::Miss && unchanged(),"inside plane upper outside miss atomic");
+ check(t::sweep(flat,unit,{{1,-2,1},1},t::SweepType::InsidePlane,contact)==t::Result::Miss &&
+       unchanged(),"soft negative side bounded by radius");
+ check(t::sweep(flat,unit,{{1,-6,1},1},t::SweepType::IntersectPlane,contact)==t::Result::Hit &&
+       contact.strength==7,"hard negative side radius plus five inclusive");
+ contact=contactSentinel;
+ check(t::sweep(flat,unit,{{1,std::nextafter(-6.0f,-inf),1},1},t::SweepType::IntersectPlane,contact)
+       ==t::Result::Miss && unchanged(),"hard beyond negative five allowance");
+ check(t::sweep(flat,unit,{{1,2,1},1},t::SweepType::IntersectPlane,contact)==t::Result::Miss &&
+       unchanged(),"hard positive side still radius limited");
+ check(t::sweep(flat,unit,{{1,0,1},0},t::SweepType::InsidePlane,contact)==t::Result::Hit &&
+       contact.point.x==1 && contact.point.y==0 && contact.strength==0,
+       "zero radius face valid including Navi arithmetic case");
+ check(t::sweep(flat,unit,{{1,-5,1},-0.0f},t::SweepType::IntersectPlane,contact)==t::Result::Hit,
+       "negative zero radius accepted hard lower boundary");
+ check(t::build(flat,g),"prepare source plane sweep");
+ check(t::sweep(flat,g,{{1,0.25f,1},0.5f},t::SweepType::InsidePlane,contact)==t::Result::Hit &&
+       contact.normal.y==g.face.normal.y && contact.kind==t::ContactKind::Face,
+       "genuine source face plane consumed directly");
+ check(t::sweep(flat,g,{{2,0.25f,-0.25f},0.5f},t::SweepType::InsidePlane,contact)==t::Result::Hit &&
+       contact.kind==t::ContactKind::Edge && contact.edgeIndex==0 &&
+       contact.normal.y>0 && contact.normal.z<0,"AB edge contact first source order");
+ t::EdgeContact edge; edge.normal={9,8,7}; edge.strength=6; edge.parameter=5;
+ const auto edgeUnchanged=[&]() {
+  return edge.normal.x==9 && edge.normal.y==8 && edge.normal.z==7 &&
+         edge.strength==6 && edge.parameter==5;
+ };
+ const t::EdgeContact edgeSentinel=edge;
+ float oneLength;
+ check(t::sourceSqrt(1,oneLength),"endpoint radius control");
+ check(t::intersectEdge({{-1,0,0},oneLength},{0,0,0},{4,0,0},edge)==t::Result::Hit &&
+       edge.parameter==0 && edge.normal.x< -1 && edge.strength==0,
+       "endpoint start tangent uses less or equal raw source length");
+ edge=edgeSentinel;
+ check(t::intersectEdge({{0,1,0},oneLength},{0,0,0},{0,0,0},edge)==t::Result::Miss &&
+       edgeUnchanged(),"interior tangent uses strict less even degenerate edge");
+ check(t::intersectEdge({{0,0,0},0},{0,0,0},{0,0,0},edge)==t::Result::Miss &&
+       edgeUnchanged(),"zero radius interior zero distance remains strict miss");
+ check(t::intersectEdge({{0,0,0},1},{0,0,0},{0,0,0},edge)==t::Result::Hit &&
+       edge.normal.x==0 && edge.normal.y==0 && edge.normal.z==0 && edge.strength==1,
+       "on edge overlap uses explicit positive zero normal");
+ check(t::intersectEdge({{5,0,0},oneLength},{0,0,0},{4,0,0},edge)==t::Result::Hit &&
+       edge.parameter==1 && edge.normal.x>1,"end endpoint source parameter one");
+ check(t::intersectEdge({{2,1,0},2},{0,0,0},{4,0,0},edge)==t::Result::Hit &&
+       edge.parameter>2 && edge.parameter<3 && edge.normal.y>0,
+       "interior parameter retains projected distance rather than unit fraction");
+ check(t::intersectEdge({{2,0,0},3},{0,0,0},{1,0,0},edge)==t::Result::Hit &&
+       edge.parameter==0 && edge.normal.x>0,"outside branch start endpoint precedes closer end");
+ // Exact-rational endpoint oracle: fused acceptance squared length=40a492bf,
+ // but stored endpoint normalisation squared length=40a492c0. A generic fused
+ // length reused for both branches changes the returned normal/overlap bits.
+ const t::Sphere precisionEndpoint{{-fromBits(0x3f6e5dc6),fromBits(0x3fd1962d),
+                                    fromBits(0x3fa1a614)},16};
+ check(t::intersectEdge(precisionEndpoint,{0,0,0},{4,0,0},edge)==t::Result::Hit &&
+       bits(edge.normal.x)==0xbed231f3u && bits(edge.normal.y)==0x3f38d116u &&
+       bits(edge.normal.z)==0x3f0e8b5cu && bits(edge.strength)==0x415bb613u,
+       "endpoint fused acceptance versus nonfused returned normalization oracle");
+ contact=contactSentinel;
+ check(t::sweep(flat,g,{{0,0,0},-1},t::SweepType::InsidePlane,contact)==t::Result::Invalid &&
+       unchanged(),"negative radius invalid atomic");
+ check(t::sweep(flat,g,{{nan,0,0},1},t::SweepType::InsidePlane,contact)==t::Result::Invalid &&
+       unchanged(),"nonfinite sphere invalid atomic");
+ check(t::sweep(flat,g,{{0,0,0},1},static_cast<t::SweepType>(2),contact)==t::Result::Invalid &&
+       unchanged(),"unimplemented moving edge mode explicitly refused");
+ auto badGeometry=g; badGeometry.edges[2].offset=inf;
+ check(t::sweep(flat,badGeometry,{{0,0,0},1},t::SweepType::InsidePlane,contact)==t::Result::Invalid &&
+       unchanged(),"nonfinite supplied edge plane invalid atomic");
+ edge=edgeSentinel;
+ check(t::intersectEdge({{0,0,0},1},{-maximum,0,0},{maximum,0,0},edge)==t::Result::Invalid &&
+       edgeUnchanged(),"finite edge subtraction overflow invalid atomic");
  std::cout << "Triangle controls: " << checks << ", failures: " << failures
            << "; engine=0, no hardware/gameplay qualification\n";
  return failures ? 1 : 0;

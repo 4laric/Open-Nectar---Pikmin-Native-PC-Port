@@ -51,8 +51,8 @@ struct Report {
  unsigned mapCalls=0,platformCalls=0;
  Contacts movementContacts;
 };
-// Portable host sqrt remains a math dependency: no PPC raw sqrt equivalence
-// or admission until the audited source primitive is composed.
+// Direct Vector3 lengths/dots use the audited source primitive; dependent
+// rigid integration arithmetic and original hardware identity remain separate.
 // Source Pellet::update Five motion only (after actual carry/FSM/LOD).
 // Positive finite dt required. State/report unchanged on refusal; caller's
 // trace-side external mutations cannot be rolled back. Neither callbacks nor

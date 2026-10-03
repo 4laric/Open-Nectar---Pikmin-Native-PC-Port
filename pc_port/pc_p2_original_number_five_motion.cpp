@@ -1,5 +1,7 @@
 #include "pc_p2_original_number_five_motion.h"
+#include "pc_p2_original_number_triangle.h"
 #include <cmath>
+#include <limits>
 
 // Primary research pelletMgr.cpp:2048-2240,3409-3426,3434-3473.
 // Particle halfstep/contact/math primary is in number_rigid.cpp references.
@@ -8,8 +10,9 @@ namespace {
 Vec3 add(Vec3 a,Vec3 b){return {a.x+b.x,a.y+b.y,a.z+b.z};}
 Vec3 sub(Vec3 a,Vec3 b){return {a.x-b.x,a.y-b.y,a.z-b.z};}
 Vec3 mul(Vec3 a,float b){return {a.x*b,a.y*b,a.z*b};}
-float dot(Vec3 a,Vec3 b){return a.x*b.x+a.y*b.y+a.z*b.z;}
-float length(Vec3 a){return std::sqrt(dot(a,a));}
+float fused(float a,float b,float c){float out;if(!triangle::sourceFma(a,b,c,out))return std::numeric_limits<float>::quiet_NaN();return out;}
+float dot(Vec3 a,Vec3 b){return fused(a.z,b.z,fused(a.x,b.x,a.y*b.y));}
+float length(Vec3 a){float out;if(!triangle::sourceVectorLength(a,out))return std::numeric_limits<float>::quiet_NaN();return out;}
 bool finite(Vec3 v){return std::isfinite(v.x)&&std::isfinite(v.y)&&std::isfinite(v.z);}
 bool fail(std::string& e,const char* message){e=message;return false;}
 bool normal(Vec3 n){return finite(n)&&std::isfinite(dot(n,n))&&std::fabs(dot(n,n)-1.f)<=.001f;}
@@ -68,7 +71,7 @@ bool halfStep(State& state,float dt,const rigid::Parameters& params,const Option
  for(unsigned i=0;i<body.particles.size();++i){
   auto& particle=body.particles[i];particle.position=transformed.particles[i].position;
   const Vec3 sep=sub(particle.position,body.transformedPosition),omega=body.current.rotatedMomentum;
-  const Vec3 angular{omega.y*sep.z-omega.z*sep.y,omega.z*sep.x-omega.x*sep.z,omega.x*sep.y-omega.y*sep.x};
+  const Vec3 angular{fused(omega.y,sep.z,-(omega.z*sep.y)),fused(omega.z,sep.x,-(omega.x*sep.z)),fused(omega.x,sep.y,-(omega.y*sep.x))};
   const Vec3 velocity=add(angular,body.current.velocity);
   float extra=dt*length(velocity);if(extra>50)extra=50;
   particle.touching=false;

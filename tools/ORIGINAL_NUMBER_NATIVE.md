@@ -69,12 +69,25 @@ actual LOD-selected simple fallback. Its explicit Events interface executes
 first-simple-floor and accepted-particle bounce at their source phases and
 propagates callback lifetime refusal. Actual wrappers must require those events;
 report counts alone do not execute gameplay. The focused controls qualify
-ordering and refusal, while host sqrt, source sound/water/onBounce composition,
-quaternion rendering and native carry transforms remain unqualified.
+ordering and refusal. Direct Five length/dot operations now use the source
+estimate and instruction order, including the strict resting threshold where
+source length of velocity10 is below10. Dependent rigid math, source
+sound/water/onBounce composition, quaternion rendering and native carry
+transforms remain unqualified.
 One now advances carry animation after physical movement, then refreshes its
 colliders. First-floor bounce observes the traced live velocity before forces.
 Shared source trace math permits the literal zero-radius FakePiki point trace;
 numeric profiles and birth admission still require their positive source radii.
+
+The separate RoomMap trace engine composes original ordered triangles, source
+planes/sphere/sweep and rebuilt CaveGrid with eight substeps and zero-radius
+support. An abstract actual owner must validate scene/body lifetime before
+geometry reads and after every callback, and supply the actual hidden-floor
+flag/sentinel before any movement. Ordinary callbacks precede floor assignment;
+the source hidden-floor exception follows its assignments. Mutable callback
+normals affect classification/response while position correction retains the
+pre-callback normal. This remains a map-only foundation: no active platform
+implementation, canonical live owner installation or gameplay grant exists.
 
 ## Producer integration contract
 
