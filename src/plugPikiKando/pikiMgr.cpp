@@ -4,6 +4,7 @@
 #include "pc_vs.h"
 #include "GoalItem.h"
 #include "PikiHeadItem.h"
+#include "pc_randomizer.h"
 #endif
 #include "AIConstant.h"
 #include "DebugLog.h"
@@ -55,6 +56,17 @@ Creature* PikiMgr::birthOriginalP2()
     // or the global AP/AICONST field limit on behalf of the source factory.
     if (meBirthMode || containerExitMode) return nullptr;
     return birthWithFieldLimit(100, false);
+}
+Creature* PikiMgr::birthOriginalP2Container()
+{
+    if (!pc_randomizer_original_session() || !containerExitMode || meBirthMode
+        || !itemMgr || itemMgr->getContainerExitCount() <= 0) return nullptr;
+    return birthWithFieldLimit(100, false);
+}
+Creature* PikiMgr::birthOriginalP2Sprout()
+{
+    if (!pc_randomizer_original_session() || !meBirthMode || containerExitMode) return nullptr;
+    return birthWithFieldLimit(100, true);
 }
 #endif
 Creature* PikiMgr::birthWithFieldLimit(int fieldLimit, bool allowSproutExtra)

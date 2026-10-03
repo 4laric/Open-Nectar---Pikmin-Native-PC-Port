@@ -36,6 +36,9 @@ std::string pc_randomizer_campaign_treasure_source();
 // Stable selected immutable descriptor fingerprint; never a process token.
 std::string pc_randomizer_session_fingerprint();
 bool pc_randomizer_enabled();
+// SAVE1229 supplies this verified ORIGINAL_P2_CAMPAIGN bootstrap boundary.
+// Terrain, typed engineering fixtures and AP seeds do not enable it.
+bool pc_randomizer_original_session();
 // Separate, versioned TheLynk AP contract. Physical checks and rewards differ.
 bool pc_randomizer_thelynk();
 bool pc_randomizer_thelynk_part(unsigned model, bool received);

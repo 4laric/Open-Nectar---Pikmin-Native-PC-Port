@@ -14,6 +14,8 @@ void pc_p2_original_onyon_register();
 bool pc_p2_original_onyon_preflight(const std::vector<Generator*>&,std::string&);
 bool pc_p2_original_onyon_generator_init(Generator*,bool& handled,std::string&);
 bool pc_p2_original_onyon_identity(const Creature*,std::string&);
+// Actual source body plus the verified original campaign bootstrap.
+bool pc_p2_original_onyon_campaign_owned(const Creature*);
 bool pc_p2_original_onyon_booted(const Creature*,bool&);
 bool pc_p2_original_onyon_access(const Creature*);
 // Source-owned actors exclusively use original boot progress; ordinary actors

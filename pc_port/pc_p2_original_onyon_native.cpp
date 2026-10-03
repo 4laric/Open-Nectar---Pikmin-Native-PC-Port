@@ -1,4 +1,5 @@
 #include "pc_p2_original_onyon_native.h"
+#include "pc_randomizer.h"
 #include "ItemMgr.h"
 #include "GoalItem.h"
 #include "UfoItem.h"
@@ -99,6 +100,7 @@ bool pc_p2_original_onyon_generator_init(Generator* gen,bool& handled,std::strin
  if(actor){gen->mLatestSpawnCreature=actor;gen->mAliveCount=1;}e.clear();return true;
 }
 bool pc_p2_original_onyon_identity(const Creature* actor,std::string& out){auto i=actors.find(actor);if(i==actors.end())return false;const auto& r=row(i->second);out=r.sourceSha+":"+r.sourceKey;return true;}
+bool pc_p2_original_onyon_campaign_owned(const Creature* actor){return pc_randomizer_original_session()&&actors.count(actor)!=0;}
 bool pc_p2_original_onyon_booted(const Creature* actor,bool& out){auto i=actors.find(actor);if(i==actors.end())return false;const auto& r=row(i->second);if(r.index==4)return false;out=bool(progress().boot&(1u<<r.index));return true;}
 bool pc_p2_original_onyon_access(const Creature* actor){bool state=false;return pc_p2_original_onyon_booted(actor,state)&&state;}
 bool pc_p2_original_onyon_color_access(const Creature* actor,bool apAllowed){bool state=false;return pc_p2_original_onyon_booted(actor,state)?state:apAllowed;}
