@@ -78,6 +78,7 @@ class SceneRuntime final:public FloorIdentityAuthority {
  SelectedSceneInputs selected;
  SourceStart start;
  StageInfo stage;
+ std::string stageName,stageFile;
  StageInfo* previousStage=nullptr;
  Shape* shape=nullptr;
  MapMgr* ownedMap=nullptr;
@@ -141,8 +142,8 @@ public:
   ownedRoutes=new RouteMgr;auto* routes=ownedRoutes;context.mRoutes=routes;routes->construct(map);
   if(!routes->getWayPoint('test',0)){error="retail scene actual native route graph missing";return false;}
   previousStage=flowCont.mCurrentStage;
-  stage.mStageName=StdSystem::stringDup((selected.plan.cave+" floor "+std::to_string(selected.plan.floor)).c_str());
-  stage.mFileName=StdSystem::stringDup(developmentFloorRole);
+  stageName=selected.plan.cave+" floor "+std::to_string(selected.plan.floor);stageFile=developmentFloorRole;
+  stage.mStageName=stageName.c_str();stage.mFileName=stageFile.c_str();
   stage.mStageID=STAGE_TESTMAP;stage.mStageIndex=STAGE_TESTMAP;
   stage.mChalStageID=CHALSTAGE_NOT;stage.mHasInitialised=FALSE;
   context.mCampaign=selected.campaign;context.mSession=selected.session;context.mRevision=selected.revision;
