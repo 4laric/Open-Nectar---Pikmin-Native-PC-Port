@@ -3334,3 +3334,9 @@ add_executable(p2_equipment_projection_test tools/pc_p2_equipment_projection_tes
 target_include_directories(p2_equipment_projection_test BEFORE PRIVATE tools/equipment_stubs pc_port)
 target_compile_options(p2_equipment_projection_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
 add_test(NAME p2_equipment_projection_test COMMAND p2_equipment_projection_test)
+
+# Ordinary White adult ingestion uses real native mouth callbacks and a genuine saved squad.
+pikmin_add_ci_fixture(white_adult_ingestion tools/p2_white_campaign_ingestion_runtime.cpp)
+if(TARGET pikmin_ci_fixture_white_adult_ingestion)
+    target_include_directories(pikmin_ci_fixture_white_adult_ingestion PRIVATE ${P2_CHALLENGE_GUARD_INCLUDE_DIR})
+endif()
