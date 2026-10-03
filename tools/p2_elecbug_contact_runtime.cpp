@@ -36,6 +36,7 @@
 #include "Collision.h"
 #include "GameStat.h"
 #include "KeyConfig.h"
+#include "Kontroller.h"
 #include "pc_bbft.h"
 #include "pc_window.h"
 #include "pc_gpu_preference.h"
@@ -215,7 +216,10 @@ public:
         ++frame;
         require(frame<3600,"frame bound; requires separate60s wall supervisor");
         if(gameflow.mMoviePlayer&&gameflow.mMoviePlayer->mIsActive){gameflow.mMoviePlayer->requestSkip();return result;}
-        if(!initialized||!pikiMgr||!tekiMgr||gameflow.mPauseAll||gameflow.mIsUIOverlayActive)return result;
+        if(!initialized||!pikiMgr||!tekiMgr||gameflow.mPauseAll||gameflow.mIsUIOverlayActive){
+            if(frame%60==0){std::printf("P2_ELECBUG_WAIT frame=%d initialized=%d pause=%d overlay=%d captain_state=%d buttons=%08x\n",frame,int(initialized),int(gameflow.mPauseAll),int(gameflow.mIsUIOverlayActive),initialized?n->getCurrState()->getID():-1,initialized?n->mKontroller->mCurrentInput:0);std::fflush(nullptr);}
+            return result;
+        }
         if(!started&&(n->getCurrState()->getID()!=NAVISTATE_Walk||++ready<45))return result;
         Teki* enemy=find(Target);Teki* partner=find(Partner);
         require(enemy&&partner&&pc_p2_elecbug_registered(enemy)&&pc_p2_elecbug_registered(partner),"two bound ElecBugs");
