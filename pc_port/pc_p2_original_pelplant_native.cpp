@@ -186,7 +186,11 @@ struct Native::Impl final:Engine {
   if(!cfg||!shape)return reject(e,"Pelplant cycle color physical resource unresolved");pellet->mConfig=cfg;pellet->mShapeObject=shape;return true;
  }
  bool metColor(unsigned color)const override{return met(color);}
- bool motion(Host& h,unsigned animation,bool blend,std::string&)override{auto& t=*tracks.at(h.creature);t.motion=animation;t.frame=0;t.blend=blend;t.blendTime=0;return true;}
+ bool motion(Host& h,unsigned animation,bool blend,std::string&)override{auto& t=*tracks.at(h.creature);
+  // Our source blend owns the whole transition. Discard the generic renderer's
+  // cached Full pose so it cannot fade back to Full when WaitSmall begins.
+  if(blend)presentation.forget(h.creature);
+  t.motion=animation;t.frame=0;t.blend=blend;t.blendTime=0;return true;}
  bool flags(Host& h,bool vulnerable,bool living,bool,float,std::string&)override{
   auto* actor=static_cast<BTeki*>(h.creature);if(vulnerable)actor->clearTekiOption(BTeki::TEKI_OPTION_INVINCIBLE);else actor->setTekiOption(BTeki::TEKI_OPTION_INVINCIBLE);
   if(living)actor->setTekiOption(BTeki::TEKI_OPTION_ORGANIC);else actor->clearTekiOption(BTeki::TEKI_OPTION_ORGANIC);return true;
