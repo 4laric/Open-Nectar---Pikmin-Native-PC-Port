@@ -4422,7 +4422,8 @@ void GameCoreSection::updateAI()
     }
     static bool bbftRedsQueued = false, bbftRedsReady = false;
     static int bbftInitialField = 20;
-    if (pc_bbft_skip_tutorial() && !pc_randomizer_resumed() && !gameflow.mMoviePlayer->mIsActive
+    // The selected source Body factory owns the complete starting roster.
+    if (!isRetailSourceStage() && pc_bbft_skip_tutorial() && !pc_randomizer_resumed() && !gameflow.mMoviePlayer->mIsActive
         && !gameflow.mPauseAll && !gameflow.mIsUIOverlayActive && itemMgr) {
         GoalItem* redOnion = itemMgr->getContainer(initialColor);
         // Real play keeps the 20 starting Pikmin in the Onion, as vanilla does:
