@@ -3265,3 +3265,4 @@ endif()
 
 # Real native factory/cache transport fixture; synthetic zero-birth admission only.
 pikmin_add_ci_fixture(original_gen_object tools/p2_original_gen_object_runtime.cpp)
+pikmin_add_ci_fixture(original_piki_init tools/p2_original_piki_init_runtime.cpp)
