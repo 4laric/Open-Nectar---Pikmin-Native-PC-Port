@@ -5,6 +5,7 @@
 #include "Piki.h"
 #include "PikiMgr.h"
 #include "SoundMgr.h"
+#include "Material.h"
 #include "pc_p2_white.h"
 #include "pc_p2_purple.h"
 #include "Interactions.h"
@@ -30,16 +31,27 @@ bool admitted=false;
 const BridgeRecord& row(unsigned uid){auto i=records.find(uid);if(i==records.end())die("source bridge UID absent");return i->second;}
 class SourceBridge;
 std::vector<SourceBridge*> bodies; // Physical birth order, no address sorting.
+std::vector<SourceBridge*> allocations; // PC global new survives stage arena reset.
 class SourceBridge final:public Bridge {
 public:
  unsigned uid;
  BridgeState state;
+ WorkObjectNode* ownedNode=nullptr;
+ bool nodeAttached=false;
  explicit SourceBridge(Shape* shape,unsigned id):Bridge(shape,true),uid(id),state(bridgeInitial(row(id))){
   const auto& r=row(uid);_400=r.type==2?4:r.type;
   if(mStageCount!=bridgeStageCount(r.type))die("retail bridge shape stage count mismatch");
   // Converter maps retail room00 joint2 to native leaf4, room01 to leaf6, etc.
   for(int i=0;i<mStageCount*2;++i)mStageJoints[i]=&shape->mJointList[4+2*i];
   mMaxHealth=r.stageLife;mGrid.setNeighbourSize(r.type==2?3:1);
+ }
+ ~SourceBridge(){
+  // No borrowed shape/joint/route/manager dereferences after stage reset.
+  delete ownedNode;
+  for(int i=0;i<mBuildShape->mCollGroupCount;++i){auto* group=mBuildShape->mCollGroupList[i];delete[] group->mTriangleList;delete group;}
+  delete[] mBuildShape->mCollGroupList;delete[] mBuildShape->mVertexList;delete[] mBuildShape->mCollTriList;delete[] mBuildShape->mJointVisibility;delete mBuildShape;
+  for(int i=0;i<mAnimatedMaterials.mMatCount;++i)if(mAnimatedMaterials.mMaterials[i].mFlags&MATFLAG_PVW)delete mAnimatedMaterials.mMaterials[i].mTevInfo; // Clone owns header only; stage/texture data borrowed.
+  delete[] mAnimatedMaterials.mMaterials;delete[] mStageJoints;delete[] mStageProgressList;delete mSeContext;
  }
  void sync(){
   const auto& r=row(uid);
@@ -94,7 +106,7 @@ public:
  }
  void doKill()override{
   mBuildShape->del();if(mStartWaypoint)mStartWaypoint->setFlag(true);if(mEndWaypoint)mEndWaypoint->setFlag(true);
-  bodies.erase(std::remove(bodies.begin(),bodies.end(),this),bodies.end());if(!workObjectMgr->originalForget(this))die("source bridge lost physical node");WorkObject::doKill();
+  bodies.erase(std::remove(bodies.begin(),bodies.end(),this),bodies.end());if(!nodeAttached||!workObjectMgr->originalForget(this))die("source bridge lost physical node");nodeAttached=false;WorkObject::doKill();
  }
 };
 GenObject* make(){return new GenObjectOriginalBridge;}
@@ -108,7 +120,12 @@ bool pc_p2_original_bridge_install(const std::vector<p2original::BridgeRecord>& 
  if(!records.empty()||!bodies.empty()||admitted||rows.size()>4096){e="bridge authority already installed/too large";return false;}
  std::map<unsigned,p2original::BridgeRecord> next;for(const auto& r:rows){if(!p2original::validateBridge(r,e))return false;if(!next.emplace(r.uid,r).second){e="duplicate source bridge";return false;}}records.swap(next);e.clear();return true;
 }
-void pc_p2_original_bridge_unload(){bodies.clear();generators.clear();records.clear();shapes.fill(nullptr);admitted=false;}
+void pc_p2_original_bridge_before_teardown(){
+ auto physical=bodies;
+ for(auto* b:physical){auto* g=b->mGenerator;b->mGenerator=nullptr;b->kill(false);if(g&&g->mLatestSpawnCreature==b)g->mLatestSpawnCreature=nullptr;}
+ for(auto* b:allocations){auto* g=b->mGenerator;if(g&&g->mLatestSpawnCreature==b)g->mLatestSpawnCreature=nullptr;b->mGenerator=nullptr;b->mSearchContext.exit();b->mStartWaypoint=nullptr;b->mEndWaypoint=nullptr;}
+}
+void pc_p2_original_bridge_unload(){if(!bodies.empty())die("bridge live teardown required before unload");for(auto* b:allocations)if(b->nodeAttached||b->mGenerator||b->mSearchContext.mMgr)die("bridge allocation still attached before unload");for(auto* b:allocations)delete b;allocations.clear();generators.clear();records.clear();shapes.fill(nullptr);admitted=false;}
 void pc_p2_original_bridge_register(){auto* f=GenObjectFactory::factory;if(!f)die("bridge factory missing");for(int i=0;i<f->mSpawnerCount;++i)if(f->mSpawnerInfo[i].mID==type)return;if(f->mSpawnerCount>=f->mMaxSpawners)die("bridge factory capacity");f->registerMember(type,make,"original P2 bridge",version);}
 GenObjectOriginalBridge::GenObjectOriginalBridge():GenObject(type,"original P2 bridge"){}
 void GenObjectOriginalBridge::doRead(RandomAccessStream& stream){if(mVersion!=version)die("bridge adapter version");if(!Generator::ramMode){uid=unsigned(stream.readInt());row(uid);}}
@@ -131,7 +148,7 @@ bool pc_p2_original_bridge_preflight(const std::vector<Generator*>& list,std::st
 }
 Creature* GenObjectOriginalBridge::birth(BirthInfo& info){
  auto g=generators.find(info.mGenerator);if(!admitted||g==generators.end()||g->second!=uid||info.mGenerator->mGenObject!=this)die("bridge birth without full admission");for(auto* b:bodies)if(b->uid==uid)die("duplicate bridge incarnation");const auto& r=row(uid);
- int previous=gsys->setHeap(SYSHEAP_App);auto* b=new SourceBridge(shapes[r.type],uid);b->mSRT.r.set(0,r.rotation[1]*0.017453292519943295f,0);b->mFaceDirection=b->mSRT.r.y;Vector3f p(r.position[0]+r.offset[0],r.position[1]+r.offset[1],r.position[2]+r.offset[2]);b->init(p);b->mGenerator=info.mGenerator;workObjectMgr->originalAdopt(b);bodies.push_back(b);b->startAI(0);gsys->setHeap(previous);std::printf("P2_ORIGINAL_BRIDGE_BIRTH uid=%u type=%d stages=%d retail_geometry=1\n",uid,r.type,b->mStageCount);return b;
+ int previous=gsys->setHeap(SYSHEAP_App);auto* b=new SourceBridge(shapes[r.type],uid);allocations.push_back(b);b->mSRT.r.set(0,r.rotation[1]*0.017453292519943295f,0);b->mFaceDirection=b->mSRT.r.y;Vector3f p(r.position[0]+r.offset[0],r.position[1]+r.offset[1],r.position[2]+r.offset[2]);b->init(p);b->mGenerator=info.mGenerator;b->ownedNode=workObjectMgr->originalAdoptNode(b);b->nodeAttached=true;bodies.push_back(b);b->startAI(0);gsys->setHeap(previous);std::printf("P2_ORIGINAL_BRIDGE_BIRTH uid=%u type=%d stages=%d retail_geometry=1\n",uid,r.type,b->mStageCount);return b;
 }
 bool pc_p2_original_bridge_generator_init(Generator* g,bool& handled,std::string& e){
  auto* o=g?dynamic_cast<GenObjectOriginalBridge*>(g->mGenObject):nullptr;handled=o!=nullptr;if(!handled)return true;if(!admitted||!generators.count(g)||generators.at(g)!=o->uid){e="bridge init without full inventory";return false;}g->mAliveCount=0;g->mLatestSpawnCreature=nullptr;if(!g->isExpired()&&!Generator::ramMode){BirthInfo info;info.mGenerator=g;g->mLatestSpawnCreature=o->birth(info);g->mAliveCount=1;}e.clear();return true;
