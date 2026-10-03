@@ -3134,6 +3134,7 @@ pikmin_add_ci_fixture(captain_reentry tools/p2_captain_reentry_runtime.cpp)
 # #1079 local native card save/resume acceptance, built only on CI.
 pikmin_add_ci_fixture(captain_campaign_resume tools/p2_captain_campaign_resume_runtime.cpp)
 pikmin_add_ci_fixture(original_pelplant tools/p2_original_pelplant_runtime.cpp)
+pikmin_add_ci_fixture(original_corpse tools/p2_original_corpse_runtime.cpp)
 add_executable(pc_p2_original_pelplant_test tools/test_p2_original_pelplant.cpp
     pc_port/pc_p2_original_pelplant.cpp pc_port/pc_p2_original_spawn_plan.cpp)
 target_include_directories(pc_p2_original_pelplant_test PRIVATE pc_port)
