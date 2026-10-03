@@ -310,6 +310,7 @@ public:
             std::printf("P2_ELECBUG_CONTACT_PROGRESS age=%d live=%d target_distance=%.2f state=%s throw_ticks=%d off_contact=%d contacts=%d\n",
                 age,live,distance(n->mSRT.t,enemy->mSRT.t),state,throwTicks,offContactSamples,contactSamples);
             std::fflush(nullptr);
+            if(stagedYellow){std::printf("P2_ELECBUG_SELECTION age=%d a_held=%d neutral=%d captain_state=%d buttons=%08x throw_bind=%08x yellow_state=%d yellow_mode=%d yellow_navi=%p captain=%p yellow_distance=%.3f next=%p\n",age,int(aHeld),neutralThrowTicks,n->getCurrState()->getID(),n->mKontroller->mCurrentInput,KeyConfig::_instance->mThrowKey.mBind,stagedYellow->getState(),stagedYellow->mMode,static_cast<void*>(stagedYellow->mNavi),static_cast<void*>(n),distance(stagedYellow->mSRT.t,n->mSRT.t),static_cast<void*>(n->mNextThrowPiki));std::fflush(nullptr);}
         }
         if(offContactSeen&&reverseSeen){
             for(const auto& entry:flight)if(entry.second==5&&(desiredSpecies()!=P2SpeciesWhite||entry.first==acquiredWhite)){
