@@ -68,3 +68,7 @@ bool pc_p2_original_captain_actor_animation_key(Navi*,int,std::string&);
 bool pc_p2_original_captain_bootstrap_roster(std::string&);
 bool pc_p2_original_captain_bootstrap_complete(const p2original::captain::LoadedScene&,std::string&);
 bool pc_p2_original_captain_continuation_valid(const p2original::captain::LoadedScene&,std::string&);
+// Genuine independent source Flick/Koke owner reads the actor's actual backup
+// and requests recovery through the ordinary source transition preflight.
+std::optional<p2original::captain::StateId> pc_p2_original_captain_reaction_backup(Navi*,std::string&);
+bool pc_p2_original_captain_recover_reaction(Navi*,std::string&);

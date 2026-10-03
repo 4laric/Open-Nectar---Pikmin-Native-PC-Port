@@ -159,6 +159,12 @@ int main(int argc,char** argv){try{
  const int advancesBeforeEnd=bankAdvances,cleanupBeforeEnd=cleanupEvents;check(!pc_p2_original_captain_animation_key(&a,1000,error)&&error.empty()&&dynamic_cast<State*>(a.current)->sourceStateId()==StateId::Walk,"actual Damaged END restores Walk and signals successful statechange with false plus empty error");check(cleanupEvents==cleanupBeforeEnd+1&&frames[0]==60&&bankAdvances==advancesBeforeEnd,"direct END dispatch performs genuine cleanup without duplicate clock advance");
  clearCounts();alive[0]=true;check(pc_p2_original_captain_transit(&a,StateId::Dead,error),error);check(downBegins==1&&deadEvents==1&&order.size()>=3&&order[1]=="begin-down-alive1"&&order[2]=="clear-source-alive","actual Dead init beginsDown BEFORE sourceCFalive clear");check(a.current->invincible(&a),"actual Dead sourceState invincible");a.mTargetVelocity.set(1,2,3);a.mVelocity.set(4,5,6);a.current->exec(&a);check(a.mTargetVelocity.x==0&&a.mTargetVelocity.y==0&&a.mTargetVelocity.z==0&&a.mVelocity.x==0&&a.mVelocity.y==0&&a.mVelocity.z==0,"actual Dead zeroes both real velocity fields");
  // Bootstrap controls execute the actual Walk factory/init and readonly gate.
+ alive[0]=true;observed=ordinary();check(!pc_p2_original_captain_reaction_backup(&a,error),"Dead cannot resume reaction backup after damage changed state");
+ check(pc_p2_original_captain_transit(&a,StateId::Walk,error),error);pc_p2_original_captain_before_transition(&a);
+ auto* realReaction=new ReceiverState(38,StateId::KokeDamage);fsm.registerState(realReaction);a.current=realReaction;
+ check(pc_p2_original_captain_reaction_backup(&a,error)==StateId::Walk,"genuine registered reaction sees saved source Walk backup");
+ world.game=Phase::Inactive;check(!pc_p2_original_captain_recover_reaction(&a,error)&&a.current==realReaction,"inactive reaction cannot recover");world.game=Phase::GameWorldActive;
+ check(pc_p2_original_captain_recover_reaction(&a,error)&&dynamic_cast<State*>(a.current)->sourceStateId()==StateId::Walk,"reaction recovery preflights actual source Walk transition");
  check(!pc_p2_original_captain_bootstrap_roster(error),"initial bootstrap cannot run in Active");
  world.game=Phase::Loading;alive[0]=alive[1]=true;observed=ordinary();
  check(!pc_p2_original_captain_bootstrap_roster(error),"two roster actors cannot share one stateful Walk FSM");

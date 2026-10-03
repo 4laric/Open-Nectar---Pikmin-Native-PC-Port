@@ -14,7 +14,7 @@ extern bool pc_p2_original_captain_pluck_preflight(Navi*,p2original::captain::St
 extern bool pc_p2_original_captain_punch_preflight(Navi*,std::string&) __attribute__((weak));
 extern bool pc_p2_original_captain_party_preflight(Navi*,p2original::captain::StateId,std::string&) __attribute__((weak));
 extern bool pc_p2_original_captain_dope_preflight(Navi*,std::string&) __attribute__((weak));
-extern bool pc_p2_source_navi_reaction_animation_key(Navi*,int,std::string&) __attribute__((weak));
+extern bool pc_p2_source_navi_reaction_animation_key(Navi*,const NaviState*,std::uint64_t,int,std::string&) __attribute__((weak));
 using namespace p2original::captain;
 namespace {
 struct Backup {const LoadedScene* scene=nullptr;std::uint64_t epoch=0;StateId state=StateId::Walk;};
@@ -162,6 +162,15 @@ bool pc_p2_original_captain_core_preflight(Navi* n,StateId id,std::string& e){
 }
 bool pc_p2_original_captain_can_enter_dead(const Navi* n){std::string e;return pc_p2_original_captain_core_preflight(const_cast<Navi*>(n),StateId::Dead,e);}
 bool pc_p2_original_captain_enter_dead(Navi* n){std::string e;return pc_p2_original_captain_transit(n,StateId::Dead,e);}
+std::optional<StateId> pc_p2_original_captain_reaction_backup(Navi* n,std::string& e){
+ e.clear();if(!actor(n,e)||pc_p2_original_captain_world()->phase()!=Phase::GameWorldActive){e="source reaction world is inactive";return {};}
+ auto* native=n->getCurrState();auto* state=dynamic_cast<State*>(native);
+ if(!state||state->nativeState()!=native||(state->sourceStateId()!=StateId::Flick&&state->sourceStateId()!=StateId::KokeDamage)||!n->mStateMachine){e="source reaction backup requires actual current Flick/Koke state";return {};}
+ bool owned=false;for(int i=0;i<n->mStateMachine->mStateCount;++i)if(n->mStateMachine->mStates[i]==native){owned=true;break;}
+ if(!owned){e="source reaction state is not owned by actual captain FSM";return {};}
+ return backup(n);
+}
+bool pc_p2_original_captain_recover_reaction(Navi* n,std::string& e){auto saved=pc_p2_original_captain_reaction_backup(n,e);return saved&&pc_p2_original_captain_transit(n,*saved,e);}
 bool pc_p2_original_captain_continuation_valid(const LoadedScene& scene,std::string& e){
  e.clear();if(pc_p2_original_captain_loaded_scene()!=&scene||!scene.incarnation()){e="source bootstrap scene is not canonical";return false;}
  for(unsigned slot=0;slot<2;++slot){auto* n=scene.captainAt(slot);if(!actor(n,e))return false;
@@ -241,7 +250,9 @@ bool pc_p2_original_captain_animation_key(Navi* n,int key,std::string& e){
  if(!typed||typed->nativeState()!=current){e="missing exact current source animation state";return false;}
  if(auto* state=dynamic_cast<NativeState*>(current))return state->sourceAnimationKey(n,key,e);
  if((typed->sourceStateId()==StateId::Flick||typed->sourceStateId()==StateId::KokeDamage)
-  &&pc_p2_source_navi_reaction_animation_key)return pc_p2_source_navi_reaction_animation_key(n,key,e);
+  &&pc_p2_source_navi_reaction_animation_key){auto* bank=bankFor(n,e);MotionState self;
+   if(!bank||!bank->stateAnimator(n,Animator::Self,self,e))return false;
+   return pc_p2_source_navi_reaction_animation_key(n,typed->nativeState(),self.generation,key,e);}
  e="actual source receiver key handler is unavailable";return false;
 }
 
@@ -250,6 +261,8 @@ bool pc_p2_original_captain_actor_animation_key(Navi* n,int key,std::string& e){
  if(!typed||typed->nativeState()!=current){e="missing exact current source actor key state";return false;}
  if(auto* state=dynamic_cast<NativeState*>(current))return state->sourceActorAnimationKey(n,key,e);
  if((typed->sourceStateId()==StateId::Flick||typed->sourceStateId()==StateId::KokeDamage)
-  &&pc_p2_source_navi_reaction_animation_key)return pc_p2_source_navi_reaction_animation_key(n,key,e);
+  &&pc_p2_source_navi_reaction_animation_key){auto* bank=bankFor(n,e);MotionState self;
+   if(!bank||!bank->stateAnimator(n,Animator::Self,self,e))return false;
+   return pc_p2_source_navi_reaction_animation_key(n,typed->nativeState(),self.generation,key,e);}
  e="actual source receiver actor key handler is unavailable";return false;
 }
