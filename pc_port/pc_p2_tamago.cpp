@@ -909,6 +909,7 @@ void pc_p2_tamago_update(BTeki* actor) {
                 Vector3f bounced = actor->getPosition();
                 bounced.y += 10.0f;
                 actor->inputPosition(bounced);
+                actor->resetCreatureFlag(CF_IsOnGround);
                 actor->mVelocity.set(std::sin(s.heading) * 80.0f,
                                      50.0f * (0.7f + 0.3f * rnd01()), std::cos(s.heading) * 80.0f);
                 appearPanic(actor, s);
