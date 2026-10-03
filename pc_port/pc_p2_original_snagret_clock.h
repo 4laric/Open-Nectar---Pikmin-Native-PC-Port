@@ -10,6 +10,7 @@ class MotionClock {
 public:
  void reset(){timer=0;cursor=0;completed=false;}
  float frame()const{return timer;}
+ float phase(int duration)const{return duration>1?timer/float(duration-1):0.0f;}
  std::vector<int> advance(float delta,const std::vector<std::pair<int,int>>& keys,int duration,bool loop){
   std::vector<int> out;
   if(completed||!std::isfinite(delta)||delta<=0||delta>1024||duration<=0)return out;

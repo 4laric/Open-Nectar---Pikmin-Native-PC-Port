@@ -567,7 +567,7 @@ int holding(BTeki* a, Snake& s) {
 void setPhase(Snake& s) {
     const float duration = clipDuration(s.parms->name, s.clip);
     const float len = duration > 0.0f ? duration : 1.0f;
-    if(s.original){s.phase=s.originalClock.frame()/(len*30.0f);return;}
+    if(s.original){s.phase=s.originalClock.phase(int(std::lround(len*30.0f)));return;}
     if (clipLoops(s.parms->name, s.clip)) {
         s.phase = s.stateTime / len;
         s.phase -= std::floor(s.phase);

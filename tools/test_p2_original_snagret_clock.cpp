@@ -13,6 +13,7 @@ int main(){
    count+=delivered(events,3);end+=delivered(events,1000);
   }
   assert(count==1&&end==1&&c.frame()==registration.second-1);
+  assert(c.phase(registration.second)==1.0f); // bank draw reconstructs phase*(duration-1)
  }
  MotionClock crossed;const std::vector<std::pair<int,int>> death={{67,2},{75,2},{110,5},{131,3},{143,4},{149,4}};
  assert(crossed.advance(131.99f,death,165,false)==(std::vector<int>{2,2,5}));
@@ -26,5 +27,8 @@ int main(){
  MotionClock loop;assert(loop.advance(60,{{0,0},{49,1}},50,true)==(std::vector<int>{0,1}));
  assert(loop.frame()==0);assert(loop.advance(1,{{0,0},{49,1}},50,true)==(std::vector<int>{0}));
  loop.reset();assert(loop.frame()==0);
+ MotionClock pose;pose.advance(35,{{34,3}},80,false);
+ assert(std::fabs(pose.phase(80)*79-35)<.00001f);
+ assert(pose.phase(1)==0);
  std::puts("original SnakeCrow strict key clock PASS");
 }
