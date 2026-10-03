@@ -3743,3 +3743,9 @@ add_executable(p2_original_captain_runtime_test tools/pc_p2_original_captain_run
 target_include_directories(p2_original_captain_runtime_test BEFORE PRIVATE tools/captain_damage_stubs pc_port)
 target_compile_options(p2_original_captain_runtime_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
 add_test(NAME p2_original_captain_runtime_test COMMAND p2_original_captain_runtime_test)
+
+# Authenticated source captain receiver component controls (#1260/#1289).
+add_executable(pc_p2_source_captain_receiver_test tools/test_p2_source_captain_receiver.cpp pc_port/pc_p2_hanachirashi_receiver.cpp)
+target_include_directories(pc_p2_source_captain_receiver_test BEFORE PRIVATE tools/source_captain_receiver_stubs pc_port)
+target_compile_options(pc_p2_source_captain_receiver_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME pc_p2_source_captain_receiver_test COMMAND pc_p2_source_captain_receiver_test)
