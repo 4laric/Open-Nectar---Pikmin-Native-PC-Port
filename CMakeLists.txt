@@ -426,6 +426,7 @@ set(PC_PORT_SOURCES
     pc_port/pc_p2_original_snow.cpp
     pc_port/pc_p2_original_snow_native.cpp
     pc_port/pc_p2_retail_cave_native.cpp
+    pc_port/pc_p2_retail_scene_input.cpp
     pc_port/pc_p2_retail_cave_foliage.cpp
     pc_port/pc_p2_retail_cave_blackpom.cpp
     pc_port/pc_p2_retail_cave_placement.cpp
@@ -3714,3 +3715,8 @@ add_executable(pc_p2_original_barrel_test tools/test_p2_original_barrel.cpp
 target_include_directories(pc_p2_original_barrel_test PRIVATE pc_port)
 target_compile_options(pc_p2_original_barrel_test PRIVATE -UNDEBUG)
 add_test(NAME p2_original_barrel COMMAND pc_p2_original_barrel_test)
+
+add_executable(pc_p2_retail_scene_input_test tools/p2_retail_scene_input_test.cpp)
+target_include_directories(pc_p2_retail_scene_input_test PRIVATE pc_port)
+target_compile_options(pc_p2_retail_scene_input_test PRIVATE -UNDEBUG)
+add_test(NAME p2_retail_scene_input COMMAND pc_p2_retail_scene_input_test)
