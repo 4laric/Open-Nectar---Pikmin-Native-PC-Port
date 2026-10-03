@@ -26,6 +26,7 @@
 #include "zen/ogFileChkSel.h"
 #include "zen/ogFileSelect.h"
 #include "zen/ogMemChk.h"
+#include "Controller.h"
 #include <fstream>
 #include <cstdio>
 #include <cstdlib>
@@ -41,6 +42,7 @@ bool prepared=false,sceneReady=false,restored=false,requested=false,pending=fals
 bool detaching=false,restoringParty=false;
 zen::ogScrFileChkSelMgr* saveChoice=nullptr;
 bool choosingSave=false;
+unsigned saveChoiceTicks=0;
 std::uint64_t permitGeneration=0;
 std::array<std::uint8_t,32> permitSha{};
 void clearPermit(){detaching=false;restoringParty=false;permitGeneration=0;permitSha.fill(0);}
@@ -185,7 +187,7 @@ void pc_p2_cave_campaign_request(){
     // Direct randomizer startup bypasses the title/file menu. Reuse its real
     // preparation and controller-driven file choice at each cave boundary;
     // physical backup slots are derived by the native card inventory.
-    requested=false;saveChoice->startSave();choosingSave=true;
+    requested=false;saveChoice->startSave();choosingSave=true;saveChoiceTicks=0;
     gameflow.mIsUIOverlayActive=TRUE;
     std::puts("P2_CAMPAIGN_SAVE_CHOICE_STARTED native_file_menu=1");
 }
@@ -201,6 +203,9 @@ P2CaveSaveChoiceSnapshot pc_p2_cave_campaign_save_choice(){
 bool pc_p2_cave_campaign_update_save_choice(Controller* input){
     if(!pc_randomizer_generated_cave()||!choosingSave||!saveChoice)return false;
     if(!input)invalid("card selection without native controller");
+    if(++saveChoiceTicks%30==0)
+        std::printf("P2_CAMPAIGN_SAVE_INPUT tick=%u player=%u down=%u pressed=%u previous=%u\n",
+            saveChoiceTicks,unsigned(input->mPlayerNum),unsigned(input->mCurrentInput),unsigned(input->mInputPressed),unsigned(input->mPrevInput));
     CardQuickInfo selection;
     const auto state=saveChoice->update(input,selection);
     if(state==zen::ogScrFileChkSelMgr::SelectionA||state==zen::ogScrFileChkSelMgr::SelectionB

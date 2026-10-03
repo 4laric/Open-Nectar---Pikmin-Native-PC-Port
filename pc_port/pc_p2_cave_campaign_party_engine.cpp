@@ -9,6 +9,7 @@
 #include "PikiHeadItem.h"
 #include "Navi.h"
 #include "NaviMgr.h"
+#include "NaviState.h"
 #include "GoalItem.h"
 #include "ItemMgr.h"
 #include "PikiState.h"
@@ -42,12 +43,15 @@ bool pc_p2_cave_campaign_party_capture(P2CaveCampaignParty& party,bool inside){
     auto nextProvenance=provenance;
     captured.captains.clear();captured.bodies.clear();
     Navi* active=naviMgr->getActiveNavi();if(!active)return held("missing_active_captain");
+    if(!active->getCurrState()||active->getCurrState()->getID()!=NAVISTATE_Walk)return held("captain_not_walking");
     captured.active=active->getNaviIndex();
     for(int slot=0;slot<naviMgr->getNaviCount();++slot){Navi* n=naviMgr->getNavi(slot);
         if(!n||!n->isAlive())return held("unavailable_captain");
-        captured.captains.push_back({slot,n->mHealth,n->mMaxHealth,n->mFaceDirection,point(n->mSRT.t)});
+        // Native Navi/Piki initialise current HP from their own parameters;
+        // the inherited Creature::mMaxHealth is not initialised for either.
+        captured.captains.push_back({slot,n->mHealth,C_NAVI_PARM(n,mHealth),n->mFaceDirection,point(n->mSRT.t)});
         if(!captured.captains.back().valid()){
-            std::printf("P2_CAMPAIGN_CAPTAIN_CAPTURE slot=%d health=%.9g inherited_max=%.9g parameter_max=%.9g state=%d\n",slot,n->mHealth,n->mMaxHealth,float(C_NAVI_PARM(n,mHealth)),n->getCurrState()?n->getCurrState()->getID():-1);
+            std::printf("P2_CAMPAIGN_CAPTAIN_CAPTURE slot=%d health=%.9g parameter_max=%.9g state=%d\n",slot,n->mHealth,float(C_NAVI_PARM(n,mHealth)),n->getCurrState()?n->getCurrState()->getID():-1);
             return held("invalid_captain_fields");}}
     Iterator bodies(pikiMgr);CI_LOOP(bodies){Piki* p=static_cast<Piki*>(*bodies);
         if(!p->isAlive())continue;
@@ -66,7 +70,7 @@ bool pc_p2_cave_campaign_party_capture(P2CaveCampaignParty& party,bool inside){
         b.species=pc_p2_species(p);b.growth=p->mHappa;
         b.owner=p->mNavi?p->mNavi->getNaviIndex():-1;b.player=p->mPlayerId;b.mode=p->mMode;
         b.generator=p->mGenerator?pc_randomizer_generator_id(p->mGenerator):0;
-        b.health=p->mHealth;b.maxHealth=p->mMaxHealth;b.face=p->mFaceDirection;b.position=point(p->mSRT.t);
+        b.health=p->mHealth;b.maxHealth=pikiMgr->mPikiParms->mPikiParms.mPikiMaxHealth();b.face=p->mFaceDirection;b.position=point(p->mSRT.t);
         if(!b.valid()||!assets(b.species)){
             std::printf("P2_CAMPAIGN_BODY_CAPTURE species=%d growth=%d owner=%d player=%d mode=%d health=%.9g max=%.9g assets=%d\n",b.species,b.growth,b.owner,b.player,b.mode,b.health,b.maxHealth,int(assets(b.species)));
             return held("invalid_body_fields");}
@@ -101,6 +105,8 @@ void pc_p2_cave_campaign_party_restore(const P2CaveCampaignParty& party){
     if(!party.present||!party.valid()||!pikiMgr||!naviMgr||!itemMgr)invalid("missing validated state/managers");
     if(naviMgr->getNaviCount()!=int(party.captains.size()))invalid("captain population changed");
     for(const auto& c:party.captains)if(!naviMgr->getNavi(c.slot))invalid("missing captain slot");
+    for(const auto& c:party.captains)if(c.maxHealth!=float(C_NAVI_PARM(naviMgr->getNavi(c.slot),mHealth)))invalid("captain health parameter changed");
+    for(const auto& b:party.bodies)if(b.maxHealth!=pikiMgr->mPikiParms->mPikiParms.mPikiMaxHealth())invalid("body health parameter changed");
     for(const auto& b:party.bodies)if(!assets(b.species))invalid("body species assets unavailable");
     const auto& savedHeads=party.inside?party.floorHeads:party.surfaceHeads;
     for(const auto& h:savedHeads)if(!assets(h.species))invalid("head species assets unavailable");
@@ -168,13 +174,13 @@ void pc_p2_cave_campaign_party_restore(const P2CaveCampaignParty& party){
             static_cast<unsigned long long>(source!=birthOrigins.end()?source->second.sourceActivation:0));
         p->kill(false);}
     for(const auto& c:party.captains){Navi* n=naviMgr->getNavi(c.slot);if(!n)invalid("missing captain slot");
-        n->mMaxHealth=c.maxHealth;n->mHealth=c.health;n->mSRT.t=vector(c.position);n->mFaceDirection=c.face;}
+        n->mHealth=c.health;n->mSRT.t=vector(c.position);n->mFaceDirection=c.face;}
     for(std::size_t i=0;i<party.bodies.size();++i){const auto& b=party.bodies[i];Piki* p=matched[i];
         if(!p){p=static_cast<Piki*>(pikiMgr->birth());if(!p)invalid("body birth capacity");
             p->init(b.owner>=0?naviMgr->getNavi(b.owner):naviMgr->getNavi());p->resetPosition(vector(b.position));}
         if(!pc_p2_set_species(p,b.species))invalid("body species");
         if(b.species==3)pc_p2_make_purple(p);if(b.species==4)pc_p2_make_white(p);
-        p->mHappa=b.growth;p->mPlayerId=b.player;p->mHealth=b.health;p->mMaxHealth=b.maxHealth;
+        p->mHappa=b.growth;p->mPlayerId=b.player;p->mHealth=b.health;
         p->mSRT.t=vector(b.position);p->mFaceDirection=b.face;
         p->changeMode(b.mode,b.owner>=0?naviMgr->getNavi(b.owner):nullptr);
         if(!b.sourceKey.empty()&&!birthOrigins.count(p)){
