@@ -618,9 +618,9 @@ PcKochappyFsmSnapshot pc_p2_kochappy_fsm_observe(const BTeki* actor)
  return value;
 }
 
-// Source Obj::pressCallBack transitions to Press (health 0, type1 anim, then
-// the terminal Demo kill). No in-engine P1 Chappy press callback is wired to
-// this P2 actor, so callers that own a bounded squash event may invoke this.
+// Source pressCallBack enters Press. Original Red receives actual descending
+// native contact through InteractPress and ends directly at Demo/kill.
+// Legacy preview actors retain this explicit trigger.
 void pc_p2_kochappy_fsm_press(BTeki* actor)
 {
 	if (!ready || !actor) return;
