@@ -3768,3 +3768,8 @@ pikmin_add_ci_fixture(white_adult_ingestion tools/p2_white_campaign_ingestion_ru
 if(TARGET pikmin_ci_fixture_white_adult_ingestion)
     target_include_directories(pikmin_ci_fixture_white_adult_ingestion PRIVATE ${P2_CHALLENGE_GUARD_INCLUDE_DIR})
 endif()
+
+# #148 real selected Shape constructor/disposal; compile only in CI.
+if(NOT ANDROID)
+    pikmin_add_ci_fixture(source_shape171 tools/source_shape171_runtime.cpp)
+endif()
