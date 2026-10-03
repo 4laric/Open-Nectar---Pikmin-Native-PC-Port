@@ -92,7 +92,7 @@ public:
  // No arrival-time rewards. P1 UfoPart's early suckMe must never reach this.
  void suckMe(Pellet*)override{}
  void finishSuck(Pellet*)override{}
- Shape* bank;int waypoint;bool live=true;
+ Shape* bank;int waypoint;bool live=false; // Prepared bodies are not observable gameplay.
 };
 enum class Phase {Bound,Sucking,Completed,Lost};
 struct Cargo {p2retail::BirthIdentity birth;p2retail::SceneIdentity scene;CompletedCallback callback;Phase phase=Phase::Bound;};
@@ -144,7 +144,7 @@ bool pc_p2_original_pod_birth(const Config& c,ContextProvider provider,std::stri
 }
 bool pc_p2_original_pod_commit_floor(const p2retail::SceneIdentity& scene,std::string& e){
  if(committed||!pod||!(scene==config.floor.scene)||!current())return reject(e,"pod_commit_identity");
- committed=true;e.clear();return true;
+ committed=true;pod->live=true;e.clear();return true;
 }
 bool pc_p2_original_pod_abort_prepared(const p2retail::SceneIdentity& scene,std::string& e){
  if(!prepared||!(scene==config.floor.scene)||committed||everSucked||completing)return reject(e,"pod_abort_after_observable_floor");
