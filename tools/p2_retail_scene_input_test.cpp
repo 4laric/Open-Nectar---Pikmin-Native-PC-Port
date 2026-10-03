@@ -8,6 +8,17 @@ int main(){
   "\nroutes "+hash+"\nstart "+hash+"\npool "+hash+"\nlayout "+hash+"\n";
  DevelopmentFloor selected;std::string error;
  assert(parseDevelopmentFloor(text,selected,error));
+ assert(selected.version==1&&sceneInputRole(selected,SceneInput::Rooms).empty());
+ auto successor=text;successor.replace(successor.find("FLOOR_1"),7,"FLOOR_2");
+ successor+="room-census "+hash+"\nwater-census "+hash+"\n";
+ DevelopmentFloor newer;assert(parseDevelopmentFloor(successor,newer,error));
+ assert(newer.version==2&&newer.sha256[6]==hash);
+ assert(sceneInputRole(newer,SceneInput::Rooms)=="p2-original/retail-caves/tutorial_1/floor1/room-census.json");
+ assert(sceneInputRole(newer,SceneInput::Water)=="p2-original/retail-caves/tutorial_1/floor1/water-census.json");
+ assert(!parseDevelopmentFloor(successor.substr(0,successor.find("water-census")),newer,error));
+ auto missing=successor.substr(0,successor.find("room-census"));
+ assert(!parseDevelopmentFloor(missing,newer,error)&&newer.version==2&&newer.sha256[6]==hash);
+ assert(!parseDevelopmentFloor(text+"room-census "+hash+"\n",newer,error));
  assert(sceneInputRole(selected,SceneInput::Start)=="p2-original/retail-caves/tutorial_1/floor1/start.json");
  selected.floor=2;
  assert(sceneInputRole(selected,SceneInput::Pool)=="p2-original/retail-caves/tutorial_1/floor2/unit-pool.txt");

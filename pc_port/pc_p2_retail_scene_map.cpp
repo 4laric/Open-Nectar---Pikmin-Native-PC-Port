@@ -1,6 +1,7 @@
 #include "pc_p2_retail_scene.h"
 #include "pc_p2_retail_start.h"
 #include "pc_p2_retail_geometry.h"
+#include "pc_p2_retail_rooms.h"
 #include "pc_randomizer.h"
 #include "pc_p2_original_pod.h"
 #include "pc_p2_retail_cave_native.h"
@@ -34,10 +35,21 @@
 #include <array>
 #include <chrono>
 #include <random>
+#include <atomic>
 
 namespace p2retail {namespace {
 std::uint64_t nextSerial=1;
 std::uint64_t nextActivation=1;
+std::uint64_t sceneThreadToken()noexcept{
+ static std::atomic<std::uint64_t> next{1};
+ static thread_local const std::uint64_t token=[](){
+  auto candidate=next.load(std::memory_order_relaxed);
+  while(candidate&&candidate!=std::numeric_limits<std::uint64_t>::max())
+   if(next.compare_exchange_weak(candidate,candidate+1,std::memory_order_relaxed))return candidate;
+  return std::uint64_t(0);
+ }();
+ return token;
+}
 // A fresh process incarnation prevents native serial/activation counters from
 // aliasing a previous run. This nonce identifies a visit; it authenticates no
 // SAVE, selected input, actor or World state.
@@ -89,6 +101,8 @@ class SceneRuntime final:public FloorIdentityAuthority,public SceneOps {
  SceneContext context;
  SelectedSceneInputs selected;
  SourceStart start;
+ SourceRoomCensus roomCensus;
+ SourceWaterInputs waterInputs;
  StageInfo stage;
  std::string stageName,stageFile;
  StageInfo* previousStage=nullptr;
@@ -118,9 +132,9 @@ class SceneRuntime final:public FloorIdentityAuthority,public SceneOps {
   out=context.mSnapshot;return true;
  };}
 public:
- SceneRuntime(SelectedSceneInputs input,SourceStart source):selected(std::move(input)),start(std::move(source)){}
+ SceneRuntime(SelectedSceneInputs input,SourceStart source,SourceRoomCensus rooms,SourceWaterInputs water):selected(std::move(input)),start(std::move(source)),roomCensus(std::move(rooms)),waterInputs(std::move(water)){context.mThreadToken=sceneThreadToken();}
  bool install(MapMgr* map,std::string& error){
-  if(!gsys||!map||map!=mapMgr||map->mMapModel||installed||!nextSerial||nextSerial==std::numeric_limits<std::uint64_t>::max()){
+  if(!context.ownsCurrentThread()||!gsys||!map||map!=mapMgr||map->mMapModel||installed||!nextSerial||nextSerial==std::numeric_limits<std::uint64_t>::max()){
    error="retail scene map ownership/order";return false;
   }
   if(!selectedCurrent()){error="retail scene selection changed before map installation";return false;}
@@ -209,7 +223,7 @@ public:
  const SceneContext* prepared()const noexcept{
   // Nonallocating incarnation/mode checks: the revision belongs to the real
   // retained selection; campaign/session were captured and checked at install.
-  return installed&&pc_randomizer_original_session()&&pc_randomizer_original_selection_revision()==context.mRevision&&
+  return context.ownsCurrentThread()&&installed&&pc_randomizer_original_session()&&pc_randomizer_original_selection_revision()==context.mRevision&&
    context.mSnapshot.scene.serial&&flowCont.mCurrentStage==context.mStage&&mapMgr==context.mMap&&
    mapMgr->mMapModel==shape&&routeMgr==context.mRoutes&&!flowCont.mIsVersusMode?&context:nullptr;
  }
@@ -225,6 +239,16 @@ public:
   error="retail scene birth absent from reserved source census";return false;
  }
  const FloorIdentityAuthority* births()const noexcept{return prepared()?this:nullptr;}
+ const SourceRoomCensus* rooms(const SceneContext& owner,std::uint64_t serial,std::uint64_t revision)const noexcept{
+  // Compare addresses before dereferencing a borrower. Native serial and
+  // selected revision are verified by the actual prepared owner lookup.
+  return &owner==&context&&serial&&serial==context.nativeSerial()&&revision&&revision==context.mRevision&&
+   prepared()==&context&&context.mPhase!=ScenePhase::Releasing&&
+   selected.selection.version==2&&!roomCensus.rooms.empty()?&roomCensus:nullptr;
+ }
+ const SourceWaterInputs* water(const SceneContext& owner,std::uint64_t serial,std::uint64_t revision)const noexcept{
+  return rooms(owner,serial,revision)&&waterInputs.roomCensusSha256==roomCensus.sha256?&waterInputs:nullptr;
+ }
  bool owns(const SceneIdentity& identity)const noexcept override{return prepared()&&identity==context.mSnapshot.scene;}
  bool mode(const SceneIdentity& identity,bool& story,bool& inCave,std::string& error)const override{
   if(!owns(identity))return fail(error,"retail scene actual story mode unavailable");
@@ -374,6 +398,7 @@ public:
   context.mPhase=ScenePhase::Prepared;error.clear();return true;
  }
  bool releaseMap(std::string& error){
+  if(!context.ownsCurrentThread())return fail(error,"retail map teardown belongs to another native thread");
   // Physical transaction release will return to Prepared only after every
   // actual consumer retires. A committed/installing owner cannot be discarded.
   if(context.mPhase!=ScenePhase::Prepared||pc_p2_original_pod_owned()||exitPrepared||
@@ -393,9 +418,12 @@ public:
  }
 };
 namespace {std::unique_ptr<SceneRuntime> runtime;}
+bool SceneContext::ownsCurrentThread()const noexcept{return mThreadToken&&mThreadToken==sceneThreadToken();}
 const SceneContext* preparedScene()noexcept{return runtime?runtime->prepared():nullptr;}
 const FloorIdentityAuthority* sceneBirths()noexcept{return runtime?runtime->births():nullptr;}
 const SceneContext* committedScene()noexcept{return runtime?runtime->committed():nullptr;}
+const SourceRoomCensus* sourceSceneRooms(const SceneContext& owner,std::uint64_t serial,std::uint64_t revision)noexcept{return runtime?runtime->rooms(owner,serial,revision):nullptr;}
+const SourceWaterInputs* sourceSceneWater(const SceneContext& owner,std::uint64_t serial,std::uint64_t revision)noexcept{return runtime?runtime->water(owner,serial,revision):nullptr;}
 bool knownSceneSourceBirth(const p2original::InstanceIdentity& identity,BirthIdentity& out,Snapshot& floor,std::string& error){
  if(!runtime){error="retail retained parent has no actual scene owner";return false;}
  return runtime->knownSourceBirth(identity,out,floor,error);
@@ -409,9 +437,10 @@ bool installSceneMap(MapMgr* map,bool& handled,std::string& error){
  SelectedSceneInputs inputs;bool selected=false;
  if(!pc_p2_retail_scene_selection(inputs,selected,error))return false;
  if(!selected){handled=false;return true;}
- SourceStart start;GeometryFacts geometry;
+ SourceStart start;GeometryFacts geometry;SourceRoomCensus rooms;SourceWaterInputs water;
  if(!parseSourceStart(inputs,start,error)||!parseRetailGeometry(inputs,geometry,error))return false;
- runtime=std::make_unique<SceneRuntime>(std::move(inputs),std::move(start));
+ if(inputs.selection.version==2&&(!parseSourceRoomCensus(inputs,rooms,error)||!parseSourceWaterInputs(inputs,rooms,water,error)))return false;
+ runtime=std::make_unique<SceneRuntime>(std::move(inputs),std::move(start),std::move(rooms),std::move(water));
  // Keep partial resource ownership on refusal. The caller must terminate or
  // run the owning scene's cleanup; it cannot reuse this map as a surface.
  if(!runtime->install(map,error))return false;
@@ -421,6 +450,8 @@ bool installSceneMap(MapMgr* map,bool& handled,std::string& error){
 const p2retail::SceneContext* pc_p2_retail_scene_prepared()noexcept{return p2retail::preparedScene();}
 bool pc_p2_retail_scene_install_map(MapMgr* map,bool& handled,std::string& error){return p2retail::installSceneMap(map,handled,error);}
 const p2retail::FloorIdentityAuthority* pc_p2_retail_scene_births()noexcept{return p2retail::sceneBirths();}
+const p2retail::SourceRoomCensus* pc_p2_retail_scene_rooms(const p2retail::SceneContext& owner,std::uint64_t serial,std::uint64_t revision)noexcept{return p2retail::sourceSceneRooms(owner,serial,revision);}
+const p2retail::SourceWaterInputs* pc_p2_retail_scene_water_inputs(const p2retail::SceneContext& owner,std::uint64_t serial,std::uint64_t revision)noexcept{return p2retail::sourceSceneWater(owner,serial,revision);}
 bool pc_p2_retail_scene_known_source_birth(const p2original::InstanceIdentity& identity,p2retail::BirthIdentity& out,p2retail::Snapshot& floor,std::string& error){
  return p2retail::knownSceneSourceBirth(identity,out,floor,error);
 }

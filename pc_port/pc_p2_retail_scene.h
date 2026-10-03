@@ -12,6 +12,8 @@ namespace p2original {struct InstanceIdentity;}
 namespace p2retail {
 enum class ScenePhase { Prepared, Installing, Committed, Releasing };
 class SceneRuntime;
+struct SourceRoomCensus;
+struct SourceWaterInputs;
 
 // Borrowed from the actual selected-floor owner. Callers cannot construct or
 // replace a context. Prepared facts admit resource checks, never live gameplay.
@@ -32,6 +34,7 @@ public:
     std::uint64_t selectionRevision() const noexcept { return mRevision; }
     std::uint64_t nativeSerial() const noexcept { return mSnapshot.scene.serial; }
     bool startsGrounded() const noexcept { return mStartsGrounded; }
+    bool ownsCurrentThread() const noexcept;
     const std::array<float,3>& captainStartBase() const noexcept { return mStartBase; }
     float mapYaw() const noexcept { return mMapYaw; }
     const std::string& planRole() const noexcept { return mPlanRole; }
@@ -51,6 +54,7 @@ private:
     std::string mCampaign,mSession,mPlanRole,mGeometryRole,mRoutesRole;
     std::string mGeometryBytes,mRoutesBytes;
     std::uint64_t mRevision=0;
+    std::uint64_t mThreadToken=0;
     std::array<float,3> mStartBase{};
     float mMapYaw=0;
     bool mStartsGrounded=false;
@@ -79,6 +83,14 @@ bool pc_p2_retail_scene_install_map(MapMgr*,bool& handled,std::string& error);
 // Independently reserved from the actual selected source definition AFTER real
 // Stage/map installation, BEFORE native actor allocation. Not a SAVE/card proof.
 const p2retail::FloorIdentityAuthority* pc_p2_retail_scene_births() noexcept;
+// Borrowed immutable raw room census adopted by this exact current owner.
+// Version-1 selection has no census. Releasing/replaced owners refuse. This
+// getter grants no matrix, collision, hiddenCollision, Plat or water authority.
+const p2retail::SourceRoomCensus* pc_p2_retail_scene_rooms(const p2retail::SceneContext&,
+    std::uint64_t nativeSerial,std::uint64_t selectionRevision) noexcept;
+// Authenticated raw WaterBox inputs only, never a current water/known-dry query.
+const p2retail::SourceWaterInputs* pc_p2_retail_scene_water_inputs(const p2retail::SceneContext&,
+    std::uint64_t nativeSerial,std::uint64_t selectionRevision) noexcept;
 // Read-only retained actual parent incarnation, including natural retirement.
 // Requires this committed selected scene; grants no activity or SAVE authority.
 // The full native binding fingerprint remains layoutSha256, while Snapshot
