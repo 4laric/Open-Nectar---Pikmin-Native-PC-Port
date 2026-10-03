@@ -1543,7 +1543,7 @@ void pc_p2_chappy_setup() {
     // The ordinary scene scan must not reset that family or require AP rosters.
     if(originalBank)return;
     for(const auto& row:p2original::originalActors().rows())
-        if(row.second.enemy.source==2||row.second.enemy.source==43)return;
+        if(row.second.enemy.source==2||row.second.enemy.source==43||row.second.enemy.source==33)return;
     setupChappy(nullptr, nullptr);
 }
 
@@ -1554,7 +1554,7 @@ bool pc_p2_chappy_prepare_original(const std::set<unsigned>& sources, std::strin
         return false;
     }
     for (unsigned source : sources) {
-        if ((source!=2&&source!=43)||!p2chappy::speciesForSource(source)) {
+        if ((source!=2&&source!=43&&source!=33)||!p2chappy::speciesForSource(source)) {
             error = "original source has no concrete Chappy profile";
             return false;
         }
@@ -1627,7 +1627,7 @@ static bool bindChappy(BTeki* actor, unsigned generatorId, unsigned sourceId,boo
 bool pc_p2_chappy_bind_dynamic(BTeki* actor,unsigned generator,unsigned source){return bindChappy(actor,generator,source,false);}
 bool pc_p2_chappy_bind_original(BTeki* actor,unsigned token,unsigned source){
     unsigned boundSource=0,boundToken=0;
-    if(!actor||(source!=2&&source!=43)||!p2original::originalActors().query(static_cast<Creature*>(actor),boundSource,boundToken)
+    if(!actor||(source!=2&&source!=43&&source!=33)||!p2original::originalActors().query(static_cast<Creature*>(actor),boundSource,boundToken)
        ||boundSource!=source||boundToken!=token)return false;
     return bindChappy(actor,token,source,true);
 }
