@@ -13,6 +13,7 @@
 #include "UfoItem.h"
 #include "MapCode.h"
 #include "Graphics.h"
+#include "Dolphin/gx.h"
 #include "Camera.h"
 #include "MapMgr.h"
 #include "MoviePlayer.h"
@@ -70,15 +71,21 @@ void mesh(Graphics& gfx,const P2CaveVisibleBoundary& a){
     for(int i=0;i<segments;++i){
         const float t=i*tau/segments,u=(i+1)*tau/segments;
         const float r=48.f+(i%3)*3.f,s=48.f+((i+1)%3)*3.f;
-        const float h=11.f+(i%4)*2.f,k=11.f+((i+1)%4)*2.f;
-        auto inner=ring(a,t,30,4),next=ring(a,u,30,4);
+        const float h=17.f+(i%4)*.6f,k=17.f+((i+1)%4)*.6f;
+        auto inner=ring(a,t,36,15),next=ring(a,u,36,15);
         auto outer=ring(a,t,r,h),outNext=ring(a,u,s,k);
-        const Colour stone(i%2?Colour(139,123,99,255):Colour(166,149,118,255));
+        const Colour stone(i%2?Colour(160,164,170,255):Colour(188,192,194,255));
         tri(gfx,inner,next,outNext,stone);tri(gfx,inner,outNext,outer,stone);
-        tri(gfx,outer,outNext,ring(a,u,s+7,1),Colour(89,78,61,255));
-        tri(gfx,outer,ring(a,u,s+7,1),ring(a,t,r+7,1),Colour(89,78,61,255));
-        tri(gfx,Vector3f(a.x,a.y+3,a.z),next,inner,Colour(17,21,27,255));
-        if(a.returning){
+        tri(gfx,outer,outNext,ring(a,u,s+7,1),Colour(91,97,105,255));
+        tri(gfx,outer,ring(a,u,s+7,1),ring(a,t,r+7,1),Colour(91,97,105,255));
+    }
+    for(int i=0;i<segments;++i){
+        const float t=i*tau/segments,u=(i+1)*tau/segments;
+        tri(gfx,Vector3f(a.x,a.y+14,a.z),ring(a,u,36,15),ring(a,t,36,15),Colour(17,21,27,255));
+    }
+    if(a.returning){
+        for(int i=0;i<segments;++i){
+            const float t=i*tau/segments,u=(i+1)*tau/segments;
             auto low=ring(a,t,16,5),lowNext=ring(a,u,16,5);
             auto high=ring(a,t,8,104),highNext=ring(a,u,8,104);
             tri(gfx,low,lowNext,highNext,Colour(75,195,239,255));
@@ -158,12 +165,20 @@ void pc_p2_cave_visible_draw(Graphics& gfx){
         std::printf("P2_CAVE_VISIBLE_DRAW kind=%s scene=%lu x=%.3f y=%.3f z=%.3f authored=1\n",
             actor.returning?"geyser":"hole",drawnScene,actor.x,actor.y,actor.z);probe(actor);}
     const Colour color=gfx.mPrimaryColour,aux=gfx.mAuxiliaryColour;
-    const int blend=gfx.setCBlending(BLEND_Alpha),cull=gfx.setCullFront(2);
+    const int blend=gfx.setCBlending(BLEND_Alpha),cull=gfx.mCullMode;
     const bool depth=gfx.setDepth(true);
     Texture* texture=gfx.mActiveTexture[0];const bool light=gfx.setLighting(false,nullptr);
     gfx.setPerspective(gfx.mCamera->mPerspectiveMatrix.mMtx,gfx.mCamera->mFov,
         gfx.mCamera->mAspectRatio,gfx.mCamera->mNear,gfx.mCamera->mFar,1.f);
     gfx.useMaterial(nullptr);gfx.useTexture(nullptr,0);gfx.useMatrix(gfx.mCamera->mLookAtMtx,0);
+    // DGX's default material resets GX culling to BACK. Set two-sided fans
+    // after that initialization, or the upward rim/mouth faces disappear.
+    gfx.setCullFront(2);
+#if PIKI_USE_DGX
+    // These submitted fans carry their own colors. Avoid inheriting the last
+    // map material's register color for the stone rim and recessed mouth.
+    GXSetChanCtrl(GX_COLOR0A0,GX_FALSE,GX_SRC_REG,GX_SRC_VTX,0,GX_DF_NONE,GX_AF_NONE);
+#endif
     mesh(gfx,actor);
     auto* n=naviMgr?naviMgr->getActiveNavi():nullptr;
     if(safe(n) && actor.ready && input.prompt() && actor.near(n->mSRT.t.x,n->mSRT.t.y,n->mSRT.t.z)
