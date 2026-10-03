@@ -5,6 +5,8 @@ namespace p2original { namespace piki {
 // Concrete source startup/actor owners implement this read-only boundary.
 // Missing retail fields cannot be inferred from P1 flags, HP, or movieMode.
 struct PhysicalFacts {
+ // Actual source CF_IsAlive and source update-context gate, not host HP/FSM.
+ bool alive=false,updateContext=false;
  bool frozen=false,movieExtra=false,movieActor=false,pikiManagerFlag1=false;
  bool naviManagerFlag1=false,mapAvailable=false,stuck=false,targetCollision=false;
 };
@@ -12,6 +14,8 @@ class PhysicalSource {
 public:
  virtual ~PhysicalSource()=default;
  virtual const captain::LoadedScene& scene()const=0;
+ // All fields require actual producer knowledge; absent facts refuse rather
+ // than accepting the zero-initialized struct as a successful observation.
  virtual bool readPhysical(Handle,PhysicalFacts&,std::string&)const=0;
 };
 struct NativeBodyFacts {
