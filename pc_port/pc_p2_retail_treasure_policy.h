@@ -8,6 +8,12 @@
 // expectedFloor, expectedBirth and selectedSource from its authenticated
 // campaign/floor/SAVE owner, never reconstruct this evidence from input rows.
 namespace p2retailtreasure {
+// selectedFingerprint must come from pc_randomizer_session_fingerprint().
+// Matching is necessary, but does not replace authenticated floor/card proof.
+inline bool selectedScene(const p2retail::SceneIdentity& scene,
+                          const std::string& selectedFingerprint) {
+    return p2retail::hex64(selectedFingerprint)&&scene.seed==selectedFingerprint;
+}
 inline const p2treasure::Entry* looseSource(const p2treasure::Catalog& catalog,
     const p2retail::CaveDescriptor& supplied,unsigned floor,
     const p2retail::BirthIdentity& birth,const p2retail::SceneIdentity& scene,

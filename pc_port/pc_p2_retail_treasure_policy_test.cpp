@@ -15,6 +15,12 @@ int main() {
     const auto* floor=p2retail::definition(*cave,2);assert(floor);
     p2retail::BirthIdentity birth{5,0,4,p2retail::instanceKey(*cave,2,floor->rows[5],0)};
     p2retail::SceneIdentity scene{"synthetic-seed","synthetic-visit",std::string(64,'a'),7};
+    auto selectedScene=scene;selectedScene.seed=std::string(64,'f');
+    assert(p2retailtreasure::selectedScene(selectedScene,std::string(64,'f')));
+    assert(!p2retailtreasure::selectedScene(selectedScene,""));
+    assert(!p2retailtreasure::selectedScene(selectedScene,std::string(64,'e')));
+    selectedScene.seed="process-token";
+    assert(!p2retailtreasure::selectedScene(selectedScene,"process-token"));
     p2retail::Snapshot expected{cave->cave,cave->source,cave->sourceSha256,cave->catalogSha256,2,cave->maxFloor,scene,true,true};
     auto source=p2retailtreasure::looseSource(catalog,*cave,2,birth,scene,expected,birth);
     assert(source&&source->id=="map01"&&source->strength==101&&source->slots==101);
