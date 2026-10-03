@@ -128,7 +128,7 @@ bool Reader::prepareCStick(Navi* n,const nativecontrol::Request& request,Plan& o
 }
 bool Reader::commitCStick(const Plan& plan,std::string& e){
  if(m->busy){m->reentered=true;return fail(e,"Source C-stick actual mutation reentered");}
- if(!m->matches(plan,e))return false;
+ if(!m->matches(plan,e)||!nativecontrol::cStickControlTransaction(plan.actor_,e)||!m->matches(plan,e))return false;
  m->busy=true;m->reentered=false;
  struct Scope {Impl& m;~Scope(){m.busy=false;m.reentered=false;}} scope{*m};
  Plan live=plan;
@@ -143,9 +143,14 @@ bool Reader::commitCStick(const Plan& plan,std::string& e){
   // It MUST NOT call the legacy combined refresh+setPos storage convenience.
   return m->matches(live,e)&&m->plate->execute(live.actor_,command,e)&&m->matches(live,e);
  };
- if(!write([&](Impl::Actor& a){a.stick.position=plan.source_.state.position;a.stick.commandOn2=plan.source_.state.commandOn2;
-   if(!plan.source_.neutral)a.stick.angle=plan.source_.state.angle;
-   else {a.stick.scaleTimer=plan.source_.state.scaleTimer;a.stick.commandOn1=plan.source_.state.commandOn1;a.stick.neutralTurn=plan.source_.state.neutralTurn;}}))return false;
+ // navi.cpp4864-4872: clear position/command, assign active command, reset
+ // the source clock, THEN publish transformed position and calculate angle.
+ if(!write([&](Impl::Actor& a){a.stick.position=actions::Vec3{};a.stick.commandOn2=false;}))return false;
+ if(!plan.source_.neutral){
+  if(!write([&](Impl::Actor& a){a.stick.commandOn2=true;}))return false;
+  if(!m->matches(live,e)||!nativecontrol::resetCStickSceneAnimationTimer(live.actor_,e)||!m->matches(live,e))return false;
+  if(!write([&](Impl::Actor& a){a.stick.position=plan.source_.state.position;a.stick.angle=plan.source_.state.angle;}))return false;
+ }else if(!write([&](Impl::Actor& a){a.stick.scaleTimer=plan.source_.state.scaleTimer;a.stick.commandOn1=plan.source_.state.commandOn1;a.stick.neutralTurn=plan.source_.state.neutralTurn;}))return false;
  for(const auto& command:plan.source_.commands){
   if(command.kind==cstick::CommandKind::SetPos&&!plan.source_.neutral&&!write([&](Impl::Actor& a){a.stick.scaleTimer=plan.source_.state.scaleTimer;}))return false;
   if(!execute(command))return false;

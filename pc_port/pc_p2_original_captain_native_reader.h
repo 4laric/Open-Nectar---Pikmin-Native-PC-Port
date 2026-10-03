@@ -41,6 +41,8 @@ public:
  bool initializeAfterBodyReset(std::string&);
  bool bindPlate(PlateDriver&,std::string&);
  bool prepareCStick(Navi*,const nativecontrol::Request&,Plan&,std::string&)const;
+ // Every commit preflights actual nativecontrol Effects.commit in flight before
+ // any prefix write; active clock reset precedes Refresh at navi.cpp4871.
  bool commitCStick(const Plan&,std::string&);
  // Source prefix field writes precede actual CPlate callbacks. On later
  // refusal those genuine partial writes remain; no later suffix is executed.

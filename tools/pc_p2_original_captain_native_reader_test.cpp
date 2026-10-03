@@ -34,6 +34,7 @@ SourceBank bank;SourceBank* selectedBank=&bank;const LoadedScene* selectedScene=
 std::string bytes;std::optional<float> timer;std::int8_t disband=0;std::uint64_t motionGeneration=1;
 pk::Plate* ownedPlate=nullptr;pk::PlateState plateState;std::function<void()> jointQuery;
 pk::Ownership bodyOwnership;unsigned retained=0;
+bool controlTransaction=true,clockAvailable=true;std::vector<std::string> order;std::function<void()> clockEvent;
 nativecontrol::Request request(){nativecontrol::Request r;r.hasController=true;r.demo=world.demo_;r.camera.side={1,0,0};r.camera.up={0,1,0};r.camera.view={0,0,1};r.subStick={0,.075f};return r;}
 struct Driver final:nr::PlateDriver {
  nr::Reader& reader;pk::Plate plate;std::vector<cstick::CommandKind> commands;std::function<void()> event;bool accepted=true;
@@ -41,13 +42,14 @@ struct Driver final:nr::PlateDriver {
  pk::Plate& storage()const override{return const_cast<pk::Plate&>(plate);}
  bool execute(Navi* n,const cstick::Command& c,std::string& e)override{
   commands.push_back(c.kind);
+  order.push_back(c.kind==cstick::CommandKind::Refresh?"refresh":"pose");
   if(c.kind==cstick::CommandKind::SetPos||c.kind==cstick::CommandKind::SetPosGray){pk::PlatePose pose;check(reader.readPose(n,pose,e));check(pose.scale==c.scale);check(pose.angle==c.angle);}
   if(event)event();
   return accepted;
  }
  bool afterRefresh(Navi*,cstick::AfterRefresh& out,std::string&)const override{out={};out.maxPositionOffset={0,0,0};return true;}
 };
-void fresh(){++scene.epoch;selectedScene=&scene;selectedBank=&bank;world.phase_=Phase::Loading;world.demo_=Demo::Inactive;lifetime=true;alive=true;bankValid=true;motionGeneration=1;timer.reset();disband=0;ownedPlate=nullptr;jointQuery={};bodyOwnership={};retained=0;a.current=&typed;b.current=&typed;typed.id=StateId::Walk;a.mKontroller=&controller;b.mKontroller=nullptr;a.mSRT.t={1,2,3};a.mVelocity={4,5,6};a.mFaceDirection=0;plateState={};plateState.maxPositionOffset={7,8,9};}
+void fresh(){++scene.epoch;selectedScene=&scene;selectedBank=&bank;world.phase_=Phase::Loading;world.demo_=Demo::Inactive;lifetime=true;alive=true;bankValid=true;motionGeneration=1;timer.reset();disband=0;ownedPlate=nullptr;jointQuery={};bodyOwnership={};retained=0;controlTransaction=true;clockAvailable=true;order.clear();clockEvent={};a.current=&typed;b.current=&typed;typed.id=StateId::Walk;a.mKontroller=&controller;b.mKontroller=nullptr;a.mSRT.t={1,2,3};a.mVelocity={4,5,6};a.mFaceDirection=0;plateState={};plateState.maxPositionOffset={7,8,9};}
 void init(nr::Reader& r,Driver& d){std::string e;check(r.initializeAfterBodyReset(e));check(r.bindPlate(d,e));}
 void active(nr::Reader& r){std::string e;nr::Plan p;check(r.prepareCStick(&a,request(),p,e));check(p.resetsSceneAnimationTimer());check(r.commitCStick(p,e));}
 }
@@ -62,7 +64,9 @@ bool SourceBank::sourceBytes(SourceResource,std::string& out,std::string&)const{
 bool SourceBank::parameters(SourceParameters& out,std::string&)const{out.neutralStick=.1f;return bankValid;}
 bool SourceBank::state(const Navi*,MotionState& out,std::string&)const{out.generation=motionGeneration;return bankValid;}
 bool SourceBank::jointWorld(Navi*,unsigned joint,std::array<float,12>& out,std::string&){check(joint==10);out={1,0,0,10,0,1,0,20,0,0,1,30};if(jointQuery)jointQuery();return bankValid;}
-namespace nativecontrol {std::optional<float> sceneAnimationTimer(const Navi*){return timer;}}
+namespace nativecontrol {std::optional<float> sceneAnimationTimer(const Navi*){return timer;}
+bool cStickControlTransaction(Navi*,std::string&){return controlTransaction;}
+bool resetCStickSceneAnimationTimer(Navi*,std::string&){if(!controlTransaction||!clockAvailable)return false;order.push_back("reset");if(clockEvent)clockEvent();timer=0;return true;}}
 }}
 namespace p2original {namespace piki {
 Plate* nativePlate(const captain::LoadedScene& s,std::string&){return &s==selectedScene?ownedPlate:nullptr;}
@@ -83,6 +87,10 @@ int main(int argc,char** argv){
  {fresh();nr::Reader r;Driver d(r);init(r,d);active(r);pk::CaptainFrame f;f.face=77;jointQuery=[&]{a.current=&other;};check(!r.frame(&a,f,e));check(f.face==77);jointQuery={};a.current=&typed;timer.reset();world.phase_=Phase::GameWorldActive;check(!r.frame(&a,f,e)&&f.face==77);world.phase_=Phase::Loading;world.demo_=Demo::Playing;check(!r.frame(&a,f,e)&&f.face==77);}
  {fresh();nr::Reader r;Driver d(r);init(r,d);active(r);pk::CaptainFrame f;f.face=77;jointQuery=[&]{++motionGeneration;};check(!r.frame(&a,f,e)&&f.face==77);jointQuery={};ownedPlate=nullptr;check(!r.frame(&a,f,e)&&f.face==77);}
  {fresh();nr::Reader r;Driver d(r);init(r,d);nr::Plan p;auto req=request();req.hasController=false;check(!r.prepareCStick(&a,req,p,e));req=request();req.subStick.x=std::numeric_limits<float>::quiet_NaN();check(!r.prepareCStick(&a,req,p,e));check(d.commands.empty());pk::Handle h;check(!r.setFormed(h,&a,e));}
+ {fresh();nr::Reader r;Driver d(r);init(r,d);timer=9;clockEvent=[&]{pk::CaptainFrame f;check(r.frame(&a,f,e));check(f.command&&f.cstickNeutral&&f.sceneAnimationTimer==9);};active(r);check((order==std::vector<std::string>{"reset","refresh","pose"}));pk::CaptainFrame f;check(r.frame(&a,f,e)&&f.sceneAnimationTimer==0);}
+ {fresh();nr::Reader r;Driver d(r);init(r,d);nr::Plan p;check(r.prepareCStick(&a,request(),p,e));controlTransaction=false;check(!r.commitCStick(p,e));check(d.commands.empty());pk::CaptainFrame f;f.face=77;check(!r.frame(&a,f,e)&&f.face==77);controlTransaction=true;clockEvent=[&]{a.current=&other;};check(r.prepareCStick(&a,request(),p,e));check(!r.commitCStick(p,e));check(d.commands.empty());}
+ {fresh();nr::Reader r;Driver d(r);init(r,d);active(r);nr::Plan p;auto req=request();req.subStick={0,0};check(r.prepareCStick(&a,req,p,e));controlTransaction=false;auto count=d.commands.size();check(!r.commitCStick(p,e));check(d.commands.size()==count);pk::CaptainFrame f;check(r.frame(&a,f,e)&&f.command&&f.cstickNeutral);timer.reset();check(r.frame(&a,f,e)&&f.sceneAnimationTimer==0);}
+ {fresh();nr::Reader r;Driver d(r);init(r,d);nr::Plan p;check(r.prepareCStick(&a,request(),p,e));clockAvailable=false;check(!r.commitCStick(p,e));check(d.commands.empty());pk::CaptainFrame f;check(r.frame(&a,f,e)&&f.command&&f.cstickNeutral);}
  {fresh();nr::Reader r;Driver d(r);init(r,d);pk::CaptainFrame f;f.face=77;pk::PlatePose pose;pk::PlateParameters parms;nr::Plan plan;check(!r.frame(nullptr,f,e)&&f.face==77);check(!r.readPose(nullptr,pose,e));check(!r.readParameters(nullptr,parms,e));check(!r.prepareCStick(nullptr,request(),plan,e));scene.campaign+="changed";check(!r.readParameters(&a,parms,e));scene.campaign="engineering";++scene.epoch;check(!r.initializeAfterBodyReset(e));}
  {fresh();nr::Reader r;Driver d(r);init(r,d);active(r);nr::Plan old;check(r.prepareCStick(&a,request(),old,e));check(!r.canRetire(e));world.phase_=Phase::Inactive;retained=1;check(!r.canRetire(e));retained=0;bodyOwnership.entries=1;check(!r.canRetire(e));bodyOwnership={};ownedPlate=nullptr;lifetime=false;selectedBank=nullptr;pk::PlateParameters parms;check(r.readParameters(&a,parms,e));check(r.canRetire(e));check(r.retireAfterBodyConsumers(e));check(r.naviParameterBytes().empty());check(!r.commitCStick(old,e));world.phase_=Phase::Loading;selectedBank=&bank;lifetime=true;check(r.initializeAfterBodyReset(e));check(r.bindPlate(d,e)==false);ownedPlate=&d.plate;check(r.bindPlate(d,e));check(!r.commitCStick(old,e));}
  std::cout<<checks<<" concrete captain reader engineering checks PASS\n";
