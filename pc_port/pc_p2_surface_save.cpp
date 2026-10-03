@@ -5,6 +5,7 @@
 #include "pc_p2_original_actor.h"
 #include "pc_randomizer.h"
 #include "FlowController.h"
+#include "Generator.h"
 #include "OnePlayerSection.h"
 #include "Piki.h"
 #include "PikiMgr.h"
@@ -57,6 +58,19 @@ bool settled(){
     // regeneration as an exact mid-day resume.
     if(!p2original::originalActors().rows().empty())return held("original_group_restore_pending");
     if(!tekiMgr||!bossMgr||!pelletMgr||!pikiMgr||!itemMgr)return held("missing_managers");
+    if(!generatorList||!generatorList->mGenListHead)return held("missing_generator_authority");
+    Generator* source;
+    FOREACH_NODE_REUSE(Generator,generatorList->mGenListHead->mChild,source){
+        if(source->isExpired())continue;
+        // A fresh-process mid-day load must use only saved source records.
+        // Sources without durable generator/count state cannot preserve their
+        // absence (killed enemies, consumed items) or their remaining births.
+        if((source->mCarryOverFlags&(GENCARRY_SaveGenerator|GENCARRY_SaveSpawnCount))
+            !=(GENCARRY_SaveGenerator|GENCARRY_SaveSpawnCount))return held("nonpersistent_source_restore_pending");
+        if(source->mLatestSpawnCreature&&source->mLatestSpawnCreature->isAlive()
+            &&(source->mCarryOverFlags&(GENCARRY_SaveCreature|GENCARRY_SaveProperties))
+                !=(GENCARRY_SaveCreature|GENCARRY_SaveProperties))return held("source_properties_restore_pending");
+    }
     for(ObjectMgr* manager:{static_cast<ObjectMgr*>(tekiMgr),static_cast<ObjectMgr*>(bossMgr),static_cast<ObjectMgr*>(pelletMgr)}){
         Iterator actors(manager);CI_LOOP(actors){auto* actor=static_cast<Creature*>(*actors);
             if(actor)return held("live_enemy_or_cargo_restore_pending");}}

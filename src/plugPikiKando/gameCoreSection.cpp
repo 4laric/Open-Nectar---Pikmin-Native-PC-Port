@@ -1628,19 +1628,24 @@ void GameCoreSection::initStage()
 	const bool resumeRoomCache = pc_pikipelago_room_preview() && std::getenv("PIKMIN_P2_CACHE_RESUME");
 #else
 	const bool resumeRoomCache = false;
+
 #endif
+	const bool livingSurfaceCache = pc_p2_surface_save_living_scene();
+	if(livingSurfaceCache&&!hasAuthoritativeStageCache){
+        std::fprintf(stderr,"Living surface checkpoint lost its authoritative stage cache\n");std::abort();
+    }
 	sprintf(path2, "%sdefault.gen", path);
 	// On a room cache-resume boot, skip the disk default.gen entirely (the
 	// generator list already came from GeneratorCache::preload); do not even
 	// open the stream, so it is neither leaked nor double-read.
-	RandomAccessStream* data = resumeRoomCache ? nullptr : gsys->openFile(path2);
+	RandomAccessStream* data = (resumeRoomCache||livingSurfaceCache) ? nullptr : gsys->openFile(path2);
 	if (data) {
 		PRINT("DEFAULT GEN LOADED **********************************\n");
 		generatorMgr->read(*data, false);
 		data->close();
 		generatorMgr->updateUseList();
 		useDefault = true;
-	} else if (!resumeRoomCache) {
+	} else if (!resumeRoomCache&&!livingSurfaceCache) {
 		PRINT("*** NO GENERATOR FILE\n");
 		mNavi->mSRT.t.set(0.0f, 0.0f, 0.0f);
 		mNavi->mDayEndPosition = mNavi->mSRT.t;
@@ -1662,7 +1667,7 @@ void GameCoreSection::initStage()
 #endif
 
 	sprintf(path2, "%s%d.gen", path, (gameflow.mWorldClock.mCurrentDay - 1) % MAX_DAYS);
-	data = gsys->openFile(path2);
+	data = livingSurfaceCache ? nullptr : gsys->openFile(path2);
 	if (data) {
 		PRINT("** FILE %s READING\n", path2);
 		dailyGeneratorMgr->read(*data, true);
@@ -1684,7 +1689,7 @@ void GameCoreSection::initStage()
 		flowCont.mCurrentStage->mHasInitialised = TRUE;
 
 		sprintf(path2, "%sinit.gen", path);
-		data = gsys->openFile(path2);
+		data = livingSurfaceCache ? nullptr : gsys->openFile(path2);
 		if (data) {
 			PRINT("** FILE %s READING\n", path2);
 			onceGeneratorMgr->read(*data, true);
@@ -1695,7 +1700,7 @@ void GameCoreSection::initStage()
 	}
 
 	sprintf(path2, "%splants.gen", path);
-	data = gsys->openFile(path2);
+	data = livingSurfaceCache ? nullptr : gsys->openFile(path2);
 	if (data) {
 		PRINT("** FILE %s READING\n", path2);
 		plantGeneratorMgr->read(*data, true);
@@ -1709,7 +1714,7 @@ void GameCoreSection::initStage()
 	int j  = 0;
 	u8 day = gameflow.mWorldClock.mCurrentDay - 1;
 	for (gfInfo = (GenFileInfo*)flowCont.mCurrentStage->mGenFileList.mChild; gfInfo; gfInfo = (GenFileInfo*)gfInfo->mNext) {
-		if (day >= gfInfo->mFirstSpawnDay && day <= gfInfo->mLastSpawnDay && playerState->checkLimitGenFlag(i) == 0) {
+		if (!livingSurfaceCache && day >= gfInfo->mFirstSpawnDay && day <= gfInfo->mLastSpawnDay && playerState->checkLimitGenFlag(i) == 0) {
 			sprintf(path2, "%s%s", path, gfInfo->mName);
 			data = gsys->openFile(path2);
 			if (data) {
