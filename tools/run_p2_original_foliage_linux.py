@@ -94,6 +94,7 @@ with (evidence/'native.log').open('wb') as log:
 log = (evidence/'native.log').read_text(errors='replace')
 markers = dict(diagnostic='PASS ORIGINAL_FOLIAGE sources='+source_marker+' ', walk='PASS ORIGINAL_FOLIAGE_WALK sources='+source_marker+' ',
                refusal=('PASS ORIGINAL_FOLIAGE_RESOURCE_REFUSAL sources='+source_marker+' ' if a.batch!='tutorial' else 'PASS ORIGINAL_FOLIAGE_RESOURCE_REFUSAL births=0 '), **{'captain-down':'P2_FIXTURE_CAPTAIN_DOWN'})
+markers['effect-refusal'] = markers['refusal']
 if a.batch == 'cave':
     markers.update(diagnostic='PASS ORIGINAL_CAVE_FOLIAGE sources=91,92,47 ',
                    refusal='PASS ORIGINAL_CAVE_FOLIAGE_RESOURCE_REFUSAL sources=91,92,47 ')
