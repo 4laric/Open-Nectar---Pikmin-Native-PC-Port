@@ -34,6 +34,7 @@
 #include "GameCoreSection.h"
 #if defined(PIKI_PC_PORT)
 #include "pc_p2_original_piki_origin.h"
+#include "pc_p2_original_piki_recruit.h"
 #endif
 #include "pc_bbft.h"
 #include "pc_p2_preview.h"
@@ -1020,6 +1021,7 @@ void GameCoreSection::exitStage()
 {
 #if defined(PIKI_PC_PORT)
 	pc_p2_cave_campaign_scene_exit();
+	pc_p2_original_piki_recruit_unbind();
 	pc_p2_original_piki_origin_scene_exit(); // Retire canonical pointers before actor heap teardown.
 	pc_demon_drop_scene_exit();
 	pc_demon_scene_exit();

@@ -18,6 +18,7 @@
 #include "Navi.h"
 #if defined(PIKI_PC_PORT)
 #include "pc_p2_original_piki_origin.h"
+#include "pc_p2_original_piki_recruit.h"
 #endif
 #if defined(PIKI_PC_PORT)
 #include "audio/pc_audio_source.h"
@@ -1681,6 +1682,11 @@ void Navi::callPikis(f32 radius, bool recallWorkers)
 			continue;
 		}
 
+#if defined(PIKI_PC_PORT)
+        std::string originalRecruitError;
+        const bool originalMovieActive=!gameflow.mMoviePlayer||gameflow.mMoviePlayer->mIsActive;
+        if(!pc_p2_original_piki_recruit_allowed(piki,mNaviID,originalMovieActive,true,originalRecruitError))continue;
+#endif
 		int state = piki->getState();
 		if (state == PIKISTATE_Drown) {
 			static_cast<PikiDrownState*>(piki->getCurrState())->mIsBeingWhistled = true;
@@ -1740,6 +1746,9 @@ void Navi::callPikis(f32 radius, bool recallWorkers)
                     workerEvent.cursorX=mCursorWorldPos.x;workerEvent.cursorY=mCursorWorldPos.y;workerEvent.cursorZ=mCursorWorldPos.z;
                 }
 #endif
+#if defined(PIKI_PC_PORT)
+                if(!pc_p2_original_piki_recruit_accepted(piki,mNaviID,originalMovieActive,true,originalRecruitError))continue;
+#endif
 				if (piki->isFired() && !pc_p2_has_red_immunity(piki)) {
 					piki->endFire();
 				}
@@ -1784,6 +1793,9 @@ void Navi::callPikis(f32 radius, bool recallWorkers)
                 workerEvent.afterMode=piki->mMode;workerEvent.afterState=piki->getState();pc_worker_observer_record(workerEvent);
 #endif
 			} else {
+#if defined(PIKI_PC_PORT)
+                if(!pc_p2_original_piki_recruit_accepted(piki,mNaviID,originalMovieActive,true,originalRecruitError))continue;
+#endif
 				pc_crowd_handover::abandonSquadBeforeHandover(piki, this);
 				piki->mNavi             = this;
 				piki->mIsWhistlePending = true;

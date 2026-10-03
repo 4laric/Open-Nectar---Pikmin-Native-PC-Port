@@ -348,6 +348,8 @@ set(PC_PORT_SOURCES
     pc_port/pc_p2_cave_campaign_party_engine.cpp
     pc_port/pc_p2_original_piki_origin.cpp
     pc_port/pc_p2_original_piki_physical.cpp
+    pc_port/pc_p2_original_piki_recruit.cpp
+    pc_port/pc_p2_original_progress.cpp
     pc_port/pc_p2_cave_campaign.cpp
     pc_port/pc_p2_cave_dialog_window.cpp
     pc_port/pc_p2_cave_generate.cpp
@@ -3251,3 +3253,9 @@ target_include_directories(pc_p2_original_piki_spawn_test PRIVATE "${PROJECT_SOU
 add_test(NAME p2_original_piki_spawn COMMAND pc_p2_original_piki_spawn_test)
 
 pikmin_add_ci_fixture(original_piki_physical tools/p2_original_piki_physical_runtime.cpp)
+
+add_executable(pc_p2_original_piki_recruit_test tools/pc_p2_original_piki_recruit_test.cpp
+    pc_port/pc_p2_original_piki_recruit.cpp pc_port/pc_p2_original_piki_origin.cpp pc_port/pc_p2_original_progress.cpp)
+target_include_directories(pc_p2_original_piki_recruit_test PRIVATE pc_port)
+target_link_libraries(pc_p2_original_piki_recruit_test PRIVATE Threads::Threads)
+add_test(NAME p2_original_piki_recruit COMMAND pc_p2_original_piki_recruit_test)
