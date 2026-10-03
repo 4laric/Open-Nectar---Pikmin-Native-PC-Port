@@ -2,16 +2,18 @@
 #include "pc_p2_original_captain_throw.h"
 #include "pc_p2_original_captain_states.h"
 #include "pc_p2_original_captain_motion.h"
+#include "pc_p2_original_captain_native_control.h"
 #include <cassert>
 #include <fstream>
 #include <iterator>
 #include <unordered_map>
 #include <iostream>
+#include <array>
 using namespace p2original::captain;
 using namespace p2original::captain::actions;
 class Piki{};
 namespace {
-Navi navis[2];Piki pikis[2];std::string raw;std::vector<int> keys;unsigned advances=0;unsigned flying=0,throws=0,calls=0,stops=0,automaticUpdates=0;bool provider=true;
+Navi navis[2];Piki pikis[2];std::string raw;std::vector<int> keys,boundKeys;unsigned advances=0,boundAdvances=0;bool missingNigeru=false,missingClock=false;unsigned speedResets=0;float speeds[2]={75,75};unsigned flying=0,throws=0,calls=0,stops=0,automaticUpdates=0;bool provider=true;
 struct Scene:LoadedScene,World {
  std::string campaign="source-campaign",fingerprint="selected-source-session",catalog="source-catalog";std::uint64_t epoch=1;
  const std::string& selectedCampaign()const override{return campaign;}const std::string& selectedFingerprint()const override{return fingerprint;}const std::string& sourceCatalog()const override{return catalog;}
@@ -44,14 +46,23 @@ struct Source:ActionSource {
 struct SinkState:NaviState {explicit SinkState(StateId id):NaviState(nativeId(id)){} };
 }
 namespace p2original {namespace captain {
-struct SourceBank::Impl {std::unordered_map<const Navi*,MotionState> states;};
+struct SourceBank::Impl {struct Actor {std::array<MotionState,2> state;std::array<Listener,2> listener;};std::unordered_map<const Navi*,Actor> states;};
 SourceBank::SourceBank():m(new Impl){}SourceBank::~SourceBank()=default;
-bool SourceBank::start(Navi* n,Motion motion,std::string&){auto& s=m->states[n];s.motion=motion;++s.generation;return true;}
-bool SourceBank::state(const Navi* n,MotionState& state,std::string&)const{auto it=m->states.find(n);if(it==m->states.end())return false;state=it->second;return true;}
-bool SourceBank::advance(Navi* n,float,const std::function<bool(int)>& emit,std::string&){++advances;auto generation=m->states[n].generation;auto pendingKeys=keys;keys.clear();for(int key:pendingKeys){if(!emit(key)||m->states[n].generation!=generation)break;}return true;}
+bool SourceBank::supports(Navi*,Motion motion,std::string& e)const{return !(missingNigeru&&motion==Motion::Nigeru)||(e="missing authored Nigeru",false);}
+bool SourceBank::startMotion(Navi* n,Motion self,Motion bound,Listener sl,Listener bl,std::string&){auto& a=m->states[n];a.state[0].motion=self;a.state[1].motion=bound;for(auto& s:a.state)++s.generation;a.listener={sl,bl};assert(bl==Listener::None);assert(sl==(self==Motion::Fue?Listener::None:Listener::SourceState));return true;}
+bool SourceBank::start(Navi* n,Motion motion,std::string& e){return startMotion(n,motion,motion,Listener::SourceState,Listener::None,e);}
+bool SourceBank::enableMotionBlend(Navi* n,std::string&){auto& a=m->states[n];a.state[1].motion=Motion::Nigeru;a.state[1].frame=10;++a.state[1].generation;a.listener[1]=Listener::SourceActor;return true;}
+bool SourceBank::listenerAnimator(const Navi* n,Animator channel,Listener& out,std::string&)const{auto it=m->states.find(n);if(it==m->states.end())return false;out=it->second.listener[unsigned(channel)];return true;}
+bool SourceBank::state(const Navi* n,MotionState& out,std::string& e)const{return stateAnimator(n,Animator::Self,out,e);}
+bool SourceBank::stateAnimator(const Navi* n,Animator channel,MotionState& out,std::string&)const{auto it=m->states.find(n);if(it==m->states.end())return false;out=it->second.state[unsigned(channel)];return true;}
+bool SourceBank::advanceAnimator(Navi* n,Animator channel,float,const std::function<bool(int)>& emit,std::string&){++advances;unsigned c=unsigned(channel);if(c)++boundAdvances;auto generation=m->states[n].state[c].generation;auto pendingKeys=c?boundKeys:keys;(c?boundKeys:keys).clear();for(int key:pendingKeys){bool keep=m->states[n].listener[c]==Listener::None||emit(key);if(!keep||m->states[n].state[c].generation!=generation)break;}return true;}
 bool NativeState::sourceAlive(const Navi&)const{return true;}std::optional<std::uint8_t> NativeState::actorInvincibleFrames(const Navi&)const{return 0;}
 bool NativeState::canEnterSourceDead(const Navi&)const{return true;}void NativeState::enterSourceDead(Navi&){}void NativeState::sourceDamageFeedback(Navi&){}
 bool NativeState::canEnterSourceDamaged(const Navi&)const{return true;}void NativeState::enterSourceDamaged(Navi&,float){}
+namespace nativecontrol {
+std::optional<float> animationSpeed(const Navi* n){if(missingClock)return {};return speeds[n==&navis[0]?0:1];}
+bool resetThrowAnimationSpeed(Navi* n,std::string& e){auto* state=dynamic_cast<NativeState*>(n->current);if(missingClock||!state||(state->sourceStateId()!=StateId::Throw&&state->sourceStateId()!=StateId::ThrowWait)){e="missing actual source throw speed owner";return false;}speeds[n==&navis[0]?0:1]=30;++speedResets;return true;}
+}
 namespace control {const char* parameterSha256(){return "dfcc8e0cf89195f06ea78fdc1a342631da4e5d2495d85380212af7d72eb2eba0";}}
 }}
 SourceBank bank;
@@ -71,14 +82,19 @@ int main(int argc,char** argv){
  provider=false;assert(!pc_p2_original_captain_throw_preflight(&navis[0],StateId::Gather,e));provider=true;
  auto good=raw;raw[0]^=1;assert(!pc_p2_original_captain_throw_preflight(&navis[0],StateId::ThrowWait,e));raw=good;
  assert(!pc_p2_original_captain_throw_preflight(&navis[0],StateId::Throw,e));
- assert(pc_p2_original_captain_transit(&navis[0],StateId::Gather,e));navis[0].current->exec(&navis[0]);assert(calls==1);
+ missingClock=true;assert(!pc_p2_original_captain_throw_preflight(&navis[0],StateId::Gather,e));missingClock=false;
+ missingNigeru=true;assert(!pc_p2_original_captain_throw_preflight(&navis[0],StateId::Gather,e));assert(!pc_p2_original_captain_throw_preflight(&navis[0],StateId::ThrowWait,e));missingNigeru=false;
+ assert(pc_p2_original_captain_transit(&navis[0],StateId::Gather,e));unsigned previousBound=boundAdvances;keys={1000};boundKeys={2,1000};assert(pc_p2_original_captain_throw_advance_animation(&navis[0],1,e));assert(boundAdvances==previousBound+1&&fsms[0].last==nativeId(StateId::Gather));navis[0].current->exec(&navis[0]);assert(calls==1&&speedResets==0&&speeds[0]==75);
  source.frames[0].releasedB=true;navis[0].current->exec(&navis[0]);assert(stops==1&&fsms[0].last==nativeId(StateId::Walk));source.frames[0].releasedB=false;
  for(unsigned i=0;i<2;++i){assert(pc_p2_original_captain_transit(&navis[i],StateId::ThrowWait,e));assert(source.ps[i].state==PikiState::Hanged);assert(pc_p2_original_captain_throw_after_animation(&navis[i],e));assert(source.ps[i].position.y==0);}
+ assert(speedResets==2&&speeds[0]==30&&speeds[1]==30);
  auto* waitState=dynamic_cast<NativeState*>(navis[0].current);assert(waitState);unsigned previousAdvances=advances;
  for(unsigned i=0;i<4;++i){assert(waitState->sourceAnimationKey(&navis[0],1,e));}assert(advances==previousAdvances);
  source.frames[0].heldA=false;navis[0].current->exec(&navis[0]);assert(fsms[0].last==nativeId(StateId::Throw)&&source.ps[1].state==PikiState::Hanged);
- assert(source.holdTimes[0]==2.5f); // loop charge caps at three
+ assert(source.holdTimes[0]==2.5f&&speedResets==3); // loop charge caps at three
  assert(!pc_p2_original_captain_throw_preflight(&navis[1],StateId::Throw,e));
+ MotionState bound;assert(bank.stateAnimator(&navis[0],Animator::Bound,bound,e)&&bound.motion==Motion::Nigeru&&bound.frame==10);
+ keys={};boundKeys={2,1000};assert(pc_p2_original_captain_throw_advance_animation(&navis[0],1,e));assert(throws==0&&fsms[0].last==nativeId(StateId::Throw));
  keys={2};assert(pc_p2_original_captain_throw_advance_animation(&navis[0],1,e));assert(throws==1&&flying==1&&source.ps[0].state==PikiState::Flying);
  auto* throwState=dynamic_cast<NativeState*>(navis[0].current);assert(throwState);previousAdvances=advances;
  assert(!throwState->sourceAnimationKey(&navis[0],1000,e)&&e.empty());assert(advances==previousAdvances&&fsms[0].last==nativeId(StateId::Walk)&&throws==1);
@@ -100,6 +116,9 @@ int main(int argc,char** argv){
  source.frames[0].controller=false;source.whistles[0].timedOut=false;
  assert(pc_p2_original_captain_begin_gather(&navis[0],GatherMode::Automatic,e));navis[0].current->exec(&navis[0]);assert(automaticUpdates==1&&fsms[0].last==nativeId(StateId::Gather));
  source.whistles[0].timedOut=true;navis[0].current->exec(&navis[0]);assert(automaticUpdates==2&&fsms[0].last==nativeId(StateId::Walk));
+ source.ps[0].state=PikiState::Walk;source.frames[0].controller=true;source.frames[0].heldA=true;source.ps[0].position={};
+ assert(pc_p2_original_captain_transit(&navis[0],StateId::ThrowWait,e));keys={};boundKeys={1,1,1};assert(pc_p2_original_captain_throw_advance_animation(&navis[0],1,e));
+ source.frames[0].heldA=false;navis[0].current->exec(&navis[0]);assert(fsms[0].last==nativeId(StateId::Throw)&&source.holdTimes[0]==0); // Bound Navi overload cannot charge
  assert(!pc_p2_original_captain_throw_advance_animation(&navis[0],-1,e));
  std::cout<<"PASS actual source action TU controls; no gameplay qualification\n";
 }

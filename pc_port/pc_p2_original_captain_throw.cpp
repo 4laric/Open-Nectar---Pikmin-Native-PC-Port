@@ -2,6 +2,7 @@
 #include "pc_p2_original_captain_states.h"
 #include "pc_p2_original_captain_motion.h"
 #include "pc_p2_original_captain_control.h"
+#include "pc_p2_original_captain_native_control.h"
 #include "netplay/pc_netplay_sha256.h"
 #include <algorithm>
 #include <cmath>
@@ -41,6 +42,11 @@ ActionSource* canonical(Navi* n,SourceBank*& bank,ThrowParameters& p,std::string
  if(!bank||!bank->state(n,state,e)||!parameters(source->parameterBytes(),p,e))return nullptr;
  return source;
 }
+bool actionMotions(SourceBank& bank,Navi* n,StateId id,std::string& e){
+ const auto speed=nativecontrol::animationSpeed(n);if(!speed||!std::isfinite(*speed)||*speed<0)return fail(e,"missing canonical source actor animation speed");
+ Motion self;if(id==StateId::Gather)self=Motion::Fue;else if(id==StateId::ThrowWait)self=Motion::ThrowWait;else if(id==StateId::Throw)self=Motion::Throw;else return fail(e,"unsupported source action motion");
+ return bank.supports(n,self,e)&&bank.supports(n,Motion::Nigeru,e);
+}
 bool validPiki(const PikiFrame& p){return p.handle.actor&&p.handle.lifetime&&finite(p.position)&&p.kind<7&&p.happa<3;}
 bool readPiki(ActionSource& s,Navi& n,PikiHandle h,PikiFrame& f,std::string& e){
  if(!s.piki(n,h,f,e)||!validPiki(f)||!same(h,f.handle)) {
@@ -57,7 +63,7 @@ class ActionState:public NativeState {
 protected:
  ActionSource* source_=nullptr;SourceBank* bank_=nullptr;ThrowParameters params_;std::uint64_t incarnation_=0;bool enabled_=false;std::string error_;
  explicit ActionState(StateId id):NativeState(id){}
- bool bind(Navi* n){source_=canonical(n,bank_,params_,error_);enabled_=source_!=nullptr;if(enabled_)incarnation_=source_->scene().incarnation();else report();return enabled_;}
+ bool bind(Navi* n){source_=canonical(n,bank_,params_,error_);enabled_=source_&&actionMotions(*bank_,n,id_,error_);if(enabled_)incarnation_=source_->scene().incarnation();else report();return enabled_;}
  bool live(Navi* n,bool active=true){
   if(!enabled_||!n||n->getCurrState()!=static_cast<NaviState*>(this))return false;
   SourceBank* bank=nullptr;ThrowParameters p;auto* s=canonical(n,bank,p,error_,active);
@@ -66,13 +72,33 @@ protected:
  void report(){std::fprintf(stderr,"P2_ORIGINAL_ACTION_REFUSED state=%d reason=%s\n",int(id_),error_.c_str());}
  bool require(bool result){if(!result){enabled_=false;report();}return result;}
  bool change(Navi* n,StateId id){return require(pc_p2_original_captain_transit(n,id,error_));}
- bool motion(Navi* n,Motion m){return require(bank_->start(n,m,error_));}
+ bool motion(Navi* n,Motion m){return require(nativecontrol::resetThrowAnimationSpeed(n,error_)&&bank_->startMotion(n,m,m,Listener::SourceState,Listener::None,error_)&&bank_->enableMotionBlend(n,error_));}
  bool animate(Navi* n,float frames){
   if(!live(n))return false;
-  return require(bank_->advance(n,frames,[&](int key){if(!live(n))return false;onKey(n,key);return n->getCurrState()==static_cast<NaviState*>(this)&&enabled_;},error_));
+  MotionState bound;if(!require(bank_->stateAnimator(n,Animator::Bound,bound,error_)))return false;
+  auto emit=[&](Animator channel,int key){
+   Listener listener;if(!require(bank_->listenerAnimator(n,channel,listener,error_)))return false;
+   std::string e;bool keep=listener==Listener::None||(listener==Listener::SourceState?sourceAnimationKey(n,key,e):sourceActorAnimationKey(n,key,e));
+   if(!keep&&!e.empty())error_=e;
+   return keep;
+  };
+  if(!require(bank_->advanceAnimator(n,Animator::Self,frames,[&](int key){return emit(Animator::Self,key);},error_)))return false;
+  if(n->getCurrState()!=static_cast<NaviState*>(this))return true;
+  if(!live(n))return false;
+  MotionState current;if(!require(bank_->stateAnimator(n,Animator::Bound,current,error_)))return false;
+  if(current.generation!=bound.generation)return true;
+  return require(bank_->advanceAnimator(n,Animator::Bound,frames,[&](int key){return emit(Animator::Bound,key);},error_));
  }
  virtual void onKey(Navi*,int){}
 public:
+ // Navi::onKeyEvent routes actor-listener keys to NaviState's two-argument
+ // overload. Throw/ThrowWait implement only their direct MotionListener
+ // overload, so Bound actor events must never charge, throw, or finish them.
+ bool sourceActorAnimationKey(Navi* n,int key,std::string& error)override{
+  if(id_==StateId::Gather)return sourceAnimationKey(n,key,error);
+  if(!live(n)){error=error_.empty()?"source action actor-listener state is not current":error_;return false;}
+  error.clear();return true;
+ }
  bool sourceAnimationKey(Navi* n,int key,std::string& error)override{
   if(!live(n)){error=error_.empty()?"source action key actor/state is not current":error_;return false;}
   error_.clear();onKey(n,key);
@@ -94,7 +120,7 @@ public:
    if(invocation->second.incarnation!=incarnation_||invocation->second.source!=source_){gatherPending.erase(invocation);require(fail(error_,"stale source GatherArg transfer"));return;}
    mode_=invocation->second.mode;gatherPending.erase(invocation);
   }
-  if(!motion(n,Motion::Fue))return;
+  if(!require(bank_->startMotion(n,Motion::Fue,Motion::Fue,Listener::None,Listener::None,error_)&&bank_->enableMotionBlend(n,error_)))return;
   require(source_->startWhistle(*n,error_)&&source_->feedback(*n,mode_==GatherMode::Player?Feedback::GatherStart:Feedback::AutomaticGatherStart,{},error_));
  }
  void exec(Navi* n)override{
@@ -197,7 +223,7 @@ void registerThrowStates(NaviStateMachine& machine){machine.registerState(new Ga
 } }
 bool pc_p2_original_captain_throw_preflight(Navi* n,p2original::captain::StateId id,std::string& e){
  using namespace p2original::captain;if(id!=StateId::Gather&&id!=StateId::ThrowWait&&id!=StateId::Throw)return false;
- SourceBank* bank=nullptr;ThrowParameters p;auto* source=canonical(n,bank,p,e);if(!source)return false;
+ SourceBank* bank=nullptr;ThrowParameters p;auto* source=canonical(n,bank,p,e);if(!source||!actionMotions(*bank,n,id,e))return false;
  if(id==StateId::Throw){auto it=pending.find(n);if(it==pending.end()||it->second.incarnation!=source->scene().incarnation()||it->second.source!=source)return fail(e,"missing authenticated ThrowInit transfer");}
  return true;
 }
@@ -214,7 +240,7 @@ bool pc_p2_original_captain_throw_advance_animation(Navi* n,float frames,std::st
 bool pc_p2_original_captain_begin_gather(Navi* n,p2original::captain::actions::GatherMode mode,std::string& e){
  using namespace p2original::captain;using namespace actions;
  if(mode!=GatherMode::Player&&mode!=GatherMode::Automatic)return fail(e,"invalid source GatherArg mode");
- SourceBank* bank=nullptr;ThrowParameters p;auto* source=canonical(n,bank,p,e);if(!source)return false;
+ SourceBank* bank=nullptr;ThrowParameters p;auto* source=canonical(n,bank,p,e);if(!source||!actionMotions(*bank,n,StateId::Gather,e))return false;
  gatherPending[n]={mode,source->scene().incarnation(),source};
  if(!pc_p2_original_captain_transit(n,StateId::Gather,e)){gatherPending.erase(n);return false;}return true;
 }
