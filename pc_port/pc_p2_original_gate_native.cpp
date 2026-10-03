@@ -123,7 +123,12 @@ bool pc_p2_original_gate_save(BuildingItem* b,RandomAccessStream& stream,bool& h
  auto i=actors.find(b);handled=i!=actors.end();if(!handled)return true;std::vector<std::uint8_t> bytes;if(!gateExport(row(i->second.uid),i->second.state,bytes,e))return false;if(stream.getPending()<int(bytes.size())){e="gate creature cache full";return false;}for(auto v:bytes)stream.writeByte(v);e.clear();return true;
 }
 bool pc_p2_original_gate_load(BuildingItem* b,RandomAccessStream& stream,bool& handled,std::string& e){auto i=actors.find(b);handled=i!=actors.end();if(!handled)return true;GateState s;if(!readState(stream,row(i->second.uid),s,e))return false;restore(b,i->second,s);e.clear();return true;}
-void pc_p2_original_gate_forget(BuildingItem* b){actors.erase(b);}
+bool pc_p2_original_gate_forget(BuildingItem* b){
+ auto i=actors.find(b);if(i==actors.end())return false;
+ if(!itemMgr||!itemMgr->mMeltingPotMgr)die("owned gate retirement lacks node manager");
+ for(auto* n=itemMgr->mMeltingPotMgr->mRootNode.mChild;n;n=n->mNext){auto* node=static_cast<CreatureNode*>(n);if(node->mCreature==b){node->del();actors.erase(i);return true;}}
+ die("owned gate retirement lost physical list node");
+}
 bool pc_p2_original_gate_snapshot(const Creature* b,GateState& s,std::string& id){auto i=actors.find(b);if(i==actors.end())return false;s=i->second.state;const auto& r=row(i->second.uid);id=r.sourceSha+":"+r.sourceKey;return true;}
 std::vector<PcOriginalGateLink> pc_p2_original_gate_links(){
  std::vector<PcOriginalGateLink> links;
