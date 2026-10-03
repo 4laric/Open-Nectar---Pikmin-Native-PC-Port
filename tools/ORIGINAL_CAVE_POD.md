@@ -14,7 +14,7 @@ authority. It never creates an economy ledger, seeds, or P1 ship repairs.
 Preflight verifies exact source archive, raw model, collision text and converted
 model bytes against the fixed SHA-256 pins in pure `pc_p2_original_pod_sources.h`. Resources
 stay in private output; no game bytes are distributed in source. The known
-converted model path is engine-relative (`courses/pikmin2room/pod.mod` by
+converted model path is engine-relative (`courses/pikmin2retailpod/pod.mod` by
 default). Preflight hashes the exact file reached by System's active directory
 and data root plus DVDOpen's `assets/` prefix, then loads a fresh shape without
 cache reuse. The model staged at the manifest's native destination must contain
