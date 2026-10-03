@@ -139,17 +139,17 @@ class FoliageApp final:public PlugPikiApp {
   checkEconomy();
  }
  void reenter(){std::string e;for(unsigned i=0;i<3;++i){checked(pc_p2_original_groups().cache(generators[i].get(),fingerprint,cache[i],e),e);GeneratorState s;unsigned live=0;require(pc_p2_original_groups().state(generators[i].get(),s,live)&&s.deathCount==0&&live==rows[i].enemy.count,"cache preserves literal count and no decorative deaths");}
-  checked(pc_p2_original_course_unload(e),e);require(native->provider().size()==0&&tekiMgr->getSize()==tekiBaseline,"native unload cleans only owned foliage");checkEconomy();install(true);
+  checked(pc_p2_original_course_unload(e),e);require(native->provider().size()==0,"native unload releases owned foliage");for(auto* actor:actors)require(!actor->isAlive(),"unloaded native roots are dead");checkEconomy();phase=4;age=0;
  }
  void walking(Navi* n){
   if(phase==1){require(walked<2,"natural walking source index");auto* h=native->provider().lookup(actors[walked]);require(h,"naturally touched source remains owned");
    if(h->active&&h->touched){naturalTouch[walked]=true;input();phase=2;age=0;
     std::printf("ORIGINAL_FOLIAGE_NATURAL_TOUCH source=%u captain=%.3f,%.3f,%.3f plant=%.3f,%.3f,%.3f frame=%.3f naturalinput=1 callbackcontrol=0\n",h->row.enemy.source,n->mSRT.t.x,n->mSRT.t.y,n->mSRT.t.z,actors[walked]->mSRT.t.x,actors[walked]->mSRT.t.y,actors[walked]->mSRT.t.z,h->frame);std::fflush(nullptr);
-   }else {point(n,collisionCentre[walked]);require(age<1200,"SDL walking must reach real foliage touch");}
+   }else {point(n,collisionCentre[walked]);if(age%120==0){std::printf("ORIGINAL_FOLIAGE_WALK_PROGRESS source=%u captain=%.3f,%.3f,%.3f goal=%.3f,%.3f,%.3f velocity=%.3f,%.3f,%.3f\n",h->row.enemy.source,n->mSRT.t.x,n->mSRT.t.y,n->mSRT.t.z,collisionCentre[walked].x,collisionCentre[walked].y,collisionCentre[walked].z,n->mVelocity.x,n->mVelocity.y,n->mVelocity.z);std::fflush(nullptr);}require(age<600,"SDL walking must reach real foliage touch");}
   }else if(phase==2){input();auto* h=native->provider().lookup(actors[walked]);require(h,"natural animation host retained");
-   if(!h->active&&!h->touched){std::printf("ORIGINAL_FOLIAGE_NATURAL_END source=%u frame=%.3f naturalinput=1 callbackcontrol=0\n",h->row.enemy.source,h->frame);std::fflush(nullptr);++walked;age=0;if(walked==2){require(naturalTouch[0]&&naturalTouch[1],"actual captain naturally touched both original species");reenter();phase=3;}else phase=1;}
+   if(!h->active&&!h->touched){std::printf("ORIGINAL_FOLIAGE_NATURAL_END source=%u frame=%.3f naturalinput=1 callbackcontrol=0\n",h->row.enemy.source,h->frame);std::fflush(nullptr);++walked;age=0;if(walked==2){require(naturalTouch[0]&&naturalTouch[1],"actual captain naturally touched both original species");reenter();}else phase=1;}
    else require(age<900,"natural touched motion completes through normal engine clock");
-  }else if(phase==3&&age>=30){input();std::string e;checked(pc_p2_original_course_unload(e),e);require(native->provider().size()==0&&tekiMgr->getSize()==tekiBaseline,"natural fixture owned cleanup");checkEconomy();std::puts("PASS ORIGINAL_FOLIAGE_WALK sources=91,88 naturalinput=1 callbackcontrol=0 natural_touch=2 normal_animation=1 collider_static=1 no_rewards=1 initialized_placement=1 cache_disc_reentry=1 full_course=0");std::fflush(nullptr);std::_Exit(0);}
+  }
  }
 public:
  int idle()override{
@@ -168,11 +168,14 @@ public:
   if(gameflow.mMoviePlayer&&gameflow.mMoviePlayer->mIsActive){gameflow.mMoviePlayer->requestSkip();return result;}
   if(!initialized||!pikiMgr||!tekiMgr||!pelletMgr||!itemMgr||!mapMgr||gameflow.mPauseAll||gameflow.mIsUIOverlayActive)return result;
   if(!phase){if(n->getCurrState()->getID()!=NAVISTATE_Walk||++ready<45)return result;int live=0,red=0;Iterator it(pikiMgr);CI_LOOP(it){auto* p=static_cast<Piki*>(*it);if(p->isAlive()){++live;red+=p->mColor==Red;}}require(live==20&&red==20,"actual20 Red Pikmin baseline");setup(n);phase=1;return result;}
-  if(human)return result;checkStatic();++age;if(naturalWalk){walking(n);return result;}
+  if(human)return result;++age;
+  if(phase==4){if(naturalWalk)input();if(age>=30){require(tekiMgr->getSize()==tekiBaseline,"normal engine recycles unloaded pool references");install(true);phase=3;age=0;}return result;}
+  if(phase==5){if(naturalWalk)input();if(age>=30){require(native->provider().size()==0&&tekiMgr->getSize()==tekiBaseline,"final normal engine pool cleanup");checkEconomy();std::puts(naturalWalk?"PASS ORIGINAL_FOLIAGE_WALK sources=91,88 naturalinput=1 callbackcontrol=0 natural_touch=2 normal_animation=1 collider_static=1 no_rewards=1 initialized_placement=1 cache_disc_reentry=1 full_course=0":"PASS ORIGINAL_FOLIAGE sources=91,88 resources=1 collider_static=1 invulnerable=1 typed_touch=1 normal_animation=1 cache_disc_reentry=1 no_rewards=1 direct_control=1 gameplay=0");std::fflush(nullptr);std::_Exit(0);}return result;}
+  checkStatic();if(phase==3&&age>=30){if(naturalWalk)input();std::string e;checked(pc_p2_original_course_unload(e),e);require(native->provider().size()==0,"final owned release");phase=5;age=0;return result;}
+  if(naturalWalk){walking(n);return result;}
   if(phase==1&&age>=15){stimulus(n);phase=2;age=0;}
   else if(phase==2){bool finished=true;for(auto* actor:actors){auto* h=native->provider().lookup(actor);require(h,"active callback retains same family host");if(age==1)require(h->frame>0,"normal engine update advances motion");finished&=!h->active&&!h->touched;}
-   if(finished){reenter();phase=3;age=0;}else require(age<900,"normal native animation eventually completes");}
-  else if(phase==3&&age>=30){std::string e;checked(pc_p2_original_course_unload(e),e);require(native->provider().size()==0&&tekiMgr->getSize()==tekiBaseline,"final owned cleanup");checkEconomy();std::puts("PASS ORIGINAL_FOLIAGE sources=91,88 resources=1 collider_static=1 invulnerable=1 typed_touch=1 normal_animation=1 cache_disc_reentry=1 no_rewards=1 direct_control=1 gameplay=0");std::fflush(nullptr);std::_Exit(0);}
+   if(finished){reenter();}else require(age<900,"normal native animation eventually completes");}
   return result;
  }
 };
