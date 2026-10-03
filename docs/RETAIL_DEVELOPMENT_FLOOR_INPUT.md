@@ -81,3 +81,10 @@ Both heap-reset callers must run this guard before any heap/section mutation.
 retirement operations. There is no accepting fallback. Until that actual producer
 and startup dispatch are composed, the scene object can compile but this graph is
 not a complete linked or runtime-qualified retail-floor build.
+
+Partial body ownership is a cleanup lease, never roster admission. Boot, physical
+preflight and commit additionally require `pc_p2_retail_scene_bodies_admitted`,
+which checks the genuine source two-captain/20-Pikmin roster and its party/bank
+bindings. The unconditional partial captain-bank ownership guard prevents map
+release during unpublished Loading. Full production linkage awaits these actual
+strong providers; no native count or synthetic readiness substitutes for them.

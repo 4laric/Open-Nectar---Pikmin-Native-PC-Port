@@ -34,6 +34,10 @@
 #include <chrono>
 #include <random>
 
+// Actual common captain owner can retain an unpublished Loading bank before
+// the complete source body roster is admitted. It still pins this map context.
+bool pc_p2_original_captain_scene_owned(const p2retail::SceneContext&) noexcept;
+
 namespace p2retail {namespace {
 std::uint64_t nextSerial=1;
 std::uint64_t nextActivation=1;
@@ -231,7 +235,7 @@ public:
  }
  bool preflight(const FloorPlan& plan,const Snapshot& snapshot,std::string& error)override{
   if(!prepared()||context.mPhase!=ScenePhase::Prepared||!same(snapshot)||plan.authenticatedBytes!=context.mPlan.authenticatedBytes||
-     !context.mStartsGrounded||!pc_p2_retail_scene_bodies_owned(context))return fail(error,"retail scene physical preflight ownership");
+     !context.mStartsGrounded||!pc_p2_retail_scene_bodies_admitted(context,error))return fail(error,"retail scene physical preflight ownership");
   consumersClaimed=true;
   std::string catalogBytes;
   if(!pc_randomizer_original_input("p2-treasure-catalog.txt",catalogBytes,error)||catalogBytes.size()>32768||
@@ -287,7 +291,7 @@ public:
  }
  bool commit(const Snapshot& snapshot,std::string& error)override{
   if(context.mPhase!=ScenePhase::Installing||!same(snapshot)||!owns(snapshot.scene)||!pc_p2_retail_exit_owned(context)||
-     !pc_p2_retail_scene_bodies_owned(context))return fail(error,"retail scene commit actual census owner differs");
+     !pc_p2_retail_scene_bodies_admitted(context,error))return fail(error,"retail scene commit actual census owner differs");
   // Exit commit remains safely releasable if the receiver refuses its commit.
   if(!pc_p2_retail_exit_commit(context,error)||!pod.commit(snapshot,error))return false;
   podCommitted=true;context.mPhase=ScenePhase::Committed;error.clear();return true;
@@ -332,7 +336,7 @@ public:
   return fail(error,"retail scene native retirement missing issued birth");
  }
  bool boot(std::string& error){
-  if(bootAttempted||!prepared()||context.mPhase!=ScenePhase::Prepared||!pc_p2_retail_scene_bodies_owned(context))return fail(error,"retail scene boot requires actual fresh source bodies");
+  if(bootAttempted||!prepared()||context.mPhase!=ScenePhase::Prepared||!pc_p2_retail_scene_bodies_admitted(context,error))return fail(error,"retail scene boot requires actual fresh source bodies");
   bootAttempted=true;consumersClaimed=true;
   floorOwner=std::make_unique<NativeFloor>(context.mPlan,*this);
   if(!floorSession.activate(context.mSnapshot.cave,context.mSnapshot.floor,context.mSnapshot.scene,true,*this,*floorOwner,error))return false;
@@ -358,7 +362,7 @@ public:
   // Physical transaction release will return to Prepared only after every
   // actual consumer retires. A committed/installing owner cannot be discarded.
   if(context.mPhase!=ScenePhase::Prepared||pc_p2_original_pod_owned()||exitPrepared||
-     pc_p2_retail_scene_bodies_owned(context)||(consumersClaimed&&!pc_p2_retail_scene_bodies_retired(context))||
+     pc_p2_original_captain_scene_owned(context)||pc_p2_retail_scene_bodies_owned(context)||(consumersClaimed&&!pc_p2_retail_scene_bodies_retired(context))||
      pc_p2_retail_cave_native_scene_owned(context.mSnapshot.scene)){
    error="retail map teardown requires retired physical floor/Pod consumers";return false;
   }
