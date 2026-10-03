@@ -38,6 +38,7 @@
 #include <cstring>
 #include <limits>
 #include <sstream>
+#include <optional>
 namespace {
 void require(bool ok,const char* reason) {
     if (!ok) { std::printf("P2_SPICY_RUNTIME_FAIL %s\n",reason); std::fflush(nullptr); std::_Exit(1); }
@@ -68,7 +69,10 @@ class SpicyApp : public PlugPikiApp {
         require(stock.snapshot(before,e),"stock snapshot before SAVE hold");
         const auto generation=pc_randomizer_active_campaign_generation();
         const auto cache=pc_p2_campaign_cache_image();
-        const auto banks=pc_randomizer_generated_cave_cache();
+        // A room regression has no generated/authored cave owner. Never read
+        // that owner's cache getter or fabricate a campaign to enable it.
+        std::optional<P2CaveCacheBanks> banks;
+        if(pc_randomizer_generated_cave())banks=pc_randomizer_generated_cave_cache();
         const std::vector<u8> card(cardData,cardData+CARD_DATA_SIZE);
         const auto savedDay=gameflow.mPlayState.mSavedDay;
         const auto saveStatus=gameflow.mPlayState.mSaveStatus;
@@ -89,13 +93,13 @@ class SpicyApp : public PlugPikiApp {
         require(!std::memcmp(card.data(),cardData,CARD_DATA_SIZE),"held SAVE changed card bytes");
         require(pc_randomizer_active_campaign_generation()==generation,"held SAVE advanced generation");
         require(pc_p2_campaign_cache_image()==cache,"held SAVE changed native cache");
-        const auto& heldBanks=pc_randomizer_generated_cave_cache();
-        require(banks.inside==heldBanks.inside&&banks.surface==heldBanks.surface&&banks.floor==heldBanks.floor,"held SAVE changed cache banks");
+        if(banks){const auto& heldBanks=pc_randomizer_generated_cave_cache();
+            require(banks->inside==heldBanks.inside&&banks->surface==heldBanks.surface&&banks->floor==heldBanks.floor,"held SAVE changed cache banks");}
         require(savedDay==gameflow.mPlayState.mSavedDay&&saveStatus==gameflow.mPlayState.mSaveStatus,"held SAVE changed PlayState");
         require(stock.snapshot(after,e)&&before.sprayCounts==after.sprayCounts
             &&before.berryCounts==after.berryCounts&&before.sprayUses==after.sprayUses
             &&before.sprayMade==after.sprayMade&&before.completed.size()==after.completed.size(),"held SAVE changed stock journal");
-        std::printf("P2_SPICY_SAVE_HOLD_CONTROL label=%s reason=%s actual_party_api_both_realms=1 actual_card_api=1 card_bytes_generation_cache_stock_unchanged=1 authored_transition_UI=UNTESTED\n",label,expected);
+        std::printf("P2_SPICY_SAVE_HOLD_CONTROL label=%s reason=%s actual_party_api_both_realms=1 actual_card_api=1 card_bytes_generation_cache_stock_unchanged=1 active_cave_cache_banks=%d authored_transition_UI=UNTESTED\n",label,expected,int(banks.has_value()));
     }
     bool input(Navi* n) {
         auto previous=n->mKontroller->mInputPressed;
