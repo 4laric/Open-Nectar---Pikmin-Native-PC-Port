@@ -16,7 +16,7 @@ bool SprayCompletion::operator<(const SprayCompletion& b)const {
  return std::tie(child.source,child.slot,captain)<std::tie(b.child.source,b.child.slot,b.captain);
 }
 bool ResourceState::restore(const ResourceSnapshot& state,const EggContents& contents,std::string& e){
- if(state.version!=1||state.completed.size()>4096||state.sprayCounts[0]<0||state.sprayCounts[1]<0||state.berryCounts[0]<0||state.berryCounts[1]<0)return fail(e,"original resource snapshot bounds invalid");
+ if(state.version!=1||state.completed.size()>4096||state.sprayCounts[0]<0||state.sprayCounts[1]<0||state.berryCounts[0]<0||state.berryCounts[1]<0||state.sprayUses[0]<0||state.sprayUses[1]<0)return fail(e,"original resource snapshot bounds invalid");
  std::set<SprayCompletion> events;
  for(const auto& event:state.completed)if(!bornSpray(event,contents)||!events.insert(event).second)return fail(e,"original spray completion absent/mismatched/duplicate");
  mState=state;mCompleted=std::move(events);mReady=true;e.clear();return true;
@@ -36,7 +36,8 @@ bool ResourceState::completeSpray(const ChildIdentity& child,HoneyKind kind,unsi
 }
 bool ResourceState::useSpray(HoneyKind kind,std::string& e){
  int i=index(kind);if(!mReady||i<0||mState.sprayCounts[i]<=0)return fail(e,"original source spray unavailable");
- --mState.sprayCounts[i];e.clear();return true;
+ if(mState.sprayUses[i]==INT_MAX)return fail(e,"original spray use counter overflow");
+ --mState.sprayCounts[i];++mState.sprayUses[i];e.clear();return true;
 }
 bool ResourceState::markSprayMade(HoneyKind kind,std::string& e){
  int i=index(kind);if(!mReady||i<0)return fail(e,"original spray crafting state uninstalled/invalid");
