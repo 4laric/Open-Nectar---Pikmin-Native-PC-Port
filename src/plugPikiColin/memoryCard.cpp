@@ -3,6 +3,8 @@
 #if defined(PIKI_PC_PORT)
 #include "pc_randomizer.h"
 #include "pc_p2_cave_campaign_cache_engine.h"
+#include "pc_p2_sprays.h"
+#include "PikiMgr.h"
 #include <cstdlib>
 #endif
 #include "BaseInf.h"
@@ -935,6 +937,15 @@ void MemoryCard::saveCurrentGame()
 	if(pc_randomizer_original_session()){
 		mDidSaveFail=true;gsys->mIsCardSaving=FALSE;
 		OSReport("[PC Port] Original graph SAVE held before card I/O: restore coverage incomplete\n");
+		return;
+	}
+	// Direct native SAVE UI paths may bypass Party capture. Never write a
+	// pending reaction or active effect into a format without its continuation.
+	// Before a living roster exists (title/new-file UI), there is no effect.
+	std::string spicyHold;
+	if(pikiMgr && !pc_p2_spicy_save_preflight(spicyHold)){
+		mDidSaveFail=true;gsys->mIsCardSaving=FALSE;
+		OSReport("[PC Port] Spicy SAVE held before card I/O: %s\n",spicyHold.c_str());
 		return;
 	}
 	// Direct boot can reach the save UI before a physical backup slot has

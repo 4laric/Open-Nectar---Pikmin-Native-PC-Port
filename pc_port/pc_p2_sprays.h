@@ -16,5 +16,8 @@ bool pc_p2_spicy_active(const Piki*);
 // Read-only Party capture observation. Failure leaves both outputs unchanged.
 // SAVE must be held while pendingDope is true; remaining cannot resume Dope.
 bool pc_p2_spicy_save_observation(const Piki*, float& remaining, bool& pendingDope) noexcept;
+// No save format currently carries spicy continuation. Read the living roster
+// before capture/cache/card mutation; this check never grants SAVE admission.
+bool pc_p2_spicy_save_preflight(std::string& error);
 void pc_p2_spicy_tick(Piki*);
 PikiState* pc_p2_spicy_state();

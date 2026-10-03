@@ -2,6 +2,7 @@
 #include "pc_p2_original_resource_state.h"
 #include "PikiState.h"
 #include "Piki.h"
+#include "PikiMgr.h"
 #include "Navi.h"
 #include "NaviState.h"
 #include "CPlate.h"
@@ -88,6 +89,21 @@ bool pc_p2_spicy_save_observation(const Piki* p, float& remaining, bool& pending
     remaining = seconds;
     pendingDope = pending;
     return true;
+}
+bool pc_p2_spicy_save_preflight(std::string& error) {
+    if (!pikiMgr) { error = "spicy_missing_roster"; return false; }
+    Iterator bodies(pikiMgr);
+    CI_LOOP(bodies) {
+        auto* p = static_cast<Piki*>(*bodies);
+        if (!p || !p->isAlive()) continue;
+        float remaining; bool pending;
+        if (!pc_p2_spicy_save_observation(p, remaining, pending)) {
+            error = "invalid_spicy_snapshot"; return false;
+        }
+        if (pending) { error = "spicy_pending_dope"; return false; }
+        if (remaining > 0) { error = "spicy_remaining_requires_graph"; return false; }
+    }
+    error.clear(); return true;
 }
 void pc_p2_spicy_tick(Piki* p) {
     if (!pc_render_is_authoritative()) return;
