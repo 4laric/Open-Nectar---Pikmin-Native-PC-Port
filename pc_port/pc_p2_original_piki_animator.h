@@ -49,6 +49,10 @@ public:
  // actor dispatcher owns alive/movie eligibility. Native matrix/draw calls
  // consume the actual selected pose/happa Shapes, never P1 model instances.
  bool draw(Handle,Graphics&,std::string&)const;
+ // Before this exact body's canonical association/pool lifetime is retired.
+ // Runtime must first release its owner; other bodies and the bank stay live.
+ bool canDetach(Handle,std::string&)const;
+ bool detach(Handle,std::string&);
  bool canRetire(std::string&)const;
  bool retire(std::string&);
  std::size_t retainedBodies()const noexcept;

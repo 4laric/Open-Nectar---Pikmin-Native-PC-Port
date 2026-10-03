@@ -175,6 +175,9 @@ bool readOwnership(Ownership&,std::string&);
 // ordinary gameplay animation/listener callback delivery remains supported.
 bool canRetireScene(std::string&);
 bool owned()noexcept;
+// Observed exact retained FSM/pending owner, independent of action/world
+// admission. In-flight owner mutation conservatively retains every consumer.
+bool retains(Handle)noexcept;
 bool retired(std::string&);
 } }
 

@@ -159,15 +159,18 @@ bool NativeAnimator::advance(Handle h,float seconds,std::string& e){
  while(!loop&&a->key<c.keys.size()&&c.keys[a->key].frame<unsigned(a->timer)){
   const auto key=c.keys[a->key];
   if(!animationKey(h,key.type,e)||!p.actor(h,e))return false;
+  if(p.world->phase()!=captain::Phase::GameWorldActive)return fail(e,"source animation key revoked active World");
   if(a->generation!=generation)return true; // authored receiver started a new motion
   if(key.type==1&&!a->finishing){std::size_t start=a->key;while(start&&c.keys[--start].type!=0){}if(c.keys[start].type!=0)return fail(e,"source animation LOOP_END lacks LOOP_START");a->timer=float(c.keys[start].frame);loop=true;}
   ++a->key;
  }
  if(loop)a->key=lowest(c,a->timer);
- if(a->timer>=c.duration){a->timer=float(c.duration-1);if(!a->completed){a->completed=true;if(!animationKey(h,1000,e)||!p.actor(h,e))return false;}}
+ if(a->timer>=c.duration){a->timer=float(c.duration-1);if(!a->completed){a->completed=true;if(!animationKey(h,1000,e)||!p.actor(h,e))return false;if(p.world->phase()!=captain::Phase::GameWorldActive)return fail(e,"source animation END revoked active World");}}
  return p.current(e);
 }
 bool NativeAnimator::pose(Handle h,AnimatedPose& out,std::string& e)const{auto& p=*impl;auto* a=p.actor(h,e);if(!a)return false;const auto& c=p.clip(*a);const Sample* sample=&c.samples.front();for(const auto& s:c.samples){if(float(s.frame)>a->timer)break;sample=&s;}AnimatedPose value;value.shape=sample->shape;value.sourceFrame=a->timer;value.sampledFrame=sample->frame;std::copy(sample->happa.begin(),sample->happa.end(),value.happa);std::copy(p.banks.at(a->species).happa.begin(),p.banks.at(a->species).happa.end(),value.happaShapes);out=value;return true;}
+bool NativeAnimator::canDetach(Handle h,std::string& e)const{auto& p=*impl;if(p.busy)return fail(e,"source animator callback is in flight");struct Busy{bool& b;Busy(bool& x):b(x){b=true;}~Busy(){b=false;}}busy(p.busy);if(!p.actor(h,e))return false;if(piki::retains(h))return fail(e,"source runtime still owns this animator consumer");if(!p.current(e)||!pc_p2_original_piki_body_current(h.body,h.lifetime))return false;return piki::retains(h)?fail(e,"source runtime reacquired this animator consumer"):true;}
+bool NativeAnimator::detach(Handle h,std::string& e){if(!canDetach(h,e))return false;impl->actors.erase(h.body);return true;}
 bool NativeAnimator::canRetire(std::string& e)const{auto& p=*impl;if(p.busy)return fail(e,"source animator callback is in flight");if(p.banks.empty()&&p.actors.empty())return true;if(!p.current(e))return false;for(const auto& item:p.actors)if(!pc_p2_original_piki_body_current(item.first,item.second.handle.lifetime))return fail(e,"source animator cleanup lifetime changed");if(piki::owned())return fail(e,"source runtime still owns animator consumers");return true;}
 bool NativeAnimator::retire(std::string& e){if(!canRetire(e))return false;impl->actors.clear();impl->banks.clear();impl->scene=nullptr;impl->world=nullptr;impl->captains={};impl->incarnation=impl->revision=0;impl->campaign.clear();impl->session.clear();impl->catalog.clear();return true;}
 std::size_t NativeAnimator::retainedBodies()const noexcept{return impl->actors.size();}
