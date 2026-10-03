@@ -2,6 +2,8 @@
 #include "pc_p2_cave_campaign_cache.h"
 #include "pc_p2_cave_campaign_cache_engine.h"
 #include "pc_p2_cave_campaign_party_engine.h"
+#include "pc_p2_cave_party_landing.h"
+#include "MapCode.h"
 #include "pc_p2_cave_survivor_permit.h"
 #if defined(PIKMIN_P2_SURFACE_SAVE_PROVIDER)
 #include "pc_p2_surface_save.h"
@@ -91,15 +93,14 @@ void flush(){
     std::printf("P2_CAMPAIGN_LIVE_CACHE_FLUSH stage_key=%u floor=%d\n",stage,int(inside()));
 }
 void moveParty(P2CaveCampaignParty& party,bool entering){
-    std::array<P2CavePartyPoint,2> from{},to{};
-    for(auto& c:party.captains){from[c.slot]=c.position;
+    std::array<P2CavePartyPoint,2> to{};
+    for(auto& c:party.captains){
         if(entering){party.surfaceHomes[c.slot]=c.position;to[c.slot]={config.spawnX+float(c.slot*30),c.position.y,config.spawnZ};}
         else to[c.slot]=party.surfaceHomes[c.slot];}
-    for(auto& b:party.bodies){const int owner=b.owner>=0?b.owner:party.active;
-        b.position.x+=to[owner].x-from[owner].x;b.position.y+=to[owner].y-from[owner].y;b.position.z+=to[owner].z-from[owner].z;
+    if(!p2CavePlaceLandingParty(party,to))invalid("invalid transported party landing");
+    for(auto& b:party.bodies){
         // Keep provenance/key while retiring the old map's pointer binding.
         b.generator=b.originRealm==int(entering)?b.originGenerator:0;}
-    for(auto& c:party.captains)c.position=to[c.slot];
     party.inside=entering;
     party.landing=true;
 }
@@ -180,8 +181,16 @@ void pc_p2_cave_campaign_scene_setup(){
         // collision; an already landed SAVE retains exact captured heights.
         if(party.landing){
             if(!mapMgr)invalid("landing without destination map");
-            for(auto& c:party.captains)c.position.y=mapMgr->getMinY(c.position.x,c.position.z,true);
-            for(auto& b:party.bodies)b.position.y=mapMgr->getMinY(b.position.x,b.position.z,true);
+            auto land=[](P2CavePartyPoint& point){
+                auto* triangle=mapMgr->getCurrTri(point.x,point.z,true);
+                if(!triangle)invalid("destination landing has no collision footing");
+                const auto attribute=MapCode::getAttribute(triangle);
+                if(attribute==ATTR_Water||attribute==ATTR_Hole)invalid("destination landing has unsafe footing");
+                point.y=mapMgr->getMinY(point.x,point.z,true);
+                if(!point.valid())invalid("destination landing height invalid");
+            };
+            for(auto& c:party.captains)land(c.position);
+            for(auto& b:party.bodies)land(b.position);
             party.landing=false;
             if(!party.valid())invalid("invalid destination landing geometry");
             pc_randomizer_generated_cave_party_set(party);
