@@ -8,6 +8,7 @@
 #include "Camera.h"
 #include "Collision.h"
 #include "SoundID.h"
+#include "SoundMgr.h"
 #include "Stickers.h"
 #include "Interactions.h"
 #include <fstream>
@@ -146,9 +147,9 @@ struct Native::Impl final:Engine {
   const bool dying=i->second->nativeDying;i->second->collision.detach(static_cast<BTeki*>(h.creature));tracks.erase(i);
   if(!dying)h.creature->kill(false);return true;
  }
- bool touchSound(Host& h,Creature* collider,std::string&)override{
+ bool touchSound(Host&,Creature*,std::string&)override{
   // Native equivalent touch-leaf cue; P2 sample bank is not part of this port.
-  collider->playEventSound(h.creature,SE_ORIMA_TOUCHPLANTS);return true;
+  SeSystem::playPlayerSe(SE_ORIMA_TOUCHPLANTS);return true;
  }
 };
 Native::Native():m(std::make_unique<Impl>()){instances().insert(this);}
@@ -212,5 +213,6 @@ void pc_p2_original_foliage_forget(BTeki* a){auto* n=owner(a);if(n)n->forget(a);
 
 
 void pc_p2_original_foliage_post_shadow(Graphics& g){for(auto* n:p2original::foliage::instances())n->postShadow(g);}
+
 
 
