@@ -54,6 +54,9 @@ public:int idle()override{
     const bool movie=gameflow.mMoviePlayer&&gameflow.mMoviePlayer->mIsActive;
     const bool walk=n&&n->getCurrState()&&n->getCurrState()->getID()==NAVISTATE_Walk;
     const bool ready=walk&&!movie&&!gameflow.mPauseAll&&!gameflow.mIsUIOverlayActive;
+    const bool controlling=n&&n->getCurrState()
+        &&(walk||n->getCurrState()->getID()==NAVISTATE_Gather)
+        &&!movie&&!gameflow.mPauseAll&&!gameflow.mIsUIOverlayActive;
     int living=0,formation=0;
     if(pikiMgr){Iterator it(pikiMgr);CI_LOOP(it){auto* p=static_cast<Piki*>(*it);if(p->isAlive()){
         ++living;if(p->mMode==PikiMode::FormationMode)++formation;}}}
@@ -69,7 +72,7 @@ public:int idle()override{
     if(choice.active){a=frames%40<4?1:0;}
     else if(gameflow.mIsTutorialTextActive){a=frames%40<4?1:0;}
     else if(gameflow.mIsUIOverlayActive&&!movie){b=frames%40<4?1:0;}
-    else if(ready&&living==20){
+    else if(controlling&&living==20){
         ++ticks;
         if(stage==0&&boundary.ready&&boundary.floor==0){
             if(!baselineGeneration){
@@ -84,12 +87,18 @@ public:int idle()override{
             if(ticks==15){++entryClicks;std::puts("CAVE_VISIBLE_INPUT enter_A=1 F6=0");}
             if(boundary.floor==1){stage=2;ticks=0;entered=true;}
         }else if(stage==2){
-            if(ticks>=45){
+            if(ticks==45){
                 floorParty=pc_randomizer_generated_cave_party();
                 if(!floorParty.present || floorParty.bodies.size()!=20 || !floorParty.inside)finish(10);
+                std::puts("CAVE_VISIBLE_INPUT gather_on_landing ordinary_B=1");
+            }
+            if(ticks>=45&&ticks<135)b=1;
+            if(ticks>=135&&formation==20){
                 if(move(320,0)<12){stage=3;ticks=0;}
             }
+            if(ticks>=240&&formation!=20){std::puts("P2_CAVE_VISIBLE_RUNTIME FAIL recruit20_on_landing=0");finish(14);}
         }else if(stage==3){
+            if(ticks==1)std::puts("CAVE_VISIBLE_INPUT dry_bank formation20_before_X=1");
             x=ticks<8?1:0;
             if(ticks>120&&formation==0){
                 P2CaveCampaignParty dismissed;
