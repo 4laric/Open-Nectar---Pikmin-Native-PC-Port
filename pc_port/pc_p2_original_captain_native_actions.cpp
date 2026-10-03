@@ -1,5 +1,6 @@
 #include "pc_p2_original_captain_native_actions.h"
 #include "pc_p2_original_captain_native_control.h"
+#include "pc_p2_original_captain_body_phases.h"
 #include "Navi.h"
 #include "NaviState.h"
 #include "Kontroller.h"
@@ -107,7 +108,7 @@ bool Bridge::dismissSound(Navi& n,std::string& e){return m->operation(n,e,[&]{re
 bool Bridge::freeMember(Navi& n,PikiHandle h,float r,Vec3 v,bool dismiss,std::string& e){if(!std::isfinite(r)||r<0||!finite(v))return fail(e,"invalid source dismissal geometry");return m->operation(n,e,[&]{piki::Frame f;return dismiss&&m->read(h,f,e)&&f.captain==&n&&f.releasable&&piki::gather(handle(h),vec(v),r,e);});}
 bool Bridge::disbandTimer(Navi& n,unsigned t,std::string& e){return m->operation(n,e,[&]{return m->source.disbandTimer(n,t,e);});}
 bool Bridge::followFrame(const Navi& n,party::FollowFrame& out,std::string& e)const{party::FollowFrame f;if(!m->operation(const_cast<Navi&>(n),e,[&]{return m->source.followFrame(n,f,e);}))return false;out=f;return true;}
-bool Bridge::moveRotation(Navi& n,bool enable,std::string& e){return m->operation(n,e,[&]{if(enable)n.resetCreatureFlag(CF_UsePriorityFaceDir);else n.setCreatureFlag(CF_UsePriorityFaceDir);return true;});}
+bool Bridge::moveRotation(Navi& n,bool enable,std::string& e){return m->operation(n,e,[&]{return bodyphases::setMoveRotation(&n,enable,e);});}
 bool Bridge::randomChoice(float& out,std::string& e){float value;if(!m->check(nullptr,e)||!m->source.randomChoice(value,e)||!m->check(nullptr,e)||!std::isfinite(value)||value<0||value>1)return false;out=value;return true;}
 bool Bridge::followFeedback(Navi& n,party::FollowFeedback f,std::string& e){return m->operation(n,e,[&]{return m->source.followFeedback(n,f,e);});}
 bool Bridge::enemy(party::EnemyHandle h,party::EnemyFrame& out,std::string& e)const{party::EnemyFrame f;if(!m->check(nullptr,e)||!m->source.enemy(h,f,e)||!m->check(nullptr,e))return false;out=f;return true;}

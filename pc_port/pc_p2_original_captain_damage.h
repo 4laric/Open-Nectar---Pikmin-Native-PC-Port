@@ -122,6 +122,11 @@ void pc_p2_original_captain_begin_retirement();
 void pc_p2_original_captain_movie_started(MoviePlayer*);
 void pc_p2_original_captain_movie_ended(MoviePlayer*);
 void pc_p2_original_captain_actor_update(Navi*);
+// Literal Navi::update ordering: iframe precedes sound/look; party/throw
+// counters follow lookCreature and precede effects. Common phase owner calls
+// these separately. The combined hook is retained for controlled legacy tests.
+void pc_p2_original_captain_invincibility_update(Navi*);
+void pc_p2_original_captain_party_timers_update(Navi*);
 // Query actor lifetime/iframes only for the exact live source scene roster.
 bool pc_p2_original_captain_actor_alive(const Navi*);
 // Distinguishes a source actor with CF_IsAlive clear from an absent source

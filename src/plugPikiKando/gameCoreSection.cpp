@@ -137,6 +137,7 @@
 #include "MoviePlayer.h"
 #if defined(PIKI_PC_PORT)
 #include "pc_p2_original_captain_damage.h"
+#include "pc_p2_original_captain_native_phases.h"
 #include "pc_p2_original_captain_render_policy.h"
 #endif
 #include "NaviMgr.h"
@@ -4219,6 +4220,20 @@ static void pelletBonusTestTick()
 
 void GameCoreSection::updateAI()
 {
+    // Original NaviMgr owns update->animation per open slot, then simulation.
+    // Dispatch before native P1 UI/pause gates; the actual source GameSystem
+    // producer supplies paused/frameTimer/time. Legacy Navi::update is fenced.
+    if (const auto* sourceWorld = pc_p2_original_captain_world();
+        sourceWorld && sourceWorld->phase() == p2original::captain::Phase::GameWorldActive) {
+        std::string sourceError;
+        if (!p2original::captain::bodyphases::tickNativePhases(gsys->getFrameTime(), sourceError)) {
+            static std::string reported;
+            if (reported != sourceError) {
+                std::fprintf(stderr, "[original captain frame refused] %s\n", sourceError.c_str());
+                reported = sourceError;
+            }
+        }
+    }
     pelletBonusTestTick();
     pc_p2_cave_tick();
     pc_p2_giant_breadbug_actor_tick();

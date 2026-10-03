@@ -302,6 +302,13 @@ set(PC_PORT_SOURCES
     pc_port/pc_p2_original_captain_whistle.cpp
     pc_port/pc_p2_original_captain_cstick.cpp
     pc_port/pc_p2_original_captain_rappa.cpp
+    pc_port/pc_p2_original_captain_water.cpp
+    pc_port/pc_p2_original_captain_body_phases.cpp
+    pc_port/pc_p2_original_captain_native_phases.cpp
+    pc_port/pc_p2_original_captain_native_water.cpp
+    pc_port/pc_p2_original_captain_native_reader.cpp
+    pc_port/pc_p2_original_captain_body_borrower.cpp
+    pc_port/pc_p2_original_captain_native_plate_driver.cpp
     pc_port/pc_p2_original_chappy.cpp
     pc_port/pc_p2_original_chappy_native.cpp
     pc_port/pc_p2_original_group_engine.cpp
@@ -3761,3 +3768,26 @@ add_executable(p2_original_captain_normals_test tools/pc_p2_original_captain_nor
 target_include_directories(p2_original_captain_normals_test PRIVATE pc_port)
 target_compile_options(p2_original_captain_normals_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
 add_test(NAME p2_original_captain_normals_test COMMAND p2_original_captain_normals_test)
+
+add_executable(p2_original_captain_water_test tools/pc_p2_original_captain_water_test.cpp pc_port/pc_p2_original_captain_water.cpp)
+target_include_directories(p2_original_captain_water_test PRIVATE pc_port)
+target_compile_options(p2_original_captain_water_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_original_captain_water_test COMMAND p2_original_captain_water_test)
+
+add_executable(p2_original_captain_body_phases_test tools/pc_p2_original_captain_body_phases_test.cpp
+    pc_port/pc_p2_original_captain_body_phases.cpp pc_port/pc_p2_original_captain_control.cpp)
+target_include_directories(p2_original_captain_body_phases_test BEFORE PRIVATE tools/captain_body_phase_stubs pc_port)
+target_compile_options(p2_original_captain_body_phases_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+
+add_executable(p2_original_captain_native_phases_test tools/pc_p2_original_captain_native_phases_test.cpp
+    pc_port/pc_p2_original_captain_body_phases.cpp pc_port/pc_p2_original_captain_native_phases.cpp
+    pc_port/pc_p2_original_captain_native_water.cpp pc_port/pc_p2_original_captain_water.cpp
+    pc_port/pc_p2_original_captain_body_borrower.cpp
+    pc_port/pc_p2_original_captain_control.cpp)
+target_include_directories(p2_original_captain_native_phases_test BEFORE PRIVATE tools/captain_body_phase_stubs pc_port)
+target_compile_options(p2_original_captain_native_phases_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+set(P2_ORIGINAL_CAPTAIN_TEST_PARAMETERS "" CACHE FILEPATH "Private descriptor-selected Navi parameter bytes for captain engineering controls")
+if(EXISTS "${P2_ORIGINAL_CAPTAIN_TEST_PARAMETERS}")
+    add_test(NAME p2_original_captain_body_phases_test COMMAND p2_original_captain_body_phases_test "${P2_ORIGINAL_CAPTAIN_TEST_PARAMETERS}")
+    add_test(NAME p2_original_captain_native_phases_test COMMAND p2_original_captain_native_phases_test "${P2_ORIGINAL_CAPTAIN_TEST_PARAMETERS}")
+endif()

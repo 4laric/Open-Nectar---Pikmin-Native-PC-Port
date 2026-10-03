@@ -38,6 +38,9 @@ struct AnimationFrame {
  // Source FakePiki position-minus-previousPosition (after real movement),
  // and NaviMgr's faceDirOffset captured before the actor update pass.
  control::Vec2 displacement;
+ // First animation clocks do not read previousPosition. Locomotion selection
+ // requires the actual postmovement displacement to have been established.
+ bool displacementKnown=true;
  float deltaTime=0, faceDirectionOffset=0;
  // Actual GameSystem::mIsFrozen observation. Missing authority refuses;
  // Self JKOKE identity is queried from the real dual animator bank.
@@ -66,6 +69,10 @@ bool resetThrowAnimationSpeed(Navi*,std::string&);
 // Actual native Walk/action states call once BEFORE inspecting post-control
 // timer. Walk command application must not execute this same control twice.
 bool control(Navi*,std::string&);
+// Literal active makeCStick clock write, before CPlate Refresh. Valid only as
+// a child of the actual control effects commit; outside calls refuse.
+bool resetCStickSceneAnimationTimer(Navi*,std::string&);
+bool cStickControlTransaction(Navi*,std::string&); // read-only child admission
 // Actual FakePiki::doAnimation phase, before physics/input AI. Consumes the
 // previously selected rate; never selects locomotion or a next-frame rate.
 bool advanceAnimation(Navi*,const std::function<bool(Animator,Listener,int)>& emit,std::string&);

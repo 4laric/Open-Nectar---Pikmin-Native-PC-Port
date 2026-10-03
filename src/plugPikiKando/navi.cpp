@@ -1241,6 +1241,11 @@ void Navi::updateWalkAnimation()
  */
 void Navi::postUpdate(int unused, f32 deltaTime)
 {
+#if defined(PIKI_PC_PORT)
+ // Source common simulation already owns map/platform response and cached
+ // bounds. Native Creature::postUpdate must not run P1 physics afterwards.
+ if(pc_p2_original_captain_body_owned(this))return;
+#endif
 	if (!movieMode()) {
 		Creature::postUpdate(unused, deltaTime);
 	}
@@ -1468,15 +1473,14 @@ void Navi::pcPinCursorFirstPerson()
 void Navi::update()
 {
 #if defined(PIKI_PC_PORT)
- pc_p2_original_captain_actor_update(this);
  // A real source scene's roster never executes the legacy manual animator,
- // control, formation or body update below. The source common animation/AI/
- // simulation phase integration is incomplete and explicitly refuses here.
+ // control, formation or body update below. The source common manager dispatch
+ // owns update, animation and simulation together before legacy UI gates.
  // This fence also applies during Loading before the typed Walk bootstrap.
  if(pc_p2_original_captain_body_owned(this)){
   static bool reported[2]={};const auto* scene=pc_p2_original_captain_loaded_scene();
   const unsigned slot=scene&&scene->captainAt(1)==this?1:0;
-  if(!reported[slot]){std::fprintf(stderr,"[original captain body refused] genuine source common update/simulation phases are not installed\n");reported[slot]=true;}
+  if(!reported[slot]){std::fprintf(stderr,"[original captain] legacy body update bypassed; source manager owns phases\n");reported[slot]=true;}
   return;
  }
 #endif

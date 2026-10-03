@@ -1,4 +1,5 @@
 #include "pc_p2_original_captain_native_phases.h"
+#include "pc_p2_original_captain_body_borrower.h"
 #include "pc_p2_retail_scene.h"
 #include "Navi.h"
 #include "NaviState.h"
@@ -84,6 +85,7 @@ const p2retail::SceneContext* prepared=nullptr;int queries=0;bool queryAvailable
 p2retail::SourceRoomGeometry geometry;p2retail::SourceWaterInputs inputs;
 }
 const p2retail::SceneContext* pc_p2_retail_scene_prepared()noexcept{return prepared;}
+const p2retail::SceneContext* pc_p2_retail_scene_committed()noexcept{return world.value==Phase::GameWorldActive?prepared:nullptr;}
 bool pc_p2_retail_scene_find_water(const p2retail::SceneContext& c,std::uint64_t serial,std::uint64_t revision,const std::array<float,3>& position,p2retail::SourceWaterResult& out,std::string& e){
  ++queries;events.push_back("findWater");if(!queryAvailable){e="engineering Scene930 query unavailable";return false;}
  if(&c!=prepared||serial!=scene.epoch||revision!=4||position[1]!=expectedWaterY)throw std::runtime_error("exact cached sphere/query ownership");
@@ -103,6 +105,23 @@ int main(int argc,char** argv){try{
  queryAvailable=false;events.clear();float prior=a.mVelocity.y;check(!bp::body_animation(&a,error)&&a.mVelocity.y==prior&&events.back()=="findWater","missing actual query stops gravity/geometry");queryAvailable=true;queryWrong=true;events.clear();check(!bp::body_animation(&a,error)&&events.back()=="findWater","wrong query selection identity refuses");queryWrong=false;
  queryExpire=true;events.clear();check(!bp::body_animation(&a,error)&&events.back()=="findWater","scene replacement during query stops body suffix");queryExpire=false;--scene.epoch;wet=true;check(bp::cachedNativeWater(&a,wet,error)&&!wet,"failed candidate never overwrites genuine cached null");
  world.wrong=true;wet=true;check(!bp::cachedNativeWater(&a,wet,error)&&wet,"canonical World roster mismatch leaves cached output unchanged");world.wrong=false;prepared=nullptr;check(!bp::body_animation(&a,error),"missing actual SceneContext revokes phase authority");prepared=context.get();lifetime=false;check(!bp::body_animation(&a,error),"missing actual actor lifetime refuses native phase");lifetime=true;
+ observation.naviManagerFlag1=true;b.mSRT.t.set(4,7,5);check(bp::body_simulation(&b,.01f,error),"second actual source slot establishes its own cached bound");observation.naviManagerFlag1=false;
+ observation.gamePaused=true;events.clear();const auto beforePause=queries;
+ check(bp::tickNativePhases(.01f,error)&&events.empty()&&queries==beforePause,"actual source paused manager does not dispatch any actor phase");
+ check(!bp::tickNativePhases(.01f,error)&&queries==beforePause,"same source GameSystem frame cannot dispatch twice");
+ observation.gamePaused=false;observation.frameTimer=2;a.mFaceDirection=.3f;events.clear();
+ check(bp::tickNativePhases(.01f,error)&&queries==beforePause+2&&events.back()=="psm","actual manager updates and animates both open bodies before simulation suffix");
+ auto clock=std::find(events.begin(),events.end(),"clocks"),execute=std::find(events.begin(),events.end(),"exec"),mapEvent=std::find(events.begin(),events.end(),"map"),queryEvent=std::find(events.begin(),events.end(),"findWater");
+ check(execute<clock&&clock<queryEvent&&queryEvent<mapEvent,"literal source manager update before animation before simulation");
+ nativecontrol::AnimationFrame observed;check(bp::nativeAnimationFrame(&a,observed,error)&&observed.displacementKnown&&observed.faceDirectionOffset==.3f&&observed.deltaTime==.01f,"native control observations borrow actual source phase fields and GameSystem facts");
+ bp::BodyBorrowerGuard borrower;check(!borrower.current(error),"default borrowed trace guard has no source authority");
+ check(bp::BodyBorrowerGuard::capture(*context,&a,borrower,error)&&borrower.current(error),"trace guard borrows actual committed scene/body generation");
+ a.current=&second;check(!borrower.current(error),"source trace callback changing real FSM revokes borrower");a.current=&typed;
+ lifetime=false;check(!borrower.current(error),"unknown actual source lifetime revokes borrower");lifetime=true;
+ world.wrong=true;check(!borrower.current(error),"source trace World roster replacement revokes borrower");world.wrong=false;
+ observation.frameTimer=3;queryAvailable=false;events.clear();
+ check(!bp::tickNativePhases(.01f,error),"source frame refuses unavailable registered SeaMgr query");const auto failureQueries=queries;
+ check(!bp::tickNativePhases(.01f,error)&&queries==failureQueries,"refused source frame cannot replay callback effects");queryAvailable=true;
  world.value=Phase::GameWorldActive;check(!bp::retireNativePhases(scene,error),"active retirement refuses");world.value=Phase::Inactive;check(bp::retireNativePhases(scene,error),"exact inactive composition retirement drains actual child owners");check(!pc_p2_original_captain_body_phase_owner(&a),"retired composition revokes owner");wet=true;check(!bp::cachedNativeWater(&a,wet,error)&&wet,"missing composition leaves output untouched");body=nullptr;
  world.value=Phase::Loading;check(bp::createNativePhases(*context,provider,trace,bank,error),"actual replacement composition");body=pc_p2_original_captain_body_phase_owner(&a);check(body->readFields(&a,fields,error)&&fields.initializationSerial>firstBirth&&!fields.bounding,"replacement owner birth defeats scene-slot ABA without invented sphere");world.value=Phase::Inactive;check(bp::retireNativePhases(scene,error),"replacement inactive cleanup");body=nullptr;
  std::cout<<checks<<" actual native composition/body/water TU controls PASS (engineering doubles; no gameplay claim)\n";return 0;

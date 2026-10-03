@@ -112,11 +112,14 @@ void pc_p2_original_captain_begin_retirement(){if(runtime.valid()){runtime.retir
 void pc_p2_original_captain_main_game_left(){if(runtime.valid())runtime.game=Phase::Inactive;}
 void pc_p2_original_captain_movie_started(MoviePlayer* p){if(p){observedMovie=p;observedDemo=Demo::Playing;}}
 void pc_p2_original_captain_movie_ended(MoviePlayer* p){if(p){observedMovie=p;observedDemo=Demo::Inactive;}}
-void pc_p2_original_captain_actor_update(Navi* n){
+void pc_p2_original_captain_invincibility_update(Navi* n){
  const int slot=runtime.slot(n);if(slot<0)return;
  // Retail Navi::update decrements mInvincibleTimer once per actor update,
  // independent of delta seconds and current state, never per global idle tick.
  if(runtime.frames[slot])--runtime.frames[slot];
+}
+void pc_p2_original_captain_party_timers_update(Navi* n){
+ const int slot=runtime.slot(n);if(slot<0)return;
  auto& timers=runtime.timers[slot];
  const auto& velocity=n->mTargetVelocity;
  const float speed=std::sqrt(velocity.x*velocity.x+velocity.y*velocity.y+velocity.z*velocity.z);
@@ -125,6 +128,10 @@ void pc_p2_original_captain_actor_update(Navi* n){
   if(n->mKontroller&&(n->mKontroller->mCurrentInput&KBBTN_A))timers.throwDisable=10;
   --timers.throwDisable;
  }
+}
+void pc_p2_original_captain_actor_update(Navi* n){
+ pc_p2_original_captain_invincibility_update(n);
+ pc_p2_original_captain_party_timers_update(n);
 }
 bool pc_p2_original_captain_actor_alive(const Navi* n){const int slot=runtime.slot(n);return slot>=0&&runtime.alive[slot];}
 bool pc_p2_original_captain_actor_lifetime(const Navi* n,bool& out){const int slot=runtime.slot(n);if(slot<0)return false;out=runtime.alive[slot];return true;}

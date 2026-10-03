@@ -103,6 +103,7 @@ bool SourceBank::sourceBytes(SourceResource,std::string& out,std::string&)const{
 bool SourceBank::state(const Navi*,MotionState& out,std::string&)const{out={};return true;}
 bool SourceBank::jointWorld(Navi*,unsigned joint,std::array<float,12>& out,std::string&){if(joint!=10)return false;out={1,0,0,10,0,1,0,20,0,0,1,30};return true;}
 namespace nativecontrol {std::optional<float> sceneAnimationTimer(const Navi*){return 2;}bool control(Navi*,std::string&){++controls;return true;}}
+namespace bodyphases {unsigned sourceFlags=0;bool setterAvailable=true;bool setMoveRotation(Navi*,bool enable,std::string&){if(!setterAvailable)return false;if(enable)sourceFlags&=~1u;else sourceFlags|=1;return true;}}
 namespace party {bool invocationAvailable=true,accepted=true;bool invokeWhistleCaptain(Navi* receiver,Navi* caller,bool,bool,WhistleOutcome& out,std::string&){if(!invocationAvailable||receiver!=&b||caller!=&a)return false;out={accepted};return true;}}
 }}
 namespace p2original {namespace piki {
@@ -144,7 +145,10 @@ int main(int argc,char** argv){try{
  whistleAvailable=false;beforeInvocations=whistleInvocations;check(!bridge->callPikis(a,error)&&whistleInvocations==beforeInvocations,"missing typed SDK authority stops before next candidate");whistleAvailable=true;whistleAccepted=true;
  physicalAvailable=false;beforeInvocations=whistleInvocations;check(!bridge->whistleMember(a,{&p,10},false,true,error)&&whistleInvocations==beforeInvocations,"absent real physical fact refuses before receiver");physicalAvailable=true;
  sdkExpire=true;check(!bridge->whistleMember(a,{&p,10},false,true,error),"typed SDK callback captain state expiry refuses continuation");sdkExpire=false;a.current=&typed;
- check(bridge->control(a,error)&&controls==1,"actual source control called once");check(bridge->moveRotation(a,false,error)&&(a.flags&CF_UsePriorityFaceDir),"physical priority face flag");
+ check(bridge->control(a,error)&&controls==1,"actual source control called once");const auto originalFlags=a.flags;
+ check(bridge->moveRotation(a,false,error)&&(bodyphases::sourceFlags&1)&&a.flags==originalFlags,"source FPFLAGS writes leave native P1 flags unchanged");
+ check(bridge->moveRotation(a,true,error)&&!(bodyphases::sourceFlags&1)&&a.flags==originalFlags,"source move rotation reenable clears only source flag");
+ bodyphases::setterAvailable=false;check(!bridge->moveRotation(a,false,error)&&!(bodyphases::sourceFlags&1)&&a.flags==originalFlags,"missing source flag owner refuses");bodyphases::setterAvailable=true;
  check(bridge->togglePlayer(a,b,error),"source controller ownership toggle preserves both state identities");actor.toggleExpire=true;check(!bridge->togglePlayer(a,b,error),"unexpected target state expiry refuses toggle continuation");actor.toggleExpire=false;b.current=&typed;
  actor.expire=true;observation.face=99;check(!bridge->frame(a,observation,error)&&observation.face==99,"read callback state expiry leaves output unchanged");a.current=&typed;
  check(!bridge->holdFields(a,1,2,3,error),"write callback exact state expiry refuses continuation");actor.expire=false;a.current=&typed;

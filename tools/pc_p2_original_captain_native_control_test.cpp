@@ -51,7 +51,7 @@ struct Effects:nc::Effects {
  bool animationFrame(const Navi&,nc::AnimationFrame& out,std::string&)const override{out=observation;return true;}
 } effects;
 SourceBank* bankProvider=nullptr;const nc::Effects* effectsProvider=&effects;
-bool Plan::commit(Navi& n,std::string& e){++commitCalls;if(commitMode==1){e="actual postRefresh facts unavailable";return false;}if(commitMode==2)nc::forget(&n);if(commitMode==3){nc::forget(&n);if(!nc::resetAfterBootstrap(&n,e))return false;}if(commitMode==4)a.current=&alternate;if(commitMode==5)effectsProvider=nullptr;if(commitMode==6)++scene.epoch;return true;}
+bool Plan::commit(Navi& n,std::string& e){++commitCalls;if(commitMode==1){e="actual postRefresh facts unavailable";return false;}if(commitMode==2)nc::forget(&n);if(commitMode==3){nc::forget(&n);if(!nc::resetAfterBootstrap(&n,e))return false;}if(commitMode==4)a.current=&alternate;if(commitMode==5)effectsProvider=nullptr;if(commitMode==6)++scene.epoch;if(commitMode==7){std::string nested;nc::control(&n,nested);}if(commitMode==8&&!nc::resetCStickSceneAnimationTimer(&n,e))return false;return true;}
 MotionState channels[2];Listener listeners[2];int lock=-1;unsigned long long generation=10;
 struct Start {Animator channel;Motion motion;bool preserve;Listener listener;float oldFrame;};
 std::vector<Start> starts;std::vector<Animator> advances;std::vector<float> amounts;bool sendEvents=false,listenerAvailable=true;
@@ -67,11 +67,14 @@ bool animate(){return nc::animateWalk(&a,[](int){return true;},error);}
 }
 const LoadedScene* pc_p2_original_captain_loaded_scene(){return &scene;}const World* pc_p2_original_captain_world(){return &world;}
 bool pc_p2_original_captain_actor_alive(const Navi* n){return n==&a||n==&b;}
+bool controlledAlive=true,lifetimeKnown=true;
+bool pc_p2_original_captain_actor_lifetime(const Navi* n,bool& out){if(!lifetimeKnown||(n!=&a&&n!=&b))return false;out=controlledAlive;return true;}
 actions::ActionSource* pc_p2_original_captain_action_source(const Navi*){return &actionsProvider;}
 const nc::Effects* pc_p2_original_captain_control_effects(const Navi*){return effectsProvider;}
 SourceBank* pc_p2_original_captain_source_bank(){return bankProvider;}
 float pc_p2_equipment_speed(float raw){return raw;}
 namespace p2original { namespace captain {
+namespace bodyphases {unsigned sourceFlags=0;bool setterAvailable=true;bool setMoveRotation(Navi*,bool enable,std::string&){if(!setterAvailable)return false;if(enable)sourceFlags&=~1u;else sourceFlags|=1;return true;}}
 struct SourceBank::Impl{};SourceBank::SourceBank():m(new Impl){}SourceBank::~SourceBank()=default;
 bool SourceBank::ready()const{return true;}
 bool SourceBank::parameters(SourceParameters& out,std::string&)const{out={};out.rawSourceSha=control::parameterSha256();return true;}
@@ -132,6 +135,20 @@ int main(int argc,char** argv){try{
  reset(Motion::Wait,Motion::Wait,-1);NaviState p1;a.current=&p1;check(!animate()&&starts.empty()&&advances.empty(),"common selector neverfalls back from untyped P1state");
  reset(Motion::Wait,Motion::Wait,-1);effectsProvider=nullptr;check(!animate()&&starts.empty()&&advances.empty(),"missing actual observation provider refuses");
  Camera camera;a.camera=&camera;controlFacts=true;
+ reset(Motion::Wait,Motion::Wait,-1);observation.displacementKnown=false;
+ check(nc::advanceAnimation(&a,[](Animator,Listener,int){return true;},error)&&advances.size()==2,"clock phase does not read undefined previous position");
+ check(!nc::selectWalkAnimation(&a,error),"selector refuses undefined displacement");
+ check(!nc::resetCStickSceneAnimationTimer(&a,error),"C-stick timer write outside real effects transaction refuses");
+ reset(Motion::Wait,Motion::Wait,-1);commitMode=8;
+ check(nc::control(&a,error)&&nc::sceneAnimationTimer(&a)==7,"actual control child resets clock before eventual resulting timer publication");
+ reset(Motion::Wait,Motion::Wait,-1);commitMode=7;
+ check(!nc::control(&a,error)&&nc::sceneAnimationTimer(&a)==0,"nested control refusal invalidates outer publication");
+ reset(Motion::Damage,Motion::Damage,-1);controlledAlive=false;
+ check(animate()&&advances.size()==2,"known CF-dead open body retains common animation clocks");
+ check(!nc::control(&a,error),"CF-dead body refuses living control");
+ lifetimeKnown=false;check(!animate(),"unknown lifetime refuses common clocks");lifetimeKnown=true;controlledAlive=true;
+ reset(Motion::Wait,Motion::Wait,-1);commitMode=0;bodyphases::setterAvailable=false;const auto missingOwnerCommits=commitCalls;
+ check(!nc::control(&a,error)&&commitCalls==missingOwnerCommits&&nc::sceneAnimationTimer(&a)==0,"missing genuine FakePiki flag owner refuses before effects");bodyphases::setterAvailable=true;
  reset(Motion::Wait,Motion::Wait,-1);commitMode=0;commitCalls=0;check(nc::control(&a,error)&&commitCalls==1&&nc::sceneAnimationTimer(&a)==7,"completed actual effects publishes timer");
  reset(Motion::Wait,Motion::Wait,-1);commitMode=1;check(!nc::control(&a,error)&&nc::sceneAnimationTimer(&a)==0,"postRefresh refusal never publishes proposed timer");
  reset(Motion::Wait,Motion::Wait,-1);commitMode=2;check(!nc::control(&a,error)&&!nc::sceneAnimationTimer(&a),"commit callback retirement leaves forgotten actor untouched");

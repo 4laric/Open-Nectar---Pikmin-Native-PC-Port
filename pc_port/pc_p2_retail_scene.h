@@ -10,6 +10,16 @@ class RouteMgr;
 namespace p2retail {
 enum class ScenePhase { Prepared, Installing, Committed, Releasing };
 class SceneRuntime;
+struct SourceRoomGeometry;
+struct SourceWaterInputs;
+enum class SourceWaterState { Unavailable,KnownDry };
+struct SourceWaterResult {
+ SourceWaterState state=SourceWaterState::Unavailable;
+ const SourceRoomGeometry* geometry=nullptr;
+ const SourceWaterInputs* inputs=nullptr;
+ std::uint64_t nativeSerial=0,selectionRevision=0;
+ unsigned registeredRooms=0;
+};
 
 // Borrowed from the actual selected-floor owner. Callers cannot construct or
 // replace a context. Prepared facts admit resource checks, never live gameplay.
@@ -61,3 +71,8 @@ bool pc_p2_retail_scene_game_active() noexcept;
 // grants activity; movie, pause, UI and day-end exclusions remain source-owned.
 bool pc_p2_retail_scene_current_activity(const p2retail::SceneIdentity&,
     std::uint64_t nativeSerial,std::uint64_t selectionRevision) noexcept;
+// Scene930's actual registered count-zero SeaMgr query. Unavailable is an
+// error, never an inferred no-map/dry fact. Caller owns its actual body phase.
+bool pc_p2_retail_scene_find_water(const p2retail::SceneContext&,std::uint64_t nativeSerial,
+    std::uint64_t selectionRevision,const std::array<float,3>& position,
+    p2retail::SourceWaterResult&,std::string& error);

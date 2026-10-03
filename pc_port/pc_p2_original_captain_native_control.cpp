@@ -1,6 +1,7 @@
 #include "pc_p2_original_captain_native_control.h"
 #include "pc_p2_original_captain_throw.h"
 #include "pc_p2_original_captain_motion.h"
+#include "pc_p2_original_captain_body_phases.h"
 #include "pc_p2_equipment.h"
 #include "Navi.h"
 #include "NaviState.h"
@@ -19,6 +20,8 @@ struct ActorControl {
  const LoadedScene* scene=nullptr;Navi* actor=nullptr;std::uint64_t incarnation=0,generation=0;
  control::RuntimeControl runtime;control::AnimationState animation;
  float animationSpeed=30;
+ bool controlInFlight=false;
+ bool controlling=false,controlReentered=false;NaviState* controlState=nullptr;
 };
 std::array<ActorControl,2> actors;
 std::uint64_t actorGeneration=0;
@@ -30,7 +33,7 @@ struct Binding {
 bool fail(std::string& e,const char* text){e=text;return false;}
 bool finite(actions::Vec3 v){return std::isfinite(v.x)&&std::isfinite(v.y)&&std::isfinite(v.z);}
 control::Vec3 vector(const Vector3f& v){return {v.x,v.y,v.z};}
-bool bind(Navi* n,Binding& b,std::string& e,bool needState,bool active){
+bool bind(Navi* n,Binding& b,std::string& e,bool needState,bool active,bool requireAlive=true){
  if(!n||!pc_p2_original_captain_action_source)return fail(e,"missing canonical source control actor/provider");
  b.scene=pc_p2_original_captain_loaded_scene();b.world=pc_p2_original_captain_world();b.source=pc_p2_original_captain_action_source(n);
  if(!b.scene||!b.world||!b.source||&b.source->scene()!=b.scene||!b.scene->incarnation()
@@ -39,7 +42,8 @@ bool bind(Navi* n,Binding& b,std::string& e,bool needState,bool active){
  ||b.scene->selectedCampaign().empty()||b.scene->selectedFingerprint().empty()||b.scene->sourceCatalog().empty())return fail(e,"noncanonical source control scene/world");
  if(b.scene->captainAt(0)==n)b.slot=0;else if(b.scene->captainAt(1)==n)b.slot=1;else return fail(e,"source control actor absent from real roster");
  if(!b.scene->captainAt(0)||!b.scene->captainAt(1)||b.scene->captainAt(0)==b.scene->captainAt(1))return fail(e,"source control roster lacks two distinct actual captains");
- if(active&&(b.world->phase()!=Phase::GameWorldActive||!pc_p2_original_captain_actor_alive(n)))return fail(e,"source control actor/world inactive");
+ bool alive=false;
+ if(active&&(b.world->phase()!=Phase::GameWorldActive||!pc_p2_original_captain_actor_lifetime(n,alive)||(requireAlive&&!alive)))return fail(e,"source control actor/world inactive");
  const auto epoch=b.scene->incarnation();const auto campaign=b.scene->selectedCampaign(),fingerprint=b.scene->selectedFingerprint(),catalog=b.scene->sourceCatalog();
  b.native=n->getCurrState();
  if(needState){auto* native=b.native;b.state=dynamic_cast<State*>(native);if(!b.state||b.state->nativeState()!=native)return fail(e,"source control missing exact owned source State");}
@@ -95,6 +99,9 @@ bool resetThrowAnimationSpeed(Navi* n,std::string& e){
 bool control(Navi* n,std::string& e){
  e.clear();Binding b;if(!bind(n,b,e,true,true))return false;auto* actor=live(n,b,e);if(!actor)return false;
  const auto token=actor->generation,epoch=actor->incarnation;const auto campaign=b.scene->selectedCampaign(),fingerprint=b.scene->selectedFingerprint(),catalog=b.scene->sourceCatalog();
+ if(actor->controlling){actor->controlReentered=true;return fail(e,"source control operation reentered");}
+ actor->controlling=true;actor->controlReentered=false;actor->controlState=b.native;
+ struct EndControl {unsigned slot;std::uint64_t generation;~EndControl(){if(actors[slot].generation==generation){actors[slot].controlling=false;actors[slot].controlReentered=false;actors[slot].controlState=nullptr;actors[slot].controlInFlight=false;}}} endControl{b.slot,token};
  if(b.world->demo()==Demo::Unknown)return fail(e,"source control missing actual movie authority");
  if(!pc_p2_original_captain_control_effects)return fail(e,"missing genuine source whistle/CPlate/Rappa effects provider");
  const auto* effects=pc_p2_original_captain_control_effects(n);if(!effects||&effects->scene()!=b.scene)return fail(e,"source control effects provider is not canonical scene");
@@ -127,17 +134,41 @@ bool control(Navi* n,std::string& e){
   &&b.scene->incarnation()==epoch&&b.scene->selectedCampaign()==campaign&&b.scene->selectedFingerprint()==fingerprint&&b.scene->sourceCatalog()==catalog
   &&b.world->phase()==Phase::GameWorldActive&&pc_p2_original_captain_actor_alive(n)&&n->getCurrState()==b.native
   &&pc_p2_original_captain_action_source(n)==b.source&&pc_p2_original_captain_control_effects(n)==effects
-  &&pc_p2_original_captain_source_bank()==b.bank&&actors[b.slot].actor==n&&actors[b.slot].scene==b.scene&&actors[b.slot].incarnation==epoch&&actors[b.slot].generation==token;};
+  &&pc_p2_original_captain_source_bank()==b.bank&&actors[b.slot].actor==n&&actors[b.slot].scene==b.scene&&actors[b.slot].incarnation==epoch&&actors[b.slot].generation==token&&!actors[b.slot].controlReentered;};
  if(!current())return fail(e,"source control authority changed during preflight");
- if(make){n->mTargetVelocity.set(velocity.targetVelocity.x*ratio,0,velocity.targetVelocity.z*ratio);n->mFaceDirection=proposed.faceDirection;
-  if(proposed.moveRotation)n->resetCreatureFlag(CF_UsePriorityFaceDir);else n->setCreatureFlag(CF_UsePriorityFaceDir);
+ if(make){
+  if(!bodyphases::setMoveRotation(n,proposed.moveRotation,e)||!current())return false;
+  n->mTargetVelocity.set(velocity.targetVelocity.x*ratio,0,velocity.targetVelocity.z*ratio);n->mFaceDirection=proposed.faceDirection;
  }
+ if(actor->controlInFlight)return fail(e,"source control effects commit reentered");
+ actor->controlInFlight=true;
+ struct End {unsigned slot;std::uint64_t generation;~End(){if(actors[slot].generation==generation)actors[slot].controlInFlight=false;}} end{b.slot,token};
  if(!plan->commit(*n,e))return false;
  if(!current())return fail(e,"source control authority changed during effects commit");
  proposed.sceneAnimationTimer=timer;actors[b.slot].runtime=proposed;return true;
 }
+bool cStickControlTransaction(Navi* n,std::string& e){
+ auto* scene=pc_p2_original_captain_loaded_scene();auto* world=pc_p2_original_captain_world();
+ if(!n||!scene||!world||world->phase()!=Phase::GameWorldActive)return fail(e,"source C-stick timer event lacks actual active control");
+ unsigned slot=scene->captainAt(0)==n?0:scene->captainAt(1)==n?1:2;
+ if(slot>1)return fail(e,"source C-stick timer actor outside canonical roster");
+ auto& a=actors[slot];auto* state=dynamic_cast<State*>(n->getCurrState());
+ if(!a.controlInFlight||a.scene!=scene||a.actor!=n||a.incarnation!=scene->incarnation()
+  ||world->incarnation()!=a.incarnation||world->selectedCampaign()!=scene->selectedCampaign()
+  ||world->selectedFingerprint()!=scene->selectedFingerprint()||world->sourceCatalog()!=scene->sourceCatalog()
+  ||a.controlReentered||a.controlState!=n->getCurrState()
+  ||!state||state->nativeState()!=n->getCurrState()||!pc_p2_original_captain_actor_alive(n))return fail(e,"source C-stick timer write outside genuine effects commit");
+ e.clear();return true;
+}
+bool resetCStickSceneAnimationTimer(Navi* n,std::string& e){
+ if(!cStickControlTransaction(n,e))return false;
+ auto* scene=pc_p2_original_captain_loaded_scene();
+ actors[scene->captainAt(0)==n?0:1].runtime.sceneAnimationTimer=0;e.clear();return true;
+}
 static bool animate(Navi* n,const std::function<bool(Animator,Listener,int)>& emit,bool legacy,bool clocks,bool selection,std::string& e){
- e.clear();Binding b;if(!bind(n,b,e,true,true))return false;auto* actor=live(n,b,e);if(!actor)return false;
+ // Original NaviMgr iterates open slots, including bodies with CF_IsAlive
+ // clear. Common clocks/locomotion require known lifetime, not living-only AI.
+ e.clear();Binding b;if(!bind(n,b,e,true,true,false))return false;auto* actor=live(n,b,e);if(!actor)return false;
  if(!pc_p2_original_captain_control_effects)return fail(e,"missing source animation observation provider");
  const auto* effects=pc_p2_original_captain_control_effects(n);if(!effects||&effects->scene()!=b.scene)return fail(e,"noncanonical source animation provider");
  AnimationFrame frame;if(!effects->animationFrame(*n,frame,e))return false;
@@ -151,13 +182,14 @@ static bool animate(Navi* n,const std::function<bool(Animator,Listener,int)>& em
  if(legacy&&(selfListener==Listener::SourceState||boundListener==Listener::SourceState))return fail(e,"untyped animation callback cannot receive source state listener");
  auto next=actor->animation;next.bound=selectorMotion(bound.motion);
  control::AnimationOutput selected;
- if(selection&&!control::updateWalkAnimation(b.params,frame.displacement,frame.deltaTime,b.frame.face,frame.faceDirectionOffset,self.motion==Motion::Jkoke,next,selected,e))return false;
+ if(selection&&(!frame.displacementKnown||!control::updateWalkAnimation(b.params,frame.displacement,frame.deltaTime,b.frame.face,frame.faceDirectionOffset,self.motion==Motion::Jkoke,next,selected,e)))return fail(e,"source locomotion displacement is unknown or invalid");
  if(clocks&&!emit)return fail(e,"missing actual source animator event receiver");
  const auto epoch=b.scene->incarnation();const auto* native=b.state->nativeState();
  auto current=[&](){
+  bool knownAlive=false;
   return pc_p2_original_captain_loaded_scene()==b.scene&&pc_p2_original_captain_world()==b.world
    &&b.scene->incarnation()==epoch&&actor->scene==b.scene&&actor->actor==n&&actor->incarnation==epoch
-   &&b.scene->captainAt(b.slot)==n&&pc_p2_original_captain_actor_alive(n)&&n->getCurrState()==native
+   &&b.scene->captainAt(b.slot)==n&&pc_p2_original_captain_actor_lifetime(n,knownAlive)&&n->getCurrState()==native
    &&pc_p2_original_captain_source_bank()==b.bank&&pc_p2_original_captain_action_source(n)==b.source
    &&pc_p2_original_captain_control_effects(n)==effects;
  };
