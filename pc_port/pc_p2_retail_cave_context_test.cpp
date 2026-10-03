@@ -4,7 +4,7 @@
 using namespace p2retail;
 // Policy test double only; never a gameplay provider or native birth evidence.
 struct Provider final:FloorProvider {
- bool ready=true,missing=false,cleanup=true,consumed=false,receiptVerified=false,forge=false,commitReady=true;
+ bool ready=true,missing=false,cleanup=true,consumed=false,receiptVerified=false,forge=false,commitReady=true,suppressBuds=false,suppressSnow=false;
  unsigned installs=0,releases=0;
  int actors[100]{};
  bool preflight(const CaveDescriptor&,const FloorDefinition&,unsigned,const SceneIdentity&,std::string& e)override{
@@ -18,6 +18,9 @@ struct Provider final:FloorProvider {
    assert(a<100);out.push_back({&actors[a++],{r,o,1,instanceKey(c,floor,f.rows[r],o),1},BindingState::Live,{}});
    if(consumed&&f.rows[r].kind=="loose_treasure"){
     out.back().actor=nullptr;out.back().state=BindingState::ConsumedTreasure;out.back().receipt="canonical-test-receipt";
+   }
+   if((suppressBuds&&f.rows[r].sourceId==6)||(suppressSnow&&f.rows[r].sourceId==45)){
+    out.back().actor=nullptr;out.back().state=BindingState::SourceSuppressed;out.back().receipt="verified-test-population-event";
    }
   }
   if(missing&&!out.empty())out.pop_back();
@@ -59,6 +62,11 @@ int main(){
  assert(error=="retail_floor_unverified_absent_source");provider.receiptVerified=true;
  assert(session.activate("tutorial_1",2,scene,true,authority,provider,error)&&session.snapshot(scene,s));
  assert(session.unload(error));
+ provider.consumed=false;provider.suppressBuds=true;
+ assert(session.activate("tutorial_1",2,scene,true,authority,provider,error));assert(session.unload(error));
+ provider.suppressSnow=true;assert(!session.activate("tutorial_1",2,scene,true,authority,provider,error));
+ assert(error=="retail_floor_unverified_absent_source"&&!session.snapshot(scene,s));
+ provider.suppressBuds=provider.suppressSnow=false;
  provider.commitReady=false;provider.cleanup=false;
  assert(!session.activate("tutorial_1",2,scene,true,authority,provider,error));
  assert(error=="test_commit_failure;release_failed:test_cleanup_failure"&&!session.snapshot(scene,s));
