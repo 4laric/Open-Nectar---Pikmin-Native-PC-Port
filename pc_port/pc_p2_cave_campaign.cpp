@@ -120,6 +120,19 @@ void pc_p2_cave_campaign_prepare(){
     floorStage->mIsVisible=FALSE;
     prepared=true;
 }
+bool pc_p2_cave_campaign_resume_scene(){
+    if(!pc_randomizer_generated_cave()||!pc_randomizer_resumed())return false;
+    const auto& party=pc_randomizer_generated_cave_party();
+    if(!party.present||!party.resumeLiving)return false;
+    if(!prepared||!party.valid()||party.inside!=inside()||!adoptPermit())
+        invalid("invalid authenticated living scene resume");
+    flowCont.mCurrentStage=inside()?floorStage:surfaceStage;
+    if(!flowCont.mCurrentStage)invalid("missing owned resume stage");
+    gameflow.mCurrentStageID=flowCont.mCurrentStage->mStageID;
+    std::printf("P2_CAMPAIGN_RESUME_SCENE floor=%d generation=%llu ordinary_section=1\n",
+        int(inside()),static_cast<unsigned long long>(permitGeneration));
+    return true;
+}
 void pc_p2_cave_campaign_select_stage(){
     if(!pc_randomizer_generated_cave())return;
     clearPermit();

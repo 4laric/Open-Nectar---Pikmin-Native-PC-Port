@@ -14,6 +14,8 @@ bool pc_p2_cave_campaign_update_save_choice(Controller* input);
 void pc_p2_cave_campaign_draw_save_choice(Graphics& gfx);
 // Seed-owned ordinary section provider; historical seeds are inert.
 void pc_p2_cave_campaign_prepare();
+// After native card loading, continue an authenticated mid-scene living SAVE.
+bool pc_p2_cave_campaign_resume_scene();
 void pc_p2_cave_campaign_select_stage();
 void pc_p2_cave_campaign_before_preload();
 void pc_p2_cave_campaign_scene_setup();
