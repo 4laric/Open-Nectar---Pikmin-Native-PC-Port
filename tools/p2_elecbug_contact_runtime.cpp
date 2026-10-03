@@ -91,7 +91,8 @@ Vector3f pressAim(Navi* n,Teki* enemy,Teki* partner){
     if(!std::strcmp(mode,"red-electric")){
         // Aim at the actual fitted rear body, clear of the arc endpoint.
         // The Flying model centre trails its root by about six units; ordinary
-        // cursor aim passes that centre so the body, not just the root, lands.
+        // cursor aim passes that centre and the final descending movement step
+        // so the cached model body, not just the root, reaches the rear part.
         CollPart* rear=enemy->mCollInfo&&enemy->mCollInfo->hasInfo()
             ?enemy->mCollInfo->getSphere('bod2'):nullptr;
         require(rear&&std::isfinite(rear->mCentre.x)&&std::isfinite(rear->mCentre.z),
@@ -99,7 +100,7 @@ Vector3f pressAim(Navi* n,Teki* enemy,Teki* partner){
         goal=rear->mCentre;
         Vector3f direction=goal-n->mSRT.t;direction.y=0;
         require(direction.length()>1.f,"distinct Red aim target");
-        direction.normalise();goal=goal+direction*6.f;
+        direction.normalise();goal=goal+direction*10.f;
     }
     return goal;
 }
