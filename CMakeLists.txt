@@ -363,6 +363,7 @@ set(PC_PORT_SOURCES
     pc_port/pc_p2_cave_geometry.cpp
     pc_port/pc_p2_cave_items.cpp
     pc_port/pc_p2_cave_bud_actor.cpp
+    pc_port/pc_p2_original_blackpom_native.cpp
     pc_port/pc_p2_cave_carry.cpp
     pc_port/pc_p2_enemy.cpp
     pc_port/pc_p2_sheargrub.cpp
