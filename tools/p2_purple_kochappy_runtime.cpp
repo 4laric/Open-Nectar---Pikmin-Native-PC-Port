@@ -510,6 +510,7 @@ class PurpleKochappyApp:public PlugPikiApp {
  bool gatherDiverted=false;
  PcKochappyReentryProgress reentryProgress;
  PcKochappyRouteCatchup routeCatchup;
+ PcKochappySwarmRecovery swarmRecovery;
  PcKochappyPrefixProgress prefixProgress;
  PcKochappyPrefixContactGate prefixContact;
  PcKochappyPrefixNeutralGate prefixNeutral;
@@ -678,6 +679,7 @@ class PurpleKochappyApp:public PlugPikiApp {
  bool catchupRoute(Navi* n,float radius) {
   require(routeCatchup.active,"catchup requires an actually visited guide");
   bool present[20]={};int count=0;float lag=0,targetError=0;bool allSettled=true,allSafeFormed=true;
+  Vector3f centroid(0,0,0);
   Iterator bodies(pikiMgr);CI_LOOP(bodies){Piki* p=static_cast<Piki*>(*bodies);
    if(!p)continue;
    int slot=-1;for(int i=0;i<initialBodyCount;++i)if(initialBodies[i]==p){slot=i;break;}
@@ -700,6 +702,9 @@ class PurpleKochappyApp:public PlugPikiApp {
     std::fflush(nullptr);
    }
    require(safeContact,"catchup original body contact/hazard changed");
+   centroid=centroid+p->mSRT.t;
+   receiverWallCache();const double pr=p->mCollisionRadius,po=p->isCreatureFlag(CF_EnableGroundOffset)?p->mGroundOffset:0.;
+   receiverCheckSphere({p->mSRT.t.x,p->mSRT.t.y-po+pr,p->mSRT.t.z},pr,"catchup-current-body",initialGeneratorIds[slot],routeCatchup.guide,-1,true);
    const float d=distance(n->mSRT.t,p->mSRT.t);require(std::isfinite(d),"catchup finite roster lag");
    require(d<512.f,"catchup original body outside verified route clearance");
    lag=std::max(lag,d);
@@ -756,7 +761,22 @@ class PurpleKochappyApp:public PlugPikiApp {
   // All20 remain actual owned Formation members. Release the whistle and
   // both sticks so native CStickNeutral can be observed on the next idle.
   // Cursor aiming here would itself prevent the Formed neutral rest gate.
-  if(edge>0){
+  const Vector3f swarmDelta=centroid*(1.f/20.f)-n->mSRT.t;
+  const float swarmSpan=std::sqrt(swarmDelta.x*swarmDelta.x+swarmDelta.z*swarmDelta.z);
+  if(swarmRecovery.update(routeCatchup.guide,routeCatchup.elapsed,roster,allSafeFormed,targetError,speed,swarmSpan)){
+   require(n->controlCamera()&&std::isfinite(swarmSpan)&&swarmSpan>1.f,"swarm recovery camera/centroid invalid");
+   const auto& axis=n->controlCamera()->mViewXAxis;
+   require(std::isfinite(axis.x)&&std::isfinite(axis.z)&&std::fabs(axis.x*axis.x+axis.z*axis.z-1.f)<.001f,"swarm recovery camera axis invalid");
+   const int power=pc_window_get_stick_dead_zone()>=22?pc_window_get_stick_dead_zone()+1:22;
+   require(power<=74,"swarm recovery loaded dead zone unsupported");
+   int sx=int(std::lround(power*(swarmDelta.x*axis.x+swarmDelta.z*axis.z)/swarmSpan));
+   int sy=int(std::lround(power*(swarmDelta.x*axis.z-swarmDelta.z*axis.x)/swarmSpan));
+   const int dz=pc_window_get_stick_dead_zone();
+   const int nativeX=std::abs(sx)<=dz?0:sx,nativeY=std::abs(sy)<=dz?0:sy;
+   require(std::sqrt(float(nativeX*nativeX+nativeY*nativeY))>3.7f,"swarm recovery quantized input suppressed");
+   input(0,0,0,sx,sy);
+   std::printf("P2_PURPLE_KOCHAPPY_SWARM_RECOVERY age=%d guide=%d remaining=%d centroid_delta=%.4f,%.4f target_error=%.4f raw=%d,%d movement=0 buttons=0 actor_writes=0\n",age,routeCatchup.guide,swarmRecovery.remaining,swarmDelta.x,swarmDelta.z,targetError,sx,sy);
+  }else if(edge>0){
    neutralEdgeGuide=routeCatchup.guide;neutralEdgeAge=age;neutralEdgeVerified=false;
    input(0,0,0,edge,0);
   }else input();

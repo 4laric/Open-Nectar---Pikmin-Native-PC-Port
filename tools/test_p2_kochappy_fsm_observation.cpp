@@ -184,7 +184,17 @@ int main(){
  now=paused;now.stateTime=std::numeric_limits<float>::quiet_NaN();
  CHECK(!pc_kochappy_overlay_preserved(paused,now));CHECK(!pc_kochappy_clock_resumed(paused,now));
  now=paused;now.available=false;CHECK(!pc_kochappy_clock_resumed(paused,now));
- std::puts("P2_KOCHAPPY_FSM_OBSERVATION_POLICY_PASS actual_FSM_runtime=unexecuted");
+ PcKochappySwarmRecovery swarm;
+    for(int age=1;age<30;++age)CHECK(!swarm.update(34,age,true,true,82,.3,10));
+    for(int age=30;age<36;++age)CHECK(swarm.update(34,age,true,true,82,.3,10));
+    for(int age=36;age<=180;++age)CHECK(!swarm.update(34,age,true,true,82,.3,10));
+    CHECK(!swarm.update(35,30,false,true,82,.3,10));
+    CHECK(!swarm.update(35,30,true,false,82,.3,10));
+    CHECK(!swarm.update(35,30,true,true,59,.3,10));
+    CHECK(!swarm.update(35,30,true,true,82,2,10));
+    CHECK(!swarm.update(35,30,true,true,82,.3,512));
+    CHECK(!swarm.update(35,30,true,true,82,.3,std::numeric_limits<float>::quiet_NaN()));
+    std::puts("P2_KOCHAPPY_FSM_OBSERVATION_POLICY_PASS actual_FSM_runtime=unexecuted");
  PcKochappyPrefixNeutralGate neutralSetup;
  for(int i=0;i<89;++i)CHECK(neutralSetup.observe(false)==0);
  CHECK(neutralSetup.observe(true)==1);

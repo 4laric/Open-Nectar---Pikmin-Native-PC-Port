@@ -164,3 +164,16 @@ inline bool pc_kochappy_enemy_path_clear(double ax,double az,double bx,double bz
  const double gap=std::hypot(ax+t*dx-ex,az+t*dz-ez);
  return std::isfinite(gap)&&gap>sight+width;
 }
+
+// One finite ordinary swarm burst per visited guide; it changes only input.
+struct PcKochappySwarmRecovery {
+ int guide=-1,remaining=0;
+ bool update(int currentGuide,int elapsed,bool roster,bool formed,float targetError,float speed,float centroidSpan) {
+  if(currentGuide<0||currentGuide>=128||elapsed<1||elapsed>180||!roster||!formed
+   ||!std::isfinite(targetError)||targetError<0||!std::isfinite(speed)||speed<0
+   ||!std::isfinite(centroidSpan)||centroidSpan<0||centroidSpan>=512)return false;
+  if(guide!=currentGuide&&elapsed==30&&targetError>=60.f&&speed<1.f&&centroidSpan>1.f){guide=currentGuide;remaining=6;}
+  if(remaining>0){--remaining;return true;}
+  return false;
+ }
+};
