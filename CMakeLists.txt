@@ -1334,6 +1334,13 @@ elseif (WIN32)
     # stays windowed: it talks through native dialogs.
     target_link_options(${NECTAR_GAME} PRIVATE -mconsole)
     target_link_options(p2_kurage_runtime PRIVATE -mconsole)
+    if(MINGW)
+        # PE DLL-internal delete does not use the executable's sysNew override.
+        # Keep C++ allocation/deallocation in the same link unit so std::string
+        # growth cannot free a BootBlockHeader payload through the CRT heap.
+        target_link_options(${NECTAR_GAME} PRIVATE -static-libstdc++)
+        target_link_options(p2_kurage_runtime PRIVATE -static-libstdc++)
+    endif()
 endif()
 
 # Set output name
