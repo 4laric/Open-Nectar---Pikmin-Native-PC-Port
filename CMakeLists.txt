@@ -308,6 +308,7 @@ set(PC_PORT_SOURCES
     pc_port/pc_p2_original_captain_native_water.cpp
     pc_port/pc_p2_original_captain_native_reader.cpp
     pc_port/pc_p2_original_captain_body_borrower.cpp
+    pc_port/pc_p2_original_captain_camera_pose.cpp
     pc_port/pc_p2_original_captain_native_plate_driver.cpp
     pc_port/pc_p2_original_captain_native_trace.cpp
     pc_port/pc_p2_original_room_trace.cpp
@@ -3787,6 +3788,7 @@ add_executable(p2_original_captain_native_phases_test tools/pc_p2_original_capta
     pc_port/pc_p2_original_captain_body_phases.cpp pc_port/pc_p2_original_captain_native_phases.cpp
     pc_port/pc_p2_original_captain_native_water.cpp pc_port/pc_p2_original_captain_water.cpp
     pc_port/pc_p2_original_captain_body_borrower.cpp
+    pc_port/pc_p2_original_captain_camera_pose.cpp
     pc_port/pc_p2_original_captain_native_trace.cpp pc_port/pc_p2_original_room_trace.cpp
     pc_port/pc_p2_original_number_triangle.cpp pc_port/pc_p2_original_number_grid.cpp
     pc_port/pc_p2_original_captain_control.cpp)

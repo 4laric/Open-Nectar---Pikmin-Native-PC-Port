@@ -1,5 +1,6 @@
 #include "pc_p2_original_captain_native_phases.h"
 #include "pc_p2_original_captain_body_borrower.h"
+#include "pc_p2_original_captain_camera_pose.h"
 #include "pc_p2_original_captain_native_trace.h"
 #include "pc_p2_retail_rooms.h"
 #include "pc_p2_retail_scene.h"
@@ -12,6 +13,7 @@
 #include <vector>
 #include <cmath>
 #include <algorithm>
+#include <limits>
 class MapMgr {}; // Physical pointer holder only; real query TU is a strong double.
 namespace p2retail {
 
@@ -30,10 +32,11 @@ struct Scene:LoadedScene {
  const std::string& selectedCampaign()const override{return c;}const std::string& selectedFingerprint()const override{return f;}const std::string& sourceCatalog()const override{return catalog;}
  MoviePlayer* moviePlayer()const override{return nullptr;}std::uint64_t incarnation()const override{return epoch;}Navi* captainAt(unsigned i)const override{return i==0?&a:i==1?&b:nullptr;}
 } scene;
+unsigned cameraDemoReads=0,cameraDemoExpireAt=0;bool cameraDemoChangesState=false;
 struct WorldOwner:World {
- Phase value=Phase::Loading;bool wrong=false;
+ Phase value=Phase::Loading;bool wrong=false;Demo movie=Demo::Inactive;
  const std::string& selectedCampaign()const override{return scene.c;}const std::string& selectedFingerprint()const override{return scene.f;}const std::string& sourceCatalog()const override{return scene.catalog;}
- std::uint64_t incarnation()const override{return scene.epoch;}Phase phase()const override{return value;}Demo demo()const override{return Demo::Inactive;}Navi* captainAt(unsigned i)const override{return wrong?nullptr:scene.captainAt(i);}
+ std::uint64_t incarnation()const override{return scene.epoch;}Phase phase()const override{return value;}Demo demo()const override{if(cameraDemoExpireAt&&++cameraDemoReads==cameraDemoExpireAt){if(cameraDemoChangesState)a.current=b.current;else ++scene.epoch;}return movie;}Navi* captainAt(unsigned i)const override{return wrong?nullptr:scene.captainAt(i);}
 } world;
 const LoadedScene* sceneProvider=&scene;const World* worldProvider=&world;SourceBank* bankProvider=nullptr;bp::Owner* body=nullptr;
 bool lifetime=true,actorAlive=true,fsmTransition=false;bp::Facts observation;int animationCount=0,selectorCount=0,timerCount=0,execCount=0;int floorKey=0,wallKey=0;unsigned slip=0;bool floorOut=false,wallOut=false,platformFloor=false,below=false,expire=false,nested=false,retireDenied=false,flagChild=false;int traceRoom=-1,observedRoom=-1;bool roomRefuses=false,roomInvalidates=false,roomRebirth=false;bp::SourceSceneTrace* wrongTrace=nullptr;float randomDraw=1;bp::Vec3 traceNormal{0,1,0};
@@ -136,7 +139,23 @@ int main(int argc,char** argv){try{
  auto nativeTrace=bp::createNativeTrace(*context,error);wrongTrace=nativeTrace.get();check(bool(nativeTrace),"Loading builds actual numeric trace from immutable wide selected geometry");
  parameterOwner=&hiddenParameters;auto hiddenTrace=bp::createNativeTrace(*context,error);check(bool(hiddenTrace),"actual hidden selected parameters bind separately");parameterOwner=&floorParameters;
  check(bp::createNativePhases(*context,provider,trace,bank,error),"real native composition initializes both actual body and water owners");body=pc_p2_original_captain_body_phase_owner(&a);check(body&&body==pc_p2_original_captain_body_phase_owner(&b),"genuine source composition owns both actors");bp::Fields fields;check(body->readFields(&a,fields,error)&&!fields.bounding&&!fields.previous,"source cached center deliberately unknown before simulation");auto firstBirth=fields.initializationSerial;
- bool wet=true;check(bp::cachedNativeWater(&a,wet,error)&&!wet&&queries==0,"genuine init cached null without fresh map query");check(!bp::createNativePhases(*context,provider,trace,bank,error),"live composition cannot be overwritten");world.value=Phase::GameWorldActive;
+ bool wet=true;check(bp::cachedNativeWater(&a,wet,error)&&!wet&&queries==0,"genuine init cached null without fresh map query");check(!bp::createNativePhases(*context,provider,trace,bank,error),"live composition cannot be overwritten");
+ camera::ActorPose pose{{91,92,93},94};auto unchangedPose=[&](){return pose.position==std::array<float,3>{91,92,93}&&pose.face==94;};
+ check(!camera::readCameraPose(*context,&a,pose,error)&&unchangedPose(),"ordinary camera pose cannot bypass Loading bootstrap scope");
+ world.value=Phase::GameWorldActive;a.mSRT.t.set(11,12,13);a.mFaceDirection=.7f;
+ check(camera::readCameraPose(*context,&a,pose,error)&&pose.position==std::array<float,3>{11,12,13}&&pose.face==.7f,"actual camera pose independent of unknown Plate offset/previous/bounding");
+ b.mSRT.t.set(21,22,23);b.mFaceDirection=1.1f;check(camera::readCameraPose(*context,&b,pose,error)&&pose.position[0]==21&&pose.face==1.1f,"camera reads exact second source roster body");
+ pose={{91,92,93},94};actorAlive=false;check(camera::readCameraPose(*context,&a,pose,error)&&pose.position[0]==11,"known CF-dead source body remains a valid camera target");actorAlive=true;pose={{91,92,93},94};
+ world.movie=Demo::Playing;check(!camera::readCameraPose(*context,&a,pose,error)&&unchangedPose(),"movie-active camera pose cannot substitute body SRT for source model translation");world.movie=Demo::Unknown;check(!camera::readCameraPose(*context,&a,pose,error)&&unchangedPose(),"unknown source movie authority leaves camera pose unchanged");world.movie=Demo::Inactive;
+ a.mFaceDirection=std::numeric_limits<float>::quiet_NaN();check(!camera::readCameraPose(*context,&a,pose,error)&&unchangedPose(),"nonfinite source face refuses camera publication");a.mFaceDirection=.7f;
+ a.mSRT.t.y=std::numeric_limits<float>::infinity();check(!camera::readCameraPose(*context,&a,pose,error)&&unchangedPose(),"nonfinite source position refuses camera publication");a.mSRT.t.y=12;
+ lifetime=false;check(!camera::readCameraPose(*context,&a,pose,error)&&unchangedPose(),"expired source body lifetime refuses camera publication");lifetime=true;
+ prepared=nullptr;check(!camera::readCameraPose(*context,&a,pose,error)&&unchangedPose(),"missing committed source scene refuses camera pose");prepared=context.get();
+ world.wrong=true;check(!camera::readCameraPose(*context,&a,pose,error)&&unchangedPose(),"source roster replacement refuses camera pose");world.wrong=false;
+ cameraDemoReads=0;cameraDemoExpireAt=1;check(!camera::readCameraPose(*context,&a,pose,error)&&unchangedPose(),"movie observation expiry refuses before actor reads");--scene.epoch;
+ cameraDemoReads=0;cameraDemoExpireAt=2;check(!camera::readCameraPose(*context,&a,pose,error)&&unchangedPose(),"post-observation source identity expiry refuses pose publication");--scene.epoch;cameraDemoExpireAt=0;
+ b.current=&second;cameraDemoChangesState=true;cameraDemoReads=0;cameraDemoExpireAt=2;check(!camera::readCameraPose(*context,&a,pose,error)&&unchangedPose(),"post-observation actual FSM change refuses camera publication");a.current=&typed;b.current=&typed;cameraDemoChangesState=false;cameraDemoExpireAt=0;
+ Navi foreignCameraActor;check(!camera::readCameraPose(*context,&foreignCameraActor,pose,error)&&unchangedPose(),"foreign actor cannot borrow source camera pose");
  events.clear();check(!bp::body_animation(&a,error)&&queries==0&&events==std::vector<std::string>{"cellLOD","clocks"},"unknown cached sphere refuses exactly at animation water point");
  observation.naviManagerFlag1=true;a.mSRT.t.set(3,7,5);events.clear();check(bp::body_simulation(&a,.01f,error)&&events.empty(),"actual manager flag simulation writes bounding without trace");check(body->readFields(&a,fields,error)&&fields.bounding&&fields.bounding->center.y==7&&fields.bounding->radius==8.5f,"actual cached bound from source simulation");observation.naviManagerFlag1=false;expectedWaterY=7;a.mVelocity.set(0,5,0);events.clear();
  check(bp::body_animation(&a,error)&&queries==1,"real composition animation calls actual Scene query once");check(events==std::vector<std::string>{"cellLOD","clocks","findWater","geometry","cursor"}&&a.mVelocity.y==4,"literal water point precedes gravity and geometry");check(bp::cachedNativeWater(&a,wet,error)&&!wet&&queries==1,"cached water never performs fresh find");
