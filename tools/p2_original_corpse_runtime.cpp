@@ -108,7 +108,8 @@ public:
   if(body){
    if(body->mCarrierCount>=10){carried=true;travel=std::max(travel,distance(body->mSRT.t,release));}
    if(carried&&body->mTargetGoal==static_cast<Suckable*>(onion)&&distance(body->mSRT.t,onion->mSRT.t)<100)nearGoal=true;
-   if(age%60==0)std::printf("P2_ORIGINAL_CORPSE_CARRY carriers=%u strength=%u max=%d state=%d travel=%.2f population=%d delta=%d navi_distance=%.2f\n",body->mCarrierCount,body->mCarrierCounter,body->mConfig->mCarryMaxPikis(),body->getState(),travel,population(),population()-baseline,distance(n->mSRT.t,body->mSRT.t));
+   if(age%60==0){float nearest=1e9f;int flying=0,formation=0;Iterator roster(pikiMgr);CI_LOOP(roster){auto* p=static_cast<Piki*>(*roster);if(p->isAlive()){nearest=std::min(nearest,distance(p->mSRT.t,body->mSRT.t));flying+=p->getState()==PIKISTATE_Flying;formation+=p->mMode==PikiMode::FormationMode;}}
+    std::printf("P2_ORIGINAL_CORPSE_CARRY carriers=%u strength=%u max=%d state=%d travel=%.2f population=%d delta=%d navi_distance=%.2f cursor_distance=%.2f followers=%d nearest_piki=%.2f flying=%d formation=%d free=%d atari=%d slot=%d body=%.2f,%.2f,%.2f\n",body->mCarrierCount,body->mCarrierCounter,body->mConfig->mCarryMaxPikis(),body->getState(),travel,population(),population()-baseline,distance(n->mSRT.t,body->mSRT.t),distance(n->mCursorWorldPos,body->mSRT.t),n->getPlatePikis(),nearest,flying,formation,int(body->isFree()),int(body->isAtari()),body->getMinFreeSlotIndex(),body->mSRT.t.x,body->mSRT.t.y,body->mSRT.t.z);std::fflush(nullptr);}
    if(body->mCarrierCount>=10){input();return result;}
    if(distance(n->mSRT.t,body->mSRT.t)>100){point(n,body->mSRT.t,true);age=0;return result;}
    point(n,body->mSRT.t,false,age%60<15?KeyConfig::_instance->mThrowKey.mBind:0);return result;
