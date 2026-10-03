@@ -26,6 +26,11 @@ Animator keys fire only when `key.frame < int(timer)`: bite17 is observed at
 pose18, swallow75 at76, flick25 at26 and restore47 at48. Unfinished loops
 reset to their start and discard overshoot; finishMotion disables that loop
 until END. END clamps the drawn frame to duration-1 and fires once.
+The authored body/mouth joints follow before event capture and again after
+any state/animation or facing change, matching that frame's visible pose.
+Wait consumes its source random draw on each entry, even though its frame0
+first key makes the resulting start timer zero. Alive pressed Pikmin remain
+searchable; only the host's separate sprout population states are excluded.
 
 Wait searches before finishing its loop; END turns toward the stored target
 and enters Walk or Turn. Turn/Walk apply source alert, angles and motion END
@@ -52,6 +57,10 @@ human gameplay/save-resume. Bitter/spray state, purple stun/earthquake,
 damage squash animation, effects/sound fidelity and Demo's global captain
 unlock timer are not implemented by this FSM and require their owning
 systems. This code does not claim those reactions as completed.
+In particular, Catfish's actual setEnemyNonStone enables NoInterrupt;
+KEY3 reset clears it and updates bitter bounce. Those gates need the bitter
+receiver. Retail carcass Carry5 uses type5's loop10/29; the existing generic
+corpse visual still selects dead, so that carry clock also remains open.
 
 For direct gameplay use exactly20 Pikmin, the current original start overlay,
 a centered960x540 native window and private arena/save/logs. Observe Wait
