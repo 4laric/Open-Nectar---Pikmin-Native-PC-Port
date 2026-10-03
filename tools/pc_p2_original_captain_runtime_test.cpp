@@ -120,7 +120,8 @@ int main(){
  pc_p2_original_captain_movie_ended(scene.player);check(world->demo()==Demo::Inactive);
  state.id=StateId::Damaged;check(pc_p2_original_captain_damaged_cleanup(&a));pc_p2_original_captain_movie_started(scene.player);
  pc_p2_original_captain_actor_update(&a);check(pc_p2_original_captain_actor_frames(&a,frames)&&frames==59); // once per actual actor update, even movie
- for(int i=0;i<70;++i)pc_p2_original_captain_actor_update(&a);check(pc_p2_original_captain_actor_frames(&a,frames)&&frames==0); // no u8 underflow
+ for(int i=0;i<70;++i)pc_p2_original_captain_actor_update(&a);
+ check(pc_p2_original_captain_actor_frames(&a,frames)&&frames==0); // no u8 underflow
  loaded=nullptr;check(!pc_p2_original_captain_world());check(!pc_p2_original_captain_actor_alive(&a));
  std::cout<<"P2_ORIGINAL_CAPTAIN_RUNTIME_CONTROLS_PASS checks="<<checks<<" gameplay=UNTESTED\n";
 }
