@@ -32,12 +32,17 @@ bool captureRenderGraph(u64 generation,const std::vector<RenderObservation>&,
  const std::set<u64>& required,const RenderResolverFactory&,RenderGraph&,std::string&);
 class IsolatedRenderAllocations {
  struct Impl;std::unique_ptr<Impl> impl_;
+ bool backingReady_=false,mutableReady_=false,mutableAttempted_=false;
+ friend class RenderDescriptorIndex;
+ friend struct RenderBindAccess;
 public:
  IsolatedRenderAllocations();~IsolatedRenderAllocations();
  bool prepare(const RenderGraph&,const RestoreGate&,ConstructorFence&,std::string&,size_t failAt=0);
  void* allocation(u64)const;
  bool heldBy(const ConstructorFence&)const;
  bool matchesLayout(const RenderGraph&)const;
+ bool backingReady()const{return impl_&&backingReady_;}
+ bool mutableReady()const{return impl_&&mutableReady_;}
  // Allocation only: default objects are NOT ready for consumers. Restore still
  // needs installed immutable descriptor setup and complete typed payload bind.
  // Retain this owner and the exact physical fence through abort/destruction.

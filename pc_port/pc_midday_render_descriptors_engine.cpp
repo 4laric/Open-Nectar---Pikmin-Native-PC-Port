@@ -2,6 +2,7 @@
 #include "Shape.h"
 #include "Material.h"
 #include <algorithm>
+#include <cstring>
 namespace pc_midday {
 namespace {
 template<class T>bool keys(const T& a){return a.mSize<=65536&&(!a.mSize||a.mKeyframes);}
@@ -62,8 +63,9 @@ bool RenderDescriptorIndex::validate(const RenderGraph& graph,std::string& e)con
  e.clear();return true;
 }
 bool RenderDescriptorIndex::initializeBacking(const RenderGraph& graph,IsolatedRenderAllocations& owner,ConstructorFence& fence,std::string& e)const{
- if(!pc_sim_rng_constructor_suppression(true,e))return false;
+ if(owner.backingReady_){e="render backing already initialized";return false;}
  if(!owner.heldBy(fence)||!owner.matchesLayout(graph)||!validate(graph,e)){if(e.empty())e="render descriptor destination/fence/layout invalid";return false;}
+ if(!pc_sim_rng_constructor_suppression(true,e))return false;
  // All source backing/geometry and owned allocation identities checked above.
  // No allocation or callback occurs after this point; never copy object bytes.
  for(const auto& node:graph.nodes){const auto& entry=entries_.at(node.factory);
@@ -81,6 +83,36 @@ bool RenderDescriptorIndex::initializeBacking(const RenderGraph& graph,IsolatedR
   else if(node.kind==RenderKind::Tev){auto& to=*static_cast<PVWTevInfo*>(owner.allocation(node.id));const auto& from=*entry.model->mMaterialList[entry.materialSlots[0]].mTevInfo;to.mTevStageCount=from.mTevStageCount;to.mTevStages=from.mTevStageCount?from.mTevStages:nullptr;for(int i=0;i<3;++i){copyKeys(to.mTevColRegs[i].mColorAnimData.mInfo,from.mTevColRegs[i].mColorAnimData.mInfo);copyKeys(to.mTevColRegs[i].mAlphaAnimData.mInfo,from.mTevColRegs[i].mAlphaAnimData.mInfo);}}
   else{auto* to=static_cast<PVWTextureData*>(owner.allocation(node.id));const auto* from=entry.model->mMaterialList[entry.materialSlots[0]].mTextureInfo.mTextureData;for(u32 i=0;i<node.count;++i){copyKeys(to[i].mScaleInfo.mInfo,from[i].mScaleInfo.mInfo);copyKeys(to[i].mRotationInfo.mInfo,from[i].mRotationInfo.mInfo);copyKeys(to[i].mTranslationInfo.mInfo,from[i].mTranslationInfo.mInfo);to[i]._UNUSED0C=from[i]._UNUSED0C;to[i]._UNUSED0E=from[i]._UNUSED0E;to[i]._UNUSED10=from[i]._UNUSED10;to[i]._UNUSED11=from[i]._UNUSED11;to[i]._UNUSED12=from[i]._UNUSED12;to[i]._UNUSED13=from[i]._UNUSED13;}}
  }
+ owner.backingReady_=true;e.clear();return true;
+}
+bool RenderDescriptorIndex::matchesInitializedBacking(const RenderGraph& graph,const IsolatedRenderAllocations& owner,const ConstructorFence& fence,std::string& e)const{
+ if(!owner.heldBy(fence)||!owner.backingReady()||!owner.matchesLayout(graph)||!validate(graph,e)){if(e.empty())e="render backing provenance requires held initialized exact layout";return false;}
+ auto reject=[&](){e="render initialized immutable backing differs from installed descriptor provenance";return false;};
+ auto keysEqual=[](const auto& to,const auto& from){return to.mSize==from.mSize&&to.mKeyframes==(from.mSize?from.mKeyframes:nullptr);};
+ auto bitsEqual=[](const float& a,const float& b){return std::memcmp(&a,&b,sizeof(float))==0;};
+ for(const auto& node:graph.nodes){const auto& entry=entries_.at(node.factory);
+  if(node.kind==RenderKind::Materials){const auto* dst=static_cast<const Material*>(owner.allocation(node.id));for(u32 i=0;i<node.count;++i){const auto& to=dst[i];const auto& from=entry.model->mMaterialList[entry.materialSlots[i]];
+   if(to.mDisplayListPtr!=from.mDisplayListPtr||to.mDisplayListSize!=(from.mDisplayListPtr?from.mDisplayListSize:0))return reject();
+   if(!(from.mFlags&MATFLAG_PVW)){if(to.mTevInfo||to.mTextureInfo.mTextureData||to.mTextureInfo.mTextureDataCount)return reject();continue;}
+   if(to.mColourInfo.mTotalFrameCount!=from.mColourInfo.mTotalFrameCount||!keysEqual(to.mColourInfo.mColourInfo.mAnimInfo,from.mColourInfo.mColourInfo.mAnimInfo)||!keysEqual(to.mColourInfo.mAlphaInfo.mAnimInfo,from.mColourInfo.mAlphaInfo.mAnimInfo))return reject();
+   if(to.mPeInfo.mControlFlags!=from.mPeInfo.mControlFlags||to.mPeInfo.mAlphaCompareFlags!=from.mPeInfo.mAlphaCompareFlags||to.mPeInfo.mDepthTestFlags!=from.mPeInfo.mDepthTestFlags||to.mPeInfo.mBlendModeFlags!=from.mPeInfo.mBlendModeFlags||to.mTevInfoIndex!=from.mTevInfoIndex)return reject();
+   if(to.mTextureInfo.mTexGenDataCount!=from.mTextureInfo.mTexGenDataCount||to.mTextureInfo.mTexGenData!=(from.mTextureInfo.mTexGenDataCount?from.mTextureInfo.mTexGenData:nullptr)||to.mTextureInfo.mUseScale!=from.mTextureInfo.mUseScale||to.mTextureInfo.mTevStageCount!=from.mTextureInfo.mTevStageCount||!bitsEqual(to.mLightingInfo._UNUSED08,from.mLightingInfo._UNUSED08))return reject();
+   const auto link=std::find_if(graph.links.begin(),graph.links.end(),[&](const RenderLink& x){return x.materials==node.id&&x.slot==i;});
+   if(to.mTevInfo!=owner.allocation(link->tev)||to.mTextureInfo.mTextureDataCount!=link->textureCount||to.mTextureInfo.mTextureData!=(link->textureCount?owner.allocation(link->textures):nullptr))return reject();
+  }}
+  else if(node.kind==RenderKind::Tev){const auto& to=*static_cast<const PVWTevInfo*>(owner.allocation(node.id));const auto& from=*entry.model->mMaterialList[entry.materialSlots[0]].mTevInfo;if(to.mTevStageCount!=from.mTevStageCount||to.mTevStages!=(from.mTevStageCount?from.mTevStages:nullptr))return reject();for(int i=0;i<3;++i)if(!keysEqual(to.mTevColRegs[i].mColorAnimData.mInfo,from.mTevColRegs[i].mColorAnimData.mInfo)||!keysEqual(to.mTevColRegs[i].mAlphaAnimData.mInfo,from.mTevColRegs[i].mAlphaAnimData.mInfo))return reject();}
+  else{const auto* to=static_cast<const PVWTextureData*>(owner.allocation(node.id));const auto* from=entry.model->mMaterialList[entry.materialSlots[0]].mTextureInfo.mTextureData;for(u32 i=0;i<node.count;++i)if(!keysEqual(to[i].mScaleInfo.mInfo,from[i].mScaleInfo.mInfo)||!keysEqual(to[i].mRotationInfo.mInfo,from[i].mRotationInfo.mInfo)||!keysEqual(to[i].mTranslationInfo.mInfo,from[i].mTranslationInfo.mInfo)||to[i]._UNUSED0C!=from[i]._UNUSED0C||to[i]._UNUSED0E!=from[i]._UNUSED0E||to[i]._UNUSED10!=from[i]._UNUSED10||to[i]._UNUSED11!=from[i]._UNUSED11||to[i]._UNUSED12!=from[i]._UNUSED12||to[i]._UNUSED13!=from[i]._UNUSED13)return reject();}
+ }
+ e.clear();return true;
+}
+bool RenderDescriptorIndex::validateStateGeometry(const RenderNode& node,u32 slot,const ActorFields& fields,std::string& e)const{
+ auto row=entries_.find(node.factory);if(row==entries_.end()||row->second.kind!=node.kind||slot>=node.count){e="render state has unknown factory/slot";return false;}
+ const auto& entry=row->second;if((node.kind==RenderKind::Materials&&node.count!=entry.materialSlots.size())||(node.kind==RenderKind::Tev&&node.count!=1)){e="render state factory geometry invalid";return false;}Material* source=nullptr;u32 materialSlot=node.kind==RenderKind::Materials?entry.materialSlots.at(slot):entry.materialSlots[0];
+ if(!modelMaterial(*entry.model,materialSlot,source,e)||!materialBacking(*entry.model,*source,e))return false;
+ auto equal=[&](const std::string& key,u32 expected){u32 value=0;if(!actor_u32(fields,key.c_str(),value,e)||value!=expected){e="render state disagrees with installed immutable descriptor: "+key;return false;}return true;};
+ if(node.kind==RenderKind::Materials){u32 flags=0;if(!equal("mIndex",source->mIndex)||!actor_u32(fields,"mFlags",flags,e))return false;if(bool(flags&MATFLAG_PVW)!=bool(source->mFlags&MATFLAG_PVW)){e="render state PVW discriminator differs from asset";return false;}if(flags&MATFLAG_PVW){int count=-1;if(!actor_i32(fields,"textureCount",count,e)||count!=int(source->mTextureInfo.mTextureDataCount)){e="render state texture geometry differs from asset";return false;}}}
+ else if(node.kind==RenderKind::Tev){if(!pvw(*entry.model,*source,e)||!tevBacking(*source->mTevInfo,e))return false;for(int i=0;i<3;++i)if(!equal("mTevColRegs."+std::to_string(i)+".mAnimFrameCount",source->mTevInfo->mTevColRegs[i].mAnimFrameCount))return false;}
+ else{if(!pvw(*entry.model,*source,e)||!textureBacking(*source,e)||node.count!=source->mTextureInfo.mTextureDataCount||slot>=source->mTextureInfo.mTextureDataCount)return false;const auto& texture=source->mTextureInfo.mTextureData[slot];if(!equal("mSourceAttrIndex",texture.mSourceAttrIndex)||!equal("mTotalFrameCount",texture.mTotalFrameCount))return false;}
  e.clear();return true;
 }
 }

@@ -10,6 +10,8 @@ class RenderDescriptorIndex {
 public:
  bool declare(u64 factory,RenderKind,BaseShape&,const std::vector<u32>& slots,std::string&);
  bool validate(const RenderGraph&,std::string&)const;
+ bool matchesInitializedBacking(const RenderGraph&,const IsolatedRenderAllocations&,const ConstructorFence&,std::string&)const;
+ bool validateStateGeometry(const RenderNode&,u32,const ActorFields&,std::string&)const;
  // Only immutable named descriptor backing and canonical allocation pointers.
  // Mutable payload bind/typed prevalidation is still a separate mandatory pass.
  bool initializeBacking(const RenderGraph&,IsolatedRenderAllocations&,ConstructorFence&,std::string&)const;

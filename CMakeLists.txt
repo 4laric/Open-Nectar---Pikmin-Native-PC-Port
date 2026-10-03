@@ -426,6 +426,8 @@ set(PC_PORT_SOURCES
     pc_port/pc_midday_render_graph.cpp
     pc_port/pc_midday_render_graph_engine.cpp
     pc_port/pc_midday_render_descriptors_engine.cpp
+    pc_port/pc_midday_render_mutable.cpp
+    pc_port/pc_midday_render_mutable_engine.cpp
     pc_port/pc_midday_animation_context.cpp
     pc_port/pc_midday_animation_context_engine.cpp
     pc_port/pc_midday_refcounts.cpp
