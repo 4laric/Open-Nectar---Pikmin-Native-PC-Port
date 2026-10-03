@@ -1,6 +1,7 @@
 #pragma once
 #include "pc_p2_original_piki_origin.h"
 #include <cstdint>
+#include <array>
 #include <map>
 #include <string>
 #include <variant>
@@ -77,6 +78,7 @@ public:
  bool depositBody(const void* body,std::uint64_t handle,const Root& actualReceiver,std::string&);
  // Highest maturity, then oldest member serial (deliberate FIFO policy).
  StockResult peekStored(std::uint8_t species,MemberRecord&,std::string&)const;
+ bool storedCounts(std::uint8_t,std::array<std::uint64_t,3>&)const noexcept;
  bool withdrawStored(std::uint64_t selectedSerial,const Root& actualReceiver,const void* successfullyBornBody,std::uint64_t& handle,std::string&);
  bool updateBody(const void*,std::uint64_t,const MemberBodyState&,std::string&);
  // Post-deposit/head-conversion/death cleanup is idempotent when no pointer

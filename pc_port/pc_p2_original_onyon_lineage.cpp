@@ -101,6 +101,14 @@ bool Lineage::withdrawStored(std::uint64_t serial,const Root& root,const void* b
  if(!attach(serial,born,false,h,e))return false;
  m->second.receiverRoot=std::move(receiver);m->second.hasReceiver=true;m->second.location=Location::Body;return true;
 }
+bool Lineage::storedCounts(std::uint8_t species,std::array<std::uint64_t,3>& out)const noexcept{
+ if(!hex(mSession)||species>=3||mUnknown[species])return false;
+ std::array<std::uint64_t,3> counts{};
+ for(const auto& member:mMembers){const auto& r=member.second;
+  if(r.location==Location::Stored&&r.state.species==species){if(r.state.maturity>=3)return false;++counts[r.state.maturity];}
+ }
+ out=counts;return true;
+}
 bool Lineage::updateBody(const void* body,std::uint64_t h,const MemberBodyState& state,std::string& e){
  auto p=mBodies.find(body);if(p==mBodies.end()||!h||p->second.handle!=h)return fail(e,"stale source body update");
  auto m=mMembers.find(p->second.serial);if(m==mMembers.end()||!stateValid(state)||state.species!=m->second.state.species||(m->second.state.wasWild&&!state.wasWild))return fail(e,"invalid source body color/maturity/wild history");
