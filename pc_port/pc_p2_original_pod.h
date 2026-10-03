@@ -50,6 +50,9 @@ bool pc_p2_original_pod_context(Suckable*,const p2retail::SceneIdentity&,p2retai
 // Raw lifetime observation only. Unlike context lookup, false means no native
 // preparation is owned; it cannot grant source, receipt or SAVE authority.
 bool pc_p2_original_pod_owned();
+// Read-only rollback phase check, including resource-only preparation. The
+// actual abort still validates its own phase; this issues no receipt authority.
+bool pc_p2_original_pod_can_abort_prepared(const p2retail::SceneIdentity&);
 Suckable* pc_p2_original_pod_goal(const p2retail::SceneIdentity&);
 bool pc_p2_original_pod_bind_cargo(Pellet*,const p2retail::BirthIdentity&,
                                  const p2retail::SceneIdentity&,
