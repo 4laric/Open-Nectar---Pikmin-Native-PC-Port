@@ -22,6 +22,7 @@
 #include "PikiMgr.h"
 #include "PikiHeadItem.h"
 #include "ItemMgr.h"
+#include "UfoItem.h"
 #include "Boss.h"
 #include "Pom.h"
 #include "pc_p2_white.h"
@@ -329,6 +330,13 @@ public:
         }
         // Only virtual-pad input. Gather, approach, aim during A hold, release.
         if(age<90){input(KBBTN_B);return result;}
+        UfoItem* ship=itemMgr?itemMgr->getUfo():nullptr;
+        if(electric()&&desiredSpecies()!=P2SpeciesWhite&&!aHeld&&ship
+            &&distance(n->mSRT.t,ship->mSRT.t)<=75.f){
+            // The ordinary A action opens ship information within50 units.
+            // Walk clear before the throw click rather than bypassing its UI.
+            neutralThrowTicks=0;point(n,enemy->mSRT.t,true);return result;
+        }
         if(distance(n->mSRT.t,enemy->mSRT.t)>140.f){
             if(aHeld){for(const auto& entry:flight)witness(entry.first,"invalidated");flight.clear();aHeld=false;}
             neutralThrowTicks=0;
