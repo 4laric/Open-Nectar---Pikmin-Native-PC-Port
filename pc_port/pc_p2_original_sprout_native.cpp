@@ -169,4 +169,10 @@ void pc_p2_original_sprout_withdraw(GoalItem* onion,Piki* p,const p2originalonyo
  p2originalonyon::Root root;std::uint64_t h=0;std::string e;
  if(!owner(onion,root,e)||!p||p->mColor!=selected.state.species||p->mHappa!=selected.state.maturity||!lineage->withdrawStored(selected.serial,root,p,h,e))fault("source withdrawal lost allocation/selection proof: "+e);
 }
+bool pc_p2_original_sprout_preflight_course_finish(std::string& e){
+ // Check persistent graph labels even if current campaign resolution is lost.
+ // Do not initialize lineage or retire BODYs before the Party observer.
+ if(!lineage){e.clear();return true;}
+ return lineage->preflightCourseFinish(e);
+}
 bool pc_p2_original_sprout_unload(std::string& e){if(!lineage){e.clear();return true;}return lineage->courseUnload(e);}

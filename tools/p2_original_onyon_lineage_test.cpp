@@ -163,5 +163,20 @@ int main(){
  check(!scene.courseUnload(e)&&!scene.newSession(otherSession,e),"scene BODY teardown cannot bypass HEAD/pending guard");
  check(scene.retireBody(&sceneBody,sb,e),"postscene native body cleanup harmless");
  check(!scene.commitReward(p,e),"scene dead history prevents source reward replay");
+ // Course preflight must hold providers before graph disposal, while preserving
+ // BODYs for the later Party observer. It does not resolve current authority.
+ Lineage finish(session);check(finish.preflightCourseFinish(e),"empty lineage early course guard succeeds");
+ check(finish.preflightReward(r,cause(950),1,p,e)&&finish.commitReward(p,e),"early guard pending reward prepared");
+ const auto pendingBefore=finish.report();
+ check(!finish.preflightCourseFinish(e)&&finish.report().members[0].location==Location::Pending&&finish.report().members.size()==pendingBefore.members.size(),"early guard rejects pending without transition");
+ check(finish.bindPendingHead(1,r,&sceneHead,sh,e),"early guard HEAD prepared");
+ check(!finish.preflightCourseFinish(e)&&finish.ownsHead(&sceneHead),"early guard refuses persistent live HEAD without tag removal");
+ check(finish.queryHead(&sceneHead,otherSession,untouched,queryHandle,e)==QueryResult::Unavailable&&!finish.preflightCourseFinish(e)&&finish.ownsHead(&sceneHead),"unavailable session cannot bypass early HEAD guard");
+ check(finish.headToBody(&sceneHead,sh,&sceneBody,sb,e),"early guard BODY transition prepared");
+ check(finish.preflightCourseFinish(e)&&finish.ownsBody(&sceneBody)&&!finish.courseUnload(e),"early guard permits live BODY but full unload still refuses");
+ check(finish.queryBody(&sceneBody,session,bodyRecord,queryHandle,e)==QueryResult::Present&&bodyRecord.location==Location::Body,"BODY remains readable for Party observer");
+ check(finish.depositBody(&sceneBody,sb,r,e)&&finish.preflightCourseFinish(e)&&finish.peekStored(0,stored,e)==StockResult::Present,"stored stock survives read-only early guard");
+ const auto storedBefore=finish.report();
+ check(finish.preflightCourseFinish(e)&&emissionSame(finish.report().members[0].origin,storedBefore.members[0].origin)&&finish.report().members[0].location==Location::Stored,"early guard preserves stored immutable history");
  std::printf("original_onyon_lineage checks=%u failures=%u engine=0 native_authentication=caller codec=0\n",checks,failures);return failures?1:0;
 }

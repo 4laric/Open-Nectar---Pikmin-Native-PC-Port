@@ -97,6 +97,9 @@ public:
  void retireSceneBodies() noexcept;
  bool markUnknownStock(std::uint8_t species,std::uint64_t count,std::string&);
  Report report()const;
+ // Read-only early teardown guard. HEAD/pending graphs must remain intact
+ // before provider disposal. BODY retirement follows the Party observer.
+ bool preflightCourseFinish(std::string&)const;
  bool courseUnload(std::string&)const;
  // Explicit new campaign only. Refuses living graph or pending queue. Stored
  // members/dead history are reset only here, never on ordinary course unload.

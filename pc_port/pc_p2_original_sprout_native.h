@@ -34,4 +34,7 @@ bool pc_p2_original_sprout_deposit(GoalItem*,Piki*,std::string&);
 bool pc_p2_original_sprout_stock(GoalItem*,p2originalonyon::MemberRecord&,std::string&);
 void pc_p2_original_sprout_withdraw(GoalItem*,Piki*,const p2originalonyon::MemberRecord&);
 // Ordinary unload retains stored lineage; no physical SAVE restore here.
+// Early read-only HEAD/pending guard; permits BODY observation and retirement
+// later, after Party observer. No current campaign resolution or tag removal.
+bool pc_p2_original_sprout_preflight_course_finish(std::string&);
 bool pc_p2_original_sprout_unload(std::string&);

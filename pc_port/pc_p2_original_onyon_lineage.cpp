@@ -146,6 +146,10 @@ bool Lineage::markUnknownStock(std::uint8_t species,std::uint64_t count,std::str
 Report Lineage::report()const{Report r;r.sessionFingerprint=mSession;r.liveHeads=mHeads.size();r.liveBodies=mBodies.size();for(const auto& m:mMembers)r.members.push_back(m.second);for(unsigned i=0;i<3;++i)r.unknownStock[i]=mUnknown[i];return r;}
 bool Lineage::courseUnload(std::string& e)const{
  if(!mHeads.empty()||!mBodies.empty())return fail(e,"source course still owns living physical member graph");
+ return preflightCourseFinish(e);
+}
+bool Lineage::preflightCourseFinish(std::string& e)const{
+ if(!mHeads.empty())return fail(e,"source course still owns living source HEAD graph before provider disposal");
  for(const auto& m:mMembers)if(m.second.location==Location::Pending)return fail(e,"source course still owns pending Onion reward members");
  e.clear();return true;
 }
