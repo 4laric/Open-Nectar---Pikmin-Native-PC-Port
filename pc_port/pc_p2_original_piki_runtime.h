@@ -52,6 +52,9 @@ public:
  virtual const std::string& naviParameterBytes()const=0;
  virtual bool gravity(float&,std::string&)const=0;
  virtual bool captainFrame(const Navi*,CaptainFrame&,std::string&)const=0;
+ // Genuine PhysicalSource CF_IsAlive fact. Missing producer refuses; native
+ // P1 HP/isAlive(), FSM state and provenance labels cannot supply this value.
+ virtual bool bodyAlive(Handle,bool&,std::string&)const=0;
  virtual bool supports(Handle,Motion,std::string&)const=0;
  virtual bool motion(Handle,Motion,std::string&)=0;
  virtual bool animate(Handle,float delta,std::string&)=0;

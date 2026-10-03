@@ -272,10 +272,11 @@ static bool whistleResultImpl(Handle h,Navi* n,bool combine,bool newToParty,bool
  if(demo==captain::Demo::Unknown||demo==captain::Demo::Absent)return fail(e,"source whistle movie authority absent");
  bool movie=demo==captain::Demo::Playing;
  PcP2SourceBody source;if(!body(h.body,source,e)||!current(h,e))return false;
+ bool alive=false;if(!services->bodyAlive(h,alive,e)||!current(h,e))return false;
  const auto reject=[&](){if(!current(h,e))return false;accepted=false;e.clear();return true;};
  // Genuine retail eligibility rejection is an authenticated result. Source
  // invocations may continue through their ordered roster without string tests.
- if(!f.alive||!f.formationable||!originalProgress().captainAllowed(captain,source.state.wasWild)
+ if(!alive||!f.alive||!f.formationable||!originalProgress().captainAllowed(captain,source.state.wasWild)
    ||(source.state.wild&&(movie||source.state.species>2)))return reject();
  // Of the five owned states, only Walk and GoHang are retail callable.
  if(x->runtime.state!=State::Walk&&x->runtime.state!=State::GoHang)return reject();
