@@ -38,7 +38,9 @@ public:
     // region before returning; cancelled SAVE retains the same protection.
     bool sample(const P2CaveVisibleBoundary& b,float x,float y,float z,
                 bool down,bool click,bool captainSafe){
-        if(!b.valid()){reset();return false;}
+        // Loading temporarily removes the provider snapshot. Preserve the old
+        // scene and accepted action so arrival inside a boundary stays blocked.
+        if(!b.valid())return false;
         if(!bound.same(b)){
             const bool hadScene=bound.valid();
             bound=b;armed=false;released=false;used=hadScene && b.near(x,y,z,20);

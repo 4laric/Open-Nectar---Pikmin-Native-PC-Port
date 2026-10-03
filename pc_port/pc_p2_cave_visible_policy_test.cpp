@@ -18,6 +18,7 @@ int main(){
     check(!input.sample(b,0,0,0,true,true,true),"repeat click in same actor refuses");
     input.sample(b,101,0,0,false,false,true);
     check(input.sample(b,0,0,0,true,true,true),"leave release reentry activates");input.accepted();
+    check(!input.sample(P2CaveVisibleBoundary{},0,0,0,false,false,true),"load gap refuses without clearing scene");
     auto next=b;next.scene=2;next.floor=1;next.returning=true;
     check(!input.sample(next,0,0,0,true,true,true),"held input across scene refuses");
     input.sample(next,0,0,0,false,false,true);
