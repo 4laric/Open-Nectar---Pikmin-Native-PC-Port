@@ -13,6 +13,7 @@ extern std::string pc_randomizer_session_fingerprint() __attribute__((weak));
 extern bool pc_p2_original_captain_down_demo(p2original::captain::Demo&) __attribute__((weak));
 extern bool pc_p2_original_captain_bootstrap_complete(const p2original::captain::LoadedScene&,std::string&) __attribute__((weak));
 extern bool pc_p2_original_captain_continuation_valid(const p2original::captain::LoadedScene&,std::string&) __attribute__((weak));
+extern bool pc_p2_original_captain_scene_body_owned(const Navi*) noexcept __attribute__((weak));
 using namespace p2original::captain;
 namespace {
 MoviePlayer* observedMovie=nullptr;Demo observedDemo=Demo::Unknown;
@@ -21,7 +22,10 @@ public:
  std::string campaign,fingerprint,catalog;
  std::uint64_t epoch=0;const LoadedScene* scene=nullptr;
  Phase game=Phase::Inactive;MoviePlayer* player=nullptr;
- bool completedBootstrap=false;
+ bool completedBootstrap=false;bool retiring=false;
+ // One retained terminal identity survives temporary canonical invalidation.
+ std::uint64_t retiredEpoch=0;std::string retiredCampaign,retiredFingerprint,retiredCatalog;
+ bool retired(const LoadedScene& s)const{return retiredEpoch&&s.incarnation()==retiredEpoch&&s.selectedCampaign()==retiredCampaign&&s.selectedFingerprint()==retiredFingerprint&&s.sourceCatalog()==retiredCatalog;}
  std::array<Navi*,2> captains{};
  std::array<bool,2> alive{};
  std::array<std::uint8_t,2> frames{};
@@ -37,7 +41,7 @@ public:
   return !player?Demo::Absent:(player==observedMovie?observedDemo:Demo::Unknown);
  }
  Navi* captainAt(unsigned slot)const override{return slot<2?captains[slot]:nullptr;}
- void clear(){scene=nullptr;epoch=0;campaign.clear();fingerprint.clear();catalog.clear();game=Phase::Inactive;completedBootstrap=false;player=nullptr;captains={};alive={};frames={};timers={};}
+ void clear(){scene=nullptr;epoch=0;campaign.clear();fingerprint.clear();catalog.clear();game=Phase::Inactive;completedBootstrap=false;retiring=false;player=nullptr;captains={};alive={};frames={};timers={};}
  const LoadedScene* canonical()const {
   if(!pc_p2_original_captain_loaded_scene||!pc_randomizer_original_session
    ||!pc_randomizer_original_session()||!pc_randomizer_original_campaign
@@ -59,8 +63,9 @@ public:
  int slot(const Navi* n){if(!n||!valid())return -1;for(int i=0;i<2;++i)if(captains[i]==n)return i;return -1;}
  bool loadedAfterReset(std::string& e){
   e.clear();const auto* s=canonical();if(!s){clear();e="missing canonical two-body source scene after actual reset";return false;}
+  if(retired(*s)){e="source reset refused for retained retired incarnation";return false;}
   // A repeated event is never a lifecycle reset or activation capability.
-  if(scene==s&&valid())return true;
+  if(scene==s&&valid()){if(retiring){e="source reset refused during retained retirement";return false;}return true;}
   clear();scene=s;epoch=s->incarnation();campaign=s->selectedCampaign();fingerprint=s->selectedFingerprint();catalog=s->sourceCatalog();
   captains={s->captainAt(0),s->captainAt(1)};player=s->moviePlayer();
   // Source Creature::init enables CF_IsAlive; Navi::onInit resets the u8
@@ -70,6 +75,7 @@ public:
  }
  bool activate(std::string& e){
   e.clear();if(!valid()){e="source activation requires actual reset/loading event";return false;}
+  if(retiring){e="source activation refused during retained retirement";return false;}
   if(game==Phase::GameWorldActive)return true;
   const auto* expectedScene=scene;const auto expectedEpoch=epoch;
   const auto expectedPhase=game;const bool expectedCompletion=completedBootstrap;
@@ -81,7 +87,7 @@ public:
    if(!pc_p2_original_captain_continuation_valid){e="missing actual source state/control continuation owner";return false;}
    if(!pc_p2_original_captain_continuation_valid(*scene,e)){if(e.empty())e="actual source state/control continuation refused";return false;}
   }
-  if(!valid()||scene!=expectedScene||epoch!=expectedEpoch||game!=expectedPhase||completedBootstrap!=expectedCompletion){e="source lifecycle changed during activation preflight";return false;}
+  if(!valid()||retiring||scene!=expectedScene||epoch!=expectedEpoch||game!=expectedPhase||completedBootstrap!=expectedCompletion){e="source lifecycle changed during activation preflight";return false;}
   completedBootstrap=true;game=Phase::GameWorldActive;return true;
  }
 } runtime;
@@ -92,10 +98,17 @@ State* ownedState(Navi* n,StateId id){
 }
 }
 const World* pc_p2_original_captain_world(){return runtime.valid()?&runtime:nullptr;}
-bool pc_p2_original_captain_body_owned(const Navi* n){const auto* scene=runtime.canonical();return n&&scene&&(scene->captainAt(0)==n||scene->captainAt(1)==n);}
+bool pc_p2_original_captain_body_owned(const Navi* n){
+ if(!n)return false;
+ if(pc_p2_original_captain_scene_body_owned)return pc_p2_original_captain_scene_body_owned(n);
+ // Classification stays separate from campaign/session authorization.
+ const auto* scene=pc_p2_original_captain_loaded_scene?pc_p2_original_captain_loaded_scene():nullptr;
+ return scene&&(scene->captainAt(0)==n||scene->captainAt(1)==n);
+}
 bool pc_p2_original_captain_body_reset_loaded(std::string& e){return runtime.loadedAfterReset(e);}
 bool pc_p2_original_captain_activate_after_bootstrap(std::string& e){return runtime.activate(e);}
 void pc_p2_original_captain_main_game_entered(){std::string e;runtime.activate(e);}
+void pc_p2_original_captain_begin_retirement(){if(runtime.valid()){runtime.retiredEpoch=runtime.epoch;runtime.retiredCampaign=runtime.campaign;runtime.retiredFingerprint=runtime.fingerprint;runtime.retiredCatalog=runtime.catalog;runtime.retiring=true;runtime.game=Phase::Inactive;}}
 void pc_p2_original_captain_main_game_left(){if(runtime.valid())runtime.game=Phase::Inactive;}
 void pc_p2_original_captain_movie_started(MoviePlayer* p){if(p){observedMovie=p;observedDemo=Demo::Playing;}}
 void pc_p2_original_captain_movie_ended(MoviePlayer* p){if(p){observedMovie=p;observedDemo=Demo::Inactive;}}

@@ -33,13 +33,14 @@ struct SourceState:NaviState,State {
 std::array<SourceState,2> bootstrapWalk;
 struct ControlReset {const LoadedScene* scene=nullptr;std::uint64_t epoch=0;Navi* actor=nullptr;};
 std::array<ControlReset,2> controlResets;
-int bootstrapQueries=0,continuationQueries=0;bool changeEpochDuringQuery=false;
+int bootstrapQueries=0,continuationQueries=0;bool changeEpochDuringQuery=false,retireDuringQuery=false;
 void actualResetControls(){for(unsigned i=0;i<2;++i){bootstrapWalk[i].id=StateId::Walk;scene.navis[i]->current=&bootstrapWalk[i];controlResets[i]={&scene,scene.epoch,scene.navis[i]};}}
 bool checkOwnedControls(const LoadedScene& source,std::string& e,bool initial){
  for(unsigned i=0;i<2;++i){auto* n=source.captainAt(i);auto* typed=n?dynamic_cast<State*>(n->current):nullptr;const auto& reset=controlResets[i];
   if(&source!=&scene||!typed||typed->nativeState()!=n->current||reset.scene!=&source||reset.epoch!=source.incarnation()||reset.actor!=n||(initial&&(n->current!=&bootstrapWalk[i]||typed->sourceStateId()!=StateId::Walk))){e="engineered actual typed state/control binding missing";return false;}
  }
  if(changeEpochDuringQuery)++scene.epoch;
+ if(retireDuringQuery)pc_p2_original_captain_begin_retirement();
  return true;
 }
 int checks=0;void check(bool b){++checks;if(!b)throw std::runtime_error("captain runtime check "+std::to_string(checks));}
@@ -70,8 +71,8 @@ int main(){
  check(!pc_p2_original_captain_body_owned(&outsider));
  scene.navis[1]=nullptr;pc_p2_original_captain_main_game_entered();check(!pc_p2_original_captain_world());scene.navis[1]=&b;
  scene.navis[1]=&a;pc_p2_original_captain_main_game_entered();check(!pc_p2_original_captain_world());scene.navis[1]=&b;
- selected=false;pc_p2_original_captain_main_game_entered();check(!pc_p2_original_captain_world());selected=true;
- scene.f=std::string(64,'c');pc_p2_original_captain_main_game_entered();check(!pc_p2_original_captain_world());scene.f=fingerprint;
+ selected=false;check(pc_p2_original_captain_body_owned(&a)&&pc_p2_original_captain_body_owned(&b));pc_p2_original_captain_main_game_entered();check(!pc_p2_original_captain_world());selected=true;
+ scene.f=std::string(64,'c');check(pc_p2_original_captain_body_owned(&a)&&pc_p2_original_captain_body_owned(&b));pc_p2_original_captain_main_game_entered();check(!pc_p2_original_captain_world());scene.f=fingerprint;
  std::string error;pc_p2_original_captain_main_game_entered();check(!pc_p2_original_captain_world()); // activation cannot bind a merely loaded scene
  check(pc_p2_original_captain_body_reset_loaded(error));auto* world=pc_p2_original_captain_world();check(world&&world->phase()==Phase::Loading&&world->demo()==Demo::Absent);
  check(!pc_p2_original_captain_activate_after_bootstrap(error)&&!error.empty()&&world->phase()==Phase::Loading&&bootstrapQueries==1);
@@ -124,6 +125,21 @@ int main(){
  pc_p2_original_captain_actor_update(&a);check(pc_p2_original_captain_actor_frames(&a,frames)&&frames==59); // once per actual actor update, even movie
  for(int i=0;i<70;++i)pc_p2_original_captain_actor_update(&a);
  check(pc_p2_original_captain_actor_frames(&a,frames)&&frames==0); // no u8 underflow
+ // Terminal scene retirement keeps the same canonical cleanup descriptors.
+ const auto retirementEpoch=world->incarnation();
+ pc_p2_original_captain_main_game_left();retireDuringQuery=true;
+ check(!pc_p2_original_captain_activate_after_bootstrap(error)&&world->phase()==Phase::Inactive);
+ retireDuringQuery=false;pc_p2_original_captain_begin_retirement();
+ check(pc_p2_original_captain_loaded_scene()==&scene&&pc_p2_original_captain_world()==world&&world->phase()==Phase::Inactive&&world->incarnation()==retirementEpoch&&world->captainAt(0)==&a&&world->captainAt(1)==&b);
+ check(!pc_p2_original_captain_activate_after_bootstrap(error)&&world->phase()==Phase::Inactive);
+ check(!pc_p2_original_captain_body_reset_loaded(error)&&world->phase()==Phase::Inactive);
+ pc_p2_original_captain_main_game_entered();pc_p2_original_captain_begin_retirement();
+ check(pc_p2_original_captain_world()==world&&world->phase()==Phase::Inactive);
  loaded=nullptr;check(!pc_p2_original_captain_world());check(!pc_p2_original_captain_actor_alive(&a));
+ // Canonical loss/restoration does not erase retirement of this incarnation.
+ loaded=&scene;check(!pc_p2_original_captain_body_reset_loaded(error)&&!pc_p2_original_captain_world());
+ check(!pc_p2_original_captain_activate_after_bootstrap(error));
+ ++scene.epoch;check(pc_p2_original_captain_body_reset_loaded(error)&&pc_p2_original_captain_world()->phase()==Phase::Loading);
+ loaded=nullptr;check(!pc_p2_original_captain_world());
  std::cout<<"P2_ORIGINAL_CAPTAIN_RUNTIME_CONTROLS_PASS checks="<<checks<<" gameplay=UNTESTED\n";
 }

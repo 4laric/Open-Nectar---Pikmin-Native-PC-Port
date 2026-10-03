@@ -112,10 +112,13 @@ bool pc_p2_original_captain_body_reset_loaded(std::string&);
 bool pc_p2_original_captain_activate_after_bootstrap(std::string&);
 void pc_p2_original_captain_main_game_entered();
 void pc_p2_original_captain_main_game_left();
-// Exact current selected source LoadedScene roster ownership, independent of
+// Exact retained physical source roster ownership, independent of
 // whether its body-reset/Walk bootstrap has completed. Missing World must not
 // turn a known source body into a legacy actor.
 bool pc_p2_original_captain_body_owned(const Navi*);
+// Terminal for this exact retained incarnation. Keep canonical inactive World
+// readable until consumers retire; repeated reset/activation cannot resume it.
+void pc_p2_original_captain_begin_retirement();
 void pc_p2_original_captain_movie_started(MoviePlayer*);
 void pc_p2_original_captain_movie_ended(MoviePlayer*);
 void pc_p2_original_captain_actor_update(Navi*);
