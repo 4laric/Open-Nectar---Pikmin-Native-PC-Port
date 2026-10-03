@@ -58,9 +58,11 @@ human gameplay/save-resume. Bitter/spray state, purple stun/earthquake,
 damage squash animation, effects/sound fidelity and Demo's global captain
 unlock timer are not implemented by this FSM and require their owning
 systems. This code does not claim those reactions as completed.
-In particular, Catfish's actual setEnemyNonStone enables NoInterrupt;
-KEY3 reset clears it and updates bitter bounce. Those gates need the bitter
-receiver. Retail carcass Carry5 uses type5 duration40 and loop10/29. The
+Catfish's actual setEnemyNonStone enables NoInterrupt after Flick KEY2;
+KEY3, Flick init and Flick cleanup reset it. The family now tracks that flag
+and a monotonic clear serial for each actual true-to-false reset. That reset
+requests source down/bounce effects; effects and actual Stone remain open.
+Retail carcass Carry5 uses type5 duration40 and loop10/29. The
 source corpse accessor exposes that clip and phase separately. Pre-carry
 starts paused at frame0, source carry-start resumes the clock, optional
 restart starts Carcass again, and carry-finish allows the loop to exit at
@@ -72,6 +74,25 @@ BTeki's family update runs before its dead-state gate, so the
 retained actor-backed corpse advances without replaying death/drop events.
 The shared integration owner must connect actual pellet view callbacks and
 the corpse draw override; transport gameplay remains an acceptance gate.
+
+The source lifecycle owner can query `pc_p2_catfish_source_gate` for the
+complete registry activation identity/token, alive/dead, health, distinct
+invulnerability, literal Catfish bitter immunity false, NoInterrupt, FSM
+state/indexed animation/source frame and nonStoneClearSerial. The query
+refuses missing/mismatched original registrations. The identity-checked
+do_start_stone family callback only zeros target velocity, matching
+KochappyBase.cpp129-140 and EnemyBase.cpp1632-1644; do_finish_stone is empty.
+These callbacks do not create, accept or track a substitute Stone state.
+The actual Stone owner must pause animation/FSM and own event backup,
+Bittered/BitterQueued and restoration. No P1 pressed/bitter flags are read.
+
+Queue contract: EnemyBase.cpp1611-1625 queues when NoInterrupt or real Stone
+start failure prevents entry. LivingState.cpp475-482 retries queued start.
+Stone init clears BitterQueued (enemyBase.cpp704-705); Stone cleanup clears
+it again (745), clears Bittered and resumes motion before the empty finish
+callback. PAL LivingState also clears queued on health<=0 (478). Resetting
+Catfish NoInterrupt does not itself clear BitterQueued. Family clear serial
+is a notification of source reset/down-effect, never queue consumption.
 
 For direct gameplay use exactly20 Pikmin, the current original start overlay,
 a centered960x540 native window and private arena/save/logs. Observe Wait
