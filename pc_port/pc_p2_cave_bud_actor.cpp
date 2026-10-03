@@ -535,11 +535,12 @@ bool pc_p2_original_pom_start(Pom* pom,std::string& e) {
     if(!b||b->started||!itemMgr||!pikiMgr||!pc_p2_purples_enabled())
         return originalRefuse(e,"original Pom start lacks fresh binding/species/managers");
     b->started=true;
-    // Native PomAi fields were initialized by the actual manager's Pom::init.
-    // Begin its ordinary wait/open path; no synthetic conversion or actor birth.
-    pom->setCurrentState(1);pom->setNextState(1);pom->setMotionFinish(false);
-    pom->disableStick();pom->setWalkTimer(0);pom->setAttackTimer(0);
-    pc_p2_original_pom_motion(pom,0);e.clear();return true;
+    // Pom::init supplies intrinsic native organic/invincible/radius/shadow and
+    // touch fields, then our managed PomAi::initAI branch. It does not replace
+    // the leaf's already-installed source CollInfo or call Boss::initBoss again.
+    pom->init(pom->mSRT.t);
+    pom->resetCreatureFlag(CF_IsAiDisabled); // publish only after initialization
+    e.clear();return true;
 }
 bool pc_p2_original_pom_release(Pom* pom,std::string& e) {
     originalPoms.erase(pom);e.clear();return true;
