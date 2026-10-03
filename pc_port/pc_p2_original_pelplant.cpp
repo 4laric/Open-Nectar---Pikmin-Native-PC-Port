@@ -88,8 +88,14 @@ bool Provider::enter(Host& h,State next,std::string& e){
  case State::WitherMiddle:animation=5;blend=true;break;
  case State::WitherSmall:animation=4;blend=true;break;
  }
- if(!mEngine.flags(h,next==State::Full||next==State::Damage,next==State::Full||next==State::Damage,
-    next==State::Full,next==State::Full||next==State::GrowMiddleFull?lod(h.initial.amount):45,e))return false;
+ // Wait init changes EB_Cullable; damage/death/wither retain it. Grow init
+ // enlarges the LOD sphere, while wither cleanup resets it at WaitSmall.
+ bool cullable=h.cullable;float radius=h.lodRadius;
+ if(wait(next))cullable=next==State::Full;
+ if(next==State::Full||next==State::GrowMiddleFull)radius=lod(h.initial.amount);
+ if(next==State::Small&&(previous==State::WitherFull||previous==State::WitherMiddle||previous==State::WitherSmall))radius=45;
+ if(!mEngine.flags(h,next==State::Full||next==State::Damage,next==State::Full||next==State::Damage,cullable,radius,e))return false;
+ h.cullable=cullable;h.lodRadius=radius;
  if(blend&&!mEngine.flick(h,e))return false;
  if(!mEngine.motion(h,animation,blend,e))return false;
  h.state=next;return true;

@@ -192,7 +192,9 @@ struct Native::Impl final:Engine {
   // cached Full pose so it cannot fade back to Full when WaitSmall begins.
   if(blend)presentation.forget(h.creature);
   t.motion=animation;t.frame=0;t.blend=blend;t.blendTime=0;return true;}
- bool flags(Host& h,bool vulnerable,bool living,bool,float,std::string&)override{
+ bool flags(Host& h,bool vulnerable,bool living,bool cullable,float radius,std::string&)override{
+  if(!std::isfinite(radius)||radius<=0)return false;
+  h.cullable=cullable;h.lodRadius=radius;
   auto* actor=static_cast<BTeki*>(h.creature);if(vulnerable)actor->clearTekiOption(BTeki::TEKI_OPTION_INVINCIBLE);else actor->setTekiOption(BTeki::TEKI_OPTION_INVINCIBLE);
   if(living)actor->setTekiOption(BTeki::TEKI_OPTION_ORGANIC);else actor->clearTekiOption(BTeki::TEKI_OPTION_ORGANIC);return true;
  }
@@ -266,6 +268,9 @@ bool Native::tick(BTeki* actor,float dt,std::string& e){Host* h=m->provider.look
  if(h->dead){if(!m->death)return reject(e,"Pelplant completed death lacks coordinated course retirement");return m->death(actor,e);}return true;
 }
 bool Native::draw(BTeki* actor,Graphics& gfx,const Matrix4f& view){Host* h=m->provider.lookup(actor);if(!h||!gfx.mCamera)return false;auto& t=*m->tracks.at(actor);auto& clip=m->variants[h->captured?amountIndex(h->initial.amount):0][t.motion];
+ // Presentation-only equivalent: keep the typed simulation/capture clock
+ // independent of this client's frustum, as required by the native port.
+ if(h->cullable&&!gfx.mCamera->isPointVisible(actor->getBoundingSphereCentre(),h->lodRadius))return true;
  gfx.useMatrix(Matrix4f::ident,0);
  auto& bank=m->banks[h->captured?amountIndex(h->initial.amount):0];Shape* shape=nullptr;
  if(t.blend){const auto* start=bank.clip(names[t.motion]);const auto* end=bank.clip("wait1");
