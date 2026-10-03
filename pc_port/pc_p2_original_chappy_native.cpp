@@ -54,7 +54,9 @@ bool Native::allocate(Host& h,const Position& p,float facing,std::string& e){
  actor->mPersonality->mFaceDirection=facing;
  actor->reset();actor->startAI(0);
  actor->mGenerator=h.generator;actor->mSRT.r.set(0,facing,0);
- actor->mRebirthDay=h.generator->getRebirthDay();
+ // Genuine original generators have no P1 GenType. Their typed original
+ // lifecycle owns respawn; only mirror the compatibility observation here.
+ actor->mRebirthDay=h.generator->mRespawnInterval;
  e.clear();return true;
 }
 bool Native::bind(Host& h,std::string& e){
