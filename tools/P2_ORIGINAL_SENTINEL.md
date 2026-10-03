@@ -125,3 +125,14 @@ continuous 21/22/23 renderer and Hit24, original color material application,
 source physical checkpoint provider, native map/receiver behavior and direct
 20-Pikmin gameplay remain open. The source-manager and native pool limits are
 separate; root reservation does not promise all later children will be born.
+
+The separate `DownEffects` source control consumes only SHA-verified genuine
+GPVE01 21/22/23 and stardust bytes. It preserves the JPA first/fractional rate,
+point-volume RNG, particle lifetime/moment, accumulating gravity, scale/alpha
+flick and rotation, source2048-entry trig frontier, and fade/drain. Positions
+follow the body for later births; existing particles remain independent.
+Actual scene clipping is injected at the source30 radius after emission, so
+previous clipping suppresses births and current clipping suppresses drawing.
+A restart after fade requires a fresh emitter handle while old particles drain.
+This helper does not supply the actual GX renderer, Hit24 or physical scene
+ownership; its genuine-resource controls are source evidence only.

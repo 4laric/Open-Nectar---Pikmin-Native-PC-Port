@@ -31,3 +31,11 @@ add_executable(p2_original_shijimi_state
 target_include_directories(p2_original_shijimi_state PRIVATE "${SENTINEL_SOURCE}/pc_port")
 target_compile_options(p2_original_shijimi_state PRIVATE -Wall -Wextra -Werror -UNDEBUG)
 add_test(NAME original_shijimi_state COMMAND p2_original_shijimi_state)
+
+# Genuine private resources are supplied explicitly to this control executable.
+# Do not register a fake-byte or resource-free appearance acceptance test.
+add_executable(p2_shijimi_effect_control
+ "${SENTINEL_SOURCE}/tools/test_p2_shijimi_effect.cpp"
+ "${SENTINEL_SOURCE}/pc_port/pc_p2_shijimi_effect.cpp")
+target_include_directories(p2_shijimi_effect_control PRIVATE "${SENTINEL_SOURCE}/pc_port")
+target_compile_options(p2_shijimi_effect_control PRIVATE -Wall -Wextra -Werror -UNDEBUG)
