@@ -23,6 +23,13 @@ if actual != a.exe_sha256:
 if evidence.exists():
     raise ValueError('Fresh runtime evidence directory required')
 evidence.mkdir(parents=True)
+if a.mode == 'refusal':
+    # Exercise a genuinely missing physical bank without altering the staged
+    # source assets or adding a production-only failure switch.
+    refusal_run = evidence / 'bank-absent-run'
+    refusal_run.mkdir()
+    (refusal_run / 'assets').symlink_to(run / 'assets', target_is_directory=True)
+    run = refusal_run
 env = os.environ.copy()
 for key in ('P2_ORIGINAL_FOLIAGE_WALK','P2_ORIGINAL_FOLIAGE_REFUSE_RESOURCES','P2_ORIGINAL_FOLIAGE_FORCE_CAPTAIN_DOWN','P2_ORIGINAL_FOLIAGE_HUMAN'):
     env.pop(key, None)
