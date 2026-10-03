@@ -31,6 +31,8 @@ SDL_Joystick* pad=nullptr;
 int frames=0,stage=0,ticks=0,entryClicks=0,exitClicks=0;
 std::uint64_t baselineGeneration=0;
 bool entered=false,returned=false,baselineKnown=false;
+bool gatherArrived=false,surfaceGathered=false;
+float gatherX=0,gatherZ=0;
 P2CaveCampaignParty floorParty;
 auto start=std::chrono::steady_clock::now();
 void finish(int code){std::fflush(nullptr);std::_Exit(code);}
@@ -57,9 +59,10 @@ public:int idle()override{
     const bool controlling=n&&n->getCurrState()
         &&(walk||n->getCurrState()->getID()==NAVISTATE_Gather)
         &&!movie&&!gameflow.mPauseAll&&!gameflow.mIsUIOverlayActive;
-    int living=0,formation=0;
+    int living=0,formation=0;float liveX=0,liveZ=0;
     if(pikiMgr){Iterator it(pikiMgr);CI_LOOP(it){auto* p=static_cast<Piki*>(*it);if(p->isAlive()){
-        ++living;if(p->mMode==PikiMode::FormationMode)++formation;}}}
+        ++living;liveX+=p->mSRT.t.x;liveZ+=p->mSRT.t.z;
+        if(p->mMode==PikiMode::FormationMode)++formation;}}}
     if(n&&n->getCurrState())p2_fixture_require_captain(GameStat::orimaDead,
         n->getCurrState()->getID()==NAVISTATE_Dead,n->mHealth,frames);
     int a=0,b=0,x=0;float sx=0,sy=0;
@@ -80,11 +83,22 @@ public:int idle()override{
                 baselineGeneration=pc_randomizer_active_campaign_generation();
                 if(baselineGeneration&&!pc_randomizer_checkpoint_info(&baselineGeneration,digest))finish(12);
                 baselineKnown=true;
+                gatherX=liveX/living;gatherZ=liveZ/living;
                 std::printf("CAVE_VISIBLE_BASELINE actual_surface_SAVE=%llu fresh_or_genuine_resume=1 live20=1\n",(unsigned long long)baselineGeneration);
             }
-            if(ticks<90)b=ticks%30<12?1:0;
-            else if(move(boundary.x,boundary.z)<45){stage=1;ticks=0;std::puts("CAVE_VISIBLE_INPUT near_hole ordinary_movement=1");}
+            if(!surfaceGathered){
+                if(!gatherArrived){
+                    if(move(gatherX,gatherZ)<20){gatherArrived=true;ticks=0;
+                        std::puts("CAVE_VISIBLE_INPUT approach_actual_squad ordinary_movement=1");}
+                }else{
+                    b=1;
+                    if(ticks>=120&&formation==20){surfaceGathered=true;ticks=0;
+                        std::puts("CAVE_VISIBLE_INPUT gather_surface20 ordinary_B=1");}
+                    else if(ticks>=360){std::puts("P2_CAVE_VISIBLE_RUNTIME FAIL gather_surface20=0");finish(15);}
+                }
+            }else if(move(boundary.x,boundary.z)<45){stage=1;ticks=0;std::puts("CAVE_VISIBLE_INPUT near_hole ordinary_movement=1");}
         }else if(stage==1){
+            if(ticks<60)b=1;
             if(ticks>=60&&ticks<64)a=1;
             if(ticks==60){++entryClicks;std::puts("CAVE_VISIBLE_INPUT enter_A=1 F6=0");}
             if(boundary.floor==1){stage=2;ticks=0;entered=true;}
