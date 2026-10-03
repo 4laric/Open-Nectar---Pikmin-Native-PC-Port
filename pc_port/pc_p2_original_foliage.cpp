@@ -17,7 +17,7 @@ bool sameRow(const CatalogRow& a,const CatalogRow& b){
 }
 
 }
-bool supported(unsigned source){return source==47||source==49||source==88||source==91;}
+bool supported(unsigned source){return source==46||source==47||source==49||source==51||source==52||source==80||source==88||source==90||source==91;}
 bool decode(const CatalogRow& row,std::string& e){
  if(!supported(row.enemy.source))return reject(e,"unsupported original foliage source");
  if(!validateOriginalRecord(row.enemy,e))return false;
@@ -83,8 +83,10 @@ bool Provider::release(Creature* c,unsigned token,std::string& e){
 }
 bool Provider::tick(Creature* c,float dt,bool /*visible*/,std::string& e){
  auto* h=lookup(c);if(!h||!std::isfinite(dt)||dt<0)return reject(e,"invalid foliage animation tick");
- // Plants::doAnimationCullingOff advances every active touched motion;
- // visibility gates model calculation, not the animation clock.
+ // The bounded native mechanic keeps an active motion advancing offscreen.
+ // Retail calls doAnimationCullingOff only while isCullingOff, which also
+ // depends on nearby Pikmin. This port has no proved equivalent of that gate;
+ // plain visibility must not be substituted for it or claimed as full fidelity.
  if(h->active){h->frame+=dt*30;
   if(h->frame>=mResources.at(h->row.enemy.source).duration){h->frame=float(mResources.at(h->row.enemy.source).duration-1);h->active=false;h->touched=false;}}
  e.clear();return true;
