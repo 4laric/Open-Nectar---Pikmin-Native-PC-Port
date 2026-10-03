@@ -173,7 +173,8 @@ bool pc_p2_authored_piki_generator(const void* raw){
         ||route.surface.stage!=flowCont.mCurrentStage->mStageID
         ||route.surface.index!=flowCont.mCurrentStage->mStageIndex)return false;
     auto* g=static_cast<const Generator*>(raw);
-    if(!g->mGenObject||g->mGenObject->mID!='piki'||(g->mCarryOverFlags&15)!=15)return false;
+    if(!g->mGenObject||g->mGenObject->mID!='piki'||(g->mCarryOverFlags&15)!=15
+        ||!g->mGenType||g->mGenType->mID!='aton'||g->mGenType->getMaxCount()!=1)return false;
     auto* piki=static_cast<GenObjectPiki*>(g->mGenObject);
     return piki->mSpawnColor()==Red&&piki->mSpawnState()==2;
 }
