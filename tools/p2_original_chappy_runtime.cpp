@@ -45,6 +45,7 @@ class ChappyApp:public PlugPikiApp {
   struct Heap{int prior;Heap():prior(gsys->setHeap(SYSHEAP_App)){}~Heap(){gsys->setHeap(prior);}} heap;
   if(!native)native=std::make_unique<chappy::Native>();
   if(!generator)generator=std::make_unique<Generator>();
+  require(!generator->mGenType,"genuine original null P1 GenType boundary");
   std::string e;checked(pc_p2_original_course_install({{generator.get(),state}},native->provider(),e),e);
   bool handled=false;checked(pc_p2_original_generator_init(generator.get(),handled,e),e);require(handled,"actual original generator handled");
   actor=nullptr;Iterator it(tekiMgr);CI_LOOP(it){auto* t=static_cast<BTeki*>(*it);unsigned source=0,found=0;
