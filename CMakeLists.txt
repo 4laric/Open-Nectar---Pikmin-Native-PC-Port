@@ -345,6 +345,7 @@ set(PC_PORT_SOURCES
     pc_port/pc_p2_purple_impact.cpp
     pc_port/pc_p2_purple_direct.cpp
     pc_port/pc_whistle_pluck.cpp
+    pc_port/pc_p2_equipment.cpp
     pc_port/pc_route_planner.cpp
     pc_port/pc_p2_purple_flight.cpp
     pc_port/pc_p2_purple_feedback.cpp
@@ -3324,6 +3325,15 @@ add_executable(p2_campaign_economy_test tools/test_p2_campaign_economy.cpp)
 target_include_directories(p2_campaign_economy_test PRIVATE pc_port)
 target_compile_options(p2_campaign_economy_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
 add_test(NAME p2_campaign_economy_test COMMAND p2_campaign_economy_test)
+
+add_executable(p2_equipment_policy_test tools/pc_p2_equipment_test.cpp)
+target_include_directories(p2_equipment_policy_test PRIVATE pc_port)
+target_compile_options(p2_equipment_policy_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_equipment_policy_test COMMAND p2_equipment_policy_test)
+add_executable(p2_equipment_projection_test tools/pc_p2_equipment_projection_test.cpp pc_port/pc_p2_equipment.cpp)
+target_include_directories(p2_equipment_projection_test BEFORE PRIVATE tools/equipment_stubs pc_port)
+target_compile_options(p2_equipment_projection_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_equipment_projection_test COMMAND p2_equipment_projection_test)
 
 # Ordinary White adult ingestion uses real native mouth callbacks and a genuine saved squad.
 pikmin_add_ci_fixture(white_adult_ingestion tools/p2_white_campaign_ingestion_runtime.cpp)
