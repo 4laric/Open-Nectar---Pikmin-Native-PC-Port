@@ -1,5 +1,5 @@
 #pragma once
-class BTeki; class Piki; class Navi; class PikiState; class NaviState; struct Vector3f;
+class BTeki; class Piki; class Navi; class PikiState; class NaviState; class Interaction; struct Vector3f;
 PikiState* pc_p2_hanachirashi_piki_state_create();
 NaviState* pc_p2_hanachirashi_navi_state_create();
 bool pc_p2_hanachirashi_wind_piki(BTeki*, Piki*, const Vector3f&);
@@ -28,3 +28,6 @@ bool pc_p2_source_navi_reaction_gate(Navi*,PcSourceNaviReactionGate&);
 // Called only by the canonical common source animator, never a P1 key broadcast.
 bool pc_p2_source_navi_reaction_animation_key(Navi*,const NaviState* expectedState,
     std::uint64_t expectedSelfGeneration,int sourceKey,std::string& error);
+// Source stimulus fence dispatches only this TU's exact private interaction.
+// Unknown types remain unhandled; recognized types retain all actNavi guards.
+bool pc_p2_source_navi_interaction_dispatch(const Interaction&,Navi*,bool& handled);
