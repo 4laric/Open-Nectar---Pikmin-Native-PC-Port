@@ -263,6 +263,7 @@ set(PC_PORT_SOURCES
     pc_port/pc_p2_sarai_capture_bridge.cpp
     pc_port/pc_p2_sarai_manager.cpp
     pc_port/pc_p2_generated_placement.cpp
+    pc_port/pc_p2_original_piki_init.cpp
     pc_port/pc_p2_campaign_goal_probe.cpp
     pc_port/pc_bbft.cpp
     pc_port/pc_p2_surface_topology.cpp
@@ -3235,3 +3236,9 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
 endif()
 
 endif()
+
+add_executable(pc_p2_original_piki_init_test tools/pc_p2_original_piki_init_test.cpp pc_port/pc_p2_original_piki_init.cpp)
+target_include_directories(pc_p2_original_piki_init_test PRIVATE "${PROJECT_SOURCE_DIR}/pc_port")
+find_package(Threads REQUIRED)
+target_link_libraries(pc_p2_original_piki_init_test PRIVATE Threads::Threads)
+add_test(NAME p2_original_piki_init COMMAND pc_p2_original_piki_init_test)
