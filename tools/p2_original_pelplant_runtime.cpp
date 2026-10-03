@@ -100,7 +100,7 @@ class PelplantApp final:public PlugPikiApp {
   std::printf("P2_ORIGINAL_PELPLANT_POSITION stage=death_end amount=%u actor=%.3f,%.3f,%.3f pellet=%.3f,%.3f,%.3f flags=%08x dynamics=%d state=%d\n",found->amount,actor->mSRT.t.x,actor->mSRT.t.y,actor->mSRT.t.z,p->mSRT.t.x,p->mSRT.t.y,p->mSRT.t.z,unsigned(p->mCreatureFlags),int(p->isRealDynamics()),p->getState());
   found->release=p->mSRT.t;found->expectedSeeds=p->mConfig->mPelletColor()==Red?p->mConfig->mMatchingOnyonSeeds():p->mConfig->mNonMatchingOnyonSeeds();
   found->dead=true;
-  std::printf("P2_ORIGINAL_PELPLANT_RELEASE source=0 uid=%u ordinal=%u token=%u amount=%u same_pointer=1 captured=0 direct_damage_control=1\n",source[found->row].enemy.uid,found->ordinal,found->token,found->amount);
+  std::printf("P2_ORIGINAL_PELPLANT_RELEASE source=0 uid=%u ordinal=%u token=%u amount=%u same_pointer=1 captured=0 direct_damage_control=%d natural_combat=%d\n",source[found->row].enemy.uid,found->ordinal,found->token,found->amount,int(!naturalCombat),int(naturalCombat));
   if(!native->provider().release(actor,found->token,error))return false;
   if(!catalog.retire(actor,found->handle)){error="original fixture instance retirement failed";return false;}return true;
  }
@@ -207,7 +207,12 @@ public:
     }
     if(h->health<naturalInitialHealth){if(!naturalHealthLoss)std::printf("P2_ORIGINAL_PELPLANT_NATURAL_HEALTH before=%.3f after=%.3f head_contact=%d direct_damage=0\n",naturalInitialHealth,h->health,int(naturalHeadStick));naturalHealthLoss=true;}
     if(h->state==State::Dead){require(naturalStick&&naturalHealthLoss,"real Piki contact and health loss precede natural death");phase=2;phaseStart=age;input();return result;}
-    require(age-phaseStart<2400,"bounded natural Piki combat");
+    auto* observedHead=i.actor->mCollInfo->getSphere('head');require(observedHead,"actual source head collider available");
+    if(age%60==0){int flying=0,formation=0,inSearch=0;float nearest=1e9f;Iterator roster(pikiMgr);CI_LOOP(roster){auto* p=static_cast<Piki*>(*roster);if(!p->isAlive())continue;
+     flying+=p->getState()==PIKISTATE_Flying;formation+=p->mMode==PikiMode::FormationMode;inSearch+=p->mSearchBuffer.getIndex(i.actor)>=0;nearest=std::min(nearest,distance(p->mSRT.t,observedHead->mCentre));}
+     std::printf("P2_ORIGINAL_PELPLANT_NATURAL_DIAG age=%d hp=%.3f state=%d actor=%.2f,%.2f,%.2f alive=%d visible=%d atari=%d head=%.2f,%.2f,%.2f radius=%.2f code=%s navi=%.2f,%.2f,%.2f head_distance=%.2f cursor_distance=%.2f followers=%d flying=%d formation=%d nearest_piki=%.2f piki_searches_with_actor=%d actor_grid=%d,%d,%d actor_ai_culled=%d navi_grid=%d,%d,%d\n",age,h->health,int(h->state),i.actor->mSRT.t.x,i.actor->mSRT.t.y,i.actor->mSRT.t.z,int(i.actor->isAlive()),int(i.actor->isVisible()),int(i.actor->isAtari()),observedHead->mCentre.x,observedHead->mCentre.y,observedHead->mCentre.z,observedHead->mRadius,observedHead->getCode().mStringID,n->mSRT.t.x,n->mSRT.t.y,n->mSRT.t.z,distance(n->mSRT.t,observedHead->mCentre),distance(n->mCursorWorldPos,observedHead->mCentre),n->getPlatePikis(),flying,formation,nearest,inSearch,int(i.actor->mGrid.mGridPositionX),int(i.actor->mGrid.mGridPositionY),int(i.actor->mGrid.mGridPositionZ),int(i.actor->mGrid.aiCulling()),int(n->mGrid.mGridPositionX),int(n->mGrid.mGridPositionY),int(n->mGrid.mGridPositionZ));std::fflush(nullptr);
+    }
+    require(age-phaseStart<600,"bounded natural Piki combat diagnostic");
     if(n->getPlatePikis()<10){Piki* nearest=nullptr;float closest=1e9f;Iterator roster(pikiMgr);CI_LOOP(roster){auto* p=static_cast<Piki*>(*roster);if(p->isAlive()&&p->mColor==Red&&p->getStickObject()!=i.actor&&distance(n->mSRT.t,p->mSRT.t)<closest){closest=distance(n->mSRT.t,p->mSRT.t);nearest=p;}}
      if(nearest&&closest>50)point(n,nearest->mSRT.t,true);else input(KeyConfig::_instance->mSetCursorKey.mBind);return result;}
     auto* head=i.actor->mCollInfo->getSphere('head');require(head&&head->isStickable(),"actual source head collider admits Piki attachment");
