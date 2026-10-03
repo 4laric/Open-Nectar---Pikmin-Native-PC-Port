@@ -1,10 +1,17 @@
 #include "pc_p2_hanachirashi_source_policy.h"
+#include "pc_p2_hanachirashi_receiver.h"
 #include <cassert>
 #include <fstream>
 #include <sstream>
 #include <iostream>
 using namespace p2hana;
 int main(int argc,char** argv){
+ // Native IDs are append-only: Flick22, Panic36, source Blow37. The receiver
+ // enters Blow after acceptance; it remains eligible on the second pass.
+ static_assert(pc_p2_source_flick_reaction_blocked(22,22,36));
+ static_assert(pc_p2_source_flick_reaction_blocked(36,22,36));
+ static_assert(!pc_p2_source_flick_reaction_blocked(37,22,36));
+ static_assert(!pc_p2_source_flick_reaction_blocked(0,22,36));
  assert(flyingNext(1800,0,0,0)==-1);assert(flyingNext(1800,1,0,1)==-1);
  assert(flyingNext(1800,1,0,1.001f)==FlyFlick);assert(flyingNext(1800,4,0,0)==Fall);
  assert(flyingNext(1800,1,1,0)==Fall);assert(flyingNext(0,1,1,0)==Dead);
