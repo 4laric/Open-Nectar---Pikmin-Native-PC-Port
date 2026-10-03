@@ -20,10 +20,11 @@
 #include <map>
 #include <cstdio>
 #include <cstdlib>
+#include <memory>
 
 namespace {
 using namespace p2originalpod;
-struct HeapScope {int previous;HeapScope():previous(gsys->setHeap(SYSHEAP_App)){}~HeapScope(){gsys->setHeap(previous);}};
+struct HeapScope {int previous;HeapScope(int heap=SYSHEAP_App):previous(gsys->setHeap(heap)){}~HeapScope(){gsys->setHeap(previous);}};
 struct ShapeScope {
  Shape* previous;immut char* base1;immut char* base2;
  ShapeScope(Shape* shape):previous(gsys->mCurrentShape),base1(gsys->mTextureBase1),base2(gsys->mTextureBase2){
@@ -56,24 +57,28 @@ public:
 class Pod final:public Suckable {
 public:
  Pod(CreatureProp* prop,Shape* shape,const Config& c,int route)
-  :Suckable(OBJTYPE_P2Pod,prop),bank(shape),waypoint(route){
-  ItemCreature::init(Vector3f(c.x,c.y,c.z));mSRT.r.set(0,c.yaw,0);mSRT.s.set(1,1,1);
-  mHealth=1;disableGravity();setCreatureFlag(CF_DisableAutoFaceDir);
+  :Suckable(OBJTYPE_P2Pod,prop),bank(shape),waypoint(route),collision(4,parts,ids){
   // Original pod/texts.szs coll.txt: four joint spheres flattened into the
   // exact model bind pose. Static presentation and collision share that pose.
   const float radius[]={31,22,10,13};
   const Vector3f offset[]={Vector3f(-.0012467411f,14.3038835f,24.6685720f),
    Vector3f(.000694147f,3.47091705f,22.7589036f),Vector3f(0,-2,10),
    Vector3f(-.0024818517f,21.1975895f,25.8838155f)};
-  ObjCollInfo* nodes[4];
-  for(unsigned i=0;i<4;++i){nodes[i]=new ObjCollInfo;nodes[i]->mId.setID('pod0'+i);
-   nodes[i]->mCode.setID('____');nodes[i]->mJointIndex=-1;nodes[i]->mRadius=radius[i];
-   nodes[i]->mCentrePosition=offset[i];if(i)nodes[0]->add(nodes[i]);}
-  mCollInfo=new CollInfo(4);mCollInfo->initInfoTree(nodes[0]);
-  for(unsigned i=0;i<4;++i){auto* p=mCollInfo->getSphere('pod0'+i);p->mIsUpdateActive=false;
-   p->mRadius=radius[i];p->mJointMatrix.makeIdentity();
-   p->mCentre.set(c.x+offset[i].x*std::cos(c.yaw)+offset[i].z*std::sin(c.yaw),
-    c.y+offset[i].y,c.z-offset[i].x*std::sin(c.yaw)+offset[i].z*std::cos(c.yaw));}
+  for(unsigned i=0;i<4;++i){auto* node=&nodes[i];node->mId.setID('pod0'+i);
+   node->mCode.setID('____');node->mJointIndex=-1;node->mRadius=radius[i];
+   node->mCentrePosition=offset[i];if(i)nodes[0].add(node);}
+  mCollInfo=&collision;mCollInfo->initInfoTree(&nodes[0]);
+  reset(c,route);
+ }
+ void reset(const Config& c,int route){
+  live=false;waypoint=route;
+  ItemCreature::init(Vector3f(c.x,c.y,c.z));mSRT.r.set(0,c.yaw,0);mSRT.s.set(1,1,1);
+  mHealth=1;disableGravity();setCreatureFlag(CF_DisableAutoFaceDir);
+  for(unsigned i=0;i<4;++i){const auto& offset=nodes[i].mCentrePosition;
+   auto* p=mCollInfo->getSphere('pod0'+i);p->mIsUpdateActive=false;
+   p->mRadius=nodes[i].mRadius;p->mJointMatrix.makeIdentity();
+   p->mCentre.set(c.x+offset.x*std::cos(c.yaw)+offset.z*std::sin(c.yaw),
+    c.y+offset.y,c.z-offset.x*std::sin(c.yaw)+offset.z*std::cos(c.yaw));}
   update();
  }
  Vector3f getGoalPos()override{return mSRT.t;}
@@ -104,7 +109,23 @@ public:
  void suckMe(Pellet*)override{}
  void finishSuck(Pellet*)override{}
  Shape* bank;int waypoint;bool live=false; // Prepared bodies are not observable gameplay.
+private:
+ ObjCollInfo nodes[4];CollPart parts[4];u32 ids[4]{};CollInfo collision;
 };
+// BaseShape has no nested resource destructor. One fixed authenticated model
+// and one receiver graph remain owned for the native System lifetime. Keeping
+// inactive storage also avoids dangling borrowed collision/search pointers
+// while the outer scene owner finishes retiring the actual party.
+struct ResourceBank {
+ enum Phase {Empty,Loading,Ready,Failed} phase=Empty;
+ const void* system=nullptr;
+ std::string modelName;
+ Shape* model=nullptr;
+ std::unique_ptr<CreatureProp> property;
+ std::unique_ptr<Pod> body;
+ std::unique_ptr<CreatureNode> link;
+};
+ResourceBank& resources(){static auto* bank=new ResourceBank;return *bank;}
 using Phase=p2originalpod::CargoPhase;
 using Cargo=p2originalpod::CargoBinding;
 Config config;ContextProvider contextProvider;Shape* shape=nullptr;Pod* pod=nullptr;
@@ -138,10 +159,11 @@ bool moving(Pellet* actor,const Cargo& c){
  return count!=actor->mParticleCount;
 }
 void clear(){
- if(pod)pod->live=false;if(node){node->del();node->mCreature=nullptr;}
+ if(pod){pod->live=false;pod->mSearchContext.exit();pod->mSearchBuffer.clear();}
+ if(node){node->del();node->mCreature=nullptr;}
  pod=nullptr;node=nullptr;manager=nullptr;shape=nullptr;cargo.clear();lostCargo.clear();contextProvider={};
  config={};prepared=committed=everSucked=false;completing=nullptr;
- // App-heap resources share the floor lifetime, never free borrowed textures.
+ // Detach the visit; the bounded resource bank still owns every allocation.
 }
 }
 
@@ -158,12 +180,35 @@ bool pc_p2_original_pod_preflight(const p2originalpod::Config& c,ContextProvider
   ||!selectedResource(c.input,c.sourceModel,originalModelSha256,provenance,e)
   ||!selectedResource(c.input,c.sourceCollision,originalCollisionSha256,provenance,e)
   ||!selectedResource(c.input,c.sourceTexts,originalTextsSha256,provenance,e))return false;
- HeapScope heap;ModelStream stream(modelBytes);Shape* loaded=new Shape;ShapeScope scope(loaded);
- loaded->mName=StdSystem::stringDup(c.model.c_str());loaded->read(stream);
- loaded->resolveTextureNames();loaded->initialise();loaded->initIni(true);loaded->optimize();
- if(!loaded||loaded->mJointCount!=1)return reject(e,"pod_converted_model_missing");
- for(int i=0;i<loaded->mTexAttrCount;++i)if(loaded->mTexAttrList[i].mTexture)loaded->mTexAttrList[i].mTexture->attach();
- config=c;contextProvider=std::move(provider);shape=loaded;prepared=true;e.clear();return true;
+ auto& bank=resources();
+ if(bank.phase!=ResourceBank::Empty&&bank.system!=gsys)return reject(e,"pod_resource_bank_system_changed");
+ if(bank.phase==ResourceBank::Loading||bank.phase==ResourceBank::Failed)return reject(e,"pod_resource_bank_initialization_failed");
+ if(bank.phase==ResourceBank::Empty){
+  bank.system=gsys;bank.phase=ResourceBank::Loading;bank.modelName="p2-original-pod-"+std::string(convertedModelSha256);
+  try {
+   HeapScope heap(SYSHEAP_Sys);ModelStream stream(modelBytes);bank.model=new Shape;ShapeScope scope(bank.model);
+   bank.model->mName=bank.modelName.c_str();bank.model->read(stream);
+   if(bank.model->mJointCount!=1||bank.model->mTextureNameList||bank.model->mFallbackTexAttrCount||bank.model->mAttrListMatCount){
+    bank.phase=ResourceBank::Failed;return reject(e,"pod_converted_model_requires_external_resources");
+   }
+   for(int i=0;i<bank.model->mTexAttrCount;++i)if(bank.model->mTexAttrList[i].mTextureIndex<0||bank.model->mTexAttrList[i].mTextureIndex>=bank.model->mTextureCount){
+    bank.phase=ResourceBank::Failed;return reject(e,"pod_converted_model_texture_index");
+   }
+   // The admitted model has embedded textures; manual source collision is
+   // owned by Pod. No ambient texture/platform/light/route imports are used.
+   bank.model->initialise();bank.model->optimize();
+   for(int i=0;i<bank.model->mTexAttrCount;++i)if(bank.model->mTexAttrList[i].mTexture)bank.model->mTexAttrList[i].mTexture->attach();
+   bank.phase=ResourceBank::Ready;
+   std::printf("P2_ORIGINAL_POD_MODEL_BANK initialized=1 lifetime=system selected_sha=%s\n",convertedModelSha256);
+  }catch(...){bank.phase=ResourceBank::Failed;throw;}
+ }
+ for(int i=0;i<bank.model->mTexAttrCount;++i){
+  const auto key=bank.modelName+":"+std::to_string(bank.model->mTexAttrList[i].mTextureIndex);
+  auto* info=gsys->findGfxObject(key.c_str(),'_tex');
+  if(!info||info->mOwnerHeap!=SYSHEAP_Sys||static_cast<TexobjInfo*>(info)->mTexture!=bank.model->mTexAttrList[i].mTexture)
+   return reject(e,"pod_retained_texture_registration_changed");
+ }
+ config=c;contextProvider=std::move(provider);shape=bank.model;prepared=true;e.clear();return true;
 }
 bool pc_p2_original_pod_birth(const Config& c,ContextProvider provider,std::string& e){
  if(!prepared&&!pc_p2_original_pod_preflight(c,std::move(provider),e))return false;
@@ -173,8 +218,16 @@ bool pc_p2_original_pod_birth(const Config& c,ContextProvider provider,std::stri
   ||c.sourceTexts!=config.sourceTexts
   ||c.births!=config.births||!current())return reject(e,"pod_prepared_identity");
  auto* wp=routeMgr->findNearestWayPoint('test',Vector3f(c.x,c.y,c.z),false);if(!wp)return reject(e,"pod_route_changed");
- HeapScope heap;auto* prop=new CreatureProp;prop->mCreatureProps.mFriction.mValue=.1f;
- pod=new Pod(prop,shape,c,wp->mIndex);node=new CreatureNode;node->mCreature=pod;
+ auto& bank=resources();HeapScope heap(SYSHEAP_Sys);
+ if(bank.body&&(bank.body->mStickListHead||bank.body->mStickTarget||bank.body->mRope||bank.body->mRopeListHead||bank.body->isGrabbed()||bank.body->isHolding()))
+  return reject(e,"pod_previous_body_consumers_remain");
+ if(!bank.property){bank.property=std::make_unique<CreatureProp>();bank.property->mCreatureProps.mFriction.mValue=.1f;}
+ if(!bank.body){bank.body=std::make_unique<Pod>(bank.property.get(),shape,c,wp->mIndex);
+  std::printf("P2_ORIGINAL_POD_BODY_BANK initialized=1 collision_parts=4 lifetime=system\n");}
+ else bank.body->reset(c,wp->mIndex);
+ pod=bank.body.get(); // Retain partial visit ownership if link allocation throws.
+ if(!bank.link)bank.link=std::make_unique<CreatureNode>();
+ node=bank.link.get();node->mCreature=pod;
  manager=itemMgr->mMeltingPotMgr;manager->mRootNode.add(node);
  std::printf("P2_ORIGINAL_POD_BORN cave=%s floor=%u type=3 bank=1 basegen=7 unit=%u slot=%u source=%s static_pose=1\n",
   c.floor.cave.c_str(),c.floor.floor,c.unit,c.slot,archive);e.clear();return true;
