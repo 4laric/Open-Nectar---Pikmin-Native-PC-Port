@@ -12,6 +12,7 @@
 #include "PlayerState.h"
 #include "gameflow.h"
 #include "sysNew.h"
+#include "timing/pc_render_phase.h"
 #include <cstdio>
 #include <string>
 namespace {
@@ -58,6 +59,7 @@ PikiState* pc_p2_spicy_state() { return new DopeState; }
 void pc_p2_sprays_bind(p2originalresource::ResourceState* state) { inventory = state; }
 bool pc_p2_spicy_active(const Piki* p) { return p && p->mP2Spicy.active(); }
 void pc_p2_spicy_tick(Piki* p) {
+    if (!pc_render_is_authoritative()) return;
     if (!p->isAlive()) { p->mP2Spicy.clear(); return; }
     if (p->mP2Spicy.tick(gsys->getFrameTime(),gameplay()))
         std::printf("P2_SPICY_END piki=%p maturity=%d\n",static_cast<void*>(p),p->mHappa);
