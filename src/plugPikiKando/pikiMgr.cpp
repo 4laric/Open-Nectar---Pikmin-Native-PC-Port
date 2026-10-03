@@ -46,6 +46,19 @@ DEFINE_PRINT("pikiMgr");
  */
 Creature* PikiMgr::birth()
 {
+    return birthWithFieldLimit(AICONST.mMaxPikisOnField(), meBirthMode);
+}
+#if defined(PIKI_PC_PORT)
+Creature* PikiMgr::birthOriginalP2()
+{
+    // Refuse a nested ordinary sprout/onion transaction. Never adjust its mode
+    // or the global AP/AICONST field limit on behalf of the source factory.
+    if (meBirthMode || containerExitMode) return nullptr;
+    return birthWithFieldLimit(100, false);
+}
+#endif
+Creature* PikiMgr::birthWithFieldLimit(int fieldLimit, bool allowSproutExtra)
+{
 	int totalPikis = GameStat::mapPikis;
 	if (itemMgr) {
 		totalPikis += itemMgr->getContainerExitCount();
@@ -55,11 +68,11 @@ Creature* PikiMgr::birth()
 		totalPikis--;
 	}
 
-	if (meBirthMode) {
-		if (totalPikis >= AICONST.mMaxPikisOnField() + 1) {
+	if (allowSproutExtra) {
+		if (totalPikis >= fieldLimit + 1) {
 			return nullptr;
 		}
-	} else if (totalPikis >= AICONST.mMaxPikisOnField()) {
+	} else if (totalPikis >= fieldLimit) {
 		return nullptr;
 	}
 
