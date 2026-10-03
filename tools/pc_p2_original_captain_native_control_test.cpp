@@ -44,11 +44,12 @@ struct Actions:actions::ActionSource {
  bool throwPiki(Navi&,actions::PikiHandle,actions::Vec3,std::string&)override{return false;}bool feedback(Navi&,actions::Feedback,actions::PikiHandle,std::string&)override{return false;}
 } actionsProvider;
 nc::AnimationFrame observation;int commitMode=0,commitCalls=0;bool controlFacts=false;
+std::function<void()> animationFrameCallback,startAnimatorCallback;
 struct Plan:nc::PreparedEffects {float resultingSceneAnimationTimer()const override{return 7;}bool commit(Navi&,std::string&)override;};
 struct Effects:nc::Effects {
  const LoadedScene& scene()const override{return ::scene;}bool facts(const Navi&,nc::ControlFacts& out,std::string&)const override{out={};return controlFacts;}
  bool prepare(const Navi&,const nc::Request&,std::unique_ptr<nc::PreparedEffects>& out,std::string&)const override{out.reset(new Plan);return true;}
- bool animationFrame(const Navi&,nc::AnimationFrame& out,std::string&)const override{out=observation;return true;}
+ bool animationFrame(const Navi&,nc::AnimationFrame& out,std::string&)const override{out=observation;if(animationFrameCallback)animationFrameCallback();return true;}
 } effects;
 SourceBank* bankProvider=nullptr;const nc::Effects* effectsProvider=&effects;
 bool Plan::commit(Navi& n,std::string& e){++commitCalls;if(commitMode==1){e="actual postRefresh facts unavailable";return false;}if(commitMode==2)nc::forget(&n);if(commitMode==3){nc::forget(&n);if(!nc::resetAfterBootstrap(&n,e))return false;}if(commitMode==4)a.current=&alternate;if(commitMode==5)effectsProvider=nullptr;if(commitMode==6)++scene.epoch;if(commitMode==7){std::string nested;nc::control(&n,nested);}if(commitMode==8&&!nc::resetCStickSceneAnimationTimer(&n,e))return false;return true;}
@@ -60,7 +61,7 @@ void check(bool value,const std::string& label){++checks;if(!value)throw std::ru
 void reset(Motion self,Motion bound,int boundLock){
  ++scene.epoch;a.current=&typed;b.current=&typed;typed.id=StateId::Punch;nc::forget(&a);
  channels[0]={self,29,++generation,false,false};channels[1]={bound,11,++generation,false,false};listeners[0]=Listener::SourceActor;listeners[1]=Listener::None;lock=boundLock;
- starts.clear();advances.clear();amounts.clear();sendEvents=false;listenerAvailable=true;effectsProvider=&effects;observation={};observation.deltaTime=1;observation.gameFrozen=false;
+ starts.clear();advances.clear();amounts.clear();sendEvents=false;listenerAvailable=true;effectsProvider=&effects;animationFrameCallback={};startAnimatorCallback={};observation={};observation.deltaTime=1;observation.gameFrozen=false;
  check(nc::resetAfterBootstrap(&a,error),error);
 }
 bool animate(){return nc::animateWalk(&a,[](int){return true;},error);}
@@ -83,7 +84,7 @@ bool SourceBank::stateAnimator(const Navi*,Animator channel,MotionState& out,std
 bool SourceBank::listenerAnimator(const Navi*,Animator channel,Listener& out,std::string& e)const{if(!listenerAvailable){e="test listener authority missing";return false;}out=listeners[unsigned(channel)];return true;}
 bool SourceBank::boundMotionLock(const Navi*,int& out,std::string&)const{out=lock;return true;}
 bool SourceBank::supports(Navi*,Motion,std::string&)const{return true;}
-bool SourceBank::startAnimator(Navi*,Animator channel,Motion target,bool preserve,Listener listener,std::string&){auto i=unsigned(channel);starts.push_back({channel,target,preserve,listener,channels[i].frame});channels[i]={target,preserve?channels[i].frame:0,++generation,false,false};listeners[i]=listener;return true;}
+bool SourceBank::startAnimator(Navi*,Animator channel,Motion target,bool preserve,Listener listener,std::string&){auto i=unsigned(channel);starts.push_back({channel,target,preserve,listener,channels[i].frame});channels[i]={target,preserve?channels[i].frame:0,++generation,false,false};listeners[i]=listener;if(startAnimatorCallback)startAnimatorCallback();return true;}
 bool SourceBank::advanceAnimator(Navi*,Animator channel,float amount,const std::function<bool(int)>& emit,std::string&){auto i=unsigned(channel);advances.push_back(channel);amounts.push_back(amount);channels[i].frame+=amount;if(sendEvents&&listeners[i]!=Listener::None){if(!emit(200))return true;emit(1000);}return true;}
 }}
 int main(int argc,char** argv){try{
@@ -157,6 +158,42 @@ int main(int argc,char** argv){try{
  reset(Motion::Wait,Motion::Wait,-1);commitMode=5;check(!nc::control(&a,error)&&nc::sceneAnimationTimer(&a)==0,"commit effects provider replacement prevents stale timer publication");
  reset(Motion::Wait,Motion::Wait,-1);commitMode=6;check(!nc::control(&a,error)&&!nc::sceneAnimationTimer(&a),"commit incarnation replacement prevents stale timer publication");
  reset(Motion::Wait,Motion::Wait,-1);commitMode=0;frameExpires=true;const auto previousCommits=commitCalls;check(!nc::control(&a,error)&&commitCalls==previousCommits&&nc::sceneAnimationTimer(&a)==0,"frame callback state expiry refuses before effects commit");frameExpires=false;
+ // Actual observation callback reconstructs the private ActorControl at the
+ // same address, scene epoch, native actor and FSM. Pointer equality alone
+ // cannot distinguish that replacement from the animation's original owner.
+ reset(Motion::Walk,Motion::Walk,-1);observation.displacement={40,0};
+ for(int i=0;i<5;++i)check(nc::selectWalkAnimation(&a,error),error);
+ check(nc::animationSpeed(&a)==50,"ABA fixture begins at an actual selected Run50 rate");
+ starts.clear();advances.clear();amounts.clear();animationFrameCallback=[&]{nc::forget(&a);check(nc::resetAfterBootstrap(&a,error),"observation callback reconstructs same native source slot");};
+ check(!animate(),"same-slot observation callback reconstruction refuses outer animation");
+ check(starts.empty()&&advances.empty()&&amounts.empty(),"observation ABA performs no stale starts or clock advances");
+ check(nc::animationSpeed(&a)==30,"observation ABA retains replacement constructor rate30");
+ animationFrameCallback={};check(nc::advanceAnimation(&a,[](Animator,Listener,int){return true;},error),error);
+ check(amounts.size()==2&&amounts[0]==30&&amounts[1]==30,"replacement clock consumes own30 rather than retired Run50");
+ // Moving transitions preserve Bound first, then unlocked Self. Retiring in
+ // Bound start must prevent the second transition and stale selected rate.
+ reset(Motion::Walk,Motion::Walk,-1);observation.gameFrozen=true;observation.displacement={40,0};
+ for(int i=0;i<4;++i)check(nc::selectWalkAnimation(&a,error),error);
+ check(starts.empty(),"moving ABA callback is armed before actual Run transition");
+ startAnimatorCallback=[&]{nc::forget(&a);check(nc::resetAfterBootstrap(&a,error),"Bound transition callback reconstructs same source slot");};
+ check(!nc::selectWalkAnimation(&a,error),"Bound transition ABA refuses stale source selector continuation");
+ check(starts.size()==1&&starts[0].channel==Animator::Bound&&starts[0].preserve,"Bound ABA cancels subsequent unlocked Self transition");
+ check(advances.empty()&&nc::animationSpeed(&a)==30,"Bound ABA publishes no old Run50 over replacement rate30");
+ startAnimatorCallback={};check(nc::advanceAnimation(&a,[](Animator,Listener,int){return true;},error),error);
+ check(nc::animationSpeed(&a)==30,"replacement remains independently usable after transition ABA");
+ // Resetting WAIT transitions use the opposite source order: Self then Bound.
+ reset(Motion::Wait,Motion::Wait,-1);observation.gameFrozen=true;observation.displacement={10,0};check(nc::selectWalkAnimation(&a,error),error);
+ startAnimatorCallback=[&]{nc::forget(&a);check(nc::resetAfterBootstrap(&a,error),"Self transition callback reconstructs same source slot");};
+ check(!nc::selectWalkAnimation(&a,error),"Self transition ABA refuses stale resetting continuation");
+ check(starts.size()==1&&starts[0].channel==Animator::Self&&!starts[0].preserve,"Self ABA prevents stale Bound reset");
+ check(nc::animationSpeed(&a)==30,"Self ABA cannot overwrite replacement rate");
+ // Callback nesting uses a one-shot fixture so the old unguarded production
+ // implementation reproduces a finite failure instead of recursive overflow.
+ reset(Motion::Damage,Motion::Damage,-1);bool nestedAttempted=false,nestedAccepted=true;
+ animationFrameCallback=[&]{if(!nestedAttempted){nestedAttempted=true;std::string nestedError;nestedAccepted=nc::advanceAnimation(&a,[](Animator,Listener,int){return true;},nestedError);}};
+ check(!animate()&&nestedAttempted&&!nestedAccepted,"nested actual animation refuses and invalidates outer preflight");
+ check(starts.empty()&&advances.empty()&&amounts.empty(),"nested observation animation causes no clock or motion effects");
+ check(nc::animationSpeed(&a)==30,"nested refusal leaves actual prior source rate unchanged");
  // No SourceBank::advance definition is linked. Using state-style advancement
  // would fail the standalone link rather than silently pass an empty counter.
  std::cout<<"P2_ORIGINAL_NATIVE_DUAL_ANIMATOR_ACTUAL_TU_CONTROLS_PASS checks="<<checks<<" gameplay=UNTESTED providers=DOUBLES\n";return 0;
