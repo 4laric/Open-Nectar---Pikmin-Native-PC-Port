@@ -3121,3 +3121,9 @@ pikmin_add_ci_fixture(ivory_budget tools/preview_p2_ivory_budget.cpp)
 if(TARGET pikmin_ci_fixture_ivory_budget)
     target_include_directories(pikmin_ci_fixture_ivory_budget PRIVATE ${P2_CHALLENGE_GUARD_INCLUDE_DIR})
 endif()
+
+# #1232: engine-free economy controls; actual carry/save acceptance is separate.
+add_executable(p2_campaign_economy_test tools/test_p2_campaign_economy.cpp)
+target_include_directories(p2_campaign_economy_test PRIVATE pc_port)
+target_compile_options(p2_campaign_economy_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_campaign_economy_test COMMAND p2_campaign_economy_test)
