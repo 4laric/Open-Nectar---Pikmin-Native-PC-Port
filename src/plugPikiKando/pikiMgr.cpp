@@ -17,6 +17,7 @@
 #if defined(PIKI_PC_PORT) && PIKI_PC_PORT
 #include "Piki.h"
 #include "pc_p2_bulbmin.h"
+#include "pc_p2_cave_campaign_party_engine.h"
 #include "pc_p2_captain.h"
 #include "pc_p2_captor_forget.h"
 #endif
@@ -67,6 +68,7 @@ Creature* PikiMgr::birth()
 	// occupant's dependent id/leader. Lane 12 (#130): the same slot must not
 	// inherit a stale captain-capture actor id. Both inert unless opted in.
 	if (born) {
+        pc_p2_cave_campaign_party_forget(static_cast<Piki*>(born));
 		pc_p2_bulbmin_forget(static_cast<Piki*>(born));
 		pc_p2_captain_forget_piki(static_cast<Piki*>(born));
 		pc_p2_captor_forget_piki(static_cast<Piki*>(born)); // #886 captor mouths

@@ -1,3 +1,4 @@
+#include "pc_p2_surface_save.h"
 #include "Generator.h"
 #include "Age.h"
 #include "DebugLog.h"
@@ -641,8 +642,18 @@ void Generator::init()
 		mGenObject->init(this);
 	}
 
+#if defined(PIKI_PC_PORT) && PIKI_PC_PORT
+    if (ramMode && pc_p2_surface_save_living_scene() && (mCarryOverFlags & GENCARRY_SaveCreature)) {
+        // The authenticated living card's creature record is the sole birth
+        // authority. loadCreature increments this count after restoring it;
+        // count-based births here would duplicate the exact saved actor.
+        mAliveCount = 0;
+        return;
+    }
+#endif
+
 	if (ramMode && (mCarryOverFlags & GENCARRY_SaveSpawnCount)) {
-		if (gameflow.mWorldClock.mCurrentDay >= mLatestSpawnDay + mRespawnInterval) {
+		if (!pc_p2_surface_save_living_scene() && gameflow.mWorldClock.mCurrentDay >= mLatestSpawnDay + mRespawnInterval) {
 			// we're due to respawn afresh.
 			PRINT("****** RESET DAY (curr=%d / save=%d interval=%d)\n", gameflow.mWorldClock.mCurrentDay, mLatestSpawnDay,
 			      mRespawnInterval);
