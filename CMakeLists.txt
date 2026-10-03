@@ -325,6 +325,7 @@ set(PC_PORT_SOURCES
     # without this TU.
     pc_port/pc_p2_challenge_stages_ext.cpp
     pc_port/pc_p2_preview.cpp
+    pc_port/pc_p2_campaign_treasure.cpp
     pc_port/pc_p2_captain.cpp
     pc_port/pc_p2_second_captain.cpp
     pc_port/pc_p2_economy.cpp
@@ -3316,3 +3317,7 @@ add_executable(p2_campaign_treasure_test tools/test_p2_campaign_treasure.cpp)
 target_include_directories(p2_campaign_treasure_test PRIVATE pc_port)
 target_compile_options(p2_campaign_treasure_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
 add_test(NAME p2_campaign_treasure_test COMMAND p2_campaign_treasure_test)
+add_executable(p2_campaign_treasure_config_test tools/test_p2_campaign_treasure_config.cpp)
+target_include_directories(p2_campaign_treasure_config_test PRIVATE pc_port)
+target_compile_options(p2_campaign_treasure_config_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_campaign_treasure_config_test COMMAND p2_campaign_treasure_config_test)
