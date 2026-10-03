@@ -512,7 +512,7 @@ bool pc_p2_catfish_original_birth(BTeki* actor,unsigned uid,unsigned ordinal,std
     state.home=actor->getPosition();state.heading=actor->getDirection();state.wanderTarget=state.home;
     state.rng=(uid*2654435761u+ordinal*2246822519u)|1u;
     if(!state.events.start(clips.at("wait1").sampled,"wait1")) {error="Catfish original initial clock failed";return false;}
-    actor->mHealth=LIFE;actors.emplace(static_cast<PelletView*>(actor),std::move(state));
+    actor->mHealth=actor->mMaxHealth=LIFE;actors.emplace(static_cast<PelletView*>(actor),std::move(state));
     error.clear();return true;
 }
 bool pc_p2_catfish_original_registry(BTeki* actor,unsigned token,std::string& error) {
