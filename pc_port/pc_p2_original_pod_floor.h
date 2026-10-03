@@ -6,7 +6,9 @@
 
 namespace p2originalpod {
 struct Resources {
- std::string model="courses/pikmin2retailpod/pod.mod",archive="pod/arc.szs",sourceModel="pod/pot.bmd",collision="pod/coll.txt";
+ SourceInput input; // The actual selected-session buffer getter, never an ambient reader.
+ std::string model=convertedModelRole,archive=archiveRole,sourceModel=originalModelRole;
+ std::string collision=originalCollisionRole,texts=originalTextsRole;
 };
 inline bool sameFloor(const p2retail::Snapshot& a,const p2retail::Snapshot& b){
  return a.cave==b.cave&&a.source==b.source&&a.sourceSha256==b.sourceSha256
@@ -26,14 +28,15 @@ inline bool floorConfig(const p2retail::FloorPlan& input,const p2retail::Snapsho
   ||floor.sourceSha256!=plan.sourceSha256||floor.catalogSha256!=plan.catalogSha256
   ||floor.maxFloor!=cave->maxFloor||!floor.story||!floor.inCave
   ||floor.scene.seed.empty()||floor.scene.visit.empty()||!floor.scene.serial
-  ||resources.model.empty()||resources.archive.empty()||resources.sourceModel.empty()||resources.collision.empty()){
+  ||!resources.input||resources.model.empty()||resources.archive.empty()||resources.sourceModel.empty()
+  ||resources.collision.empty()||resources.texts.empty()){
   error="pod_floor_plan_context";return false;
  }
- Config next;next.floor=floor;next.births=births;
+ Config next;next.floor=floor;next.births=births;next.input=resources.input;
  next.unit=plan.pod.unit;next.slot=plan.pod.slot;next.x=plan.pod.x;next.y=plan.pod.y;next.z=plan.pod.z;
  next.yaw=plan.pod.yawDegrees*0.01745329251994329577f;
  next.model=resources.model;next.sourceArchive=resources.archive;
- next.sourceModel=resources.sourceModel;next.sourceCollision=resources.collision;
+ next.sourceModel=resources.sourceModel;next.sourceCollision=resources.collision;next.sourceTexts=resources.texts;
  out=std::move(next);error.clear();return true;
 }
 
