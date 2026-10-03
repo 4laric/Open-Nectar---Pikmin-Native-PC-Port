@@ -160,3 +160,18 @@ of losing relationships. The reader is not yet linked to a live source77 scene.
 This reference preparation does not allocate bodies, apply stick/FSM state,
 implement the full physical provider, or publish a graph. SAVE admission stays
 closed until actual cross-family party/whole-context restoration is complete.
+
+The next native consumer exposes `Native::captureGenPikiAttachments`. It selects
+the actual owned source77 body and its own `st__` part, captures the producer's
+full child identity, and guards membership callbacks with the source77 body's
+current process incarnation. The helper still requires the caller's independent
+selected whole-graph `AttachmentAuthority`; a live Piki handle alone is not that
+authority. A callback that retires/reuses the source77 owner refuses before the
+reader continues. All outputs stay unchanged on refusal.
+
+This consumer is syntax-qualified with actual native headers. Its implementation
+requires `PIKMIN_ORIGINAL_SENTINEL_ATTACHMENTS` and the actual released Piki SDK
+owner plus attachment TUs in the native link; without that composition the API
+explicitly refuses. The old private component graph does not link test observers
+as a substitute. Whole-party membership/mapping has no released contract yet,
+so scene wiring, linked qualification and physical capture acceptance are open.

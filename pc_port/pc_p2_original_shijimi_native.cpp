@@ -1,6 +1,7 @@
 #include "pc_p2_original_shijimi_native.h"
 #include "pc_p2_original_shijimi_state.h"
 #include "pc_p2_original_shijimi_honey.h"
+#include "pc_p2_shijimi_attachment_native.h"
 #include "pc_p2_original_honey_native.h"
 #include "pc_p2_original_pelplant_geometry.h"
 #include "pc_p2_flyer_coll.h"
@@ -19,6 +20,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <set>
+#include <limits>
 extern Matrix4f invCamMat;
 namespace p2original { namespace shijimi {
 namespace {
@@ -34,6 +36,7 @@ struct Track {
  BTeki* actor=nullptr;Child child;ActorState state;
  Position home,goal,fallStart;float pitch=0,pitchAmp=0,fallDir=0,remainder=0;
  bool published=false,dying=false,endKey=false,pendingKill=false,cullable=false;
+ std::uint64_t nativeLifetime=0;
  std::unique_ptr<pelplant::Geometry> geometry;P2FlyerColl collision;
 };
 }
@@ -41,6 +44,7 @@ struct Native::Impl final:Engine,StateEngine {
  Scene& scene;ActorRegistry& registry;p2originalresource::honey::Manager& honeyManager;
  p2originalresource::Engine& rng;SourceBank bank;Shape* shape=nullptr;PlantGroups groups;
  std::map<Creature*,std::unique_ptr<Track>> tracks;bool ready=false;unsigned maxObjects=0;
+ std::uint64_t nextLifetime=1;
  Impl(Scene& s,ActorRegistry& r,p2originalresource::honey::Manager& h,p2originalresource::Engine& random):scene(s),registry(r),honeyManager(h),rng(random){}
  Track* member(const Identity& id){for(auto& entry:tracks)if(entry.second->child.identity==id)return entry.second.get();return nullptr;}
  Track& track(const ActorState& a){auto* t=member(a.identity);if(!t)refusal("source77 state lost actual native body");return *t;}
@@ -54,8 +58,9 @@ struct Native::Impl final:Engine,StateEngine {
   out=nullptr;if(!ready)return fail(e,"source77 raw birth lacks admitted native resources");Heap heap;
   if(member(child.identity))return fail(e,"source77 manager duplicate actual child");
   if(tracks.size()>=maxObjects){e.clear();return true;}
+  if(nextLifetime==std::numeric_limits<std::uint64_t>::max())return fail(e,"source77 native incarnation capacity exhausted");
   auto* actor=tekiMgr->newTeki(TEKI_Palm);if(!actor){e.clear();return true;}
-  auto t=std::make_unique<Track>();t->actor=actor;t->child=child;t->state.identity=child.identity;t->state.leader=child.identity.child==0;
+  auto t=std::make_unique<Track>();t->actor=actor;t->child=child;t->state.identity=child.identity;t->state.leader=child.identity.child==0;t->nativeLifetime=nextLifetime++;
   tracks.emplace(actor,std::move(t));auto& body=*tracks.at(actor);out=actor;
   // Source setParameters consumes the scale roll even with min=max=1.
   (void)rng.randFloat();
@@ -135,6 +140,33 @@ Native::~Native(){if(!m->tracks.empty())refusal("source77 manager destroyed befo
 bool Native::prepare(std::string& e){if(!m->tracks.empty())return fail(e,"source77 preparation with live bodies");m->ready=false;if(!gsys||!tekiMgr||!mapMgr||!tekiMgr->hasModel(TEKI_Palm))return fail(e,"source77 native manager/chassis/floor unavailable");Heap heap;auto* chassis=tekiMgr->getTekiShapeObject(TEKI_Palm);if(!chassis||!chassis->mShape||!chassis->mAnimMgr||!m->bank.prepare(m->shape,e)||!m->scene.prepare(e))return false;m->maxObjects=m->scene.cave()?25u:10u;m->ready=true;e.clear();return true;}
 bool Native::touched(Creature* plant,unsigned source,const Position& position,float height,std::string& e){unsigned actualSource=0,token=0;InstanceIdentity id;if(!m->registry.query(plant,actualSource,token,&id)||actualSource!=source||!token)return fail(e,"source77 touch lacks actual plant registry binding");Group result;if(!m->groups.touch(id,source,position,height,*m,result,e))return false;Identity leader{id,0,0};if(auto* t=m->member(leader))t->state.groupCount=int(result.sourceGroupCount);return true;}
 bool Native::owns(const Creature* actor)const{return m->tracks.count(const_cast<Creature*>(actor))!=0;}
+bool Native::captureGenPikiAttachments(Creature* actor,const AttachmentAuthority& authority,GenPikiStickerCapture& out,std::string& e)const{
+#if !defined(PIKMIN_ORIGINAL_SENTINEL_ATTACHMENTS)
+ (void)actor;(void)authority;(void)out;
+ return fail(e,"source77 attachment consumer is not linked with actual party SDK owner");
+#else
+ auto i=m->tracks.find(actor);if(i==m->tracks.end())return fail(e,"source77 attachment capture requires actual owned body");
+ const Identity identity=i->second->child.identity;const auto lifetime=i->second->nativeLifetime;auto* part=i->second->collision.part(1);
+ const auto current=[&](){auto found=m->tracks.find(actor);return found!=m->tracks.end()&&m->ready&&found->second->nativeLifetime==lifetime
+  &&found->second->child.identity==identity&&found->second->published&&found->second->child.initialized&&!found->second->child.retired
+  &&!found->second->dying&&!found->second->pendingKill&&found->second->collision.part(1)==part&&part;};
+ if(!current())return fail(e,"source77 attachment capture requires current initialized body/collider");
+ // The helper re-reads native topology after membership callbacks. Guard each
+ // callback so it cannot continue reading a retired/reused source77 body.
+ struct Guard final:AttachmentAuthority {
+  const AttachmentAuthority& source;const decltype(current)& live;
+  Guard(const AttachmentAuthority& s,const decltype(current)& l):source(s),live(l){}
+  bool member(const OriginalPikiOrigin& p,std::string& error)const override{
+   if(!live())return fail(error,"source77 owner changed before party authority callback");
+   if(!source.member(p,error))return false;
+   return live()||fail(error,"source77 owner changed during party authority callback");
+  }
+ } guarded(authority,current);
+ GenPikiStickerCapture next;next.owner=identity;
+ if(!captureGenPikiStickers(actor,part,guarded,next.stickers,e)||!current())return fail(e,"source77 attachment capture lost current owner/party relationship");
+ out=std::move(next);e.clear();return true;
+#endif
+}
 bool Native::tick(BTeki* actor,float seconds,std::string& e){
  auto i=m->tracks.find(actor);if(i==m->tracks.end())return false;if(!std::isfinite(seconds)||seconds<0||seconds>2)return fail(e,"source77 invalid native delta");Heap heap;auto& t=*i->second;
  // Source culling suppresses FSM, animation-clock and physics updates.
