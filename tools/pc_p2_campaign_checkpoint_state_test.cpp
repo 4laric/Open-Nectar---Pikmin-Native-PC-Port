@@ -17,6 +17,7 @@ int main(){
  p2original::GenerationDecision decision;check(frontier.activate(generator,1,true,decision,error));
  P2CampaignCheckpointState state;state.present=true;state.original=campaign;
  check(progress.encode(state.progress,error));check(progress.encodeContext(state.context,error));check(frontier.encode(state.frontier,error));
+ p2original::CalendarLedger calendar;check(calendar.initialize(campaign,progress.context().day,error));check(calendar.encode(state.calendar,error));
  auto c=catalog();p2treasurestate::State ledger;check(ledger.bind(source));check(ledger.credit(c,"source_200",50)==p2treasurestate::Credit::Added);state.treasure=p2treasurestate::encode(ledger.snapshot());
  check(state.matches(campaign,source,&c));const auto encoded=wire(state);
  P2CampaignCheckpointState resumed;std::istringstream input(encoded);check(resumed.read(input,&c,source));check(wire(resumed)==encoded);check(resumed.matches(campaign,source,&c));
@@ -27,7 +28,11 @@ int main(){
  bad=state;bad.treasure.back()='A';std::istringstream broken(wire(bad));check(!resumed.read(broken,&c,source));check(wire(resumed)==encoded);
  bad=state;bad.present=false;check(!bad.valid(&c,source));bad=state;bad.original.clear();check(!bad.valid(&c,source));
  auto originalOnly=state;originalOnly.treasure.clear();check(originalOnly.matches(campaign,""));check(!originalOnly.matches(campaign,source,&c));
- auto treasureOnly=state;treasureOnly.original.clear();treasureOnly.progress.clear();treasureOnly.context.clear();treasureOnly.frontier.clear();check(treasureOnly.matches("",source,&c));
+ auto treasureOnly=state;treasureOnly.original.clear();treasureOnly.progress.clear();treasureOnly.context.clear();treasureOnly.frontier.clear();treasureOnly.calendar.clear();check(treasureOnly.matches("",source,&c));
+ auto oldOriginal=encoded;oldOriginal.replace(oldOriginal.find("CAMPAIGN_STATE 2"),16,"CAMPAIGN_STATE 1");std::istringstream oldSource(oldOriginal);check(!resumed.read(oldSource,&c,source));check(wire(resumed)==encoded);
+ auto oldTreasure=wire(treasureOnly);oldTreasure.replace(oldTreasure.find("CAMPAIGN_STATE 2"),16,"CAMPAIGN_STATE 1");std::istringstream legacy(oldTreasure);P2CampaignCheckpointState legacyState;check(legacyState.read(legacy,&c,source));check(legacyState.matches("",source,&c));
+ auto wrongDay=state;p2original::CalendarLedger otherCalendar;check(otherCalendar.initialize(campaign,0,error));check(otherCalendar.encode(wrongDay.calendar,error));check(!wrongDay.valid(&c,source));
+ auto missingCalendar=state;missingCalendar.calendar.clear();check(!missingCalendar.valid(&c,source));
  P2CampaignCheckpointState absent;check(absent.matches("",""));check(wire(absent).empty());check(!absent.matches(campaign,""));absent.present=true;check(!absent.valid());
  std::string bytes="preserved";check(!P2CampaignCheckpointState::unhex("AA",1,1,bytes));check(bytes=="preserved");check(!P2CampaignCheckpointState::unhex(std::string(211,'a'),105,105,bytes));check(bytes=="preserved");
  // Adoption can roll scalar receipts back; incarnation identity stays monotonic.

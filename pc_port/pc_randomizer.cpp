@@ -9,9 +9,14 @@
 #include "pc_p2_cave_campaign_cache.h"
 #include "pc_p2_campaign_checkpoint_state.h"
 #include "pc_p2_campaign_treasure_config.h"
+#include "pc_p2_original_session.h"
 #if !defined(PC_RANDOMIZER_NO_ORIGINAL_ENGINE)
 #include "pc_p2_original_group_engine.h"
-#include "pc_p2_original_session.h"
+#endif
+#if defined(PIKMIN_P2_ORIGINAL_COURSE_PROVIDER)
+// Strong actual course-provider APIs; component probes cannot adopt a ledger.
+bool pc_p2_original_calendar_encode(std::string&,std::string&);
+bool pc_p2_original_calendar_decode(const std::string&,unsigned,const std::string&,std::string&);
 #endif
 #include "pc_randomizer.h"
 #include "pc_randomizer_catalog.h"
@@ -311,6 +316,9 @@ void loadCampaignCheckpoint() {
     }
 #if !defined(PC_RANDOMIZER_NO_ORIGINAL_ENGINE)
     if(!originalCampaign.empty()&&!pc_p2_original_incarnation_decode(originalCampaign,s.originalState.frontier,originalError))fail("original incarnation adoption requires unloaded scene");
+#endif
+#if defined(PIKMIN_P2_ORIGINAL_COURSE_PROVIDER)
+    if(!originalCampaign.empty()&&!pc_p2_original_calendar_decode(originalCampaign,progress.context().day,s.originalState.calendar,originalError))fail("original calendar adoption requires unloaded source scene");
 #endif
     p2original::originalProgress()=std::move(progress);
     p2treasurestate::state=std::move(treasure);
@@ -2514,6 +2522,9 @@ bool write_campaign_checkpoint(const void* source, unsigned long long generation
     if(!originalCampaign.empty()&&(!p2original::originalProgress().encode(originalState.progress,originalError)
         ||!p2original::originalProgress().encodeContext(originalState.context,originalError)
         ||!pc_p2_original_incarnation_encode(originalState.frontier,originalError))){if(fatal)fail("original campaign save state invalid");return false;}
+#if defined(PIKMIN_P2_ORIGINAL_COURSE_PROVIDER)
+    if(!originalCampaign.empty()&&!pc_p2_original_calendar_encode(originalState.calendar,originalError)){if(fatal)fail("original calendar save state invalid");return false;}
+#endif
 #endif
     if(!treasureSource.empty()){
         p2treasure::Catalog catalog;p2treasureplacements::Config config;
