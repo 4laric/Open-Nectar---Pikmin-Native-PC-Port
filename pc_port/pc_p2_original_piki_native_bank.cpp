@@ -36,7 +36,7 @@ private:bool entered=false;
 };
 bool sameStage(const Owner& value) noexcept {
     const auto* context=pc_p2_retail_scene_prepared();
-    return context&&context==value.context&&gsys&&gsys==value.system
+    return context&&context==value.context&&context->ownsCurrentThread()&&gsys&&gsys==value.system
         &&context->stage()&&context->map()&&context->nativeSerial()==value.serial
         &&context->selectionRevision()==value.revision;
 }
@@ -100,7 +100,7 @@ NativeBodyBank& NativeBodyBank::instance(){
 bool NativeBodyBank::prepare(const p2retail::SceneContext& context,std::string& error){
  Operation operation;if(!operation.valid())return fail(error,"reentrant source Body bank load");
  if(m->owner)return fail(error,"source Body bank retains prior graph");
- if(pc_p2_retail_scene_prepared()!=&context||!context.stage()||!context.map()
+ if(pc_p2_retail_scene_prepared()!=&context||!context.ownsCurrentThread()||!context.stage()||!context.map()
     ||!context.nativeSerial()||!context.selectionRevision()||!gsys||gsys->mIsRendering
     ||context.phase()!=p2retail::ScenePhase::Prepared)
   return fail(error,"source Body bank requires the actual prepared Stage boundary");
