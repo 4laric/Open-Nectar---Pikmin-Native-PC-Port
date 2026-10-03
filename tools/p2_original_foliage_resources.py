@@ -23,7 +23,7 @@ def main():
     parser.add_argument('--source', type=Path, required=True)
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--pose-limit', type=int, default=12)
-    parser.add_argument('--sources', type=int, nargs='+', choices=(46, 47, 49, 51, 52, 80, 88, 90, 91),
+    parser.add_argument('--sources', type=int, nargs='+', choices=(46, 47, 49, 51, 52, 80, 88, 90, 91, 92),
                         default=[91, 88],
                         help='Literal source IDs to convert; default preserves original 91/88 bank')
     args = parser.parse_args()
@@ -55,7 +55,9 @@ def main():
                51: ('Wakame_s', 'wakame_s', 'normal', 2),
                52: ('Wakame_l', 'wakame_l', 'normal', 2),
                80: ('Tukushi', 'tukushi', 'normal', 2),
-               90: ('Zenmai', 'zenmai', 'normal', 0)}
+               90: ('Zenmai', 'zenmai', 'normal', 0),
+               92: ('KareOoinu_l', 'karaooinu_l', 'normal', 0)}
+
     species = [(source_id, *catalog[source_id]) for source_id in args.sources]
     index = disc_files(args.iso)
     hashes = {}
@@ -89,6 +91,8 @@ def main():
         'animation_end_clock': 'SysShape::Animator::animate (sysShape.cpp133-187) clamps manual timer at duration-1 and emits END. Registered LOOP_END keys govern repetition; these plant registrations have none. Raw BCA loop attributes49/51/52/80=2 are retained without repeating the actor touch clock.',
         'fully_culled_clock_caveat': 'EnemyBase lifecycle State::animation (enemyBase.cpp86-112) only calls doAnimationCullingOff when isCullingOff (1850-1857): not Cullable, visible, Pikmin in cell, or Dropping. Converter output does not implement or qualify that lifecycle gate.',
         'resources': 'Literal original species model.szs/anim.szs and parameter directory; no aliases.',
+        'brown_large_clip': 'Source92 registry karaOoinu_l.bca matches archive karaooinu_l.bca by casefold; the literal kara spelling is preserved.',
+        'fully_culled_clock_caveat': 'EnemyBase lifecycle State::animation (enemyBase.cpp86-112) only calls doAnimationCullingOff when isCullingOff (1850-1857): not Cullable, visible, Pikmin in cell, or Dropping. Converter output does not implement or qualify that lifecycle gate.',
         'rewards': 'Plants::Mgr plain EnemyParmsBase; invulnerable nonliving actor, carcass disabled.',
         'foxtail_lod': 'Cylinder origin offset -50*sin(face), -50*cos(face); height fp11; radius fp10.'}
     with args.iso.open('rb') as disc:

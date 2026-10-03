@@ -62,8 +62,8 @@ struct Native::Impl final:Engine {
     if(banks.count(source))return reject(e,"duplicate original foliage bank");
     auto b=std::make_unique<Bank>();b->source=source;
     if(!(row>>b->name>>b->stem>>b->count>>b->duration)||b->count<2||b->count>64||b->duration<2||b->duration>10000)return reject(e,"invalid original foliage species row");
-    const std::string name=source==46?"Tanpopo":source==47?"Clover":source==49?"Ooinu_s":source==51?"Wakame_s":source==52?"Wakame_l":source==80?"Tukushi":source==90?"Zenmai":source==91?"KareOoinu_s":"Nekojarashi";
-    const std::string stem=source==46?"flora_Tanpopo_tanpopo":source==47?"flora_Clover_clover":source==49?"flora_Ooinu_s_ooinu_s":source==51?"flora_Wakame_s_wakame_s":source==52?"flora_Wakame_l_wakame_l":source==80?"flora_Tukushi_tukushi":source==90?"flora_Zenmai_zenmai":source==91?"flora_KareOoinu_s_kareooinu_s":"flora_Nekojarashi_nekojarashi";
+    const std::string name=source==46?"Tanpopo":source==47?"Clover":source==49?"Ooinu_s":source==51?"Wakame_s":source==52?"Wakame_l":source==80?"Tukushi":source==90?"Zenmai":source==92?"KareOoinu_l":source==91?"KareOoinu_s":"Nekojarashi";
+    const std::string stem=source==46?"flora_Tanpopo_tanpopo":source==47?"flora_Clover_clover":source==49?"flora_Ooinu_s_ooinu_s":source==51?"flora_Wakame_s_wakame_s":source==52?"flora_Wakame_l_wakame_l":source==80?"flora_Tukushi_tukushi":source==90?"flora_Zenmai_zenmai":source==92?"flora_KareOoinu_l_karaooinu_l":source==91?"flora_KareOoinu_s_kareooinu_s":"flora_Nekojarashi_nekojarashi";
     if(b->name!=name||b->stem!=stem)return reject(e,"original foliage model identity mismatch");
     banks.emplace(source,std::move(b));
    }else {
@@ -98,11 +98,12 @@ struct Native::Impl final:Engine {
   std::size_t total=0;
   for(auto& entry:banks){auto& b=*entry.second;
    if(!b.params||!b.layer||b.frames.empty()||b.spheres.empty())return reject(e,"incomplete foliage physical resource bank");
+   if(b.source==92&&(b.territory!=45.f||b.lod!=80.f))return reject(e,"source92 literal sphere LOD mismatch");
    // All admitted plain species have literal anonymous joint-zero trees. Do
    // not admit a truncated Dandelion bank that silently loses its leaf spheres.
    const std::size_t expected=b.source==46?5:2;
-   const float rootRadius=b.source==46?50.f:b.source==51?10.f:(b.source==47||b.source==49||b.source==91)?30.f:20.f;
-   const float childRadius=b.source==46?25.f:b.source==51?5.f:(b.source==47||b.source==49||b.source==91)?20.f:10.f;
+   const float rootRadius=(b.source==46||b.source==92)?50.f:b.source==51?10.f:(b.source==47||b.source==49||b.source==91)?30.f:20.f;
+   const float childRadius=b.source==92?35.f:b.source==46?25.f:b.source==51?5.f:(b.source==47||b.source==49||b.source==91)?20.f:10.f;
    if(b.spheres.size()!=expected)return reject(e,"foliage literal collider count mismatch");
    for(std::size_t i=0;i<expected;++i){
     const auto& sphere=b.spheres[i];
@@ -170,8 +171,10 @@ struct Native::Impl final:Engine {
   actor->mTekiAnimator->init(&actor->mTekiShape->mAnimContext,actor->mTekiShape->mAnimMgr,tekiMgr->mMotionTable);
   actor->mDeadState=actor->mStateID=actor->mDamageCount=0;actor->_3A4=0;actor->mStoredDamage=0;actor->mPellet=nullptr;
   for(int i=0;i<4;++i)actor->mParticleGenerators[i]=nullptr;
+  // Surface owns a native generator; genuine cave births deliberately carry
+  // no P1 generator. Cave registry associations remain with the floor caller.
   actor->mGenerator=h.generator;actor->mSRT.t.set(p.x,p.y,p.z);actor->mFaceDirection=facing;actor->mSRT.r.set(0,facing,0);actor->mSRT.s.set(1,1,1);
-  actor->mHealth=actor->mMaxHealth=b.health;actor->mVelocity.set(0,0,0);actor->mCollisionRadius=b.spheres[0].radius;actor->mSize=b.spheres[0].radius;
+  actor->mHealth=actor->mMaxHealth=b.health;actor->mVelocity.set(0,0,0);actor->mVolatileVelocity.set(0,0,0);actor->mTargetVelocity.set(0,0,0);actor->mCollisionRadius=b.spheres[0].radius;actor->mSize=b.spheres[0].radius;
   actor->setCreatureFlag(CF_DisableMovement);actor->setCreatureFlag(CF_IsAiDisabled);
   for(unsigned option:{BTeki::TEKI_OPTION_VISIBLE,BTeki::TEKI_OPTION_ATARI,BTeki::TEKI_OPTION_ALIVE,BTeki::TEKI_OPTION_SHAPE_VISIBLE,BTeki::TEKI_OPTION_INVINCIBLE})actor->setTekiOption(option);
   actor->clearTekiOption(BTeki::TEKI_OPTION_ORGANIC);actor->clearTekiOption(BTeki::TEKI_OPTION_GRAVITATABLE);
@@ -213,7 +216,7 @@ bool Native::tick(BTeki* actor,float dt,std::string& e){
  auto* h=m->provider.lookup(actor);if(!h)return false;auto& t=*m->tracks.at(actor);
  m->simulationVisibility(actor,t);
  if(!m->provider.tick(actor,dt,t.visible,e))return false;
- actor->mVelocity.set(0,0,0);actor->mStoredDamage=0;actor->mHealth=t.bank->health;
+ actor->mVelocity.set(0,0,0);actor->mVolatileVelocity.set(0,0,0);actor->mTargetVelocity.set(0,0,0);actor->mStoredDamage=0;actor->mHealth=t.bank->health;
  actor->mSRT.t.set(h->position.x,h->position.y,h->position.z);actor->mGrid.updateGrid(actor->mSRT.t);actor->mGrid.updateAIGrid(actor->mSRT.t,false);
  t.presented.advance(dt);m->follow(actor,t);return true;
 }

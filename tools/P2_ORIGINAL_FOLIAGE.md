@@ -74,6 +74,37 @@ visible fixture do not prove fully culled animation scheduling: retail
 `isCullingOff()` depends on nearby Pikmin, and an equivalent native predicate
 remains unproved. Plain frustum visibility must not be substituted for it.
 
+Brown large Figwort92 is tracked separately in
+[issue1279](https://github.com/4laric/pikmin-randomizer/issues/1279). Select
+`--batch brown-large` in the Linux supervisor, or
+`P2_ORIGINAL_FOLIAGE_BATCH=brown-large` for direct fixture launch. The batch
+pairs92/91 at the same surveyed east tutorial points. Existing tutorial91/88
+and forest47/49 selections are preserved; no generic foliage batch dependency
+is required.
+
+The92 representative is literal `last/plantsgen.txt#0`, UID1390080862, index0,
+facing0, count1, reserved0, respawn0 and zero offset. Its source object version
+`0004` retains the constructor's birthType0 default, as decoded explicitly by
+startup; generator version is still `????` with an empty tail. All remaining
+common/drop fields stay literal. Its genuine model is `KareOoinu_l`, with stem
+`flora_KareOoinu_l_karaooinu_l`; the source animation's `karao` spelling is kept.
+
+The fixture checks92's static root50/child35 collision radii and both centres
+through touch animation, normal60-frame motion ending at59, equivalent native
+leaf-touch sound, invulnerability, no rewards, owned cleanup and disc cache
+reentry. PASS markers identify `sources=92,91`. It still launches tutorial with
+20Red Pikmin and a centered960x540 window under bounded60-second supervision.
+These representative controls do not qualify original Last positions, full
+Last-course admission, cave placement or RAM saved-creature loading.
+
+Cave integration uses `foliage::Native::provider()` through the existing
+`GroupProvider` preflight/reserve/birth/bind/release interface. A caller outside
+the global `GroupCourse` must keep each actual Generator alive until its actors
+release, then explicitly retire its original registry associations. Global
+native retirement scans the global course; it does not retire a separate cave
+owner's bindings. Keep source92 identity and resource admission independent of
+the allocation chassis and test the actual cave path before gameplay sign-off.
+
 Human test (set `P2_ORIGINAL_FOLIAGE_HUMAN=1`; fixture remains open10minutes):
 
 1. Confirm centered960x540 gameplay and20Red Pikmin. Walk toward each of the two
@@ -98,3 +129,34 @@ Known presentation differences:12sampled poses with vertex interpolation,
 accepted diffuse TEV approximation, equivalent native touch-leaf cue, and a
 conservative sphere enclosing Foxtail's retail LOD cylinder. Source radius,
 orientation, root, post-shadow drawing and static collision remain literal.
+
+Typed cave leaf control (issue1279 extended scope):
+`P2_ORIGINAL_FOLIAGE_BATCH=cave`, or supervisor `--batch cave --mode diagnostic`,
+selects the genuine tutorial_1 floor2 TekiInfo rows91/92/47 and their exact
+minimum counts6/4/2. Other floor families are skipped. The descriptor source SHA,
+floor, vector row, source key and UID authenticate each association. `CAVE` is
+an association transport marker on `SourceForm::CaveTekiInfo`; it is not a retail
+GenEnemy version. Surface decode refuses these rows. No fabricated GenEnemy,
+`????` surface envelope, floor layout or full FloorSession is used.
+
+All twelve native leaves are born on the initialized tutorial arena's surveyed
+east approach. This bounded placement is disclosed in each run; it establishes
+neither cave layout nor cave entry/save/resume acceptance. The direct collision
+control exercises real engine dispatch, normal animation completion, source92
+END59, invulnerability, unchanged static colliders and no rewards. Leaf actors
+and Hosts carry null native generators. Caller-owned real association generators
+retain sentinel alive/day bookkeeping through release, then the caller explicitly
+retires every actor and generator registry association. Thirty normal updates
+allow deferred native pool recycling before a new epoch/activation births all
+twelve again; the final release repeats this cleanup gate. No cave walking or
+human mode is qualified by this diagnostic. `--mode refusal` verifies absent
+banks before any native leaf allocation. The supervisor remains bounded60seconds
+and requires a cave-specific marker and successful process exit; an interrupted
+run cannot qualify.
+
+Pure controls retain all existing surface cases and add authenticated cave
+provenance/envelope tampering, missing resources, exact whole reservation12,
+foreign-family skip, surface/cave route separation, ordinal and retired-token
+reuse refusal while unused slots remain, caller registry identity/retirement,
+null native generator ownership and allocation/cleanup failure recovery. These
+are controlled tests and do not claim native gameplay.
