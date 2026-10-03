@@ -40,6 +40,7 @@
 #include "GameCoreSection.h"
 #if defined(PIKI_PC_PORT)
 #include "pc_p2_original_piki_origin.h"
+#include "pc_p2_bud_conversion_origin.h"
 #include "pc_p2_original_piki_recruit.h"
 #endif
 #include "pc_bbft.h"
@@ -1036,6 +1037,7 @@ void GameCoreSection::exitStage()
     pc_p2_surface_save_scene_exit();
     pc_p2_original_piki_recruit_unbind();
     pc_p2_original_piki_origin_scene_exit();
+    p2budorigin::registry().sceneExit();
 #endif
 #if defined(PIKI_PC_PORT)
 	pc_demon_drop_scene_exit();

@@ -21,6 +21,8 @@
 #include "pc_p2_captain.h"
 #include "pc_p2_captor_forget.h"
 #include "pc_p2_original_piki_origin.h"
+#include "pc_p2_bud_conversion_origin.h"
+#include "pc_p2_species.h"
 #endif
 
 PikiMgr* pikiMgr;
@@ -56,6 +58,18 @@ Creature* PikiMgr::birthOriginalP2()
     if (meBirthMode || containerExitMode) return nullptr;
     return birthWithFieldLimit(100, false);
 }
+Creature* PikiMgr::birthOriginalP2Sprout(PikiHeadItem* head)
+{
+    if(meBirthMode||containerExitMode||!head||!itemMgr||!itemMgr->getPikiHeadMgr())return nullptr;
+    bool live=false;Iterator heads(itemMgr->getPikiHeadMgr());CI_LOOP(heads){if(*heads==head){live=true;break;}}
+    if(!live||!head->canPullout())return nullptr;
+    p2budorigin::Record origin;std::string error;
+    if(!p2budorigin::registry().head(head,origin)||origin.species!=unsigned(pc_p2_species(head))
+        ||!p2budorigin::registry().admitted(origin,error))return nullptr;
+    // The authenticated source head will be replaced, not duplicated. Reserve
+    // one transient slot exactly as native sprout birth, without global modes.
+    return birthWithFieldLimit(100,true);
+}
 #endif
 Creature* PikiMgr::birthWithFieldLimit(int fieldLimit, bool allowSproutExtra)
 {
@@ -87,6 +101,7 @@ Creature* PikiMgr::birthWithFieldLimit(int fieldLimit, bool allowSproutExtra)
 		pc_p2_captain_forget_piki(static_cast<Piki*>(born));
 		pc_p2_captor_forget_piki(static_cast<Piki*>(born)); // #886 captor mouths
 		pc_p2_original_piki_origin_forget(static_cast<Piki*>(born));
+        p2budorigin::registry().forget(static_cast<Piki*>(born));
 	}
 #endif
 	return born;

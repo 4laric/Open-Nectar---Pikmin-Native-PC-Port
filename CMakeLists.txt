@@ -385,6 +385,8 @@ set(PC_PORT_SOURCES
     pc_port/pc_p2_surface_save.cpp
     pc_port/pc_p2_original_piki_physical.cpp
     pc_port/pc_p2_original_piki_recruit.cpp
+    pc_port/pc_p2_bud_conversion_origin.cpp
+    pc_port/pc_p2_source_body.cpp
     pc_port/pc_p2_original_piki_native.cpp
     pc_port/pc_p2_original_bulblax_snagret.cpp
     pc_port/pc_p2_original_bulblax_snagret_native.cpp
@@ -3468,10 +3470,17 @@ pikmin_add_ci_fixture(original_piki_physical tools/p2_original_piki_physical_run
 pikmin_add_ci_fixture(original_piki_native tools/p2_original_piki_native_runtime.cpp)
 
 add_executable(pc_p2_original_piki_recruit_test tools/pc_p2_original_piki_recruit_test.cpp
-    pc_port/pc_p2_original_piki_recruit.cpp pc_port/pc_p2_original_piki_origin.cpp pc_port/pc_p2_original_progress.cpp)
+    pc_port/pc_p2_original_piki_recruit.cpp pc_port/pc_p2_original_piki_origin.cpp pc_port/pc_p2_original_progress.cpp
+    pc_port/pc_p2_source_body.cpp pc_port/pc_p2_bud_conversion_origin.cpp)
 target_include_directories(pc_p2_original_piki_recruit_test PRIVATE pc_port)
 target_link_libraries(pc_p2_original_piki_recruit_test PRIVATE Threads::Threads)
 add_test(NAME p2_original_piki_recruit COMMAND pc_p2_original_piki_recruit_test)
+add_executable(pc_p2_bud_conversion_origin_test tools/pc_p2_bud_conversion_origin_test.cpp
+    pc_port/pc_p2_bud_conversion_origin.cpp pc_port/pc_p2_source_body.cpp
+    pc_port/pc_p2_original_piki_origin.cpp pc_port/pc_p2_original_piki_recruit.cpp pc_port/pc_p2_original_progress.cpp)
+target_include_directories(pc_p2_bud_conversion_origin_test PRIVATE pc_port)
+target_link_libraries(pc_p2_bud_conversion_origin_test PRIVATE Threads::Threads)
+add_test(NAME p2_bud_conversion_origin COMMAND pc_p2_bud_conversion_origin_test)
 
 # Original decorative source91/88 (#1251); no asset payloads are committed.
 pikmin_add_ci_fixture(original_foliage tools/p2_original_foliage_runtime.cpp)

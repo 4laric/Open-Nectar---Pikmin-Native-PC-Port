@@ -2,6 +2,7 @@
 #include "pc_p2_captive_navi_policy.h"
 #include "pc_p2_original_piki_init.h"
 #include "pc_p2_original_piki_origin.h"
+#include "pc_p2_bud_conversion_origin.h"
 #endif
 #include "pc_p2_purple.h"
 #include "pc_p2_purple_flight.h"
@@ -2550,6 +2551,7 @@ void Piki::init(Navi* navi)
 	pc_p2_purple_flight_cancel(this);
 	pc_p2_purple_impact_forget(this);
     pc_p2_cave_campaign_party_forget(this);
+    p2budorigin::registry().forget(this);
 	mHorizontalRotation = 0.0f;
 	mVerticalRotation   = 0.0f;
 	mSRT.s.set(1.0f, 1.0f, 1.0f);
