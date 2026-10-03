@@ -35,15 +35,15 @@ const char* names[]={"waitl","damage","run","appear1","hide1"};
 const int durations[]={100,35,10,30,30};
 struct Sample {Matrix4f water,body;};
 struct Motion {int duration=0;std::vector<int> frames;std::vector<Key> keys;std::vector<Shape*> shapes;std::vector<Sample> joints;};
-struct Track {unsigned motion=3;Clock clock;Matrix4f water,body;Vector3f target{0,0,0};p2originalresource::SourceIdentity cargo;bool cargoKnown=false,eggBorn=false;CreatureProp* borrowedProps=nullptr;std::unique_ptr<CreatureProp> props;P2FlyerColl collision;std::unique_ptr<pelplant::Geometry> geometry;p2pose::Track presented;};
+struct Track {unsigned motion=3;Clock clock;Matrix4f water,body;Vector3f target{0,0,0};p2originalresource::SourceIdentity cargo;bool cargoKnown=false,eggBorn=false,restoreApplied=false,checkpointAllocated=false;std::array<bool,4> sourceFlags{{false,true,true,true}};CreatureProp* borrowedProps=nullptr;std::unique_ptr<CreatureProp> props;P2FlyerColl collision;std::unique_ptr<pelplant::Geometry> geometry;p2pose::Track presented;};
 }
 struct Native::Impl final:Engine {
- Services& services;Provider provider;Resources resource;bool loaded=false;
+ Services& services;ActorRegistry& registry;Provider provider;Resources resource;bool loaded=false;
  p2posefamily::Bank bank{"ORIGINAL_WISP"};p2poseload::Shared shared;
  std::array<Motion,5> motions;std::array<p2flyer::Sphere,2> spheres;
  std::map<Creature*,std::unique_ptr<Track>> tracks;
  float acceleration=0,mapRadius=0,mapOffset=0,wallReflection=0;
- explicit Impl(Services& s):services(s),provider(*this){}
+ Impl(Services& s,ActorRegistry& actors):services(s),registry(actors),provider(*this){}
  bool load(std::string& e){
   if(loaded)return true;
   if(!gsys||!tekiMgr||!pikiMgr||!mapMgr)return fail(e,"Qurione actual managers unavailable");
@@ -84,7 +84,7 @@ struct Native::Impl final:Engine {
  }
  bool allocate(Host& h,const Position& p,float dir,std::string& e)override{
   Heap heap;auto* actor=tekiMgr->newTeki(TEKI_Palm);if(!actor){e.clear();return true;}h.creature=actor;
-  auto track=std::make_unique<Track>();track->water.makeIdentity();track->body.makeIdentity();tracks.emplace(actor,std::move(track));
+  auto track=std::make_unique<Track>();track->borrowedProps=actor->mProps;track->water.makeIdentity();track->body.makeIdentity();tracks.emplace(actor,std::move(track));
   actor->clearTekiOptions();actor->clearCreaturePointers();actor->mTekiShape=tekiMgr->getTekiShapeObject(TEKI_Palm);
   actor->mTekiAnimator->init(&actor->mTekiShape->mAnimContext,actor->mTekiShape->mAnimMgr,tekiMgr->mMotionTable);
   actor->mDeadState=0;actor->mStateID=0;actor->mStoredDamage=0;actor->mDamageCount=0;actor->_3A4=0;actor->mPellet=nullptr;
@@ -103,8 +103,10 @@ struct Native::Impl final:Engine {
  bool attachEgg(Host& h,Creature*& egg,std::string& e)override{auto& t=*tracks.at(h.creature);if(!services.capturedEpochIdentity(h.row,h.generator,h.ordinal,t.cargo,e))return false;if(t.cargo.fingerprint.empty()||t.cargo.uid!=h.row.enemy.uid||t.cargo.ordinal!=h.ordinal||!t.cargo.activation)return fail(e,"Qurione authoritative cargo identity invalid");t.cargoKnown=true;auto p=h.creature->getPosition();if(!services.attachEgg(h.creature,&t.water,{p.x,p.y,p.z},h.facing,egg,e))return false;t.eggBorn=egg!=nullptr;return true;}
  bool setPosition(Host& h,const Position& p,std::string&)override{h.creature->mSRT.t.set(p.x,p.y,p.z);follow(h);return true;}
  bool facing(Host& h,float dir,std::string&)override{h.creature->mFaceDirection=dir;h.creature->mSRT.r.set(0,dir,0);follow(h);return true;}
- bool flags(Host& h,bool atari,bool hidden,bool,bool alive,std::string&)override{
+ bool flags(Host& h,bool atari,bool hidden,bool cullable,bool alive,std::string&)override{
   auto* a=static_cast<BTeki*>(h.creature);
+  tracks.at(a)->sourceFlags={{atari,hidden,cullable,alive}};
+  if(h.staged){atari=false;hidden=true;alive=false;a->clearTekiOption(BTeki::TEKI_OPTION_VISIBLE);}else a->setTekiOption(BTeki::TEKI_OPTION_VISIBLE);
   if(atari)a->setTekiOption(BTeki::TEKI_OPTION_ATARI);else a->clearTekiOption(BTeki::TEKI_OPTION_ATARI);
   if(hidden)a->clearTekiOption(BTeki::TEKI_OPTION_SHAPE_VISIBLE);else a->setTekiOption(BTeki::TEKI_OPTION_SHAPE_VISIBLE);
   if(alive)a->setTekiOption(BTeki::TEKI_OPTION_ALIVE);else a->clearTekiOption(BTeki::TEKI_OPTION_ALIVE);
@@ -154,8 +156,9 @@ struct Native::Impl final:Engine {
   for(int k=0;k<2;++k){auto* part=t.collision.part(k);if(!part)continue;auto off=spheres[k].offset;const auto& world=t.body;part->mCentre.set(world.mMtx[0][3]+world.mMtx[0][0]*off.x+world.mMtx[0][1]*off.y+world.mMtx[0][2]*off.z,world.mMtx[1][3]+world.mMtx[1][0]*off.x+world.mMtx[1][1]*off.y+world.mMtx[1][2]*off.z,world.mMtx[2][3]+world.mMtx[2][0]*off.x+world.mMtx[2][1]*off.y+world.mMtx[2][2]*off.z);part->mRadius=spheres[k].radius*std::max({std::fabs(h.creature->mSRT.s.x),std::fabs(h.creature->mSRT.s.y),std::fabs(h.creature->mSRT.s.z)});Matrix4f cameraRotation,jointRotation=world;cameraRotation.makeIdentity();for(int r=0;r<3;++r){jointRotation.mMtx[r][3]=0;for(int c=0;c<3;++c)cameraRotation.mMtx[r][c]=invCamMat.mMtx[c][r];}cameraRotation.multiplyTo(jointRotation,part->mJointMatrix);}
  }
 };
-Native::Native(Services& s):m(std::make_unique<Impl>(s)){instances().insert(this);}
-Native::~Native(){if(!m->tracks.empty()){std::fputs("Qurione destroyed with live source actors\n",stderr);std::abort();}instances().erase(this);}
+Native::Native(Services& s):Native(s,originalActors()){}
+Native::Native(Services& s,ActorRegistry& actors):m(std::make_unique<Impl>(s,actors)){instances().insert(this);}
+Native::~Native(){abortStaged();if(!m->tracks.empty()){std::fputs("Qurione destroyed with live source actors\n",stderr);std::abort();}instances().erase(this);}
 Provider& Native::provider(){return m->provider;}
 bool Native::owns(const Creature* a)const{return m->tracks.count(const_cast<Creature*>(a))!=0;}
 bool Native::capturedSourceIdentity(Creature* parent,p2originalresource::SourceIdentity& out,std::string& e)const{
@@ -172,16 +175,16 @@ bool Native::capturedIdentity(Creature* parent,std::string& out,std::string& e)c
 bool Native::snapshot(BTeki* a,Snapshot& out,std::string& e)const{
  auto* h=m->provider.lookup(a);if(!h||!owns(a))return fail(e,"Qurione checkpoint outside actual source host");
  const auto& t=*m->tracks.at(a);unsigned source=0,token=0;Snapshot s;
- if(!originalActors().query(a,source,token,&s.identity)||source!=16||token!=h->token||!t.cargoKnown)return fail(e,"Qurione checkpoint missing full original association");
+ if(!m->registry.query(a,source,token,&s.identity)||source!=16||token!=h->token||!t.cargoKnown)return fail(e,"Qurione checkpoint missing full original association");
  s.state=h->state;s.spawnIndex=h->spawnIndex;s.motion=t.motion;s.spawn[0]=h->spawn[0];s.spawn[1]=h->spawn[1];s.position={a->mSRT.t.x,a->mSRT.t.y,a->mSRT.t.z};s.velocity={a->mVelocity.x,a->mVelocity.y,a->mVelocity.z};s.targetVelocity={t.target.x,t.target.y,t.target.z};s.facing=h->facing;s.pitch=h->pitch;s.timer=h->timer;s.scale=h->scale;s.dead=h->dead;s.released=h->released;s.eggBorn=t.eggBorn;s.cargo=t.cargo;s.clock=t.clock;
- s.atari=a->getTekiOption(BTeki::TEKI_OPTION_ATARI);s.hidden=!a->getTekiOption(BTeki::TEKI_OPTION_SHAPE_VISIBLE);s.alive=a->getTekiOption(BTeki::TEKI_OPTION_ALIVE);s.cullable=h->state!=State::Drop&&h->state!=State::Dead;
+ s.atari=h->staged?t.sourceFlags[0]:a->getTekiOption(BTeki::TEKI_OPTION_ATARI);s.hidden=h->staged?t.sourceFlags[1]:!a->getTekiOption(BTeki::TEKI_OPTION_SHAPE_VISIBLE);s.cullable=t.sourceFlags[2];s.alive=h->staged?t.sourceFlags[3]:a->getTekiOption(BTeki::TEKI_OPTION_ALIVE);
  if(!preflightRestore(a,s,e))return false;
  out=std::move(s);e.clear();return true;
 }
 bool Native::preflightRestore(BTeki* a,const Snapshot& s,std::string& e)const{
  auto* h=m->provider.lookup(a);if(!h||!owns(a)||s.motion>=m->motions.size())return fail(e,"Qurione checkpoint restore outside actual source host");
  unsigned source=0,token=0;InstanceIdentity identity;
- if(!originalActors().query(a,source,token,&identity)||source!=16||token!=h->token||!(identity==s.identity))return fail(e,"Qurione checkpoint full source incarnation mismatch");
+ if(!m->registry.query(a,source,token,&identity)||source!=16||token!=h->token||!(identity==s.identity))return fail(e,"Qurione checkpoint full source incarnation mismatch");
  const auto& clip=m->motions[s.motion];if(!validateSnapshot(s,h->initial,clip.duration,clip.keys,e))return false;
  for(unsigned i=0;i<2;++i)if(s.spawn[i].x!=h->spawn[i].x||s.spawn[i].y!=h->spawn[i].y||s.spawn[i].z!=h->spawn[i].z)return fail(e,"Qurione checkpoint changed immutable source endpoints");
  if(s.state==State::Dead&&(s.targetVelocity.x!=0||s.targetVelocity.z!=0||s.targetVelocity.y!=h->parameters.deathRate))return fail(e,"Qurione checkpoint source death target invalid");
@@ -199,11 +202,61 @@ bool Native::applyRestore(BTeki* a,const Snapshot& s,std::string& e){
  if(!m->services.checkpointEgg(s.cargo,s.eggBorn,s.released,a,&t.water,cargo,e))return false;
  h->state=s.state;h->spawnIndex=s.spawnIndex;h->spawn[0]=s.spawn[0];h->spawn[1]=s.spawn[1];h->facing=s.facing;h->pitch=s.pitch;h->timer=s.timer;h->scale=s.scale;h->dead=s.dead;h->released=s.released;h->egg=s.released?nullptr:cargo;
  a->mSRT.t.set(s.position.x,s.position.y,s.position.z);a->mFaceDirection=s.facing;a->mSRT.r.set(0,s.facing,0);a->mVelocity.set(s.velocity.x,s.velocity.y,s.velocity.z);t.target.set(s.targetVelocity.x,s.targetVelocity.y,s.targetVelocity.z);t.motion=s.motion;t.clock=s.clock;
- m->flags(*h,s.atari,s.hidden,s.cullable,s.alive,e);a->mStoredDamage=0;a->mHealth=h->parameters.health;m->follow(*h);e.clear();return true;
+ m->flags(*h,s.atari,s.hidden,s.cullable,s.alive,e);a->mStoredDamage=0;a->mHealth=h->parameters.health;m->follow(*h);t.restoreApplied=true;e.clear();return true;
+}
+bool Native::preflightAllocateNoInit(const CatalogRow& row,Generator* generator,const Snapshot& s,std::string& e)const{
+ const auto* actual=m->registry.find(row.enemy.uid);
+ if(!m->loaded||!actual||s.identity.catalog!=m->registry.fingerprint()||s.identity.catalog.size()!=64||s.identity.catalog.find_first_not_of("0123456789abcdef")!=std::string::npos||s.identity.generator!=row.enemy.uid||!s.identity.epoch||!s.identity.activation||s.motion>=m->motions.size())return fail(e,"Qurione no-init allocation source context unavailable");
+ if(!m->provider.canAdoptRestored(row,generator,s.identity.ordinal,e)||!m->provider.canAdoptRestored(*actual,generator,s.identity.ordinal,e))return false;
+ Initial initial;if(!decode(row,initial,e))return false;const auto& clip=m->motions[s.motion];
+ if(!validateSnapshot(s,initial,clip.duration,clip.keys,e))return false;
+ if(s.state==State::Dead&&(s.targetVelocity.x!=0||s.targetVelocity.z!=0||s.targetVelocity.y!=m->resource.parameters.deathRate))return fail(e,"Qurione no-init source death target invalid");
+ p2originalresource::SourceIdentity context;if(!m->services.capturedEpochIdentity(row,generator,s.identity.ordinal,context,e))return false;
+ if(context.fingerprint!=s.cargo.fingerprint||context.uid!=s.cargo.uid||context.ordinal!=s.cargo.ordinal||context.epoch!=s.cargo.epoch||context.activation!=s.cargo.activation)return fail(e,"Qurione no-init generator incarnation differs from saved graph");
+ e.clear();return true;
+}
+bool Native::allocateNoInit(const CatalogRow& row,Generator* generator,const Snapshot& s,Creature*& out,std::string& e){
+ if(!preflightAllocateNoInit(row,generator,s,e))return false;
+ Heap heap;
+ auto h=std::make_unique<Host>();h->row=row;h->generator=generator;h->ordinal=s.identity.ordinal;h->parameters=m->resource.parameters;h->staged=true;decode(row,h->initial,e);
+ h->state=s.state;h->spawnIndex=s.spawnIndex;h->spawn[0]=s.spawn[0];h->spawn[1]=s.spawn[1];h->facing=s.facing;h->pitch=s.pitch;h->timer=s.timer;h->scale=s.scale;h->released=s.released;h->dead=s.dead;
+ auto discard=[&](){if(!h||!h->creature)return;auto* a=h->creature;a->mGenerator=nullptr;m->forgetTrack(a);a->kill(false);h->creature=nullptr;};
+ try{
+  if(!m->allocate(*h,s.position,s.facing,e)){discard();return false;}
+  if(!h->creature)return fail(e,"Qurione saved live root cannot restore as null source birth");
+  auto* a=static_cast<BTeki*>(h->creature);auto& t=*m->tracks.at(a);t.checkpointAllocated=true;t.motion=s.motion;t.clock=s.clock;t.cargo=s.cargo;t.cargoKnown=true;t.eggBorn=s.eggBorn;t.target.set(s.targetVelocity.x,s.targetVelocity.y,s.targetVelocity.z);a->mVelocity.set(s.velocity.x,s.velocity.y,s.velocity.z);a->mLastPosition.set(a->mSRT.t);
+  m->flags(*h,s.atari,s.hidden,s.cullable,s.alive,e);m->follow(*h);
+  if(!m->provider.adoptRestoredHost(h,e)){discard();return false;}
+  out=a;e.clear();return true;
+ }catch(...){discard();throw;}
+}
+bool Native::capturedWater(Creature* a,const p2originalresource::SourceIdentity& source,void*& out,std::string& e)const{
+ auto* h=m->provider.lookup(a);auto it=m->tracks.find(a);unsigned family=0,token=0;InstanceIdentity identity;
+ if(!h||it==m->tracks.end()||!m->registry.query(a,family,token,&identity)||family!=16||token!=h->token||source.fingerprint!=identity.catalog||source.uid!=identity.generator||source.ordinal!=identity.ordinal||source.epoch!=identity.epoch||source.activation!=identity.activation)return fail(e,"Qurione water matrix requires exact bound parent incarnation");
+ const auto& cargo=it->second->cargo;if(!it->second->cargoKnown||cargo.fingerprint!=source.fingerprint||cargo.uid!=source.uid||cargo.ordinal!=source.ordinal||cargo.epoch!=source.epoch||cargo.activation!=source.activation)return fail(e,"Qurione water matrix cargo incarnation changed");
+ for(int r=0;r<3;++r)for(int c=0;c<4;++c)if(!std::isfinite(it->second->water.mMtx[r][c]))return fail(e,"Qurione actual authored water matrix nonfinite");
+ out=&it->second->water;e.clear();return true;
+}
+bool Native::preflightPublish(std::string& e)const{
+ for(const auto& entry:m->tracks){auto* h=m->provider.lookup(entry.first);if(!h)return fail(e,"Qurione publication lost policy host");if(!h->staged)continue;
+  if(!entry.second->restoreApplied)return fail(e,"Qurione staged graph has not completed family apply");
+  Snapshot checked;if(!snapshot(static_cast<BTeki*>(entry.first),checked,e))return false;
+ }
+ e.clear();return true;
+}
+void Native::publishStaged()noexcept{
+ for(const auto& entry:m->tracks){auto* h=m->provider.lookup(entry.first);if(h&&h->staged&&!entry.second->restoreApplied){std::fputs("Qurione publication before validated graph apply\n",stderr);std::abort();}}
+ m->provider.publishRestoredHosts();
+ for(const auto& entry:m->tracks){if(!entry.second->checkpointAllocated)continue;auto* h=m->provider.lookup(entry.first);const auto flags=entry.second->sourceFlags;std::string ignored;m->flags(*h,flags[0],flags[1],flags[2],flags[3],ignored);entry.second->checkpointAllocated=false;}
+}
+void Native::abortStaged()noexcept{
+ for(;;){Creature* found=nullptr;for(const auto& entry:m->tracks){auto* h=m->provider.lookup(entry.first);if(h&&h->staged){found=entry.first;break;}}if(!found)break;
+  auto* h=m->provider.lookup(found);h->egg=nullptr;found->mGenerator=nullptr;m->forgetTrack(found);m->provider.retiredNative(found);found->kill(false);
+ }
 }
 void Native::forget(BTeki* a){auto* h=m->provider.lookup(a);if(h&&h->egg){std::string e;if(!m->services.destroyCapturedEgg(h->egg,e)){std::fprintf(stderr,"Qurione attached Egg cleanup refusal: %s\n",e.c_str());std::abort();}h->egg=nullptr;}m->forgetTrack(a);m->provider.retiredNative(a);}
 bool Native::flyingCollision(BTeki* a,Creature* collider,std::string& e){bool piki=collider&&collider->mObjType==OBJTYPE_Piki&&static_cast<Piki*>(collider)->getState()==PIKISTATE_Flying;return m->provider.flyingCollision(a,piki,e);}
-bool Native::tick(BTeki* a,float dt,std::string& e){Heap heap;auto* h=m->provider.lookup(a);if(!h||!std::isfinite(dt)||dt<0)return fail(e,"Qurione tick outside original source or invalid delta");auto& t=*m->tracks.at(a);a->setInsideView();a->mGrid.updateGrid(a->mSRT.t);a->mGrid.updateAIGrid(a->mSRT.t,false);
+bool Native::tick(BTeki* a,float dt,std::string& e){Heap heap;auto* h=m->provider.lookup(a);if(!h||!std::isfinite(dt)||dt<0)return fail(e,"Qurione tick outside original source or invalid delta");if(h->staged){e.clear();return true;}auto& t=*m->tracks.at(a);a->setInsideView();a->mGrid.updateGrid(a->mSRT.t);a->mGrid.updateAIGrid(a->mSRT.t,false);
  auto& motion=m->motions[t.motion];int key=t.clock.advance(dt,motion.duration,motion.keys);m->follow(*h);Event event=key==2?Event::ReleaseEgg:key==1000?Event::End:Event::None;
  if(!m->provider.tick(a,dt,event,e))return false;
  // kill may synchronously release Host and Track. Never use prior references.
@@ -216,7 +269,7 @@ bool Native::tick(BTeki* a,float dt,std::string& e){Heap heap;auto* h=m->provide
  if(!owns(a))return true;
  h=m->provider.lookup(a);a->mStoredDamage=0;a->mHealth=h->parameters.health;auto& live=*m->tracks.at(a);live.presented.advance(dt);m->follow(*h);return true;
 }
-bool Native::draw(BTeki* a,Graphics& gfx,const Matrix4f& view,std::string& e){auto* h=m->provider.lookup(a);if(!h||!gfx.mCamera)return fail(e,"Qurione draw outside actual host");if(h->state==State::Stay)return true;auto& t=*m->tracks.at(a);const auto* clip=m->bank.clip(names[t.motion]);float frame=std::min(t.clock.frame,float(m->motions[t.motion].duration-1));if(!clip||!p2pose::present(t.presented,names[t.motion],clip->poses.size(),[clip](std::size_t i)->const p2pose::Pose&{return clip->poses[i];},clip->frames,frame,p2motion::tunables(),clip->seamContinuous).ok)return fail(e,"Qurione authored pose presentation failed");gfx.useMatrix(Matrix4f::ident,0);auto& shape=t.geometry->shape;shape.updateAnim(gfx,view,nullptr,a);shape.drawshape(gfx,*gfx.mCamera,nullptr);return true;}
+bool Native::draw(BTeki* a,Graphics& gfx,const Matrix4f& view,std::string& e){auto* h=m->provider.lookup(a);if(!h)return fail(e,"Qurione draw outside actual host");if(h->staged||h->state==State::Stay)return true;if(!gfx.mCamera)return fail(e,"Qurione actual draw camera unavailable");auto& t=*m->tracks.at(a);const auto* clip=m->bank.clip(names[t.motion]);float frame=std::min(t.clock.frame,float(m->motions[t.motion].duration-1));if(!clip||!p2pose::present(t.presented,names[t.motion],clip->poses.size(),[clip](std::size_t i)->const p2pose::Pose&{return clip->poses[i];},clip->frames,frame,p2motion::tunables(),clip->seamContinuous).ok)return fail(e,"Qurione authored pose presentation failed");gfx.useMatrix(Matrix4f::ident,0);auto& shape=t.geometry->shape;shape.updateAnim(gfx,view,nullptr,a);shape.drawshape(gfx,*gfx.mCamera,nullptr);return true;}
 } }
 namespace {
 p2original::wisp::Native* owner(const BTeki* a){for(auto* n:p2original::wisp::instances())if(n->owns(a))return n;return nullptr;}

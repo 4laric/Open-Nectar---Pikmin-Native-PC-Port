@@ -55,7 +55,8 @@ Additional targets are `p2_original_resource_state_policy`,
 `p2_original_honey_policy`, `p2_original_honey_bank_policy`, and
 `p2_original_contents_save_policy`, `p2_original_egg_save_policy`,
 `p2_original_wisp_save_policy`, and `p2_original_honey_save_policy`
-(17 policy targets total).
+and `p2_original_honey_identity_policy`, `p2_original_restore_stage_policy`,
+`p2_original_wisp_cold_policy` (20 policy targets total).
 Record exact source pin, output directory,
 executable SHA256, build log and a no-work Ninja dry run.
 
@@ -105,9 +106,9 @@ physical graph transaction; these producers never write their own save files.
 Private staging tools validate retail receipts before writing destination files:
 stage_original_egg_resources.py, stage_original_wisp_resources.py and
 stage_original_honey_resources.py. Retail assets remain private under output.
-Policy/native object logs for the latest codec producer are
-original-resources-1252-policy-build08.log, policy-ctest08.log and
-native-object08.log. The initial harness link failed for a missing test helper
+Policy/native object logs for the cold-staging producer are
+original-resources-1252-policy-build13.log, policy-ctest13.log and
+native-object14.log. The initial harness link failed for a missing test helper
 dependency (build07); the log is preserved and the dependency is corrected.
 The runner's earlier 77bf5bd build linked and passed six policies, but its worker
 exited failed after looking for the executable at the wrong path. Metadata-only
@@ -136,3 +137,35 @@ guard observes every actual idle tick; never refill health or disable extinction
    carried actors, listeners or gas emission. Preserve every failing run log.
 
 Building or policy PASS cannot substitute for any of these gameplay steps.
+
+## Cold staging and dependent reward identities
+
+Gas/Egg and Wisp native constructors accept the checkpoint owner's provisional
+ActorRegistry. Their no-init allocation, apply and publication preflight APIs
+retain source clocks and physical state without source birth/init RNG, floor
+queries, capture events or generator-death callbacks. Staged native bodies hide
+visibility, collision and update until publication. Honey uses beginStaged,
+preflightPublishStaged, publishStaged and abortStaged on its private Manager.
+Abort captured Eggs before Wisp water-matrix owners, then discard the entire
+provisional catalog/registry context; clearing individual actors does not rewind
+Catalog's used-source frontier. Retained dead Gas pipes need physical bodies;
+terminal Eggs are absent, while pending-kill Eggs still need their bodies.
+
+These are provider APIs for the SAVE staged-graph SDK, not whole-graph adoption.
+The scene owner must authenticate actual saved Generator incarnations, reserve
+aggregate capacity, resolve links through provisional structure contexts, and
+publish only after all families pass preflight. No live-pointer fallback or
+invented epoch/activation is permitted. Actual cold boot remains unqualified.
+
+ChildIdentity preserves the actual root SourceIdentity plus typed ancestry:
+EggMitite (68), emission 0, member 0..9; PlantSpectralid (77), emission 0,
+member 0..4. Their Honey reward slot is 0. Direct Egg drops retain their empty
+ancestry and slots 0/1. This makes rewards distinct without invented generator
+UIDs. Egg-only codecs refuse nonempty ancestry; dependent family owners must
+provide their own complete journals and route consumption to the actual owner.
+
+Egg contentsReady receives the verified configuration and computed reachable
+ContentsRequirements. Current unforced Eggs require real nectar, both sprays and
+Mitite group providers. Numeric One/Five providers are required only when an
+actual forced configuration makes them reachable. Mitite fallback also requires
+nectar. Spray reachability includes dynamic made flags and their nectar fallback.

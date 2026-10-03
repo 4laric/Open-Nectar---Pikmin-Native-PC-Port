@@ -77,6 +77,21 @@ bool Provider::bind(const CatalogRow& row,Creature* actor,unsigned token,std::st
  h->token=token;e.clear();return true;
 }
 Host* Provider::lookup(Creature* actor){auto i=mHosts.find(actor);return i==mHosts.end()?nullptr:i->second.get();}
+bool Provider::canAdoptRestored(const CatalogRow& row,Generator* generator,unsigned ordinal,std::string& e)const{
+ auto admitted=mAdmitted.find(row.enemy.uid);auto remaining=mRemaining.find(row.enemy.uid);
+ if(!mPrepared||!mReserved||!generator||admitted==mAdmitted.end()||!same(admitted->second,row)||remaining==mRemaining.end()||!remaining->second||ordinal>=row.enemy.count||mUsed.count({row.enemy.uid,ordinal}))return fail(e,"Honeywisp restored host outside exact reserved source admission");
+ e.clear();return true;
+}
+bool Provider::adoptRestoredHost(std::unique_ptr<Host>& host,std::string& e){
+ if(!host||!host->creature||!host->staged||host->token||host->egg||mHosts.count(host->creature)||!canAdoptRestored(host->row,host->generator,host->ordinal,e))return fail(e,"Honeywisp checkpoint adoption invalid or duplicate");
+ Initial initial;if(!decode(host->row,initial,e))return false;
+ host->initial=initial;host->parameters=mResources.parameters;
+ auto* actor=host->creature;auto key=std::make_pair(host->row.enemy.uid,host->ordinal);
+ auto inserted=mHosts.emplace(actor,nullptr);
+ try{mUsed.insert(key);}catch(...){mHosts.erase(inserted.first);throw;}
+ --mRemaining.at(host->row.enemy.uid);inserted.first->second=std::move(host);e.clear();return true;
+}
+void Provider::publishRestoredHosts()noexcept{for(auto& item:mHosts)item.second->staged=false;}
 void Provider::retiredNative(Creature* actor){mHosts.erase(actor);}
 bool Provider::release(Creature* actor,unsigned token,std::string& e){
  auto i=mHosts.find(actor);if(i==mHosts.end())return fail(e,"Honeywisp release outside owned source");
@@ -96,9 +111,11 @@ bool Provider::enter(Host& h,State next,std::string& e){
  }
  return false;
 }
-bool Provider::flyingCollision(Creature* actor,bool pikmin,std::string& e){auto* h=lookup(actor);if(!h)return fail(e,"Honeywisp collision outside owned source");if(pikmin&&h->state==State::Move)return enter(*h,State::Drop,e);e.clear();return true;}
+bool Provider::flyingCollision(Creature* actor,bool pikmin,std::string& e){auto* h=lookup(actor);if(!h)return fail(e,"Honeywisp collision outside owned source");if(!h->staged&&pikmin&&h->state==State::Move)return enter(*h,State::Drop,e);e.clear();return true;}
 bool Provider::tick(Creature* actor,float dt,Event event,std::string& e){
- auto* h=lookup(actor);if(!h||!h->token||!std::isfinite(dt)||dt<0)return fail(e,"Honeywisp invalid owned tick");
+ auto* h=lookup(actor);if(!h||!std::isfinite(dt)||dt<0)return fail(e,"Honeywisp invalid owned tick");
+ if(h->staged){e.clear();return true;}
+ if(!h->token)return fail(e,"Honeywisp invalid owned tick");
  switch(h->state){
  case State::Stay:{h->timer+=dt;bool appear=false;if(h->timer>1&&(!mEngine.appear(*h,appear,e)|| (appear&&!enter(*h,State::Appear,e))))return false;break;}
  case State::Appear:h->scale=std::min(1.0f,float(double(h->scale)+0.05));if(!mEngine.effect(*h,"glow-scale",e))return false;

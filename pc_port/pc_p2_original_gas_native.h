@@ -34,6 +34,7 @@ struct Snapshot {
 class Native {
 public:
  explicit Native(Services&);
+ Native(Services&,ActorRegistry&);
  ~Native();
  Native(const Native&)=delete; Native& operator=(const Native&)=delete;
  Provider& provider();
@@ -45,6 +46,11 @@ public:
  // incarnation by the typed checkpoint loader. Logical dead/count state must
  // already be restored by GroupCourse; this never informs a second death.
  bool restore(BTeki*,const Snapshot&,std::string&);
+ bool allocateRestored(const CatalogRow&,Generator*,const Snapshot&,BTeki*&,std::string&);
+ bool preflightAllocateRestored(const CatalogRow&,Generator*,const Snapshot&,std::string&)const;
+ void publishRestored() noexcept;
+ bool preflightPublishRestored(std::string&)const;
+ bool abortRestored(std::string&);
  // Optional observation AFTER actual Generator::informDeath and detach.
  // Must not record a second GroupCourse death.
  void onDeath(std::function<bool(Creature*,std::string&)>);

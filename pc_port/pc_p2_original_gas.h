@@ -30,7 +30,7 @@ struct Host {
  CatalogRow row;unsigned ordinal=0,token=0;Position position;
  Parameters parameters;State state=State::Wait;Flags flags;
  float timer=0,health=0;
- bool checkLinks=true,deathReported=false,effectActive=false;
+ bool checkLinks=true,deathReported=false,effectActive=false,staged=false;
  // Transient real item pointers; never serialize them as source identity.
  void* bridge=nullptr;void* gate=nullptr;
 };
@@ -80,6 +80,8 @@ public:
  // Actual manager forget after doKill: no cleanup/kill recursion.
  void retiredNative(Creature*);
  Host* lookup(Creature*);
+ bool preflightRestoredHost(const Host&,std::string&)const;
+ bool adoptRestoredHost(std::unique_ptr<Host>&,std::string&);
  bool tick(Creature*,float,Event,std::string&);
  // Return source callback acceptance; invulnerable valid hits return true but
  // do not alter HP. Native adapter must suppress its own stored-damage path.

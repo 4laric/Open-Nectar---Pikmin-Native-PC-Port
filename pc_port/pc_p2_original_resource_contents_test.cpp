@@ -2,6 +2,7 @@
 #include <cassert>
 #include <cmath>
 #include <iostream>
+#include <set>
 using namespace p2originalresource;
 struct Fake : Engine {
     std::string calls;
@@ -138,6 +139,30 @@ int main() {
         next.ordinal++; e = Fake{}; e.roll = boundaries[i]; e.spray = true;
         assert(resumed.generate(next, cfg, {}, e, r, error) && r.type == types[i]);
     }
+    ContentsRequirements needed;
+    cfg.singleNectarChance=.5f;cfg.doubleNectarChance=.35f;cfg.mititesChance=cfg.spicyChance=cfg.bitterChance=.05f;
+    assert(requirements(cfg,needed,error));
+    assert(needed.nectar&&needed.spicy&&needed.bitter&&needed.mitites&&!needed.pelletOne&&!needed.pelletFive);
+    for(int forced=1;forced<=7;++forced){cfg.forcedDropType=forced;assert(requirements(cfg,needed,error));assert(needed.pelletOne==(forced==1));assert(needed.pelletFive==(forced==2));assert(needed.mitites==(forced==5));}
+    cfg=P2EggConfig{};cfg.singleNectarChance=1;cfg.mititesChance=1;cfg.spicyChance=1;
+    assert(requirements(cfg,needed,error)&&needed.nectar&&!needed.mitites&&!needed.spicy); // unreachable intervals beyond1
+    cfg=P2EggConfig{};cfg.forcedDropType=6;cfg.checkHasSpray=false;
+    assert(requirements(cfg,needed,error)&&needed.spicy&&!needed.nectar);
+    cfg.checkHasSpray=true;assert(requirements(cfg,needed,error)&&needed.spicy&&needed.nectar);
+    cfg.forcedDropType=8;auto unchanged=needed;assert(!requirements(cfg,needed,error));assert(needed.spicy==unchanged.spicy&&needed.nectar==unchanged.nectar);
+    const ChildIdentity ordinary{next,0};
+    const ChildIdentity spectralid0{next,0,{{EmitterKind::PlantSpectralid,0,0}}};
+    const ChildIdentity spectralid4{next,0,{{EmitterKind::PlantSpectralid,0,4}}};
+    assert(validChildIdentity(ordinary)&&validChildIdentity(spectralid0)&&validChildIdentity(spectralid4));
+    assert(!(ordinary==spectralid0)&&!(spectralid0==spectralid4));
+    assert(std::set<ChildIdentity>({ordinary,spectralid0,spectralid4}).size()==3);
+    auto badChild=spectralid4;badChild.ancestry[0].member=5;assert(!validChildIdentity(badChild));
+    badChild=spectralid0;badChild.ancestry[0].emissionOrdinal=1;assert(!validChildIdentity(badChild));
+    badChild=spectralid0;badChild.slot=1;assert(!validChildIdentity(badChild));
+    assert(!resumed.consume(spectralid0,error)); // cannot consume an Egg child through a different emitter path
+    const ChildIdentity mitite9{next,0,{{EmitterKind::EggMitite,0,9}}};
+    assert(validChildIdentity(mitite9)&&!(mitite9==ordinary)&&!(mitite9==spectralid4));
+    badChild=mitite9;badChild.ancestry[0].member=10;assert(!validChildIdentity(badChild));
     std::cout << "P2_ORIGINAL_EGG_CONTENTS_PASS\n";
 }
 

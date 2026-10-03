@@ -18,14 +18,20 @@
 #include <set>
 #include <cstdio>
 #include <cstdlib>
+#include <tuple>
 extern Matrix4f invCamMat;
 namespace p2original { namespace egg { namespace {
 struct Heap {int before;Heap():before(gsys->setHeap(SYSHEAP_App)){}~Heap(){gsys->setHeap(before);}};
 bool fail(std::string& e,const char* s){e=s;return false;}
+bool sameSnapshot(const Snapshot& a,const Snapshot& b){auto fields=[](const Snapshot& s){return std::make_tuple(s.identity,s.resourceFingerprint,s.state,
+ s.position.x,s.position.y,s.position.z,s.velocity.x,s.velocity.y,s.velocity.z,s.targetVelocity.x,s.targetVelocity.y,s.targetVelocity.z,s.scale.x,s.scale.y,s.scale.z,
+ s.facing,s.health,s.flickTimer,s.sourceFrame,s.stopped,s.flags.leaveCarcass,s.flags.damageAnimation,s.flags.deathEffect,s.flags.bitterImmune,s.flags.constrained,s.flags.invulnerable,s.flags.cullable,s.flags.living,s.flags.lifeGauge,
+ s.dependent,s.captured,s.falling,s.dropGroup,s.contentsGenerated,s.effectsEmitted,s.killRequested,s.hasParent,s.parentIdentity);};return fields(a)==fields(b);}
 std::set<Native*>& instances(){static std::set<Native*> all;return all;}
 struct Sample {int frame=0;std::array<Matrix4f,2> joint;};
 struct Track {
- float frame=0;bool stopped=true;Matrix4f* capture=nullptr;
+ std::unique_ptr<Snapshot> checkpoint;
+ float frame=0;bool stopped=true,restoreApplied=false;Matrix4f* capture=nullptr;
  bool hasDependentIdentity=false;p2originalresource::SourceIdentity dependentIdentity;
  P2FlyerColl collision;std::unique_ptr<pelplant::Geometry> geometry;p2pose::Track presented;
 };
@@ -52,13 +58,13 @@ struct Native::Impl final:Engine {
  p2originalresource::EggContents contentsState;P2EggConfig config;
  unsigned fieldReserved=0,capturedReserved=0;
  std::string resourceFingerprint;
- explicit Impl(Services& s):services(s),provider(*this){}
+ ActorRegistry& actors;
+ explicit Impl(Services& s,ActorRegistry& a):services(s),provider(*this),actors(a){}
  bool load(std::string& e){
   if(loaded)return true;
   if(!gsys||!tekiMgr)return fail(e,"Egg actual managers unavailable");
   auto* chassis=tekiMgr->getTekiShapeObject(TEKI_Palm);
   if(!chassis||!chassis->mShape||!chassis->mAnimMgr||!tekiMgr->getTekiParameters(TEKI_Palm)||!tekiMgr->getStrategy(TEKI_Palm))return fail(e,"Egg inert allocation chassis not preloaded before stage start");
-  if(!services.contentsReady(e))return false;
   if(!services.breakEffectsReady(e)){std::printf("P2_ORIGINAL_EGG_PRESENTATION_DEFERRED source_jpa=0 source_audio=0 mechanics=required\n");e.clear();}
   frames.clear();shapes.clear();samples.clear();bank.reset();shared={};
   std::ifstream in("p2-original-egg-bank.txt");std::string word,name,stem;int count=0,duration=0;
@@ -79,6 +85,7 @@ struct Native::Impl final:Engine {
   int checkSpray=0;if(!(in>>checkSpray)||checkSpray<0||checkSpray>1||config.forcedDropType<0||config.forcedDropType>7)return fail(e,"Egg source forced/drop spray controls invalid");
   config.health=resource.parameters.health;config.checkHasSpray=checkSpray!=0;
   for(float v:{config.singleNectarChance,config.doubleNectarChance,config.mititesChance,config.spicyChance,config.bitterChance})if(!std::isfinite(v)||v<0||v>1)return fail(e,"Egg source drop chance invalid");
+  p2originalresource::ContentsRequirements required;if(!p2originalresource::requirements(config,required,e)||!services.contentsReady(config,required,e))return false;
   for(int i=0;i<2;++i){int parent=0,joint=0;float x=0,y=0,z=0,radius=0;
    if(!(in>>word>>parent>>joint>>x>>y>>z>>radius)||word!="collider"||parent!=(i?0:-1)||joint!=(i?0:1)||!std::isfinite(radius)||radius<=0||!std::isfinite(x)||!std::isfinite(y)||!std::isfinite(z))return fail(e,"Egg source collider invalid");
    spheres[i]={"none","____",radius,{x,y,z},parent};jointIndices[i]=joint;
@@ -95,6 +102,7 @@ struct Native::Impl final:Engine {
  bool capacity(unsigned field,unsigned dependencies,std::string& e){if(!tekiMgr->hasModel(TEKI_Palm)||tekiMgr->getMax()-tekiMgr->getSize()<int(field+dependencies))return fail(e,"Egg complete field/captured actor capacity unavailable");return true;}
  bool reserve(unsigned n,std::string& e)override{if(!capacity(n,capturedReserved,e))return false;fieldReserved=n;return true;}
  bool reserveCaptured(unsigned n,std::string& e)override{if(!capacity(fieldReserved,n,e))return false;capturedReserved=n;return true;}
+ void discardUnadopted(Host& h){if(!h.creature)return;auto* actor=h.creature;std::string ignored;if(tracks.count(actor))cleanup(h,ignored);else{actor->mGenerator=nullptr;actor->kill(false);}h.creature=nullptr;}
  bool allocate(Host& h,const Position& p,float facing,std::string& e)override{
   Heap heap;auto* actor=tekiMgr->newTeki(TEKI_Palm);if(!actor){e.clear();return true;}h.creature=actor;
   auto t=std::make_unique<Track>();tracks.emplace(actor,std::move(t));
@@ -108,7 +116,7 @@ struct Native::Impl final:Engine {
   actor->mCollisionRadius=15;actor->mSize=15;actor->setCreatureFlag(CF_DisableMovement);actor->setCreatureFlag(CF_IsAiDisabled);
   actor->setTekiOption(BTeki::TEKI_OPTION_VISIBLE);actor->setTekiOption(BTeki::TEKI_OPTION_ATARI);actor->setTekiOption(BTeki::TEKI_OPTION_ALIVE);actor->setTekiOption(BTeki::TEKI_OPTION_SHAPE_VISIBLE);
   auto& track=*tracks.at(actor);track.geometry=std::make_unique<pelplant::Geometry>(*bank.owner());track.presented.shape=&track.geometry->shape;track.presented.size(*bank.basePose());
-  if(!track.collision.bind(actor,spheres.data(),2))return fail(e,"Egg source collider binding failed");follow(h);return true;
+  if(!track.collision.bind(actor,spheres.data(),2))return fail(e,"Egg source collider binding failed");follow(h);if(h.staged){actor->clearTekiOption(BTeki::TEKI_OPTION_VISIBLE);actor->clearTekiOption(BTeki::TEKI_OPTION_SHAPE_VISIBLE);actor->clearTekiOption(BTeki::TEKI_OPTION_ATARI);}return true;
  }
  bool initialize(Host& h,std::string& e)override{
   auto* actor=static_cast<BTeki*>(h.creature);
@@ -124,6 +132,7 @@ struct Native::Impl final:Engine {
  }
  bool flags(Host& h,const Flags& f,std::string&)override{
   auto* actor=static_cast<BTeki*>(h.creature);
+  if(h.staged){actor->clearTekiOption(BTeki::TEKI_OPTION_VISIBLE);actor->clearTekiOption(BTeki::TEKI_OPTION_SHAPE_VISIBLE);actor->clearTekiOption(BTeki::TEKI_OPTION_ATARI);}else{actor->setTekiOption(BTeki::TEKI_OPTION_VISIBLE);actor->setTekiOption(BTeki::TEKI_OPTION_SHAPE_VISIBLE);actor->setTekiOption(BTeki::TEKI_OPTION_ATARI);}
   if(f.invulnerable)actor->setTekiOption(BTeki::TEKI_OPTION_INVINCIBLE);else actor->clearTekiOption(BTeki::TEKI_OPTION_INVINCIBLE);
   if(f.living)actor->setTekiOption(BTeki::TEKI_OPTION_ORGANIC);else actor->clearTekiOption(BTeki::TEKI_OPTION_ORGANIC);
   if(f.constrained)actor->setCreatureFlag(CF_DisableMovement);else actor->resetCreatureFlag(CF_DisableMovement);
@@ -149,7 +158,7 @@ struct Native::Impl final:Engine {
  bool contents(Host& h,std::string& e)override{
   p2originalresource::SourceIdentity identity;
   if(h.dependent){auto& t=*tracks.at(h.creature);if(!t.hasDependentIdentity)return fail(e,"Egg contents missing captured source incarnation");identity=t.dependentIdentity;}
-  else if(!services.sourceIdentity(h,identity,e))return false;
+  else {unsigned source=0,token=0;InstanceIdentity id;if(!actors.query(h.creature,source,token,&id)||source!=37||token!=h.token)return fail(e,"Egg contents missing exact owned source registry");identity={id.catalog,id.generator,id.ordinal,id.epoch,id.activation};}
   auto p=h.creature->getPosition();p2originalresource::ContentsRecord record;
   return contentsState.generate(identity,config,{p.x,p.y,p.z},services,record,e);
  }
@@ -164,15 +173,18 @@ struct Native::Impl final:Engine {
   h.creature->mGenerator=nullptr;h.creature->kill(false);return true;
  }
  Matrix4f root(Host& h){auto& t=*tracks.at(h.creature);Matrix4f result;if(t.capture)result=*t.capture;else result.makeSRT(h.creature->mSRT.s,Vector3f(0,h.creature->mFaceDirection,0),h.creature->mSRT.t);return result;}
+ bool parentIdentity(Creature* parent,p2originalresource::SourceIdentity& out,std::string& e)const{unsigned source=0,token=0;InstanceIdentity id;if(!actors.query(parent,source,token,&id)||source!=16)return fail(e,"Egg actual parent missing exact source registry identity");out={id.catalog,id.generator,id.ordinal,id.epoch,id.activation};return true;}
  bool context(Host& h,SnapshotContext& out,std::string& e)const{
   auto it=tracks.find(h.creature);if(!loaded||it==tracks.end()||resourceFingerprint.empty()||!bank.clip("damage1")||frames!=std::vector<int>({0,6,12,17,23,29})||samples.size()!=6)return fail(e,"Egg snapshot source bank/physical resources unavailable");
   SnapshotContext next;next.resourceFingerprint=resourceFingerprint;next.maxHealth=resource.parameters.health;next.dependent=h.dependent;next.dropGroup=h.dropGroup;
   if(h.dependent){if(!it->second->hasDependentIdentity||h.creature->mGenerator)return fail(e,"Egg snapshot dependent identity/generator boundary invalid");next.identity=it->second->dependentIdentity;}
   else {
-   if(!h.token||!h.generator||h.creature->mGenerator!=h.generator||!services.sourceIdentity(h,next.identity,e))return fail(e,"Egg snapshot standalone exact generator/incarnation unresolved");
+   unsigned source=0,token=0;InstanceIdentity identity;
+   if(!h.token||!h.generator||h.creature->mGenerator!=h.generator||!actors.query(h.creature,source,token,&identity)||source!=37||token!=h.token)return fail(e,"Egg snapshot standalone exact generator/incarnation unresolved");
+   next.identity={identity.catalog,identity.generator,identity.ordinal,identity.epoch,identity.activation};
    if(next.identity.uid!=h.row.enemy.uid||next.identity.ordinal!=h.ordinal)return fail(e,"Egg snapshot source identity belongs to another physical row/ordinal");
   }
-  if(h.captured){if(!h.parent||!it->second->capture||!services.capturedSourceIdentity(h.parent,next.actualParent,e))return fail(e,"Egg snapshot actual source capture graph unresolved");
+  if(h.captured){if(!h.parent||!it->second->capture||!parentIdentity(h.parent,next.actualParent,e))return fail(e,"Egg snapshot actual source capture graph unresolved");
    for(int r=0;r<3;++r)for(int c=0;c<4;++c)if(!std::isfinite(it->second->capture->mMtx[r][c]))return fail(e,"Egg snapshot capture matrix nonfinite");
    next.actualCaptureBound=true;next.capturePosition={it->second->capture->mMtx[0][3],it->second->capture->mMtx[1][3],it->second->capture->mMtx[2][3]};
   }else if(it->second->capture||h.parent)return fail(e,"Egg independent body retains native capture pointer");
@@ -186,13 +198,62 @@ struct Native::Impl final:Engine {
   }
  }
 };
-Native::Native(Services& s):m(std::make_unique<Impl>(s)){instances().insert(this);}
+Native::Native(Services& s):Native(s,originalActors()){}
+Native::Native(Services& s,ActorRegistry& actors):m(std::make_unique<Impl>(s,actors)){instances().insert(this);}
 Native::~Native(){if(!m->tracks.empty()||m->provider.size()){std::fprintf(stderr,"Egg native destroyed with owned actors\n");std::abort();}instances().erase(this);}
 Provider& Native::provider(){return m->provider;}
 bool Native::owns(const Creature* actor)const{return m->tracks.count(const_cast<Creature*>(actor))!=0;}
 p2originalresource::EggContents& Native::contents(){return m->contentsState;}
+namespace {
+SnapshotContext intended(const Snapshot& s,const std::string& resource,float maxHealth){SnapshotContext c;c.identity=s.identity;c.resourceFingerprint=resource;c.maxHealth=maxHealth;c.dependent=s.dependent;c.dropGroup=s.dropGroup;c.actualCaptureBound=s.captured;c.actualParent=s.parentIdentity;c.capturePosition=s.position;return c;}
+std::string cargoKey(const p2originalresource::SourceIdentity& s){return s.fingerprint+":"+std::to_string(s.uid)+":"+std::to_string(s.ordinal)+":"+std::to_string(s.epoch)+":"+std::to_string(s.activation)+":Egg:0";}
+}
+bool Native::preflightAllocateRestored(const CatalogRow& row,Generator* generator,const Snapshot& saved,std::string& e)const{
+ if(!m->loaded||!generator||saved.dependent||row.enemy.source!=37||row.enemy.uid!=saved.identity.uid||saved.identity.fingerprint!=m->actors.fingerprint()||saved.identity.ordinal>=row.enemy.count||saved.dropGroup!=(row.enemy.birthType>=1&&row.enemy.birthType<=5)||!validateSnapshot(saved,intended(saved,m->resourceFingerprint,m->resource.parameters.health),e))return fail(e,"Egg no-init field allocation exact source/state invalid");
+ auto h=std::make_unique<Host>();h->row=row;h->generator=generator;h->ordinal=saved.identity.ordinal;h->health=saved.health;h->dropGroup=saved.dropGroup;h->staged=true;
+ if(!m->provider.preflightRestoredHost(*h,e))return false;
+ e.clear();return true;
+}
+bool Native::allocateRestored(const CatalogRow& row,Generator* generator,const Snapshot& saved,BTeki*& out,std::string& e){
+ if(!preflightAllocateRestored(row,generator,saved,e))return false;
+ auto h=std::make_unique<Host>();h->row=row;h->generator=generator;h->ordinal=saved.identity.ordinal;h->health=saved.health;h->dropGroup=saved.dropGroup;h->staged=true;
+ if(!m->provider.preflightRestoredHost(*h,e))return false;
+ try{
+ if(!m->allocate(*h,saved.position,saved.facing,e)||!h->creature){m->discardUnadopted(*h);return fail(e,"Egg required saved field allocation failed");}
+ auto* actor=static_cast<BTeki*>(h->creature);m->tracks.at(actor)->checkpoint=std::make_unique<Snapshot>(saved);if(!m->provider.adoptRestoredHost(h,e)){m->discardUnadopted(*h);return false;}out=actor;e.clear();return true;
+ }catch(...){if(h)m->discardUnadopted(*h);throw;}
+}
+bool Native::preflightAllocateRestoredCargo(const CatalogRow& parentRow,const Snapshot& saved,std::string& e)const{
+ const auto* authenticated=m->actors.find(parentRow.enemy.uid);
+ if(!authenticated||authenticated->course!=parentRow.course||authenticated->member!=parentRow.member||authenticated->index!=parentRow.index||authenticated->sourceKey!=parentRow.sourceKey||authenticated->enemy.source!=16||authenticated->enemy.count!=parentRow.enemy.count)return fail(e,"Egg cargo parent row not authenticated by provisional catalog");
+ if(!m->loaded||!saved.dependent||parentRow.enemy.source!=16||parentRow.enemy.uid!=saved.identity.uid||saved.identity.fingerprint!=m->actors.fingerprint()||saved.identity.ordinal>=parentRow.enemy.count||!validateOriginalRecord(parentRow.enemy,e)||!validateSnapshot(saved,intended(saved,m->resourceFingerprint,m->resource.parameters.health),e))return fail(e,"Egg no-init cargo allocation exact source/state invalid");
+ auto h=std::make_unique<Host>();h->row=*authenticated;h->ordinal=saved.identity.ordinal;h->health=saved.health;h->dependent=true;h->dependentIdentity=cargoKey(saved.identity);h->staged=true;
+ if(!m->provider.preflightRestoredHost(*h,e))return false;
+ e.clear();return true;
+}
+bool Native::allocateRestoredCargo(const CatalogRow& parentRow,const Snapshot& saved,BTeki*& out,std::string& e){
+ if(!preflightAllocateRestoredCargo(parentRow,saved,e))return false;
+ const auto* authenticated=m->actors.find(parentRow.enemy.uid);
+ auto h=std::make_unique<Host>();h->row=*authenticated;h->ordinal=saved.identity.ordinal;h->health=saved.health;h->dependent=true;h->dependentIdentity=cargoKey(saved.identity);h->staged=true;
+ if(!m->provider.preflightRestoredHost(*h,e))return false;
+ try{
+ if(!m->allocate(*h,saved.position,saved.facing,e)||!h->creature){m->discardUnadopted(*h);return fail(e,"Egg required saved cargo allocation failed");}
+ auto* actor=static_cast<BTeki*>(h->creature);auto& track=*m->tracks.at(actor);track.dependentIdentity=saved.identity;track.hasDependentIdentity=true;track.checkpoint=std::make_unique<Snapshot>(saved);
+ if(!m->provider.adoptRestoredHost(h,e)){m->discardUnadopted(*h);return false;}out=actor;e.clear();return true;
+ }catch(...){if(h)m->discardUnadopted(*h);throw;}
+}
+bool Native::bindRestoredCapture(BTeki* actor,Creature* parent,void* matrix,std::string& e){
+ auto* h=m->provider.lookup(actor);auto it=m->tracks.find(actor);if(!h||it==m->tracks.end()||!h->staged||!h->dependent||h->captured||h->parent||it->second->capture||!parent||!matrix)return fail(e,"Egg staged capture graph binding invalid");
+ unsigned source=0,token=0;InstanceIdentity identity;if(!m->actors.query(parent,source,token,&identity)||source!=16)return fail(e,"Egg staged capture parent outside provisional source registry");
+ p2originalresource::SourceIdentity actual{identity.catalog,identity.generator,identity.ordinal,identity.epoch,identity.activation};if(!(actual==it->second->dependentIdentity))return fail(e,"Egg staged capture parent incarnation mismatch");
+ auto* water=static_cast<Matrix4f*>(matrix);for(int r=0;r<3;++r)for(int c=0;c<4;++c)if(!std::isfinite(water->mMtx[r][c]))return fail(e,"Egg staged capture matrix nonfinite");
+ h->parent=parent;h->captured=true;it->second->capture=water;e.clear();return true;
+}
+bool Native::preflightPublishRestored(std::string& e)const{for(const auto& entry:m->tracks){auto* h=m->provider.lookup(entry.first);if(!h)return fail(e,"egg publication lost owned Host");if(!h->staged)continue;if(!entry.second->restoreApplied)return fail(e,"egg staged physical state not applied before publication");Snapshot checked;if(!snapshot(static_cast<BTeki*>(entry.first),checked,e))return false;if(!entry.second->checkpoint||!sameSnapshot(checked,*entry.second->checkpoint))return fail(e,"Egg publication differs from authenticated allocated snapshot");}e.clear();return true;}
+void Native::publishRestored() noexcept{for(const auto& entry:m->tracks){auto* h=m->provider.lookup(entry.first);if(h&&h->staged&&!entry.second->restoreApplied)std::abort();}for(auto& entry:m->tracks){auto* h=m->provider.lookup(entry.first);if(h&&h->staged){h->staged=false;auto* actor=static_cast<BTeki*>(entry.first);actor->setTekiOption(BTeki::TEKI_OPTION_VISIBLE);actor->setTekiOption(BTeki::TEKI_OPTION_SHAPE_VISIBLE);actor->setTekiOption(BTeki::TEKI_OPTION_ATARI);}}}
+bool Native::abortRestored(std::string& e){for(;;){Creature* actor=nullptr;for(const auto& entry:m->tracks){auto* h=m->provider.lookup(entry.first);if(h&&h->staged){actor=entry.first;break;}}if(!actor)break;auto* h=m->provider.lookup(actor);if(!m->provider.release(actor,h->token,e))return false;}e.clear();return true;}
 void Native::forget(BTeki* actor){auto it=m->tracks.find(actor);if(it!=m->tracks.end()){it->second->capture=nullptr;it->second->collision.detach(actor);m->tracks.erase(it);}m->provider.retiredNative(actor);}
-bool Native::tick(BTeki* actor,float dt,std::string& e){Heap heap;auto* h=m->provider.lookup(actor);if(!h||!std::isfinite(dt)||dt<0)return fail(e,"Egg native update outside provider");auto& t=*m->tracks.at(actor);Event event=Event::None;
+bool Native::tick(BTeki* actor,float dt,std::string& e){Heap heap;auto* h=m->provider.lookup(actor);if(!h||!std::isfinite(dt)||dt<0)return fail(e,"Egg native update outside provider");if(h->staged){e.clear();return true;}auto& t=*m->tracks.at(actor);Event event=Event::None;
  if(!t.stopped){t.frame+=30*dt;if(t.frame>=30){t.frame=30;event=Event::End;}}
  if(!m->provider.tick(actor,dt,event,e))return false;
  // Actual kill may have synchronously removed Host and Track.
@@ -200,7 +261,7 @@ bool Native::tick(BTeki* actor,float dt,std::string& e){Heap heap;auto* h=m->pro
  actor->mHealth=h->health;actor->mStoredDamage=0;m->tracks.at(actor)->presented.advance(dt);m->follow(*h);return true;
 }
 bool Native::world(BTeki* actor,Matrix4f& out,std::string& e)const{auto* h=m->provider.lookup(actor);if(!h||!m->tracks.count(actor))return fail(e,"Egg native world outside provider");out=m->root(*h);return true;}
-bool Native::identity(BTeki* actor,p2originalresource::SourceIdentity& out,std::string& e)const{auto* h=m->provider.lookup(actor);auto t=m->tracks.find(actor);if(!h||t==m->tracks.end())return fail(e,"Egg source identity outside provider");if(h->dependent){if(!t->second->hasDependentIdentity)return fail(e,"Egg source capture identity unresolved");out=t->second->dependentIdentity;e.clear();return true;}return m->services.sourceIdentity(*h,out,e);}
+bool Native::identity(BTeki* actor,p2originalresource::SourceIdentity& out,std::string& e)const{auto* h=m->provider.lookup(actor);auto t=m->tracks.find(actor);if(!h||t==m->tracks.end())return fail(e,"Egg source identity outside provider");if(h->dependent){if(!t->second->hasDependentIdentity)return fail(e,"Egg source capture identity unresolved");out=t->second->dependentIdentity;e.clear();return true;}unsigned source=0,token=0;InstanceIdentity id;if(!m->actors.query(actor,source,token,&id)||source!=37||token!=h->token)return fail(e,"Egg identity outside exact owned registry");out={id.catalog,id.generator,id.ordinal,id.epoch,id.activation};e.clear();return true;}
 bool Native::captureLink(BTeki* actor,Creature*& actualParent,void*& actualMatrix,std::string& e)const{
  auto* h=m->provider.lookup(actor);auto it=m->tracks.find(actor);
  if(!h||it==m->tracks.end()||!h->dependent||!h->captured||!h->parent||!it->second->capture||!it->second->hasDependentIdentity)return fail(e,"Egg capture link outside actual owned captured dependency");
@@ -226,9 +287,9 @@ bool Native::apply(BTeki* actor,const Snapshot& saved,std::string& e){
  h->health=saved.health;h->flickTimer=saved.flickTimer;h->flags=saved.flags;h->falling=saved.falling;h->contentsGenerated=saved.contentsGenerated;h->effectsEmitted=saved.effectsEmitted;h->killRequested=saved.killRequested;
  actor->mSRT.t.set(saved.position.x,saved.position.y,saved.position.z);actor->mLastPosition=actor->mSRT.t;actor->mSRT.s.set(saved.scale.x,saved.scale.y,saved.scale.z);actor->mFaceDirection=saved.facing;actor->mSRT.r.set(0,saved.facing,0);
  actor->mVelocity.set(saved.velocity.x,saved.velocity.y,saved.velocity.z);actor->mTargetVelocity.set(saved.targetVelocity.x,saved.targetVelocity.y,saved.targetVelocity.z);actor->mHealth=saved.health;actor->mMaxHealth=h->parameters.health;actor->mStoredDamage=0;actor->mGroundTriangle=nullptr;
- t.frame=saved.sourceFrame;t.stopped=saved.stopped;std::string ignored;m->flags(*h,saved.flags,ignored);m->follow(*h);actor->mGrid.updateGrid(actor->mSRT.t);actor->mGrid.updateAIGrid(actor->mSRT.t,false);e.clear();return true;
+ t.frame=saved.sourceFrame;t.stopped=saved.stopped;std::string ignored;m->flags(*h,saved.flags,ignored);m->follow(*h);actor->mGrid.updateGrid(actor->mSRT.t);actor->mGrid.updateAIGrid(actor->mSRT.t,false);t.restoreApplied=true;e.clear();return true;
 }
-bool Native::draw(BTeki* actor,Graphics& gfx,const Matrix4f& view,std::string& e){auto* h=m->provider.lookup(actor);if(!h||!gfx.mCamera)return fail(e,"Egg native draw outside provider");auto& t=*m->tracks.at(actor);const auto* clip=m->bank.clip("damage1");float frame=std::min(t.frame,29.0f);
+bool Native::draw(BTeki* actor,Graphics& gfx,const Matrix4f& view,std::string& e){auto* h=m->provider.lookup(actor);if(!h||!gfx.mCamera)return fail(e,"Egg native draw outside provider");if(h->staged){e.clear();return true;}auto& t=*m->tracks.at(actor);const auto* clip=m->bank.clip("damage1");float frame=std::min(t.frame,29.0f);
  if(!clip||!p2pose::present(t.presented,"damage1",clip->poses.size(),[clip](std::size_t i)->const p2pose::Pose&{return clip->poses[i];},clip->frames,frame,p2motion::tunables(),clip->seamContinuous).ok)return fail(e,"Egg source pose drawing failed");
  gfx.useMatrix(Matrix4f::ident,0);auto& shape=t.geometry->shape;shape.updateAnim(gfx,view,nullptr,actor);shape.drawshape(gfx,*gfx.mCamera,nullptr);return true;
 }

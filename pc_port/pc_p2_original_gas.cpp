@@ -94,6 +94,16 @@ bool Provider::birth(const CatalogRow& row,Generator* generator,unsigned ordinal
  }
  host.timer=draw*host.parameters.waitTime;--remaining->second;mUsed.emplace(row.enemy.uid,ordinal);out=actor;e.clear();return true;
 }
+bool Provider::preflightRestoredHost(const Host& h,std::string& e)const{
+ auto a=mAdmitted.find(h.row.enemy.uid);auto r=mRemaining.find(h.row.enemy.uid);
+ if(!mPrepared||!mReserved||!h.staged||!h.generator||h.token||!std::isfinite(h.health)||h.health<0||h.health>mResources.parameters.maxHealth||a==mAdmitted.end()||!same(a->second,h.row)||r==mRemaining.end()||!r->second||h.ordinal>=h.row.enemy.count||mUsed.count({h.row.enemy.uid,h.ordinal}))return fail(e,"Gas restored Host outside prepared exact reservation");
+ e.clear();return true;
+}
+bool Provider::adoptRestoredHost(std::unique_ptr<Host>& h,std::string& e){
+ if(!h||!preflightRestoredHost(*h,e)||!h->creature||mHosts.count(h->creature))return fail(e,"Gas restored Host adoption refused");
+ h->parameters=mResources.parameters;const auto uid=h->row.enemy.uid,ordinal=h->ordinal;Creature* actor=h->creature;
+ mHosts.emplace(actor,std::move(h));--mRemaining.at(uid);mUsed.emplace(uid,ordinal);e.clear();return true;
+}
 Host* Provider::lookup(Creature* actor){auto it=mHosts.find(actor);return it==mHosts.end()?nullptr:it->second.get();}
 void Provider::retiredNative(Creature* actor){mHosts.erase(actor);}
 bool Provider::bind(const CatalogRow& row,Creature* actor,unsigned token,std::string& e){
@@ -122,6 +132,7 @@ bool Provider::living(Host& h,bool initialize,std::string& e){
 }
 bool Provider::tick(Creature* actor,float dt,Event event,std::string& e){
  Host* h=lookup(actor);if(!h||!h->token||!std::isfinite(dt)||dt<0)return fail(e,"invalid GasHiba source tick");
+ if(h->staged){e.clear();return true;}
  if(h->state==State::Dead){e.clear();return true;}
  if(h->state==State::Wait){
   h->timer+=dt;if(!living(*h,true,e))return false;
@@ -140,6 +151,7 @@ bool Provider::tick(Creature* actor,float dt,Event event,std::string& e){
 }
 bool Provider::damage(Creature* actor,Creature* attacker,bool navi,Position p,float amount,std::string& e){
  Host* h=lookup(actor);if(!h||!finite(p)||!std::isfinite(amount)||amount<0)return fail(e,"invalid GasHiba damage callback");
+ if(h->staged){e.clear();return false;}
  e.clear();if(!attacker||navi||!damageHeight(h->position,p,h->parameters))return false;
  if(!h->flags.invulnerable)h->health=std::max(0.0f,h->health-amount);
  return true;

@@ -18,7 +18,7 @@ struct Host {
  CatalogRow row;unsigned ordinal=0,token=0;std::string dependentIdentity;
  Parameters parameters;Flags flags;float health=0,flickTimer=0;
  bool dependent=false,captured=false,falling=false,dropGroup=false;
- bool contentsGenerated=false,effectsEmitted=false,killRequested=false;
+ bool contentsGenerated=false,effectsEmitted=false,killRequested=false,staged=false;
 };
 bool decode(const CatalogRow&,std::string&);
 class Engine {
@@ -68,6 +68,8 @@ public:
  // must not kill this Egg after detach; it has its own update/kill lifetime.
  bool detach(Creature*,std::string&);
  Host* lookup(Creature*);
+ bool preflightRestoredHost(const Host&,std::string&)const;
+ bool adoptRestoredHost(std::unique_ptr<Host>&,std::string&);
  bool tick(Creature*,float,Event,std::string&);
  bool damage(Creature*,float,float flickSpeed,std::string&);
  bool press(Creature*,std::string&);

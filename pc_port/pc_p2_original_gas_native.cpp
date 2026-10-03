@@ -34,7 +34,7 @@ std::set<Native*>& instances(){static std::set<Native*> all;return all;}
 const char* clips[]={"wait","attack"};
 struct Sample {int frame=0;Matrix4f joint;};
 struct Motion {int duration=0;std::vector<int> frames;std::vector<Shape*> shapes;std::vector<Sample> joints;};
-struct Track {unsigned motion=0;float frame=0;bool finish=false,generatorDeathCommitted=false;P2FlyerColl collision;std::unique_ptr<pelplant::Geometry> geometry;p2pose::Track presented;};
+struct Track {std::unique_ptr<Snapshot> checkpoint;unsigned motion=0;float frame=0;bool finish=false,generatorDeathCommitted=false,restoreApplied=false;P2FlyerColl collision;std::unique_ptr<pelplant::Geometry> geometry;p2pose::Track presented;};
 }
 struct Native::Impl final:Engine {
  Services& services; Provider provider;
@@ -44,7 +44,8 @@ struct Native::Impl final:Engine {
  std::array<p2flyer::Sphere,2> spheres;
  std::map<Creature*,std::unique_ptr<Track>> tracks;
  std::function<bool(Creature*,std::string&)> deathCallback;
- explicit Impl(Services& s):services(s),provider(*this){}
+ ActorRegistry& actors;
+ explicit Impl(Services& s,ActorRegistry& a):services(s),provider(*this),actors(a){}
  bool load(std::string& e){
   if(loaded)return true;
   if(!gsys||!tekiMgr||!pikiMgr)return fail(e,"GasHiba real managers unavailable");
@@ -83,6 +84,7 @@ struct Native::Impl final:Engine {
  bool resources(Resources& out,std::string& e)override{Heap heap;if(!load(e))return false;out=resource;return true;}
  bool commonResources(const CatalogRow& row,std::string& e)override{return pc_p2_original_drop_resources(row,e);}
  bool reserve(unsigned n,std::string& e)override{if(tekiMgr->getMax()-tekiMgr->getSize()<int(n)||!tekiMgr->hasModel(TEKI_Palm))return fail(e,"GasHiba actual actor capacity not reserved");return true;}
+ void discardUnadopted(Host& h){if(!h.creature)return;auto* actor=h.creature;std::string ignored;if(tracks.count(actor))cleanup(h,ignored);else{actor->mGenerator=nullptr;actor->kill(false);}h.creature=nullptr;}
  bool allocate(Host& h,const Position& p,float facing,std::string& e)override{
   Heap heap;auto* actor=tekiMgr->newTeki(TEKI_Palm);if(!actor){e.clear();return true;}h.creature=actor;
   auto track=std::make_unique<Track>();tracks.emplace(actor,std::move(track));
@@ -91,15 +93,16 @@ struct Native::Impl final:Engine {
   actor->mDeadState=0;actor->mStateID=0;actor->mStoredDamage=0;actor->mDamageCount=0;actor->_3A4=0;actor->mPellet=nullptr;
   for(int i=0;i<4;++i)actor->mParticleGenerators[i]=nullptr;
   actor->mGenerator=h.generator;actor->mSRT.t.set(p.x,p.y,p.z);actor->mFaceDirection=facing;
-  actor->mSRT.r.set(0,facing,0);actor->mSRT.s.set(1,1,1);actor->mHealth=actor->mMaxHealth=h.health;actor->mVelocity.set(0,0,0);
+  actor->mSRT.r.set(0,facing,0);actor->mSRT.s.set(1,1,1);actor->mHealth=h.health;actor->mMaxHealth=resource.parameters.maxHealth;actor->mVelocity.set(0,0,0);
   actor->mCollisionRadius=20;actor->mSize=20;actor->setCreatureFlag(CF_DisableMovement);actor->setCreatureFlag(CF_IsAiDisabled);
   actor->setTekiOption(BTeki::TEKI_OPTION_VISIBLE);actor->setTekiOption(BTeki::TEKI_OPTION_ATARI);actor->setTekiOption(BTeki::TEKI_OPTION_ALIVE);actor->setTekiOption(BTeki::TEKI_OPTION_SHAPE_VISIBLE);
   auto& t=*tracks.at(actor);t.geometry=std::make_unique<pelplant::Geometry>(*bank.owner());t.presented.shape=&t.geometry->shape;t.presented.size(*bank.basePose());
-  if(!t.collision.bind(actor,spheres.data(),2))return fail(e,"GasHiba real source collider bind failed");follow(h);return true;
+  if(!t.collision.bind(actor,spheres.data(),2))return fail(e,"GasHiba real source collider bind failed");follow(h);if(h.staged){actor->clearTekiOption(BTeki::TEKI_OPTION_VISIBLE);actor->clearTekiOption(BTeki::TEKI_OPTION_SHAPE_VISIBLE);actor->clearTekiOption(BTeki::TEKI_OPTION_ATARI);}return true;
  }
  bool unitDraw(float& out,std::string&)override{out=gsys->getRand(1);return true;}
  bool flags(Host& h,const Flags& f,std::string&)override{
   auto* actor=static_cast<BTeki*>(h.creature);
+  if(h.staged){actor->clearTekiOption(BTeki::TEKI_OPTION_VISIBLE);actor->clearTekiOption(BTeki::TEKI_OPTION_SHAPE_VISIBLE);actor->clearTekiOption(BTeki::TEKI_OPTION_ATARI);}else{actor->setTekiOption(BTeki::TEKI_OPTION_VISIBLE);actor->setTekiOption(BTeki::TEKI_OPTION_SHAPE_VISIBLE);actor->setTekiOption(BTeki::TEKI_OPTION_ATARI);}
   if(f.invulnerable)actor->setTekiOption(BTeki::TEKI_OPTION_INVINCIBLE);else actor->clearTekiOption(BTeki::TEKI_OPTION_INVINCIBLE);
   if(f.living)actor->setTekiOption(BTeki::TEKI_OPTION_ORGANIC);else actor->clearTekiOption(BTeki::TEKI_OPTION_ORGANIC);
   // ALIVE is retained for Dead so it remains visible/owned until course cleanup.
@@ -133,8 +136,8 @@ struct Native::Impl final:Engine {
  }
  bool cleanup(Host& h,std::string& e)override{
   auto i=tracks.find(h.creature);if(i==tracks.end())return true;
-  if(!services.gasEffect(h.creature,false,services.surfaceStory(),e))return false;
-  std::vector<Creature*> attached;Stickers stickers(h.creature);Iterator it(&stickers);CI_LOOP(it)attached.push_back(*it);
+  if(!h.staged&&!services.gasEffect(h.creature,false,services.surfaceStory(),e))return false;
+  std::vector<Creature*> attached;if(!h.staged){Stickers stickers(h.creature);Iterator it(&stickers);CI_LOOP(it)attached.push_back(*it);}
   for(auto* p:attached){InteractFlick flick(h.creature,0,0,-1000);p->stimulate(flick);}
   auto* actor=static_cast<BTeki*>(h.creature);
   i->second->collision.detach(actor);tracks.erase(i);
@@ -151,13 +154,33 @@ struct Native::Impl final:Engine {
   }
  }
 };
-Native::Native(Services& services):m(std::make_unique<Impl>(services)){instances().insert(this);}
+Native::Native(Services& services):Native(services,originalActors()){}
+Native::Native(Services& services,ActorRegistry& actors):m(std::make_unique<Impl>(services,actors)){instances().insert(this);}
 Native::~Native(){if(!m->tracks.empty()||m->provider.size()){std::fprintf(stderr,"GasHiba destroyed with live source actors\n");std::abort();}instances().erase(this);}
 Provider& Native::provider(){return m->provider;}
 bool Native::owns(const Creature* actor)const{return m->tracks.count(const_cast<Creature*>(actor))!=0;}
 void Native::onDeath(std::function<bool(Creature*,std::string&)> fn){m->deathCallback=std::move(fn);}
-void Native::forget(BTeki* actor){auto i=m->tracks.find(actor);if(i!=m->tracks.end()){std::string e;if(!m->services.gasEffect(actor,false,m->services.surfaceStory(),e)){std::fprintf(stderr,"P2_ORIGINAL_GAS forget refusal: %s\n",e.c_str());std::abort();}i->second->collision.detach(actor);m->tracks.erase(i);}m->provider.retiredNative(actor);}
-bool Native::tick(BTeki* actor,float dt,std::string& e){Heap heap;auto* h=m->provider.lookup(actor);if(!h)return fail(e,"GasHiba tick outside provider");auto& t=*m->tracks.at(actor);
+bool Native::preflightAllocateRestored(const CatalogRow& row,Generator* generator,const Snapshot& saved,std::string& e)const{
+ std::string bytes;if(!encodeSnapshot(saved,bytes,e)||!generator||row.enemy.source!=21||row.enemy.uid!=saved.identity.generator||saved.identity.catalog!=m->actors.fingerprint()||!saved.identity.epoch||!saved.identity.activation||saved.identity.ordinal>=row.enemy.count)return fail(e,"Gas no-init allocation exact source binding invalid");
+ auto h=std::make_unique<Host>();h->row=row;h->generator=generator;h->ordinal=saved.identity.ordinal;h->position=saved.position;h->health=saved.health;h->staged=true;
+ if(!m->provider.preflightRestoredHost(*h,e)||!m->loaded||saved.health>m->resource.parameters.maxHealth)return fail(e,"Gas no-init allocation resources/state refused");
+ e.clear();return true;
+}
+bool Native::allocateRestored(const CatalogRow& row,Generator* generator,const Snapshot& saved,BTeki*& out,std::string& e){
+ if(!preflightAllocateRestored(row,generator,saved,e))return false;
+ auto h=std::make_unique<Host>();h->row=row;h->generator=generator;h->ordinal=saved.identity.ordinal;h->position=saved.position;h->health=saved.health;h->staged=true;
+ if(!m->provider.preflightRestoredHost(*h,e)||!m->loaded||saved.health>m->resource.parameters.maxHealth)return fail(e,"Gas no-init allocation resources/state refused");
+ try{
+ if(!m->allocate(*h,saved.position,saved.facing,e)||!h->creature){m->discardUnadopted(*h);return fail(e,"Gas required saved body allocation failed");}
+ auto* actor=static_cast<BTeki*>(h->creature);m->tracks.at(actor)->checkpoint=std::make_unique<Snapshot>(saved);if(!m->provider.adoptRestoredHost(h,e)){m->discardUnadopted(*h);return false;}
+ out=actor;e.clear();return true;
+ }catch(...){if(h)m->discardUnadopted(*h);throw;}
+}
+bool Native::preflightPublishRestored(std::string& e)const{for(const auto& entry:m->tracks){auto* h=m->provider.lookup(entry.first);if(!h)return fail(e,"gas publication lost owned Host");if(!h->staged)continue;if(!entry.second->restoreApplied)return fail(e,"gas staged physical state not applied before publication");Snapshot checked;if(!snapshot(static_cast<BTeki*>(entry.first),checked,e))return false;std::string encoded,expected;if(!entry.second->checkpoint||!encodeSnapshot(checked,encoded,e)||!encodeSnapshot(*entry.second->checkpoint,expected,e)||encoded!=expected)return fail(e,"Gas publication differs from authenticated allocated snapshot");}e.clear();return true;}
+void Native::publishRestored() noexcept{for(const auto& entry:m->tracks){auto* h=m->provider.lookup(entry.first);if(h&&h->staged&&!entry.second->restoreApplied)std::abort();}for(auto& entry:m->tracks){auto* h=m->provider.lookup(entry.first);if(h&&h->staged){h->staged=false;auto* actor=static_cast<BTeki*>(entry.first);actor->setTekiOption(BTeki::TEKI_OPTION_VISIBLE);actor->setTekiOption(BTeki::TEKI_OPTION_SHAPE_VISIBLE);actor->setTekiOption(BTeki::TEKI_OPTION_ATARI);}}}
+bool Native::abortRestored(std::string& e){for(;;){Creature* actor=nullptr;for(const auto& entry:m->tracks){auto* h=m->provider.lookup(entry.first);if(h&&h->staged){actor=entry.first;break;}}if(!actor)break;auto* h=m->provider.lookup(actor);if(!m->provider.release(actor,h->token,e))return false;}e.clear();return true;}
+void Native::forget(BTeki* actor){auto i=m->tracks.find(actor);if(i!=m->tracks.end()){std::string e;auto* h=m->provider.lookup(actor);if((!h||!h->staged)&&!m->services.gasEffect(actor,false,m->services.surfaceStory(),e)){std::fprintf(stderr,"P2_ORIGINAL_GAS forget refusal: %s\n",e.c_str());std::abort();}i->second->collision.detach(actor);m->tracks.erase(i);}m->provider.retiredNative(actor);}
+bool Native::tick(BTeki* actor,float dt,std::string& e){Heap heap;auto* h=m->provider.lookup(actor);if(!h)return fail(e,"GasHiba tick outside provider");if(h->staged){e.clear();return true;}auto& t=*m->tracks.at(actor);
  actor->mGrid.updateGrid(actor->mSRT.t);actor->mGrid.updateAIGrid(actor->mSRT.t,false);
  // Retail attack has source loop [0,3] and finishMotion exits that loop to
  // duration4 before KEYEVENT_END. Wait is one static frame. No half-clip events.
@@ -166,13 +189,13 @@ bool Native::tick(BTeki* actor,float dt,std::string& e){Heap heap;auto* h=m->pro
  if(!m->provider.tick(actor,dt,event,e))return false;
  actor->mStoredDamage=0;actor->mHealth=h->health;t.presented.advance(dt);m->follow(*h);return true;
 }
-bool Native::draw(BTeki* actor,Graphics& gfx,const Matrix4f& view,std::string& e){auto* h=m->provider.lookup(actor);if(!h||!gfx.mCamera)return fail(e,"GasHiba draw outside owned native state");auto& t=*m->tracks.at(actor);const auto* clip=m->bank.clip(clips[t.motion]);
+bool Native::draw(BTeki* actor,Graphics& gfx,const Matrix4f& view,std::string& e){auto* h=m->provider.lookup(actor);if(!h||!gfx.mCamera)return fail(e,"GasHiba draw outside owned native state");if(h->staged){e.clear();return true;}auto& t=*m->tracks.at(actor);const auto* clip=m->bank.clip(clips[t.motion]);
  float frame=std::min(t.frame,float(m->motions[t.motion].duration-1));if(!clip||!p2pose::present(t.presented,clips[t.motion],clip->poses.size(),[clip](std::size_t i)->const p2pose::Pose&{return clip->poses[i];},clip->frames,frame,p2motion::tunables(),clip->seamContinuous).ok)return fail(e,"GasHiba source pose draw failed");
  gfx.useMatrix(Matrix4f::ident,0);auto& shape=t.geometry->shape;shape.updateAnim(gfx,view,nullptr,actor);shape.drawshape(gfx,*gfx.mCamera,nullptr);return true;
 }
 bool Native::snapshot(BTeki* actor,Snapshot& out,std::string& e)const{
  auto* h=m->provider.lookup(actor);auto t=m->tracks.find(actor);unsigned source=0,token=0;Snapshot next;
- if(!h||t==m->tracks.end()||!originalActors().query(actor,source,token,&next.identity)||source!=21||token!=h->token)return fail(e,"GasHiba checkpoint lacks exact original incarnation");
+ if(!h||t==m->tracks.end()||!m->actors.query(actor,source,token,&next.identity)||source!=21||token!=h->token)return fail(e,"GasHiba checkpoint lacks exact original incarnation");
  next.state=h->state;next.position=h->position;next.facing=actor->mFaceDirection;next.health=h->health;next.timer=h->timer;
  next.sourceFrame=t->second->frame;next.motion=t->second->motion;next.finishMotion=t->second->finish;next.checkLinks=h->checkLinks;next.living=h->flags.living;next.generatorDeathCommitted=t->second->generatorDeathCommitted;
  bool bridge=false;
@@ -183,7 +206,7 @@ bool Native::snapshot(BTeki* actor,Snapshot& out,std::string& e)const{
 bool Native::restore(BTeki* actor,const Snapshot& saved,std::string& e){
  std::string validated;if(!encodeSnapshot(saved,validated,e))return false;
  Heap heap;auto* h=m->provider.lookup(actor);auto t=m->tracks.find(actor);InstanceIdentity current;unsigned source=0,token=0;
- if(!h||t==m->tracks.end()||!originalActors().query(actor,source,token,&current)||source!=21||token!=h->token||!(current==saved.identity)||saved.motion>1)return fail(e,"GasHiba restore must bind exact saved source incarnation");
+ if(!h||t==m->tracks.end()||!m->actors.query(actor,source,token,&current)||source!=21||token!=h->token||!(current==saved.identity)||saved.motion>1)return fail(e,"GasHiba restore must bind exact saved source incarnation");
  for(float v:{saved.position.x,saved.position.y,saved.position.z,saved.facing,saved.health,saved.timer,saved.sourceFrame})if(!std::isfinite(v))return fail(e,"GasHiba checkpoint nonfinite state");
  const bool dead=saved.state==State::Dead,attack=saved.state==State::Attack;
  if((saved.state!=State::Dead&&saved.state!=State::Wait&&!attack)||saved.health<0||saved.health>h->parameters.maxHealth||saved.timer<0||saved.sourceFrame<0||saved.sourceFrame>m->motions[saved.motion].duration
@@ -200,7 +223,7 @@ bool Native::restore(BTeki* actor,const Snapshot& saved,std::string& e){
  auto& track=*t->second;track.frame=saved.sourceFrame;track.finish=saved.finishMotion;track.generatorDeathCommitted=dead;
  actor->mSRT.t.set(saved.position.x,saved.position.y,saved.position.z);actor->mFaceDirection=saved.facing;actor->mSRT.r.set(0,saved.facing,0);actor->mHealth=saved.health;actor->mStoredDamage=0;
  if(dead)actor->mGenerator=nullptr;
- m->follow(*h);if(!m->gasEffect(*h,attack,e))return false;e.clear();return true;
+ m->follow(*h);if(!h->staged&&!m->gasEffect(*h,attack,e))return false;track.restoreApplied=true;e.clear();return true;
 }
 } }
 namespace {

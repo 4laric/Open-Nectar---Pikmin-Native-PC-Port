@@ -26,7 +26,7 @@ public:
 };
 class Native {
 public:
- explicit Native(Services&);~Native();
+ explicit Native(Services&);Native(Services&,ActorRegistry&);~Native();
  Native(const Native&)=delete;Native& operator=(const Native&)=delete;
  Provider& provider();bool owns(const Creature*)const;
  bool tick(BTeki*,float,std::string&);
@@ -39,6 +39,16 @@ public:
  // Caller preflights the complete graph first and serializes its apply phase.
  // Resolves no new bodies; never invokes birth/release/contents/death/RNG.
  bool applyRestore(BTeki*,const Snapshot&,std::string&);
+ // Explicit registry/context must be provisional and scene unpublished.
+ // Never uses ordinary birth, source init, cargo creation or source RNG.
+ bool preflightAllocateNoInit(const CatalogRow&,Generator*,const Snapshot&,std::string&)const;
+ bool allocateNoInit(const CatalogRow&,Generator*,const Snapshot&,Creature*&,std::string&);
+ bool capturedWater(Creature*,const p2originalresource::SourceIdentity&,void*&,std::string&)const;
+ bool preflightPublish(std::string&)const;
+ void publishStaged()noexcept;
+ // Root aborts dependent Egg allocations first; this destroys Wisp bodies only.
+ // Provisional registry ownership/retirement belongs to the graph transaction.
+ void abortStaged()noexcept;
  void forget(BTeki*);
 private:
  struct Impl;std::unique_ptr<Impl> m;

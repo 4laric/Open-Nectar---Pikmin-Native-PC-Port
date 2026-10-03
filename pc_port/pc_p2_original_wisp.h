@@ -26,6 +26,7 @@ struct Host {
  State state=State::Stay;
  Position spawn[2]; float facing=0,pitch=0,timer=0,scale=0;
  bool released=false,dead=false;
+ bool staged=false; // transient checkpoint allocation; never persisted
 };
 // Each native operation below must act on the actual owned creature. Capture
 // follows the authored water joint; release leaves the SAME Egg in its manager,
@@ -65,6 +66,11 @@ public:
  // Only an actual flying-Pikmin collision in Move triggers Drop.
  bool flyingCollision(Creature*,bool isPikmin,std::string&);
  Host* lookup(Creature*);
+ // Checkpoint-only adoption. No allocate/attach/enter or source callbacks.
+ // Ownership transfers only on success; the caller owns failed allocations.
+ bool canAdoptRestored(const CatalogRow&,Generator*,unsigned ordinal,std::string&)const;
+ bool adoptRestoredHost(std::unique_ptr<Host>&,std::string&);
+ void publishRestoredHosts()noexcept;
 private:
  Engine& mEngine; Resources mResources;
  std::map<unsigned,CatalogRow> mAdmitted;

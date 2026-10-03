@@ -64,6 +64,17 @@ bool Provider::birth(const CatalogRow& row,Generator* generator,unsigned ordinal
  if(!born||!init(*h,e))return false;
  --left->second;mUsed.emplace(row.enemy.uid,ordinal);e.clear();return true;
 }
+bool Provider::preflightRestoredHost(const Host& h,std::string& e)const{
+ if(!mPrepared||!mReserved||!h.staged||h.token||!std::isfinite(h.health)||h.health<0||h.health>mResources.parameters.health)return fail(e,"Egg restored Host requires prepared reservation");
+ if(h.dependent){if(h.generator||h.dependentIdentity.empty()||!mCapturedRemaining||mDependentUsed.count(h.dependentIdentity))return fail(e,"Egg restored cargo outside exact dependency reservation");}
+ else {auto a=mAdmitted.find(h.row.enemy.uid);auto r=mRemaining.find(h.row.enemy.uid);if(!h.generator||a==mAdmitted.end()||!same(a->second,h.row)||r==mRemaining.end()||!r->second||h.ordinal>=h.row.enemy.count||mUsed.count({h.row.enemy.uid,h.ordinal}))return fail(e,"Egg restored field Host outside exact reservation");}
+ e.clear();return true;
+}
+bool Provider::adoptRestoredHost(std::unique_ptr<Host>& h,std::string& e){
+ if(!h||!preflightRestoredHost(*h,e)||!h->creature||mHosts.count(h->creature))return fail(e,"Egg restored Host adoption refused");
+ h->parameters=mResources.parameters;const bool dependent=h->dependent;const auto uid=h->row.enemy.uid,ordinal=h->ordinal;const auto identity=h->dependentIdentity;Creature* actor=h->creature;
+ mHosts.emplace(actor,std::move(h));if(dependent){--mCapturedRemaining;mDependentUsed.insert(identity);}else{--mRemaining.at(uid);mUsed.emplace(uid,ordinal);}e.clear();return true;
+}
 Host* Provider::lookup(Creature* actor){auto it=mHosts.find(actor);return it==mHosts.end()?nullptr:it->second.get();}
 void Provider::retiredNative(Creature* actor){mHosts.erase(actor);}
 bool Provider::bind(const CatalogRow& row,Creature* actor,unsigned token,std::string& e){
@@ -100,6 +111,7 @@ bool Provider::detach(Creature* actor,std::string& e){
 }
 bool Provider::tick(Creature* actor,float dt,Event event,std::string& e){
  Host* h=lookup(actor);if(!h||(!h->dependent&&!h->token)||!std::isfinite(dt)||dt<0)return fail(e,"Egg update lacks source identity or valid delta");
+ if(h->staged){e.clear();return true;}
  if(!mEngine.update(*h,dt,e))return false;
  // Native out-of-world physics can retire the actual body synchronously.
  // Such retirement is not Egg StateWait destruction or contents generation.
@@ -116,6 +128,7 @@ bool Provider::tick(Creature* actor,float dt,Event event,std::string& e){
 }
 bool Provider::damage(Creature* actor,float amount,float flick,std::string& e){
  auto* h=lookup(actor);if(!h||!std::isfinite(amount)||amount<0||!std::isfinite(flick)||flick<0)return fail(e,"invalid Egg damage callback");
+ if(h->staged){e.clear();return false;}
  if(!h->flags.invulnerable){h->health=std::max(0.0f,h->health-amount);h->flickTimer+=flick;}
  // Inherited EnemyBase callback returns true even when addDamage is blocked.
  e.clear();return true;
@@ -124,6 +137,6 @@ bool Provider::press(Creature* actor,std::string& e){if(!lookup(actor))return fa
 bool Provider::breakOnContact(Host& h,std::string& e){
  h.health=0;h.flags.lifeGauge=true;return mEngine.flags(h,h.flags,e);
 }
-bool Provider::bounce(Creature* actor,std::string& e){auto* h=lookup(actor);if(!h)return fail(e,"Egg bounce outside provider");if(h->falling||h->dropGroup)return breakOnContact(*h,e);e.clear();return true;}
-bool Provider::collision(Creature* actor,Creature* other,bool teki,std::string& e){auto* h=lookup(actor);if(!h)return fail(e,"Egg collision outside provider");if(h->dropGroup&&other&&!teki)return breakOnContact(*h,e);e.clear();return true;}
+bool Provider::bounce(Creature* actor,std::string& e){auto* h=lookup(actor);if(!h)return fail(e,"Egg bounce outside provider");if(!h->staged&&(h->falling||h->dropGroup))return breakOnContact(*h,e);e.clear();return true;}
+bool Provider::collision(Creature* actor,Creature* other,bool teki,std::string& e){auto* h=lookup(actor);if(!h)return fail(e,"Egg collision outside provider");if(!h->staged&&h->dropGroup&&other&&!teki)return breakOnContact(*h,e);e.clear();return true;}
 } }

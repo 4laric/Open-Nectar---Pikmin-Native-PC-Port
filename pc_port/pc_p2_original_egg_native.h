@@ -12,7 +12,7 @@ bool sourceGroundHeight(Position,float&,std::string&);
 // by their owners. Missing receivers/assets refuse admission, never proxy.
 class Services : public p2originalresource::Engine {
 public:
- virtual bool contentsReady(std::string&)=0;
+ virtual bool contentsReady(const P2EggConfig&,const p2originalresource::ContentsRequirements&,std::string&)=0;
  virtual bool breakEffectsReady(std::string& e){e.clear();return false;}
  virtual bool capturedIdentity(Creature*,std::string&,std::string&)=0;
  virtual bool capturedSourceIdentity(Creature*,p2originalresource::SourceIdentity&,std::string&)=0;
@@ -23,6 +23,7 @@ public:
 class Native {
 public:
  explicit Native(Services&);~Native();
+ Native(Services&,ActorRegistry&);
  Native(const Native&)=delete;Native& operator=(const Native&)=delete;
  Provider& provider();
  bool owns(const Creature*)const;
@@ -38,6 +39,14 @@ public:
  bool snapshot(BTeki*,Snapshot&,std::string&)const;
  bool preflight(BTeki*,const Snapshot&,std::string&)const;
  bool apply(BTeki*,const Snapshot&,std::string&);
+ bool allocateRestored(const CatalogRow&,Generator*,const Snapshot&,BTeki*&,std::string&);
+ bool allocateRestoredCargo(const CatalogRow& parentRow,const Snapshot&,BTeki*&,std::string&);
+ bool preflightAllocateRestored(const CatalogRow&,Generator*,const Snapshot&,std::string&)const;
+ bool preflightAllocateRestoredCargo(const CatalogRow& parentRow,const Snapshot&,std::string&)const;
+ bool bindRestoredCapture(BTeki*,Creature* actualParent,void* actualMatrix,std::string&);
+ void publishRestored() noexcept;
+ bool preflightPublishRestored(std::string&)const;
+ bool abortRestored(std::string&);
  void forget(BTeki*);
  p2originalresource::EggContents& contents();
 private:
