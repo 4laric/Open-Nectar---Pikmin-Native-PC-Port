@@ -12,6 +12,13 @@ int main()
     // One placement is a leader plus nine fellows.
     assert(GroupCount == 10 && fellowCount(GroupCount) == 9);
     assert(EggGroupCount == 10 && BigFootGroupCount == 30);
+    bool consumed = false;
+    assert(!consumeBigFootDrop(false, false, consumed) && !consumed);
+    assert(consumeBigFootDrop(true, false, consumed) && consumed);
+    assert(!consumeBigFootDrop(true, false, consumed));
+    consumed = false;
+    assert(!consumeBigFootDrop(true, true, consumed) && consumed);
+    assert(!consumeBigFootDrop(true, false, consumed));
     int attempts = 0;
     assert(bigFootGroup([&](int) { ++attempts; return false; }) == 0 && attempts == 1);
     attempts = 0;

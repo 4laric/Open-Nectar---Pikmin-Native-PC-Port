@@ -27,6 +27,11 @@ constexpr float TickSeconds = 1.0f / 30.0f; // P2 update tick (one tick per fram
 constexpr int GroupCount = 10;              // Obj::createFellow -> createGroup(this, 10, false)
 constexpr int EggGroupCount = 10;           // egg.cpp EGGDROP_Mitites
 constexpr int BigFootGroupCount = 30;       // TAMAGOMUSHI_GROUP_COUNT, Raging Long Legs drop
+inline bool consumeBigFootDrop(bool key2, bool heldPart, bool& consumed) {
+    if (!key2 || consumed) return false;
+    consumed = true;
+    return !heldPart; // source mPelletDropCode.isNull()
+}
 constexpr float AppearRange = 120.0f;       // proper fp02 (disc), isFound search radius
 constexpr float PanicRadius = 150.0f;       // Parms::mPanicInduceRadius, appearPanic
 constexpr float SurvivalTicks = 180.0f;     // proper fp01 (disc)
