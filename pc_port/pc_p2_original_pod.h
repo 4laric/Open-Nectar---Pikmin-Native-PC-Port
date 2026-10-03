@@ -2,6 +2,7 @@
 #include "pc_p2_retail_cave_context.h"
 #include <functional>
 class Pellet;
+struct PelletGoalState;
 struct Suckable;
 
 namespace p2originalpod {
@@ -56,8 +57,13 @@ unsigned pc_p2_original_pod_pending();
 bool pc_p2_original_pod_snapshot(const p2retail::SceneIdentity&,p2originalpod::Snapshot&);
 bool pc_p2_original_pod_release(std::string&);
 
-// Engine seam entrypoints. Consumers use completed(), not these transitions.
-void pc_p2_original_pod_suction_begin(Pellet*);
-bool pc_p2_original_pod_suction_done(Pellet*);
-void pc_p2_original_pod_suction_cleanup(Pellet*);
+// Only the actual native goal state may issue receipt authority. Consumers
+// cannot invoke these transitions or construct a synthetic completion token.
+struct P2OriginalPodNativeSeam {
+private:
+ friend struct PelletGoalState;
+ static void begin(Pellet*);
+ static bool done(Pellet*,const PelletGoalState&);
+ static void cleanup(Pellet*);
+};
 void pc_p2_original_pod_forget_pellet(Pellet*);

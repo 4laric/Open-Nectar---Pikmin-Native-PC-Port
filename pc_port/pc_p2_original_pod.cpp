@@ -178,14 +178,16 @@ bool pc_p2_original_pod_release(std::string& e){
  if(completing||pc_p2_original_pod_pending())return reject(e,"pod_pending_cargo");
  clear();e.clear();return true;
 }
-void pc_p2_original_pod_suction_begin(Pellet* p){
+void P2OriginalPodNativeSeam::begin(Pellet* p){
  auto it=cargo.find(p);if(it==cargo.end())return;
  if(it->second.phase!=Phase::Bound||p->mTargetGoal!=pc_p2_original_pod_goal_for(p))fail("pod_stale_or_duplicate_suction");
  it->second.phase=Phase::Sucking;everSucked=true;
 }
-bool pc_p2_original_pod_suction_done(Pellet* p){
+bool P2OriginalPodNativeSeam::done(Pellet* p,const PelletGoalState& state){
  auto it=cargo.find(p);if(it==cargo.end())return false;
  if(completing||it->second.phase!=Phase::Sucking||p->getState()!=PELSTATE_Goal||!p->isAlive()
+  ||p->mCurrentState!=&state||!std::isfinite(state.mSuckProgress)||state.mSuckProgress<1
+  ||state.mWaitTimer>0||state.mIsFirstMove||state.mTargetIsShip
   ||p->mTargetGoal!=pc_p2_original_pod_goal_for(p))fail("pod_unverified_completed_suction");
  completing=p;std::string e;auto callback=it->second.callback;bool ok=callback(p,pod,e);completing=nullptr;
  if(!ok)fail(e.empty()?"canonical_pod_receipt_failed":e.c_str());
@@ -194,7 +196,7 @@ bool pc_p2_original_pod_suction_done(Pellet* p){
  std::printf("P2_ORIGINAL_POD_SUCK_DONE cave=%s floor=%u instance=%s epoch=%llu\n",config.floor.cave.c_str(),config.floor.floor,it->second.birth.instance.c_str(),static_cast<unsigned long long>(it->second.birth.epoch));
  return true;
 }
-void pc_p2_original_pod_suction_cleanup(Pellet* p){auto it=cargo.find(p);if(it!=cargo.end()&&it->second.phase==Phase::Sucking)it->second.phase=Phase::Bound;}
+void P2OriginalPodNativeSeam::cleanup(Pellet* p){auto it=cargo.find(p);if(it!=cargo.end()&&it->second.phase==Phase::Sucking)it->second.phase=Phase::Bound;}
 void pc_p2_original_pod_forget_pellet(Pellet* p){
  auto it=cargo.find(p);if(it==cargo.end())return;
  if(it->second.phase==Phase::Completed)cargo.erase(it);
