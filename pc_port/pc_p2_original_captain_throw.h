@@ -18,10 +18,14 @@ struct ActorFrame {
  Vec3 position,velocity,hand,cursor; float face=0,delta=0,sceneAnimationTimer=0;
  bool controller=false,heldA=false,heldB=false,pressedA=false,pressedB=false,releasedB=false;
  bool right=false,left=false,up=false,down=false;
+ // Literal source Navi::mThrowTimer; absent is refusal, never P1 cooldown.
+ std::optional<std::uint8_t> throwDisableFrames;
  std::optional<Vec3> firstFormationSlot;
 };
 struct WhistleFrame { Vec3 cursor; float radius=0; bool timedOut=false; };
-enum class Feedback { GatherStart, GatherLoop, GatherStop, Grab, PikiChange, StopHold, Throw };
+enum class GatherMode { Player, Automatic };
+enum class Feedback { GatherStart, GatherLoop, GatherStop, AutomaticGatherStart,
+ AutomaticGatherStop, Grab, PikiChange, StopHold, Throw };
 // Canonical original body/party owner supplies concrete methods. Each query
 // must authenticate actual source Piki lifetime/FSM/party; no P1 action
 // delegates. scene() MUST be the same object as the canonical LoadedScene.
@@ -57,8 +61,13 @@ public:
 void registerThrowStates(NaviStateMachine&);
 } }
 // Canonical source body/party lookup; missing producer is an explicit refusal.
-const p2original::captain::actions::ActionSource* pc_p2_original_captain_action_source(const Navi*);
+p2original::captain::actions::ActionSource* pc_p2_original_captain_action_source(const Navi*);
 // Source rhnd pose must already be updated. Root wires this actual animation
 // callback; no synthetic hand coordinates or P1 animation delegates.
 bool pc_p2_original_captain_throw_after_animation(Navi*,std::string&);
+// Root calls in the actual source animation phase, even when FSM exec returns
+// early. Call after-animation only AFTER the resulting rhnd pose is refreshed.
+bool pc_p2_original_captain_throw_advance_animation(Navi*,float frames,std::string&);
 bool pc_p2_original_captain_throw_preflight(Navi*,p2original::captain::StateId,std::string&);
+// Typed retail NaviGatherArg._00; transfer is scoped to canonical actor/scene.
+bool pc_p2_original_captain_begin_gather(Navi*,p2original::captain::actions::GatherMode,std::string&);
