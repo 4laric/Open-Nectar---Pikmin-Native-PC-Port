@@ -64,6 +64,7 @@ public:int idle()override{
         &&(walk||n->getCurrState()->getID()==NAVISTATE_Gather)
         &&!movie&&!gameflow.mPauseAll&&!gameflow.mIsUIOverlayActive;
     int living=0,formation=0,loose=0;float liveX=0,liveZ=0,looseX=0,looseZ=0;
+    float targetX=0,targetZ=0,nearest=1e30f;
     if(pikiMgr){Iterator it(pikiMgr);CI_LOOP(it){auto* p=static_cast<Piki*>(*it);if(p->isAlive()){
         ++living;liveX+=p->mSRT.t.x;liveZ+=p->mSRT.t.z;
         if(frames%60==0)std::printf("CAVE_VISIBLE_PIKI frame=%d uid=%u state=%d mode=%d callable=%d stick=%d owner=%d player=%d health=%.9g xyz=%.3f,%.3f,%.3f kinoko=%d\n",
@@ -71,7 +72,10 @@ public:int idle()override{
             p->getCurrState()?p->getCurrState()->getID():-1,p->mMode,int(p->mIsCallable),int(p->isStickTo()),
             p->mNavi?p->mNavi->getNaviIndex():-1,p->mPlayerId,p->mHealth,p->mSRT.t.x,p->mSRT.t.y,p->mSRT.t.z,int(p->isKinoko()));
         if(p->mMode==PikiMode::FormationMode)++formation;
-        else{++loose;looseX+=p->mSRT.t.x;looseZ+=p->mSRT.t.z;}}}}
+        else{++loose;looseX+=p->mSRT.t.x;looseZ+=p->mSRT.t.z;
+            if(n){const float d=std::hypot(p->mSRT.t.x-n->mSRT.t.x,p->mSRT.t.z-n->mSRT.t.z);
+                if(!std::isfinite(d))finish(18);
+                if(d<nearest){nearest=d;targetX=p->mSRT.t.x;targetZ=p->mSRT.t.z;}}}}}}
     if(n&&n->getCurrState())p2_fixture_require_captain(GameStat::orimaDead,
         n->getCurrState()->getID()==NAVISTATE_Dead,n->mHealth,frames);
     int a=0,b=0,x=0;float sx=0,sy=0;
@@ -82,7 +86,7 @@ public:int idle()override{
         return len;
     };
     auto gather=[&](){
-        const float tx=loose?looseX/loose:liveX/living,tz=loose?looseZ/loose:liveZ/living;
+        const float tx=loose?targetX:liveX/living,tz=loose?targetZ:liveZ/living;
         const float bx=tx-n->mSRT.t.x,bz=tz-n->mSRT.t.z;
         b=1;
         if(!std::isfinite(bx)||!std::isfinite(bz))finish(18);
@@ -204,8 +208,8 @@ public:int idle()override{
     if(frames%30==0&&n){std::printf("CAVE_VISIBLE_OBSERVER frame=%d stage=%d floor=%d ready=%d living=%d formation=%d xyz=%.3f,%.3f,%.3f UI=%d\n",
         frames,stage,boundary.floor,int(ready),living,formation,n->mSRT.t.x,n->mSRT.t.y,n->mSRT.t.z,int(choice.active));std::fflush(nullptr);}
     if(frames%60==0&&n)std::printf("CAVE_VISIBLE_CURSOR frame=%d cursor=%.3f,%.3f target=%.3f,%.3f loose=%d control_mode=%d\n",
-        frames,n->mCursorWorldPos.x,n->mCursorWorldPos.z,living?(loose?looseX/loose:liveX/living):0,
-        living?(loose?looseZ/loose:liveZ/living):0,loose,int(pc_window_get_control_mode()));
+        frames,n->mCursorWorldPos.x,n->mCursorWorldPos.z,living?(loose?targetX:liveX/living):0,
+        living?(loose?targetZ:liveZ/living):0,loose,int(pc_window_get_control_mode()));
 
     if(std::chrono::steady_clock::now()-start>std::chrono::seconds(180)){std::puts("P2_CAVE_VISIBLE_RUNTIME TIMEOUT");finish(2);}
     ++frames;return PlugPikiApp::idle();
