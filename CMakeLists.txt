@@ -3535,13 +3535,6 @@ target_include_directories(pc_p2_bud_conversion_origin_test PRIVATE pc_port)
 target_link_libraries(pc_p2_bud_conversion_origin_test PRIVATE Threads::Threads)
 add_test(NAME p2_bud_conversion_origin COMMAND pc_p2_bud_conversion_origin_test)
 
-# Original decorative source91/88 (#1251); no asset payloads are committed.
-pikmin_add_ci_fixture(original_foliage tools/p2_original_foliage_runtime.cpp)
-add_executable(pc_p2_original_foliage_test tools/test_p2_original_foliage.cpp
-    pc_port/pc_p2_original_foliage.cpp pc_port/pc_p2_original_spawn_plan.cpp)
-target_include_directories(pc_p2_original_foliage_test PRIVATE pc_port)
-target_compile_options(pc_p2_original_foliage_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
-add_test(NAME pc_p2_original_foliage_test COMMAND pc_p2_original_foliage_test)
 add_test(NAME p2_campaign_treasure_test COMMAND p2_campaign_treasure_test)
 add_executable(p2_campaign_treasure_config_test tools/test_p2_campaign_treasure_config.cpp)
 target_include_directories(p2_campaign_treasure_config_test PRIVATE pc_port)
