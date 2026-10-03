@@ -6,9 +6,10 @@ class Creature;class Generator;struct Vector3f;
 namespace p2retail {
 struct FamilyOps {
  // Each leaf verifies real resources and whole-family actor/corpse capacity.
- std::function<bool(unsigned,std::string&)> prepare;
- std::function<bool(Generator*,const Vector3f&,float,Creature*&,bool& suppressed,std::string&)> birth;
- std::function<bool(Creature*,unsigned,std::string&)> bind,release;
+ std::function<bool(const std::vector<p2original::CatalogRow>&,std::string&)> prepare;
+ std::function<bool(const p2original::CatalogRow&,Generator*,unsigned,const Vector3f&,float,Creature*&,bool& suppressed,std::string&)> birth;
+ std::function<bool(const p2original::CatalogRow&,Creature*,unsigned,std::string&)> bind;
+ std::function<bool(Creature*,unsigned,std::string&)> release;
  std::function<bool(std::string&)> cancel;
  // After registry retirement, before native manager address reuse.
  std::function<bool(Creature*,std::string&)> retired;
@@ -35,6 +36,7 @@ public:
  NativeFloor(FloorPlan,SceneOps&);~NativeFloor();
  NativeFloor(const NativeFloor&)=delete;NativeFloor&operator=(const NativeFloor&)=delete;
  bool family(unsigned source,FamilyOps,std::string&);
+ bool familyGroup(const std::vector<unsigned>& sources,FamilyOps,std::string&);
  bool preflight(const CaveDescriptor&,const FloorDefinition&,unsigned,const SceneIdentity&,std::string&)override;
  bool install(const CaveDescriptor&,const FloorDefinition&,unsigned,const SceneIdentity&,
               const std::vector<BirthIdentity>&,std::vector<LiveBinding>&,std::string&)override;

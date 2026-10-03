@@ -13,8 +13,8 @@ std::set<NativeFloor*>& owners(){static std::set<NativeFloor*> value;return valu
 bool refuse(std::string& error,const char* text){error=text;return false;}
 }
 struct NativeFloor::Impl {
- FloorPlan plan;SceneOps& scene;std::map<unsigned,FamilyOps> families;
- std::set<unsigned> preparedFamilies;
+ FloorPlan plan;SceneOps& scene;std::map<unsigned,std::shared_ptr<FamilyOps>> families;
+ std::set<std::shared_ptr<FamilyOps>> preparedFamilies;
  Snapshot context;bool prepared=false,begun=false,committed=false,cleaning=false;
  struct Source {p2original::CatalogRow row;std::unique_ptr<Generator> generator;std::uint64_t handle=0;};
  struct Actor {Creature* actor=nullptr;unsigned source=0,token=0;std::uint64_t handle=0;
@@ -24,21 +24,29 @@ struct NativeFloor::Impl {
 };
 NativeFloor::NativeFloor(FloorPlan plan,SceneOps& scene):m(new Impl(std::move(plan),scene)){
  FamilyOps snow;
- snow.prepare=[](unsigned count,std::string& e){return pc_p2_snow_prepare_cave(e)&&pc_p2_snow_reserve_cave(count,e);};
- snow.birth=[](Generator* gen,const Vector3f& p,float yaw,Creature*& out,bool& suppressed,std::string& e){suppressed=false;return pc_p2_snow_birth_cave(gen,p,yaw,out,e);};
- snow.bind=pc_p2_snow_bind_cave;snow.release=pc_p2_snow_release_cave;
+ snow.prepare=[](const std::vector<p2original::CatalogRow>& rows,std::string& e){unsigned count=0;for(const auto& row:rows)count+=row.enemy.count;return pc_p2_snow_prepare_cave(e)&&pc_p2_snow_reserve_cave(count,e);};
+ snow.birth=[](const p2original::CatalogRow&,Generator* gen,unsigned,const Vector3f& p,float yaw,Creature*& out,bool& suppressed,std::string& e){suppressed=false;return pc_p2_snow_birth_cave(gen,p,yaw,out,e);};
+ snow.bind=[](const p2original::CatalogRow&,Creature* actor,unsigned token,std::string& e){return pc_p2_snow_bind_cave(actor,token,e);};snow.release=pc_p2_snow_release_cave;
  snow.retired=[](Creature*,std::string&){return true;}; // Snow native forget clears its own leaf ownership.
  snow.cancel=[](std::string&){pc_p2_original_snow_resources_reset();return true;};
- m->families.emplace(45,std::move(snow));owners().insert(this);
+ m->families.emplace(45,std::make_shared<FamilyOps>(std::move(snow)));owners().insert(this);
 }
 NativeFloor::~NativeFloor(){
  if(!m->actors.empty()||!m->sources.empty()||m->begun||m->prepared){std::fputs("P2_RETAIL_FLOOR live owner destroyed\n",stderr);std::abort();}
  owners().erase(this);
 }
 bool NativeFloor::family(unsigned source,FamilyOps ops,std::string& error){
- if(m->prepared||!ops.prepare||!ops.birth||!ops.bind||!ops.release||!ops.cancel||!ops.retired||m->families.count(source))
+ return familyGroup({source},std::move(ops),error);
+}
+bool NativeFloor::familyGroup(const std::vector<unsigned>& sources,FamilyOps ops,std::string& error){
+ if(m->prepared||sources.empty()||!ops.prepare||!ops.birth||!ops.bind||!ops.release||!ops.cancel||!ops.retired)
   return refuse(error,"retail family registration invalid/already prepared");
- m->families.emplace(source,std::move(ops));error.clear();return true;
+ std::set<unsigned> unique;
+ for(unsigned source:sources)if(m->families.count(source)||!unique.insert(source).second)
+  return refuse(error,"retail duplicate physical family");
+ auto shared=std::make_shared<FamilyOps>(std::move(ops));
+ for(unsigned source:sources)m->families.emplace(source,shared);
+ error.clear();return true;
 }
 bool NativeFloor::preflight(const CaveDescriptor& cave,const FloorDefinition& floor,unsigned number,const SceneIdentity& identity,std::string& error){
  FloorPlan verified;
@@ -48,11 +56,14 @@ bool NativeFloor::preflight(const CaveDescriptor& cave,const FloorDefinition& fl
     m->plan.cave!=cave.cave||m->plan.floor!=number||identity.layoutSha256!=m->plan.layoutSha256||
     m->plan.sourceSha256!=cave.sourceSha256||m->plan.catalogSha256!=cave.catalogSha256)
   return refuse(error,"retail floor native scene/source mismatch");
- std::map<unsigned,unsigned> counts;
+ std::vector<p2original::CatalogRow> rows;
+ if(!catalogRows(cave.cave,number,rows,error))return false;
+ std::map<std::shared_ptr<FamilyOps>,std::vector<p2original::CatalogRow>> groups;
  for(const auto& row:floor.rows)if(row.kind!="loose_treasure"){
   if(row.sourceId<0||!m->families.count(unsigned(row.sourceId)))return refuse(error,"retail literal physical family unsupported");
-  counts[unsigned(row.sourceId)]+=row.minimum();
+
  }
+ for(const auto& row:rows)groups[m->families.at(row.enemy.source)].push_back(row);
  bool story=false,inCave=false;
  if(!m->scene.mode(identity,story,inCave,error)||!inCave)return refuse(error,"retail floor actual cave mode unavailable");
  m->context={cave.cave,cave.source,cave.sourceSha256,cave.catalogSha256,number,cave.maxFloor,identity,story,inCave};
@@ -60,13 +71,13 @@ bool NativeFloor::preflight(const CaveDescriptor& cave,const FloorDefinition& fl
  // geometry/routes, source anchors, cargo assets/profiles and receiver capacity.
  if(!m->scene.preflight(m->plan,m->context,error))return false;
  m->prepared=true;
- for(const auto& count:counts){
-  if(!m->families.at(count.first).prepare(count.second,error)){
+ for(const auto& group:groups){
+  if(!group.first->prepare(group.second,error)){
    // Include the failed leaf: a partial resource reservation belongs to it.
-   m->preparedFamilies.insert(count.first);
+   m->preparedFamilies.insert(group.first);
    return false; // FloorSession invokes release and retains a failed cleanup.
   }
-  m->preparedFamilies.insert(count.first);
+  m->preparedFamilies.insert(group.first);
  }
  error.clear();return true;
 }
@@ -113,8 +124,8 @@ bool NativeFloor::install(const CaveDescriptor& cave,const FloorDefinition& floo
    if(!std::isfinite(position.y))return refuse(error,"retail native map has no source ground");
    Impl::Actor actor;actor.source=unsigned(row.sourceId);actor.origin=*origin;bool suppressed=false;
    const float yaw=p.yawDegrees*0.01745329251994329577f;
-   auto& family=m->families.at(actor.source);
-   bool born=family.birth(source->generator.get(),position,yaw,actor.actor,suppressed,error);
+   auto& family=*m->families.at(actor.source);
+   bool born=family.birth(source->row,source->generator.get(),origin->ordinal,position,yaw,actor.actor,suppressed,error);
    // Preserve every partial native allocation for bounded rollback.
    if(actor.actor)m->actors.push_back(actor);
    if(!born)return false;
@@ -126,7 +137,7 @@ bool NativeFloor::install(const CaveDescriptor& cave,const FloorDefinition& floo
     auto& owned=m->actors.back();
     if(!registry.actorActivation(owned.actor,source->row.enemy.uid,origin->ordinal,origin->epoch,origin->activation,owned.token,owned.handle,error))return false;
     owned.registered=true;++source->generator->mAliveCount;
-    if(!family.bind(owned.actor,owned.token,error))return false;
+    if(!family.bind(source->row,owned.actor,owned.token,error))return false;
     binding.actor=owned.actor;
    }
   }
@@ -159,7 +170,7 @@ bool NativeFloor::retired(Creature* pointer,std::string& error){
   if(!m->cleaning&&m->committed&&!m->scene.retired(actor.origin,m->context,error))return false;
   if(actor.registered&&!p2original::originalActors().retire(pointer,actor.handle))return refuse(error,"retail native association retirement failed");
   actor.registered=false;
-  if(!m->families.at(actor.source).retired(pointer,error))return false;
+  if(!m->families.at(actor.source)->retired(pointer,error))return false;
   actor.actor=nullptr;error.clear();return true;
  }
  error.clear();return true;
@@ -171,7 +182,7 @@ bool NativeFloor::release(std::string& error){
  m->begun=false;m->committed=false;m->cleaning=true;
  auto& registry=p2original::originalActors();
  for(auto& actor:m->actors)if(actor.actor){
-  Creature* pointer=actor.actor;auto& family=m->families.at(actor.source);
+  Creature* pointer=actor.actor;auto& family=*m->families.at(actor.source);
   if(family.retireBeforeRelease&&actor.registered){
    if(!registry.retire(pointer,actor.handle))return refuse(error,"retail pre-release registry retirement failed");
    actor.registered=false;
@@ -186,7 +197,7 @@ bool NativeFloor::release(std::string& error){
   source.handle=0;
  }
  m->sources.clear();
- for(unsigned family:m->preparedFamilies)if(!m->families.at(family).cancel(error))return false;
+ for(const auto& family:m->preparedFamilies)if(!family->cancel(error))return false;
  m->preparedFamilies.clear();
  m->prepared=false;m->cleaning=false;error.clear();return true;
 }
