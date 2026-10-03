@@ -35,6 +35,7 @@
 // modified.
 #include "pc_p2_catfish.h"
 #include "pc_p2_original_actor.h"
+#include "pc_p2_original_catfish_bank.h"
 #include "pc_p2_original_catfish_native.h"
 #include "pc_p2_batch3.h"
 #include <sstream>
@@ -469,6 +470,8 @@ bool pc_p2_catfish_clip(const BTeki* actor, const char*& name, float& phase) {
 
 bool pc_p2_catfish_original_resources(std::string& error) {
     if (!gsys) { error="Catfish system unavailable"; return false; }
+    std::ifstream authored("p2-aquatic-bank.txt");
+    if(!p2original::catfish::validateCatfishBank(authored,error))return false;
     if (!pc_p2_batch3_original_resources(26,error)) return false;
     std::ifstream input("p2-aquatic-bank.txt"); std::string line;
     if (!std::getline(input,line) || line!="P2_AQUATIC_BANK_1") { error="Catfish authored bank header missing"; return false; }
