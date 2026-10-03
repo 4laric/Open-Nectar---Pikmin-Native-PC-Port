@@ -1,6 +1,7 @@
 #pragma once
 #include "pc_p2_retail_treasure_profile.h"
 #include "pc_p2_campaign_treasure_held_config.h"
+#include "pc_p2_original_pod_sources.h"
 #include <functional>
 
 namespace p2retailtreasure {
@@ -60,7 +61,17 @@ inline bool verifyAssetBank(const std::string& master,const std::string& expecte
     }
     if(!receiver)return fail("aggregate literal ship missing");
     if(!input("assets/dataDir/courses/pikmin2treasures/pod.mod",32u*1024u*1024u,bytes)
-       ||p2treasureplacements::hash(bytes)!=next.held.podHash)return fail("aggregate legacy held asset mismatch");
+       ||p2treasureplacements::hash(bytes)!=next.held.podHash)return fail("aggregate historical held dependency mismatch");
+    if(!input("assets/dataDir/courses/pikmin2retailpod/pod.mod",32u*1024u*1024u,bytes)
+       ||p2treasureplacements::hash(bytes)!=p2originalpod::convertedModelSha256)return fail("aggregate original Pod model mismatch");
+    for(const auto& role:std::vector<std::pair<std::string,std::string>>{
+        {base+"pod/arc.szs",p2originalpod::archiveSha256},
+        {base+"pod/pot.bmd",p2originalpod::originalModelSha256},
+        {base+"pod/coll.txt",p2originalpod::originalCollisionSha256},
+        {base+"pod/texts.szs",p2originalpod::originalTextsSha256}}) {
+        if(!input(role.first,32u*1024u*1024u,bytes)||p2treasureplacements::hash(bytes)!=role.second)
+            return fail("aggregate original Pod source bytes changed");
+    }
     std::map<std::string,std::string> configs;
     for(const char* kind:{"otakara","item"}) {
         if(!input(base+"source/user/Abe/Pellet/us/"+kind+"_config.txt",128u*1024u,bytes))return fail("aggregate original profile missing");
