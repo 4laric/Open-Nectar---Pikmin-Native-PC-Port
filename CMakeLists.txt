@@ -267,6 +267,8 @@ set(PC_PORT_SOURCES
     pc_port/pc_p2_original_catalog.cpp
     pc_port/pc_p2_original_actor.cpp
     pc_port/pc_p2_original_lifecycle.cpp
+    pc_port/pc_p2_original_cannon.cpp
+    pc_port/pc_p2_original_cannon_native.cpp
     pc_port/pc_p2_original_group.cpp
     pc_port/pc_p2_original_progress.cpp
     pc_port/pc_p2_original_group_engine.cpp
@@ -3312,3 +3314,14 @@ add_executable(p2_campaign_economy_test tools/test_p2_campaign_economy.cpp)
 target_include_directories(p2_campaign_economy_test PRIVATE pc_port)
 target_compile_options(p2_campaign_economy_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
 add_test(NAME p2_campaign_economy_test COMMAND p2_campaign_economy_test)
+
+add_executable(pc_p2_original_cannon_test tools/test_p2_original_cannon.cpp
+    pc_port/pc_p2_original_cannon.cpp pc_port/pc_p2_original_spawn_plan.cpp
+    pc_port/pc_p2_original_drop.cpp pc_port/pc_p2_original_catalog.cpp)
+target_include_directories(pc_p2_original_cannon_test PRIVATE pc_port)
+target_compile_options(pc_p2_original_cannon_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME pc_p2_original_cannon_test COMMAND pc_p2_original_cannon_test)
+add_executable(pc_p2_original_cannon_stones_test tools/test_p2_original_cannon_stones.cpp pc_port/pc_p2_cannon_stone.cpp)
+target_include_directories(pc_p2_original_cannon_stones_test PRIVATE pc_port)
+target_compile_options(pc_p2_original_cannon_stones_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME pc_p2_original_cannon_stones_test COMMAND pc_p2_original_cannon_stones_test)
