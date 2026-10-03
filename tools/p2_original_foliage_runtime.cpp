@@ -109,7 +109,9 @@ class FoliageApp final:public PlugPikiApp {
   HeapScope heap;std::string e;require(originalActors().rows().empty(),"fixture does not replace another original course");
   // Literal source/type/tail and UID from day5 rows #0/#4. These nearby
   // positions are fixture relocations, not proof of original course geometry.
-  Position a{n->mSRT.t.x+90,0,n->mSRT.t.z},b{n->mSRT.t.x-90,0,n->mSRT.t.z};
+  // The west site sits above a steep tutorial terrain edge. Put both control
+  // plants on the east approach used by the successfully surveyed walk.
+  Position a{n->mSRT.t.x+90,0,n->mSRT.t.z},b{n->mSRT.t.x+90,0,n->mSRT.t.z+70};
   a.y=mapMgr->getMinY(a.x,a.z,true);b.y=mapMgr->getMinY(b.x,b.z,true);require(std::isfinite(a.y)&&std::isfinite(b.y),"actual native arena floor");
   rows={literal(91,0,1390538979u,a,0),literal(88,4,1381420794u,b,95)};
   auto zero=literal(91,0,originalGeneratorUid("fixture/foliage-zero#0"),a,0);zero.course="fixture";zero.member="foliage-zero";zero.sourceKey="fixture/foliage-zero#0";zero.enemy.count=0;rows.push_back(zero);
