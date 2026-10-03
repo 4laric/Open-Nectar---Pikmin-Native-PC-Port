@@ -57,6 +57,29 @@ struct WorkProbe:ActBreakWall {
  explicit WorkProbe(Piki* p):ActBreakWall(p){}
  void work(BuildingItem* b){mWall=b;mWorkTimer=0;mStartAttackTime=gameflow.mWorldClock.mCurrentGameMinute;mIsAttackReady=true;mFailAttackCounter=0;breakWall();}
 };
+// Own the constructor's private heap and stage entries; never install this
+// object as the global cache. This only proves the creature-write segment.
+struct CacheProbe:GeneratorCache {
+ CacheProbe(){initGame();}
+ ~CacheProbe(){
+  for(auto* list:{&mAliveCacheList,&mDeadCacheList})while(list->mChild){auto* entry=static_cast<Cache*>(list->mChild);entry->del();delete entry;}
+  delete[] mCacheHeap;mCacheHeap=nullptr;
+ }
+ void verifyRetired(Generator* g,const std::array<unsigned char,112>& expected){
+  require(g->mCarryOverFlags==3&&!Generator::ramMode,"literal flags3 and ordinary stream mode before isolated cache control");
+  auto* originalGlobal=generatorCache;int originalIndex=g->mGeneratorListIdx;
+  std::array<unsigned char,112> direct{};RamStream raw(direct.data(),int(direct.size()));g->saveCreature(raw);
+  require(raw.getPosition()==112&&direct==expected,"Generator saveCreature flags3 emits exactly112 without XYZ prefix");
+  g->mGeneratorListIdx=7;beginSave(STAGE_Practice);saveGeneratorCreature(g);endSave();g->mGeneratorListIdx=originalIndex;
+  auto* entry=findCache(mAliveCacheList,STAGE_Practice);
+  require(entry&&mUsedSize==116&&mFreeSize==mTotalCacheSize-116&&entry->mCacheHeapOffset==0&&entry->mTotalCacheSize==116&&entry->mCreatureCacheSize==116&&entry->mCreatureCount==1&&entry->mGenCacheSize==0&&entry->mGenCount==0,"isolated cache retains one index4 plus retired112 segment");
+  RamStream segment(mCacheHeap,mUsedSize);require(segment.readInt()==7&&std::memcmp(mCacheHeap+4,expected.data(),112)==0,"isolated cache index and retired bytes exact");
+  std::array<unsigned char,36> metadata{};RamStream card(metadata.data(),int(metadata.size()));entry->saveCard(card);
+  require(card.getPosition()==36,"cache entry card metadata remains nine native ints");RamStream fields(metadata.data(),int(metadata.size()));
+  const int values[]={STAGE_Practice,0,116,0,116,0,0,1,0};for(int value:values)require(fields.readInt()==value,"isolated cache card metadata matches creature segment");
+  require(!Generator::ramMode&&generatorCache==originalGlobal&&g->mGeneratorListIdx==originalIndex,"cache control restores stream mode/index and preserves global cache");
+ }
+};
 void run(){
  // idle() enters without an allocation heap; all fixture objects/preflight
  // resources belong to the private App heap. This process ends with _Exit.
@@ -97,6 +120,7 @@ void run(){
   auto lowering=water();require(lowering.boxes[size_t(sourceBox)].phase==p2water::Phase::Lowering,"authored clip end requests original water lowering");
   auto deadDay=g->mLatestSpawnDay;itemMgr->update();require(g->mLatestSpawnDay==deadDay,"retirement death bookkeeping occurs once");savedDay[i]=deadDay;
   RamStream carrierSave(retired[i].data(),int(retired[i].size()));b->doSave(carrierSave);require(carrierSave.getPosition()==112,"direct retired carrier cache112 bytes");
+  {CacheProbe isolated;isolated.verifyRetired(g,retired[i]);} // Explicitly frees private heap and every cache entry.
   pc_p2_surface_water_update(0.25f);auto drainPending=water();require(pc_p2_surface_water_restore(drainPending)&&sameWater(drainPending,water()),"public pending water restore retains exact timer and lowering");
   for(int tick=0;tick<100&&water().boxes[size_t(sourceBox)].phase!=p2water::Phase::Dead;++tick)pc_p2_surface_water_update(0.25f);
   require(water().boxes[size_t(sourceBox)].phase==p2water::Phase::Dead,"bounded drain reaches source dead state");
@@ -110,7 +134,7 @@ void run(){
  // Replay previously serialized pending bytes to exercise dying-node teardown.
  auto* pendingGenerator=inventory.front();int calendar=pendingGenerator->mLatestSpawnDay;RamStream replay(pendingBytes.front().data(),112);bool handled=false;checked(pc_p2_original_barrel_generator_load(pendingGenerator,replay,handled,e),e);require(handled&&pc_p2_original_barrel_owned(pendingGenerator->mLatestSpawnCreature)&&!pendingGenerator->mLatestSpawnCreature->isAlive(),"pending replay creates actual dying physical node");require(itemMgr->mMeltingPotMgr->getSize()==baseline+1,"dying replay adopts one node");pc_p2_original_barrel_before_teardown();require(itemMgr->mMeltingPotMgr->getSize()==baseline&&!pendingGenerator->mLatestSpawnCreature&&pendingGenerator->mLatestSpawnDay==calendar,"explicit dying teardown unlinks without replaying calendar death");
  auto allocationBefore=piki_pc_allocation_stats();pc_p2_original_barrel_unload();auto allocationAfter=piki_pc_allocation_stats();require(allocationAfter.unknownFrees==allocationBefore.unknownFrees&&allocationAfter.liveBlocks<allocationBefore.liveBlocks,"owned concrete allocations released with matching PC allocator");for(auto& g:generators)g->mGenObject=nullptr;
- std::printf("PASS ORIGINAL_BARREL_NATIVE checks=%u physical_factory=1 assigned_work_hook=1 injected_damage=1 manager_animation=1 direct_creature_cache=1 full_generator_cache=0 water_restore_controls=1 natural_gameplay=0\n",checks);std::fflush(nullptr);std::_Exit(0);
+ std::printf("PASS ORIGINAL_BARREL_NATIVE checks=%u physical_factory=1 assigned_work_hook=1 injected_damage=1 manager_animation=1 direct_creature_cache=1 isolated_generator_cache_creature_write=1 full_generator_cache=0 water_restore_controls=1 natural_gameplay=0\n",checks);std::fflush(nullptr);std::_Exit(0);
 }
 class TestApp:public PlugPikiApp {
  std::chrono::steady_clock::time_point start=std::chrono::steady_clock::now();bool seen=false;
