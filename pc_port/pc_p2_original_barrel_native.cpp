@@ -56,7 +56,7 @@ public:
  }
  bool stimulate(immut Interaction& interaction)override{
   auto* attack=dynamic_cast<const InteractAttack*>(&interaction);
-  if(!attack||!attack->mOwner||!attack->mOwner->isPiki())return false;
+  if(!attack||!attack->mOwner||attack->mOwner->isNavi())return false;
   auto before=state.phase;if(!barrelDamage(state,attack->mDamage))return false;mHealth=state.health;
   if(before!=state.phase){mCurrStage=1;if(mSeContext)mSeContext->releaseEvent();std::printf("P2_ORIGINAL_BARREL_DEATH uid=%u health=%.6f pending_source_clip=1\n",uid,state.health);}
   return true;
