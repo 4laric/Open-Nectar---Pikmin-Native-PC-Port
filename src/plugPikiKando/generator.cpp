@@ -14,6 +14,7 @@
 #if defined(PIKI_PC_PORT)
 #include "pc_randomizer.h"
 #include "pc_p2_original_group_engine.h"
+#include "pc_p2_original_gen_object.h"
 #include <cstdlib>
 #include "pc_p2_species_unit.h"
 #include <cmath>
@@ -231,6 +232,9 @@ void GenObjectFactory::createInstance()
 	if (!factory) {
 		factory = new GenObjectFactory();
 		factory->registerMember('piki', &makeObjectPiki, "create PIKI", 'v0.0');
+#if defined(PIKI_PC_PORT)
+		pc_p2_original_gen_object_register();
+#endif
 	}
 }
 
