@@ -23,8 +23,9 @@ bool complete(const Trees& t){
 }
 struct Actor {Trees trees;p2attach::Instance joints;p2attach::Token token=0;std::uint64_t tick=0;p2captor::Held<Piki> held;};
 std::map<BTeki*,std::unique_ptr<Actor>> actors;
-// Stable App heap parts outlive detached PikiSwallowedState/render references.
-// Reuse one pair of trees per physical pool address; never delete live parts.
+// App heap parts outlive detached PikiSwallowedState/render references within
+// a course. Reuse by pool address only until the next resource preflight;
+// a course heap reset can invalidate every cached pointer.
 std::map<BTeki*,Trees> retiredTrees;
 std::shared_ptr<const p2attach::Bank> bank;
 std::string residentBytes;
@@ -57,6 +58,10 @@ bool pc_p2_catfish_mouth_resources(std::string& error){
  std::ifstream file("p2-original-catfish-attach.txt");auto staged=p2original::catfish::readAttachments(file,error);if(!staged)return false;
  file.clear();file.seekg(0);std::string bytes((std::istreambuf_iterator<char>(file)),{});
  if(bank&&bytes!=residentBytes){error="resident original Catfish joint bank changed";return false;}
+ if(!actors.empty()){error="cannot reprepare Catfish mouth resources with live actors";return false;}
+ // Forget addresses, not parts: detached Pikmin may retain CollPart pointers
+ // until their next state update. The course heap owns their eventual disposal.
+ retiredTrees.clear();
  bank=std::move(staged);residentBytes=std::move(bytes);error.clear();return true;
 }
 bool pc_p2_catfish_mouth_birth(BTeki* a,std::string& error){
