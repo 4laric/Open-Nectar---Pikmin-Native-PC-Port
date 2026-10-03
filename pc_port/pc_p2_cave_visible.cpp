@@ -43,6 +43,8 @@ bool snapshot(P2CaveBoundarySnapshot& source,P2CaveVisibleBoundary& actor){
 bool safe(Navi* n){
     return n && naviMgr && n==naviMgr->getActiveNavi() && n->mKontroller
         && n->getCurrState() && n->getCurrState()->getID()==NAVISTATE_Walk
+        // Navi::update enters the captain-down path at health <= 1, even
+        // though serialized party health may represent smaller positive values.
         && std::isfinite(n->mHealth) && n->mHealth>1
         && !gameflow.mPauseAll && !gameflow.mIsUIOverlayActive && !gameflow.mIsDayEndActive
         && gameflow.mMoviePlayer && !gameflow.mMoviePlayer->mIsActive && !online();
@@ -84,7 +86,7 @@ bool pc_p2_cave_visible_interact(Navi* n){
     // Inactive/co-op captains must not reset the active captain's latch.
     if(!naviMgr || n!=naviMgr->getActiveNavi() || !n || !n->mKontroller)return false;
     P2CaveBoundarySnapshot source;P2CaveVisibleBoundary actor;
-    if(!snapshot(source,actor)){input.reset();return false;}
+    if(!snapshot(source,actor))return false;
     const bool click=input.sample(actor,n->mSRT.t.x,n->mSRT.t.y,n->mSRT.t.z,
         n->mKontroller->keyDown(KBBTN_A),n->mKontroller->keyClick(KBBTN_A),safe(n));
     if(!click || !pc_p2_cave_campaign_request_boundary(source))return false;
