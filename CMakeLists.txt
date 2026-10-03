@@ -275,6 +275,7 @@ set(PC_PORT_SOURCES
     pc_port/pc_p2_original_drop_engine.cpp
     pc_port/pc_p2_original_gen_object.cpp
     pc_port/pc_p2_original_bridge.cpp
+    pc_port/pc_p2_original_barrel.cpp
     pc_port/pc_p2_original_bridge_native.cpp
     pc_port/pc_p2_campaign_goal_probe.cpp
     pc_port/pc_bbft.cpp
@@ -3306,3 +3307,9 @@ add_executable(pc_p2_surface_water_drain_test tools/test_p2_surface_water_drain.
 target_include_directories(pc_p2_surface_water_drain_test PRIVATE pc_port)
 target_compile_options(pc_p2_surface_water_drain_test PRIVATE -UNDEBUG)
 add_test(NAME p2_surface_water_drain COMMAND pc_p2_surface_water_drain_test)
+
+add_executable(pc_p2_original_barrel_test tools/test_p2_original_barrel.cpp
+    pc_port/pc_p2_original_barrel.cpp pc_port/pc_p2_original_bridge.cpp)
+target_include_directories(pc_p2_original_barrel_test PRIVATE pc_port)
+target_compile_options(pc_p2_original_barrel_test PRIVATE -UNDEBUG)
+add_test(NAME p2_original_barrel COMMAND pc_p2_original_barrel_test)
