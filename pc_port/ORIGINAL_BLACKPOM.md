@@ -17,6 +17,13 @@ of that mechanic is supplied here; `coreMechanic()` adapts the Purple owner's
 published hooks. Core pin fce554d27c76487cc06c82453f6dec959fe20e94 is the
 initial API dependency, with explicit source initialization followup pending.
 No floor provider is installed implicitly.
+`pc_p2_original_blackpom_producer.h::producerConsumer` connects the actual
+published #148 Producer pair to `Native.onBind`. It rechecks owned, bound,
+unstarted source6 plus exact registry token/identity before registration.
+Dependencies are BudOrigin f40b27e8 and Graph SDK167cc; this header does not
+implement floor/card/donor authority. The composition owner supplies actual
+Authority and initialized-head species reader, and retains producer/authority
+through root teardown before cancelling reversible reservations.
 Inherited Pom animation/collision cannot qualify retail source events merely
 because the root's type is Pom. Original BlackPom bank draws sampled poses with
 approximate materials; this explicit presentation limit is not source-event
