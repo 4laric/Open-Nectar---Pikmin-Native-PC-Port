@@ -60,7 +60,7 @@ inline bool load_verified(p2treasure::Catalog& catalog,Config& config) {
     if(!p2original::readSourceManifest(bytes,next.course,original,error)||original.fingerprint!=next.campaign)return false;
     if(!bounded(std::string(directory)+"/"+next.course+".p2on",4u*1024u*1024u,bytes)||hash(bytes)!=next.receiverManifestHash)return false;
     std::vector<p2original::OnyonRecord> receivers;
-    if(!p2original::readOnyons(std::string(directory)+"/"+next.course+".p2on",receivers,error))return false;
+    if(!p2original::readOnyonsFromBytes(bytes,receivers,error))return false;
     bool receiver=false;
     for(const auto& source:receivers)if(source.uid==next.receiver) {
         if(source.index!=4||source.sourceSha+":"+source.sourceKey!=next.receiverIdentity)return false;

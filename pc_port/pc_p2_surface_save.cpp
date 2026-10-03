@@ -51,6 +51,7 @@ bool sameProof(){
 }
 bool held(const char* why){std::printf("P2_SURFACE_SAVE_HELD reason=%s\n",why);return false;}
 bool settled(){
+    if(pc_randomizer_original_session())return held("original_graph_restore_pending");
     if(!pc_randomizer_ready()||pc_randomizer_netplay_agreed_saves()||pc_randomizer_generated_cave()
         ||!playerState||playerState->isChallengeMode()||!flowCont.mCurrentStage
         ||gameflow.mPauseAll||gameflow.mIsUIOverlayActive||gameflow.mIsDayEndActive
@@ -72,7 +73,7 @@ bool settled(){
             ||(source->mAliveCount==1&&(!source->mLatestSpawnCreature||!source->mLatestSpawnCreature->isAlive()))
             ||(source->mAliveCount==0&&source->mLatestSpawnCreature))
             return held("source_actor_cardinality_restore_pending");
-        if(source->mCarryOverFlags>15||source->mDayLimit<-1||source->mDayLimit>32767
+        if(source->mDayLimit<-1||source->mDayLimit>32767
             ||!source->mGenObject||!source->mGenArea||!source->mGenType)
             return held("unsupported_source_record");
         savedSources.insert(source);
