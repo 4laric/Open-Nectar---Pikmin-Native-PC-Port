@@ -14,6 +14,14 @@ bool pc_p2_original_gate_save(BuildingItem*,RandomAccessStream&,bool& handled,st
 bool pc_p2_original_gate_load(BuildingItem*,RandomAccessStream&,bool& handled,std::string&);
 void pc_p2_original_gate_forget(BuildingItem*);
 bool pc_p2_original_gate_snapshot(const Creature*,p2original::GateState&,std::string& identity);
+struct PcOriginalGateLink {
+ std::string identity;
+ std::array<float,3> position{};
+ bool alive=false;
+};
+// Actual active source gates, in admitted generator birth order. No P1/AP items.
+std::vector<PcOriginalGateLink> pc_p2_original_gate_links();
+bool pc_p2_original_gate_alive(const std::string& identity,bool& alive);
 struct GenObjectOriginalGate final:GenObject {
  GenObjectOriginalGate();
  void doRead(RandomAccessStream&)override;
