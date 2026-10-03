@@ -1,3 +1,4 @@
+#include "pc_p2_original_captain_damage.h"
 #include "pc_coop.h"
 #include "NaviMgr.h"
 #include "DebugLog.h"
@@ -84,6 +85,11 @@ Creature* NaviMgr::createObject()
 void NaviMgr::update()
 {
 	MonoObjectMgr::update();
+#if defined(PIKI_PC_PORT)
+	// Source party switching/following belongs to its real CPlate/FSM owners.
+	if (pc_p2_original_captain_body_owned(getNavi(0)) ||
+	    (mNumObjects > 1 && pc_p2_original_captain_body_owned(getNavi(1)))) return;
+#endif
 	pc_p2_captain::update_player_switch();
 
 	// Lane 12 two-captain follow-up (#130): drive the inactive captain's follow
