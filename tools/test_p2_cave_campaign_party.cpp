@@ -96,6 +96,23 @@ int main(int argc,char** argv){
     check(wire(parsed)==before,"invalid read leaves owned state intact");
     P2CaveCampaignParty empty;check(empty.valid(),"absent party valid");
     std::istringstream absent(wire(empty));check(parsed.read(absent)&&!parsed.present,"absent party resets state");
+    auto flags=fixture();flags.bodies[0].wild=true;flags.bodies[0].wasWild=true;
+    check(flags.valid(),"canonical source wild flags valid");
+    std::istringstream flagWire(wire(flags));check(parsed.read(flagWire)&&parsed.bodies[0].wild&&parsed.bodies[0].wasWild,"Party3 authentic wild flags roundtrip");
+    bad=flags;bad.bodies[0].wasWild=false;check(!bad.valid(),"wild requires wasWild");
+    bad=flags;bad.bodies[0].sourceKey.clear();bad.bodies[0].catalogFingerprint.clear();bad.bodies[0].sourceRecord=0;bad.bodies[0].sourceAttempt=0;bad.bodies[0].sourceActivation=0;
+    check(!bad.valid(),"P1 mode cannot manufacture source wild flags");
+    auto malformed=wire(flags);const auto boundary=malformed.find(" 23.125 1 1");
+    check(boundary!=std::string::npos,"flag fixture token found");
+    malformed.replace(boundary+8,3,"2 1");const auto flagBefore=wire(parsed);std::istringstream badFlag(malformed);
+    check(!parsed.read(badFlag)&&wire(parsed)==flagBefore,"nonboolean flag refused unchanged");
+    digest.fill(7);OriginalPikiBodyState selectedFlags{0,false,false};admitted=0;for(auto& byte:admittedSha)byte=0;
+    const auto& flagSource=flags.bodies[0];
+    check(p2CaveSurvivorBody(flags,true,8,8,digest,flagSource.sourceKey,flagSource.sourceRecord,flagSource.sourceAttempt,flagSource.sourceActivation,flagSource.catalogFingerprint,selectedFlags,&admitted,admittedSha),"selected living body authenticates logical flags");
+    check(selectedFlags.species==4&&selectedFlags.wild&&selectedFlags.wasWild&&admitted==8&&admittedSha[31]==7,"selected body outputs exact state and full proof");
+    check(!p2CaveSurvivorBody(flags,false,8,8,digest,flagSource.sourceKey,flagSource.sourceRecord,flagSource.sourceAttempt,flagSource.sourceActivation,flagSource.catalogFingerprint,selectedFlags,&admitted,admittedSha),"ordinary context refuses flags");
+    check(selectedFlags.species==4&&selectedFlags.wild&&selectedFlags.wasWild&&admitted==8&&admittedSha[31]==7,"false body proof preserves all outputs");
+    std::istringstream legacyAbsent(" CAVE_PARTY 2 0");check(parsed.read(legacyAbsent)&&!parsed.present,"legacy absent party compatible");
     std::cout<<"P2 cave campaign party: "<<checks<<" controls passed\n";
     if(argc==3&&std::string(argv[1])=="--write-fixture"){
         std::ofstream out(argv[2]);check(bool(out),"fixture output opened");out<<wire(p)<<'\n';

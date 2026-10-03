@@ -13,6 +13,7 @@
 #include "pc_bbft.h"
 #include "Piki.h"
 #include "pc_p2_cave_campaign_party_engine.h"
+#include "pc_p2_original_piki_origin.h"
 #include "pc_p2_kurage_receiver.h"
 #include "AIConstant.h"
 #include "AIPerf.h"
@@ -1334,7 +1335,7 @@ void Piki::initColor(int color)
     const bool originalSourceColor = color >= Blue && color <= Yellow && pc_p2_original_piki_init_held(this);
     if (!originalSourceColor && !pc_bbft_color_access(color)) color = Red;
 #else
-    if (!pc_bbft_color_access(color)) color = Red;
+    if (!pc_bbft_color_access(color) && !pc_p2_original_piki_saved_color_held(this,color)) color = Red;
 #endif
 	mColor = color;
 #if defined(PIKI_PC_PORT)
@@ -1397,7 +1398,7 @@ void Piki::endKinoko()
  */
 void Piki::setColor(int color)
 {
-    if (!pc_bbft_color_access(color)) color = Red;
+    if (!pc_bbft_color_access(color) && !pc_p2_original_piki_saved_color_held(this,color)) color = Red;
 	mColor = color;
 	if (isKinoko()) {
 		mDefaultColour = kinokoColors[mColor];

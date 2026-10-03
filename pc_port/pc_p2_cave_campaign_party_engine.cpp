@@ -1,5 +1,6 @@
 #include "pc_p2_cave_campaign_party_engine.h"
 #include "pc_p2_species.h"
+#include "pc_p2_original_piki_origin.h"
 #include "pc_p2_purple.h"
 #include "pc_p2_white.h"
 #include "pc_p2_captain.h"
@@ -72,6 +73,17 @@ bool pc_p2_cave_campaign_party_capture(P2CaveCampaignParty& party,bool inside){
             if(p->mGenerator){b.originGenerator=pc_randomizer_generator_id(p->mGenerator);
                 if(!b.originGenerator)return held("unresolved_generator_id");}}
         b.species=pc_p2_species(p);b.growth=p->mHappa;
+        OriginalPikiBody canonical;
+        if(pc_p2_original_piki_body_query(p,canonical)){
+            const auto& o=canonical.origin;
+            if(canonical.state.species!=b.species)return held("source_species_disagreement");
+            if(!b.sourceKey.empty()&&(b.sourceKey!=o.sourceKey||b.sourceRecord!=o.recordUid
+                ||b.sourceAttempt!=o.attempt||b.sourceActivation!=o.activation
+                ||b.catalogFingerprint!=o.catalogFingerprint))return held("source_body_identity_disagreement");
+            b.sourceKey=o.sourceKey;b.sourceRecord=o.recordUid;b.sourceAttempt=o.attempt;
+            b.sourceActivation=o.activation;b.catalogFingerprint=o.catalogFingerprint;
+            b.wild=canonical.state.wild;b.wasWild=canonical.state.wasWild;
+        }else if(!b.sourceKey.empty())return held("source_body_authority_missing");
         b.owner=p->mNavi?p->mNavi->getNaviIndex():-1;b.player=p->mPlayerId;b.mode=p->mMode;
         b.generator=p->mGenerator?pc_randomizer_generator_id(p->mGenerator):0;
         b.health=p->mHealth;b.maxHealth=pikiMgr->mPikiParms->mPikiParms.mPikiMaxHealth();b.face=p->mFaceDirection;b.position=point(p->mSRT.t);
@@ -94,8 +106,10 @@ bool pc_p2_cave_campaign_party_capture(P2CaveCampaignParty& party,bool inside){
     if(!captured.valid())return held("invalid_party_relationships");
     party=std::move(captured);provenance=std::move(nextProvenance);return true;
 }
-void pc_p2_cave_campaign_party_forget(Piki* body){provenance.erase(body);birthOrigins.erase(body);}
-void pc_p2_cave_campaign_party_scene_exit(){provenance.clear();birthOrigins.clear();}
+void pc_p2_cave_campaign_party_forget(Piki* body){provenance.erase(body);birthOrigins.erase(body);pc_p2_original_piki_origin_forget(body);}
+void pc_p2_cave_campaign_party_scene_exit(){for(const auto& entry:provenance)pc_p2_original_piki_origin_forget(entry.first);
+    for(const auto& entry:birthOrigins)pc_p2_original_piki_origin_forget(entry.first);
+    provenance.clear();birthOrigins.clear();}
 bool pc_p2_cave_campaign_party_associate_birth(Piki* body,const char* sourceKey,
     std::uint32_t recordUid,std::uint32_t attempt,std::uint64_t activation,const char* catalogFingerprint){
     // Original source births also notify this optional consumer in ordinary
@@ -189,7 +203,25 @@ void pc_p2_cave_campaign_party_restore(const P2CaveCampaignParty& party){
             // newly born restored body once, using its actual base colour.
             GameStat::workPikis.inc(b.species<=2?b.species:Red);GameStat::update();
             p->init(b.owner>=0?naviMgr->getNavi(b.owner):naviMgr->getNavi());p->resetPosition(vector(b.position));}
-        if(!pc_p2_set_species(p,b.species))invalid("body species");
+        if(!b.sourceKey.empty()){
+            OriginalPikiBody saved{{b.sourceKey,b.sourceRecord,b.sourceAttempt,b.sourceActivation,b.catalogFingerprint},
+                {std::uint8_t(b.species),b.wild,b.wasWild}};
+            OriginalPikiBody existing;
+            if(pc_p2_original_piki_body_query(p,existing)){
+                const auto& o=existing.origin;
+                if(o.sourceKey!=b.sourceKey||o.recordUid!=b.sourceRecord||o.attempt!=b.sourceAttempt
+                    ||o.activation!=b.sourceActivation||o.catalogFingerprint!=b.catalogFingerprint)
+                    invalid("foreign canonical cache body");
+                // Rebind the authentic selected state, including recruitment,
+                // through the source owner's restore API rather than overwrite
+                // live flags or authorize an unrelated pointer.
+                pc_p2_cave_campaign_party_forget(p);
+            }
+            if(!pc_p2_original_piki_body_restore_saved(p,saved))invalid("authenticated source body bind");
+            PcOriginalPikiSavedColorScope color(p);
+            if(!color.valid()||!pc_p2_set_species(p,b.species))invalid("source saved colour authority");
+        }else if(!pc_p2_set_species(p,b.species))invalid("body species");
+        if(pc_p2_species(p)!=b.species)invalid("physical restored species disagreement");
         if(b.species==3)pc_p2_make_purple(p);if(b.species==4)pc_p2_make_white(p);
         p->mHappa=b.growth;p->mPlayerId=b.player;p->mHealth=b.health;
         p->mSRT.t=vector(b.position);p->mFaceDirection=b.face;

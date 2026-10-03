@@ -1,5 +1,8 @@
 #include "pc_p2_surface_save.h"
 #include "pc_p2_campaign_flush.h"
+#include "pc_p2_cave_survivor_permit.h"
+#include "WorkObject.h"
+#include <set>
 #include "pc_p2_cave_campaign_cache_engine.h"
 #include "pc_p2_cave_campaign_party_engine.h"
 #include "pc_p2_original_actor.h"
@@ -29,7 +32,7 @@
 
 namespace {
 zen::ogScrFileChkSelMgr* choice=nullptr;
-bool choosing=false, previous=false, restoring=false, restored=false;
+bool choosing=false, previous=false, restoring=false, restored=false, bindingParty=false;
 std::uint64_t selectedGeneration=0;
 std::array<std::uint8_t,32> selectedSha{};
 [[noreturn]] void invalid(const char* why){std::fprintf(stderr,"Invalid living surface SAVE: %s\n",why);std::abort();}
@@ -59,6 +62,7 @@ bool settled(){
     if(!p2original::originalActors().rows().empty())return held("original_group_restore_pending");
     if(!tekiMgr||!bossMgr||!pelletMgr||!pikiMgr||!itemMgr)return held("missing_managers");
     if(!generatorList||!generatorList->mGenListHead)return held("missing_generator_authority");
+    std::set<Generator*> savedSources;
     Generator* source;
     FOREACH_NODE_REUSE(Generator,generatorList->mGenListHead->mChild,source){
         if(source->isExpired())continue;
@@ -80,7 +84,15 @@ bool settled(){
         if(source->mLatestSpawnCreature&&source->mLatestSpawnCreature->isAlive()
             &&(source->mCarryOverFlags&(GENCARRY_SaveCreature|GENCARRY_SaveProperties))
                 !=(GENCARRY_SaveCreature|GENCARRY_SaveProperties))return held("source_properties_restore_pending");
+        savedSources.insert(source);
     }
+    auto serializedActor=[&](Creature* actor){
+        auto* gen=actor->mGenerator;
+        return gen&&savedSources.count(gen)&&gen->mLatestSpawnCreature==actor
+            &&gen->mAliveCount==1
+            &&(gen->mCarryOverFlags&(GENCARRY_SaveCreature|GENCARRY_SaveProperties))
+                ==(GENCARRY_SaveCreature|GENCARRY_SaveProperties);
+    };
     for(ObjectMgr* manager:{static_cast<ObjectMgr*>(tekiMgr),static_cast<ObjectMgr*>(bossMgr),static_cast<ObjectMgr*>(pelletMgr)}){
         Iterator actors(manager);CI_LOOP(actors){auto* actor=static_cast<Creature*>(*actors);
             if(actor)return held("live_enemy_or_cargo_restore_pending");}}
@@ -90,8 +102,8 @@ bool settled(){
         if(!n||!n->getCurrState()||n->getCurrState()->getID()!=NAVISTATE_Walk)
             return held("unsettled_captain");}
     Iterator bodies(pikiMgr);CI_LOOP(bodies){auto* body=static_cast<Piki*>(*bodies);
-        // Party2 has no original-source wild/wasWild authority. Party3 is
-        // owned by the source/cave producers; never manufacture those flags.
+        // Party3 authenticates original-source flags, but the physical source
+        // factory/cache restore composition is still unqualified here.
         if(body->isAlive()&&(body->mGenerator||body->mP2Bulbmin||body->mMode>1||body->isHolding()))
             return held("unsupported_body_state");}
     if(!itemMgr->getPikiHeadMgr())return held("missing_head_manager");
@@ -99,6 +111,8 @@ bool settled(){
         if(h->mGenerator)return held("source_head_restore_pending");}
     Iterator items(itemMgr);CI_LOOP(items){auto* item=static_cast<Creature*>(*items);
         if(!item)continue;
+        if(item->mObjType!=OBJTYPE_Pikihead&&!serializedActor(item))
+            return held("world_item_source_authority_missing");
         switch(item->mObjType){
         case OBJTYPE_Goal:case OBJTYPE_Ufo:case OBJTYPE_Pikihead:
         case OBJTYPE_SluiceSoft:case OBJTYPE_SluiceHard:case OBJTYPE_SluiceBomb:case OBJTYPE_SluiceBombHard:
@@ -107,6 +121,9 @@ bool settled(){
         default:return held("world_item_restore_pending");
         }
     }
+    if(!workObjectMgr)return held("missing_work_object_manager");
+    Iterator works(workObjectMgr);CI_LOOP(works){auto* work=static_cast<Creature*>(*works);
+        if(work&&!serializedActor(work))return held("work_object_source_authority_missing");}
     return true;
 }
 bool commit(){
@@ -174,7 +191,9 @@ void pc_p2_surface_save_scene_setup(){
         const auto& saved=pc_randomizer_surface_session();
         if(!flowCont.mCurrentStage||flowCont.mCurrentStage->mStageID!=saved.stage)invalid("restore scene mismatch");
         gameflow.mWorldClock.setTime(saved.party.surfaceTime);
+        bindingParty=true;
         pc_p2_cave_campaign_party_restore(saved.party);
+        bindingParty=false;
         // Cold setup runs the native landing FSM. A living checkpoint resumes
         // its settled Walk state rather than walking these restored positions
         // back to the ship on the next tick.
@@ -193,7 +212,7 @@ void pc_p2_surface_save_scene_setup(){
 }
 void pc_p2_surface_save_scene_exit(){
     if(choosing)gameflow.mIsUIOverlayActive=FALSE;
-    choosing=false;choice=nullptr;restoring=false;restored=false;
+    choosing=false;choice=nullptr;restoring=false;restored=false;bindingParty=false;
     pc_p2_cave_campaign_party_scene_exit();
     // A saved checkpoint remains on disk; ordinary unsaved travel must not
     // carry a stale living descriptor into a future day-boundary card.
@@ -226,3 +245,35 @@ bool pc_p2_surface_save_update(Controller* input){
     return true;
 }
 void pc_p2_surface_save_draw(Graphics& gfx){if(choosing&&choice)choice->draw(gfx);}
+
+bool pc_p2_surface_save_survivor_permit(const std::string& sourceKey,std::uint32_t recordUid,
+    std::uint32_t attempt,std::uint64_t activation,const std::string& catalogFingerprint,
+    std::uint64_t* generation,std::uint8_t sha[32]){
+    if(!bindingParty||!restoring||pc_randomizer_generated_cave()||!sameProof())return false;
+    return p2CaveSurvivorPermit(pc_randomizer_surface_session().party,true,
+        selectedGeneration,pc_randomizer_active_campaign_generation(),selectedSha,
+        sourceKey,recordUid,attempt,activation,catalogFingerprint,generation,sha);
+}
+bool pc_p2_surface_save_survivor_body(const std::string& sourceKey,std::uint32_t recordUid,
+    std::uint32_t attempt,std::uint64_t activation,const std::string& catalogFingerprint,
+    OriginalPikiBodyState& state,std::uint64_t* generation,std::uint8_t sha[32]){
+    if(!bindingParty||!restoring||pc_randomizer_generated_cave()||!sameProof())return false;
+    return p2CaveSurvivorBody(pc_randomizer_surface_session().party,true,
+        selectedGeneration,pc_randomizer_active_campaign_generation(),selectedSha,
+        sourceKey,recordUid,attempt,activation,catalogFingerprint,state,generation,sha);
+}
+// Current base has no cave campaign provider. A composed cave build supplies
+// these global dispatchers and forwards its outside-cave case to the surface
+// callbacks above; explicit provider ownership prevents duplicate definitions.
+#if !defined(PIKMIN_P2_CAVE_CAMPAIGN_PROVIDER)
+bool pc_p2_cave_campaign_survivor_permit(const std::string& key,std::uint32_t record,
+    std::uint32_t attempt,std::uint64_t activation,const std::string& fingerprint,
+    std::uint64_t* generation,std::uint8_t sha[32]){
+    return pc_p2_surface_save_survivor_permit(key,record,attempt,activation,fingerprint,generation,sha);
+}
+bool pc_p2_cave_campaign_survivor_body(const std::string& key,std::uint32_t record,
+    std::uint32_t attempt,std::uint64_t activation,const std::string& fingerprint,
+    OriginalPikiBodyState& state,std::uint64_t* generation,std::uint8_t sha[32]){
+    return pc_p2_surface_save_survivor_body(key,record,attempt,activation,fingerprint,state,generation,sha);
+}
+#endif

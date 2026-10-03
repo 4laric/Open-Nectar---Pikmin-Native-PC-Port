@@ -25,6 +25,7 @@ struct P2CavePartyCaptain {
 };
 struct P2CavePartyBody {
     int species=-1,growth=-1,owner=-1,player=-1,mode=0;
+    bool wild=false,wasWild=false;
     std::uint32_t generator=0;
     std::uint64_t key=0;
     int originRealm=0;
@@ -56,6 +57,7 @@ struct P2CavePartyBody {
     }
     bool valid()const{return species>=0&&species<=4&&growth>=0&&growth<=2
         &&owner>=-1&&owner<2&&player>=-1&&player<2&&(mode==0||mode==1)
+        &&(!wild||wasWild)&&(!(wild||wasWild)||!sourceKey.empty())
         &&(mode==0||owner>=0)&&position.valid()&&std::isfinite(face)&&std::isfinite(health)
         &&key>0&&key<1000000000ULL&&(originRealm==0||originRealm==1)&&originPosition.valid()&&sourceValid()
         &&std::isfinite(maxHealth)&&maxHealth>0&&maxHealth<=100000&&health>0&&health<=maxHealth;}
@@ -121,7 +123,7 @@ struct P2CaveCampaignParty {
     }
     bool read(std::istream& in){
         P2CaveCampaignParty parsed;std::string tag,version;int presentFlag,insideFlag,resumeFlag,landingFlag;
-        if(!(in>>tag>>version>>presentFlag)||tag!="CAVE_PARTY"||version!="2"
+        if(!(in>>tag>>version>>presentFlag)||tag!="CAVE_PARTY"||(version!="2"&&version!="3")
             ||(presentFlag!=0&&presentFlag!=1))return false;
         parsed.present=presentFlag==1;
         if(!parsed.present){*this=parsed;return true;}
@@ -140,7 +142,10 @@ struct P2CaveCampaignParty {
                 if(!(in>>b.species>>b.growth>>b.owner>>b.player>>b.mode>>b.generator>>b.key>>b.originRealm>>b.originGenerator
                     >>b.sourceKey>>b.catalogFingerprint>>b.sourceRecord>>b.sourceAttempt>>b.sourceActivation
                     >>b.health>>b.maxHealth>>b.face)||!b.position.read(in)||!b.originPosition.read(in))return false;
+                if(version=="3"){int w=-1,was=-1;if(!(in>>w>>was)||(w!=0&&w!=1)||(was!=0&&was!=1))return false;b.wild=w==1;b.wasWild=was==1;}
                 if(b.sourceKey=="-")b.sourceKey.clear();
+                // Legacy source records do not authenticate logical body flags.
+                if(version=="2"&&!b.sourceKey.empty())return false;
                 if(b.catalogFingerprint=="-")b.catalogFingerprint.clear();
                 records->push_back(b);}}
         for(auto* heads:{&parsed.surfaceHeads,&parsed.floorHeads}){
@@ -154,7 +159,7 @@ struct P2CaveCampaignParty {
         *this=std::move(parsed);return true;
     }
     void write(std::ostream& out)const{
-        out<<std::setprecision(std::numeric_limits<float>::max_digits10)<<" CAVE_PARTY 2 "<<int(present);
+        out<<std::setprecision(std::numeric_limits<float>::max_digits10)<<" CAVE_PARTY 3 "<<int(present);
         if(!present)return;
         out<<' '<<int(inside)<<' '<<int(resumeLiving)<<' '<<int(landing)<<' '<<surfaceTime<<' '<<active<<' '<<nextKey<<' '<<captains.size();
         for(const auto& c:captains){out<<' '<<c.slot<<' '<<c.health<<' '<<c.maxHealth<<' '<<c.face;c.position.write(out);}
@@ -164,7 +169,7 @@ struct P2CaveCampaignParty {
                 <<' '<<(b.sourceKey.empty()?"-":b.sourceKey)<<' '<<(b.catalogFingerprint.empty()?"-":b.catalogFingerprint)
                 <<' '<<b.sourceRecord<<' '<<b.sourceAttempt<<' '<<b.sourceActivation
                 <<' '<<b.health<<' '<<b.maxHealth<<' '<<b.face;
-                b.position.write(out);b.originPosition.write(out);}}
+                b.position.write(out);b.originPosition.write(out);out<<' '<<int(b.wild)<<' '<<int(b.wasWild);}}
         for(const auto* heads:{&surfaceHeads,&floorHeads}){out<<' '<<heads->size();
             for(const auto& h:*heads){out<<' '<<h.species<<' '<<h.growth<<' '<<h.owner<<' '<<h.parent<<' '<<h.state<<' '<<h.counter<<' '<<h.motion<<' '<<h.key
                 <<' '<<h.previousKey<<' '<<h.playState<<' '<<h.timer<<' '<<h.frame<<' '<<h.speed;h.position.write(out);}}
