@@ -400,7 +400,7 @@ constexpr RouteFloor ReceiverRouteFloor[]={
  {116.396667480f,1341},
 };
 // Read-only original static-map wall cache; no actor or terrain fields are changed.
-struct RouteWall {RouteVec a,b,c;};
+struct RouteWall {RouteVec a,b,c;int sourceFace;};
 std::vector<RouteWall> receiverRouteWalls;
 const Shape* receiverRouteShape=nullptr;
 // ROUTE_LAYOUT_POLICY_BEGIN
@@ -425,17 +425,19 @@ void receiverWallCache(){
   for(int k=0;k<3;++k)require(receiverSourceVertex(t.mVertexIndices[k]),"route original collision vertex suffix changed");
   float ny=t.mTriangle.mNormal.y;require(std::isfinite(ny),"route nonfinite plane");if(!(ny>-.5f&&ny<.5f))continue;
   RouteVec v[3];for(int k=0;k<3;++k){require(t.mVertexIndices[k]<unsigned(shape->mVertexCount),"route bad wall vertex");const auto& p=shape->mVertexList[t.mVertexIndices[k]];v[k]={p.x,p.y,p.z};require(rvfinite(v[k]),"route nonfinite vertex");}
-  receiverRouteWalls.push_back({v[0],v[1],v[2]});
+  receiverRouteWalls.push_back({v[0],v[1],v[2],i});
  }
  require(!receiverRouteWalls.empty(),"route original walls missing");receiverRouteShape=shape;
 }
-void receiverCheckSphere(RouteVec center,double rejectRadius){
+void receiverCheckSphere(RouteVec center,double rejectRadius,const char* role="original-route",int actor=-1,int guide=-1,int sample=-1){
  require(rvfinite(center)&&std::isfinite(rejectRadius)&&rejectRadius>0,"route invalid sphere");
  for(const auto& w:receiverRouteWalls){
   if(center.x<std::min({w.a.x,w.b.x,w.c.x})-rejectRadius||center.x>std::max({w.a.x,w.b.x,w.c.x})+rejectRadius
    ||center.y<std::min({w.a.y,w.b.y,w.c.y})-rejectRadius||center.y>std::max({w.a.y,w.b.y,w.c.y})+rejectRadius
    ||center.z<std::min({w.a.z,w.b.z,w.c.z})-rejectRadius||center.z>std::max({w.a.z,w.b.z,w.c.z})+rejectRadius)continue;
-  double d=routeTriangleDistance(center,w.a,w.b,w.c);require(std::isfinite(d)&&d>rejectRadius,"route unsafe static wall contact/shortcut");
+  double d=routeTriangleDistance(center,w.a,w.b,w.c);
+  if(!(std::isfinite(d)&&d>rejectRadius))std::printf("P2_PURPLE_KOCHAPPY_WALL_REFUSAL role=%s generator=%d guide=%d sample=%d source_face=%d center=%.9f,%.9f,%.9f reject_radius=%.9f triangle_distance=%.9f a=%.9f,%.9f,%.9f b=%.9f,%.9f,%.9f c=%.9f,%.9f,%.9f read_only=1 actor_writes=0\n",role,actor,guide,sample,w.sourceFace,center.x,center.y,center.z,rejectRadius,d,w.a.x,w.a.y,w.a.z,w.b.x,w.b.y,w.b.z,w.c.x,w.c.y,w.c.z);
+  require(std::isfinite(d)&&d>rejectRadius,"route unsafe static wall contact/shortcut");
  }
 }
 void receiverRouteClearance(Navi* n,int target){
@@ -603,11 +605,11 @@ class PurpleKochappyApp:public PlugPikiApp {
    const float r=p->mCollisionRadius;
    require(std::isfinite(r)&&r>0.f,"prefix invalid native body radius");
    const float offset=p->isCreatureFlag(CF_EnableGroundOffset)?p->mGroundOffset:0.f;
-   receiverCheckSphere({p->mSRT.t.x,p->mSRT.t.y-offset+r,p->mSRT.t.z},r+.10);
+   receiverCheckSphere({p->mSRT.t.x,p->mSRT.t.y-offset+r,p->mSRT.t.z},r+.10,"prefix-current-body",int(p->mGenerator->_70),prefixProgress.guide);
    auto* floor=mapMgr->getCurrTri(target.x,target.z,true);const float y=mapMgr->getMinY(target.x,target.z,true);
    require(floor&&std::isfinite(y)&&std::isfinite(floor->mTriangle.mNormal.y)&&floor->mTriangle.mNormal.y>.5f,
     "prefix slot source floor missing/unsafe");
-   receiverCheckSphere({target.x,double(y)+r/floor->mTriangle.mNormal.y,target.z},r+.10);
+   receiverCheckSphere({target.x,double(y)+r/floor->mTriangle.mNormal.y,target.z},r+.10,"prefix-owned-slot",int(p->mGenerator->_70),prefixProgress.guide);
   }
   const auto& w=ReceiverPrefix[prefixProgress.guide];const Vector3f goal(w.x,0.f,w.z);
   auto* floor=mapMgr->getCurrTri(w.x,w.z,true);const float y=mapMgr->getMinY(w.x,w.z,true);
@@ -620,7 +622,7 @@ class PurpleKochappyApp:public PlugPikiApp {
   const double span=std::sqrt(rvdot(rvsub(end,begin),rvsub(end,begin)));
   require(std::isfinite(span)&&span<512.,"prefix captain shortcut span invalid");
   const int samples=std::max(1,int(std::ceil(span/.25)));
-  for(int j=0;j<=samples;++j)receiverCheckSphere(rvadd(begin,rvscale(rvsub(end,begin),double(j)/samples)),r+.10+.125);
+  for(int j=0;j<=samples;++j)receiverCheckSphere(rvadd(begin,rvscale(rvsub(end,begin),double(j)/samples)),r+.10+.125,"prefix-captain-segment",-1,prefixProgress.guide,j);
   const int guide=prefixProgress.guide;
   const auto command=prefixProgress.observe(distance(n->mSRT.t,goal),roster,ReceiverPrefixCount);
   require(command!=PcKochappyPrefixInput::Refuse,"bounded ordinary west prefix stalled/invalid");
