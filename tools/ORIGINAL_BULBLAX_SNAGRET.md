@@ -65,3 +65,13 @@ leaves that unmodified literal Snagret running for ordinary human controls.
 Actual source33 initgen.txt#17 carries treasure841 and remains explicitly
 refused until genuine original treasure resource/birth/delivery/persistence
 integration exists. Never remove that treasure to manufacture an accepted row.
+
+The fixture vendors scripts/p2_fixture_captain_guard.h exactly as the owned
+p2_original_snagret_captain_guard.h. It checks dead state, dead flag,
+nonfinite/low HP and disappearance of an initialized captain immediately
+AFTER engine idle and BEFORE movie/pause/readiness/observation/PASS gates.
+--guard-negative-test exercises that guard before engine boot: require raw
+exit86, P2_FIXTURE_CAPTAIN_DOWN and no PASS. The standalone guard test checks
+the same truth table. Diagnostic mode parks the captain on actual course
+terrain at least700XZ units from the literal encounter; it does not modify
+health. --manual-encounter bypasses diagnostic parking for ordinary controls.
