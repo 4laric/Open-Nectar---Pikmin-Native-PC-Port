@@ -15,6 +15,11 @@ int main() {
     s.begin(); assert(s.remaining==40); // re-spray extends; does not stack
     assert(!s.tick(39.5f,true)); assert(s.tick(.5f,true) && !s.active());
     s.begin(); s.clear(); assert(!s.active());
+    assert(s.restore(17.25f) && s.remaining==17.25f);
+    assert(!s.restore(-1) && !s.restore(40.01f));
+    assert(!s.restore(std::numeric_limits<float>::infinity()) && s.remaining==17.25f);
+    assert(!s.restore(std::numeric_limits<float>::quiet_NaN()) && s.remaining==17.25f);
+    assert(s.restore(0) && !s.active());
     ResourceState inventory; ResourceSnapshot snapshot; EggContents contents; std::string e;
     assert(!inventory.useSpray(HoneyKind::Spicy,e));
     assert(inventory.restore(snapshot,contents,e));
