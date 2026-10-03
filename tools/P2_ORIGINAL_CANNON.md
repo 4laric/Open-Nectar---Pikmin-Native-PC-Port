@@ -22,6 +22,10 @@ Each accepted damage event adds
 one flick count; the retail thresholds of three mean the fourth hit starts
 flicking. Original attacks accept normal body damage instead of the P1
 Beatle armour portion gate.
+Pikmin flicks add the source EnemyFunc PI offset before the receiver computes
+negative sine/cosine velocity. Source 95 checks death immediately after the
+flick key at posed frame 31, as well as at animation END; source 96 follows
+the same key-event death rule.
 
 The authored `mouth` joint supplies shot X/Z; the source body position plus
 25 supplies Y. Event observation uses posed frames 51 (`attack`) and 56
