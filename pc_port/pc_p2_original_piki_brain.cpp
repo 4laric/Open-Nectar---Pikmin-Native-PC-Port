@@ -23,18 +23,35 @@ bool brainCleanup(Handle h,RuntimeState& r,Services& s,std::string& e){
  if(r.brain.slot!=-1&&!s.releaseSlot(h,r.brain.navi,r.brain.slot,e))return false;
  r.brain.slot=-1;r.brain.navi=nullptr;return true;
 }
+bool brainCleanupAll(Handle h,RuntimeState& r,Services& s,std::string& e){
+ bool clean=brainCleanup(h,r,s,e);
+ if(r.brain.pendingSlot!=-1){
+  std::string pendingError;
+  if(s.releaseSlot(h,r.brain.pendingNavi,r.brain.pendingSlot,pendingError)){
+   r.brain.pendingSlot=-1;r.brain.pendingNavi=nullptr;
+  }else{if(clean)e=pendingError;clean=false;}
+ }
+ return clean;
+}
 bool brainFree(Handle h,RuntimeState& r,Services& s,std::string& e){
+ if(r.brain.pendingSlot!=-1)return fail(e,"source Free transition cannot discard pending Formation slot");
  if(!brainCleanup(h,r,s,e)||!s.motion(h,Motion::Wait,e)||!s.freeEffects(h,true,e))return false;
  r.brain=BrainState{};
  h.body->mNavi=nullptr;h.body->mTargetVelocity.set(0,0,0);
  return true;
 }
 bool brainFormation(Handle h,RuntimeState& r,Services& s,Navi* n,std::string& e){
+ if(r.brain.pendingSlot!=-1)return fail(e,"source Formation still owns a pending cleanup slot");
  CaptainFrame frame;if(!n||!s.captainFrame(n,frame,e)||!frame.alive||!frame.formationable)return false;
  if(!s.supports(h,Motion::Run2,e))return false;
- int slot=-1;if(!s.allocateSlot(h,n,slot,e)||slot<0)return fail(e,"source Formation has no actual CPlate slot");
+ int slot=-1;bool allocated=s.allocateSlot(h,n,slot,e);
+ if(slot>=0){r.brain.pendingSlot=slot;r.brain.pendingNavi=n;}
+ if(!allocated||slot<0)return fail(e,"source Formation has no committed actual CPlate slot");
  if(!brainCleanup(h,r,s,e)){
-  std::string cleanupError;s.releaseSlot(h,n,slot,cleanupError);return false;
+  std::string cleanupError;
+  if(s.releaseSlot(h,n,slot,cleanupError)){r.brain.pendingSlot=-1;r.brain.pendingNavi=nullptr;}
+  else e+="; newly allocated slot cleanup also refused: "+cleanupError;
+  return false;
  }
  r.brain=BrainState{};r.brain.action=Action::Formation;r.brain.navi=n;r.brain.slot=slot;
  // Retail InteractFue(false,true) ActFormationInitArg uses touch cooldown.

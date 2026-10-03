@@ -38,6 +38,7 @@ struct CaptainFrame {
 };
 // Source startup supplies actual native animation/effect and CPlate consumers.
 // There are no default implementations and no "ready"/permission parameters.
+// Services MUST be a process-lifetime stable singleton; no uninstall exists.
 // install alone does not initialize actors or activate the original course.
 class Services {
 public:
@@ -78,6 +79,8 @@ struct BrainState {
  std::uint16_t distanceType=5,oldDistanceType=5;
  float lostTimer=0,tripDistance=0;
  bool releasedSlot=false;
+ // A newly acquired slot remains owned through a failed old-action cleanup.
+ Navi* pendingNavi=nullptr;int pendingSlot=-1;
 };
 struct RuntimeState {
  State state=State::Walk;
@@ -112,4 +115,9 @@ bool ignoreAtari(Handle,const Creature*,bool&);
 bool collision(Handle,const CollEvent&,std::string&);
 void forget(Piki*)noexcept;
 void sceneExit()noexcept;
+// Teardown must use these checked forms before origin retirement or heap reuse.
+// They verify the exact native lifetime independently of world action phase.
+// Failed resource cleanup retains ownership and refuses retirement.
+bool retire(Piki*,std::string&);
+bool retireScene(std::string&);
 } }
