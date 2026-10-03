@@ -15,6 +15,10 @@ public:
  };
  virtual ~NativeEffects()=default;
  virtual const captain::LoadedScene& scene()const=0;
+ // Null before binding and after the real descriptor is revoked/deleted.
+ // Read-only pointer comparison: never dereference a retained stale Scene or
+ // manufacture a replacement. Services inspects this before any effect call.
+ virtual const captain::LoadedScene* retainedScene()const noexcept=0;
  // Actual retained Piki contexts, including failed/partial registration and
  // pending voice cleanup. Unknown observation refuses; runtime flag counts
  // cannot substitute for this producer's independent ownership census.

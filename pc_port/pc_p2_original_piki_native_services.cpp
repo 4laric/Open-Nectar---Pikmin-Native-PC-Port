@@ -51,7 +51,7 @@ bool NativeServices::bound(std::string& error)const{
  const auto phase=world->phase();
  const auto* first=loaded->captainAt(0);const auto* second=loaded->captainAt(1);
  if(!bank.current()||&captains.scene()!=loaded
-    ||&effects.scene()!=loaded||&environment.scene()!=loaded||&physical.scene()!=loaded
+    ||effects.retainedScene()!=loaded||&environment.scene()!=loaded||&physical.scene()!=loaded
     ||&captains.plateSource().scene()!=loaded){
   error="native Body Services lost its actual selected resource/producer owner";return false;
  }

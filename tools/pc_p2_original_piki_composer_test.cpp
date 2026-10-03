@@ -23,7 +23,9 @@ struct ObservedPlateSource final:p::PlateSource {
  bool setFormed(p::Handle,Navi*,std::string&)override{return false;}
 } observedPlateSource;
 struct ObservedEffects final:p::NativeEffects {
- const c::LoadedScene& scene()const override{if(ownerCallback)ownerCallback(3);return ::scene;}
+ bool sceneRetained=true;mutable unsigned sceneReferenceCalls=0;
+ const c::LoadedScene& scene()const override{++sceneReferenceCalls;return ::scene;}
+ const c::LoadedScene* retainedScene()const noexcept override{if(ownerCallback)ownerCallback(3);return sceneRetained?&::scene:nullptr;}
  bool ownership(Ownership&,std::string&)const override{return false;}
  bool canRetire(std::string&)const override{return false;}
  bool retire(std::string&)override{return false;}
@@ -118,6 +120,11 @@ int main(){
  check(p::nativeServices(scene,error)==installed,"substitution refusal preserves original storage");
  world.state=c::Phase::Inactive;
  check(p::nativePlate(scene,error)==plate,"inactive retained cleanup can borrow actual Plate without action grant");
+ effectReader.sceneRetained=false;
+ check(!p::nativeServices(scene,error),"retired effect descriptor refuses composition borrow gracefully");
+ check(effectReader.sceneReferenceCalls==0,"composition never dereferences retired effect Scene reference");
+ effectReader.sceneRetained=true;
+ check(p::nativeServices(scene,error)==installed,"real retained effect descriptor restores checked borrow");
  stageThread=false;
  check(!p::nativePhysicalSource(scene,error),"wrong creating thread refuses after construction too");
  std::printf("NativeComposition controls PASS %u (Stage/model/animator doubles; no body factory)\n",checks);

@@ -56,7 +56,7 @@ struct Composition {
    return fail(e,"native composition PlateSource observation changed authority");
   if(!plateSource||&plateSource->scene()!=scene||!exact()||world->phase()!=phase||stage->phase()!=stagePhase)
    return fail(e,"native composition Plate observation changed authority");
-  if(!effects||&effects->scene()!=scene||!exact()||world->phase()!=phase||stage->phase()!=stagePhase)
+  if(!effects||effects->retainedScene()!=scene||!exact()||world->phase()!=phase||stage->phase()!=stagePhase)
    return fail(e,"native composition effect observation changed authority");
   if(!environment||&environment->scene()!=scene||!exact()||world->phase()!=phase||stage->phase()!=stagePhase)
    return fail(e,"native composition environment observation changed authority");

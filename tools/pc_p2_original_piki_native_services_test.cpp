@@ -58,7 +58,9 @@ struct Bank final:p::AnimationBank {
 } animationBank;
 struct Effects final:p::NativeEffects {
  Ownership retained{1,0,0,0};bool cleanupAllowed=false;
- const c::LoadedScene& scene()const override{return ::scene;}
+ bool sceneRetained=true;mutable unsigned sceneReferenceCalls=0;
+ const c::LoadedScene& scene()const override{++sceneReferenceCalls;return ::scene;}
+ const c::LoadedScene* retainedScene()const noexcept override{return sceneRetained?&::scene:nullptr;}
  bool ownership(Ownership& out,std::string&)const override{out=retained;return true;}
  bool canRetire(std::string&)const override{return cleanupAllowed;}
  bool retire(std::string&)override{if(!cleanupAllowed)return false;retained={};return true;}
@@ -142,5 +144,10 @@ int main(){
  check(!effects.canRetire(error)&&!effects.retire(error),"failed partial cleanup refuses instead of clearing owner");
  check(effects.ownership(retained,error)&&retained.freeContexts==1,"partial effect owner remains retained after failure");
  effects.cleanupAllowed=true;check(effects.retire(error)&&effects.ownership(retained,error)&&retained.freeContexts==0,"actual producer retry clears only after successful disposal");
+ reset();effects.sceneRetained=false;float staleGravity=71;
+ check(!services.gravity(staleGravity,error)&&staleGravity==71,"unbound effect descriptor refuses without stale outputs");
+ bool staleAlive=true;check(!services.bodyAlive(body,staleAlive,error)&&staleAlive,"deleted effect Scene refuses source alive read");
+ check(effects.sceneReferenceCalls==0,"Services never dereferences effect Scene through reference getter");
+ effects.sceneRetained=true;check(services.gravity(staleGravity,error)&&staleGravity==9,"actual retained descriptor allows checked retry");
  std::printf("NativeServices source observation controls PASS %u (resource/physical/effect doubles; no engine factory)\n",checks);
 }
