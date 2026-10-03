@@ -212,5 +212,27 @@ int main() {
     check(!overflow.select(1,16,0)&&!overflow.select(1,0,0),"motion overflow sticky refuses");
     PcPurpleMotionPoseCatalog invalidMotion;
     check(!invalidMotion.select(1,-1,0),"invalid native motion refuses");
+    float cursorArc=0;
+    check(pcPurpleCursorYawBound(0,0,100,0,1.f/30.f,cursorArc)&&cursorArc==0,"aligned stationary cursor has zero native turn");
+    check(pcPurpleCursorYawBound(0,100,0,0,1.f/30.f,cursorArc)&&std::fabs(cursorArc-.2f*1.570796327f)<.00001f,"native one-fifth cursor-facing bound");
+    check(!pcPurpleCursorYawBound(0,0,1,100,1.f/30.f,cursorArc),"cursor may cross origin refuses");
+    check(!pcPurpleCursorYawBound(0,0,100,100,.04f,cursorArc),"unsupported cursor timing refuses");
+    check(!pcPurpleCursorYawBound(0,0,100,INFINITY,1.f/30.f,cursorArc),"nonfinite cursor speed refuses");
+    for(int frame=1;frame<=30;++frame)for(int direction=0;direction<64;++direction){
+        const float dt=frame/(30.f*30.f),yaw=.2f,cx=10.f,cz=100.f;
+        check(pcPurpleCursorYawBound(yaw,cx,cz,100,dt,cursorArc),"source cursor bound finite");
+        const float angle=direction*6.283185307f/64.f;
+        const float actual=.2f*std::remainder(std::atan2(cx+100*dt*std::sin(angle),cz+100*dt*std::cos(angle))-yaw,6.283185307f);
+        check(std::fabs(actual)<=cursorArc+.000001f,"all one-tick cursor directions within native yaw bound");
+    }
+    for(float arc:{0.f,.001f,.4f,1.5f}){
+        check(PcPurplePoseEnvelope::projectedRadius(*captured,14,6,reserve,arc),"variable native arc projection");
+        for(int i=0;i<=32;++i){float x=0,z=0;PcPurplePoseEnvelope::rotatedOffset(*captured,-arc+2*arc*i/32,x,z);float nearest=1000;
+            for(int sample=-1;sample<=1;++sample){float sx=0,sz=0;PcPurplePoseEnvelope::rotatedOffset(*captured,sample*arc,sx,sz);nearest=std::min(nearest,std::hypot(x-sx,z-sz));}
+            check(nearest<=reserve-15.4f+.0001f,"variable arc chord covers intermediate captured rotations");
+        }
+    }
+    check(!PcPurplePoseEnvelope::projectedRadius(*captured,14,6,reserve,-.1f),"negative arc refuses");
+    check(!PcPurplePoseEnvelope::projectedRadius(*captured,14,6,reserve,INFINITY),"nonfinite arc refuses");
     std::puts("Purple collision trace controls PASS");
 }
