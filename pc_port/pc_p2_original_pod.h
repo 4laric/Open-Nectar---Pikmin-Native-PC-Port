@@ -1,5 +1,6 @@
 #pragma once
 #include "pc_p2_retail_cave_context.h"
+#include "pc_p2_original_pod_sources.h"
 #include <functional>
 class Pellet;
 struct PelletGoalState;
@@ -7,12 +8,6 @@ struct Suckable;
 
 namespace p2originalpod {
 // Retail Onyon type 3, object bank 1. Ship type 4 belongs to the surface owner.
-constexpr unsigned sourceType=3, sourceObject=1;
-constexpr const char* archive="user/Kando/pod/arc.szs";
-constexpr const char* archiveSha256="90784394f69e8db32102e7b3e69c29b2fe737d4d0240efaf1dcdf32def783412";
-constexpr const char* originalModelSha256="e567b76127b7802f88fe28cdd956260fededba0b5d30255b935bc15c28f25c0e";
-constexpr const char* originalCollisionSha256="548f59a9d8eceb3be896011a33765e8357217c66cd1587ac258253aa675ac005";
-constexpr const char* convertedModelSha256="f562fb2926cc54be8875afb07d2d0effe2f2af7469f9d4ab5c7940917eb8b595";
 struct Config {
  p2retail::Snapshot floor;
  // Authenticated authored-layout BaseGen type 7 placement, radians. Never
@@ -52,6 +47,9 @@ bool pc_p2_original_pod_commit_floor(const p2retail::SceneIdentity&,std::string&
 // Rollback only before commit and before any observable suction/receipt.
 bool pc_p2_original_pod_abort_prepared(const p2retail::SceneIdentity&,std::string&);
 bool pc_p2_original_pod_context(Suckable*,const p2retail::SceneIdentity&,p2retail::Snapshot&);
+// Raw lifetime observation only. Unlike context lookup, false means no native
+// preparation is owned; it cannot grant source, receipt or SAVE authority.
+bool pc_p2_original_pod_owned();
 Suckable* pc_p2_original_pod_goal(const p2retail::SceneIdentity&);
 bool pc_p2_original_pod_bind_cargo(Pellet*,const p2retail::BirthIdentity&,
                                  const p2retail::SceneIdentity&,
