@@ -143,6 +143,7 @@ struct Tamago {
     // Campaign per-placement source FSM (#992).
     bool sourceMode = false;
     bool ballFall = false;
+    bool bigFootDrop = false;
     bool born = false;
     int member = 0;
     bool hidden = true;
@@ -556,6 +557,7 @@ int pc_p2_tamago_birth_bigfoot(BTeki* boss, unsigned generator, const Vector3f& 
         Tamago& s = actors[static_cast<PelletView*>(child)];
         s = Tamago();
         s.sourceMode = s.born = s.madeFellow = s.ballFall = true;
+        s.bigFootDrop = true;
         s.hidden = false; // source setTypeBall: visible falling Wait, no atari
         s.generator = s.leaderGenerator = generator;
         s.member = member;
@@ -903,6 +905,12 @@ void pc_p2_tamago_update(BTeki* actor) {
                 s.hidden = false;
                 actor->setTekiOption(TEKIOPT_Atari);
                 actor->clearTekiOption(TEKIOPT_Invincible);
+                // Source bounceCallback: rise10, horizontal80, vertical35..50.
+                Vector3f bounced = actor->getPosition();
+                bounced.y += 10.0f;
+                actor->inputPosition(bounced);
+                actor->mVelocity.set(std::sin(s.heading) * 80.0f,
+                                     50.0f * (0.7f + 0.3f * rnd01()), std::cos(s.heading) * 80.0f);
                 appearPanic(actor, s);
                 s.walkMax = p2tamagopolicy::walkSeconds(rnd01());
                 pickGoal(actor, s);
@@ -982,7 +990,9 @@ void pc_p2_tamago_update(BTeki* actor) {
             const float speed = s.speedFactor * p2tamagopolicy::MoveSpeed;
             const Vector3f drive(std::sin(s.heading) * speed, 0.0f, std::cos(s.heading) * speed);
             actor->inputDrive(drive);
-            actor->mVelocity.set(drive);
+            // Keep the source bounce's vertical arc through normal terrain physics.
+            const float vy = s.bigFootDrop && !actor->isCreatureFlag(CF_IsOnGround) ? actor->mVelocity.y : 0.0f;
+            actor->mVelocity.set(drive.x, vy, drive.z);
             s.activeTicks += dt / p2tamagopolicy::TickSeconds;
             if (distXZ(pos, s.goal) < 10.0f || s.stateTime > s.walkMax) {
                 std::printf("P2_TAMAGO_STATE generator=%u member=%d state=turn\n", generator, s.member);
