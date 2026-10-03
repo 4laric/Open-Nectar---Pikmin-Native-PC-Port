@@ -95,6 +95,7 @@ class PelplantApp final:public PlugPikiApp {
   Host* h=native->provider().lookup(actor);
   if(!h||!h->released||h->captured||!found->pellet||native->captured(found->pellet)){error="death did not release same native captured pellet";return false;}
   Pellet* p=livePellet(found->pellet);if(!p||!p->mConfig){error="released configured pellet missing";return false;}
+  std::printf("P2_ORIGINAL_PELPLANT_POSITION stage=death_end amount=%u actor=%.3f,%.3f,%.3f pellet=%.3f,%.3f,%.3f flags=%08x dynamics=%d state=%d\n",found->amount,actor->mSRT.t.x,actor->mSRT.t.y,actor->mSRT.t.z,p->mSRT.t.x,p->mSRT.t.y,p->mSRT.t.z,unsigned(p->mCreatureFlags),int(p->isRealDynamics()),p->getState());
   found->release=p->mSRT.t;found->expectedSeeds=p->mConfig->mPelletColor()==Red?p->mConfig->mMatchingOnyonSeeds():p->mConfig->mNonMatchingOnyonSeeds();
   found->dead=true;
   std::printf("P2_ORIGINAL_PELPLANT_RELEASE source=0 uid=%u ordinal=%u token=%u amount=%u same_pointer=1 captured=0 direct_damage_control=1\n",source[found->row].enemy.uid,found->ordinal,found->token,found->amount);
@@ -156,6 +157,8 @@ class PelplantApp final:public PlugPikiApp {
     require(catalog.query(actor,actualSource,actualToken,&identity)&&actualSource==0&&actualToken==i.token&&identity.generator==source[row].enemy.uid&&identity.ordinal==ordinal&&identity.epoch==1&&identity.activation==1,"actual original registry source0 identity");
     checked(provider.bind(source[row],actor,i.token,error),error);instances.push_back(i);
     auto* h=provider.lookup(actor);require(h&&h->row.enemy.source==0&&h->row.enemy.pelletSize==1,"literal source0 and unmodified common drop metadata");
+    require(distance(actor->mSRT.t,Vector3f(at.x,at.y,at.z))<.1f&&std::fabs(actor->mSRT.t.y-at.y)<.1f,"actual actor birth retains requested fixture position");
+    std::printf("P2_ORIGINAL_PELPLANT_POSITION stage=birth row=%u ordinal=%u requested=%.3f,%.3f,%.3f actor=%.3f,%.3f,%.3f captured=%d pellet=%.3f,%.3f,%.3f\n",row,ordinal,at.x,at.y,at.z,actor->mSRT.t.x,actor->mSRT.t.y,actor->mSRT.t.z,int(h->captured!=nullptr),h->captured?h->captured->mSRT.t.x:0,h->captured?h->captured->mSRT.t.y:0,h->captured?h->captured->mSRT.t.z:0);
    }
   }
   require(instances.size()==8&&provider.size()==8,"seven rows eight actual native births");
@@ -183,10 +186,11 @@ public:
   if(phase==1){auto* h=native->provider().lookup(i.actor);require(h&&!h->dead,"live actual provider actor");
    if(h->state!=State::Full)return result;
    i.pellet=h->captured;require(i.pellet&&native->captured(i.pellet)&&i.pellet->mConfig,"actual configured captured number pellet");
+   std::printf("P2_ORIGINAL_PELPLANT_POSITION stage=full_before_damage amount=%u actor=%.3f,%.3f,%.3f pellet=%.3f,%.3f,%.3f\n",i.amount,i.actor->mSRT.t.x,i.actor->mSRT.t.y,i.actor->mSRT.t.z,i.pellet->mSRT.t.x,i.pellet->mSRT.t.y,i.pellet->mSRT.t.z);
    require(i.pellet->mConfig->mCarryMinPikis()>=int(i.amount),"configured literal number carry identity");
    baseline=rewards();carried=nearGoal=false;travel=0;settled=0;
    checked(native->provider().damage(i.actor,0,"s__0",error),error);phase=2;phaseStart=age;return result;}
-  if(phase==2){input();if(!i.dead)return result;require(i.expectedSeeds>0&&!native->captured(i.pellet),"source death-END releases actual cargo");phase=3;phaseStart=age;return result;}
+  if(phase==2){input();if(!i.dead)return result;require(i.expectedSeeds>0&&!native->captured(i.pellet),"source death-END releases actual cargo");Pellet* released=livePellet(i.pellet);require(released,"first ordinary released update retains cargo");std::printf("P2_ORIGINAL_PELPLANT_POSITION stage=first_released_update amount=%u pellet=%.3f,%.3f,%.3f flags=%08x dynamics=%d state=%d\n",i.amount,released->mSRT.t.x,released->mSRT.t.y,released->mSRT.t.z,unsigned(released->mCreatureFlags),int(released->isRealDynamics()),released->getState());std::fflush(nullptr);phase=3;phaseStart=age;return result;}
   Pellet* body=livePellet(i.pellet);
   if(phase==3){
    Piki* nearest=nullptr;float closest=1e9f;Iterator roster(pikiMgr);CI_LOOP(roster){auto* p=static_cast<Piki*>(*roster);if(p->isAlive()&&p->mColor==Red&&distance(n->mSRT.t,p->mSRT.t)<closest){closest=distance(n->mSRT.t,p->mSRT.t);nearest=p;}}
