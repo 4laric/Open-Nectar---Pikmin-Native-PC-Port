@@ -171,7 +171,12 @@ public:int idle()override{
   if(dx*dx+dz*dz<144&&bx*bx+bz*bz>1600&&bx*bx+bz*bz<10000&&n->getCurrState()->getID()==NAVISTATE_Walk){held=nullptr;next(6);return result;}
  }
  if(phase==6&&n->getCurrState()->getID()==NAVISTATE_ThrowWait){auto*grab=static_cast<NaviThrowWaitState*>(n->getCurrState());Piki*actual=grab->mHeldThrowPiki?grab->mHeldThrowPiki:grab->mPendingThrowPiki;
-  if(!held&&actual){require(live.count(actual)&&restored.count(actual)&&!captured.count(actual)&&pc_p2_is_white(actual)&&actual->mNavi==n&&actual->mMode==PikiMode::FormationMode&&(actual->getState()==PIKISTATE_Normal||actual->getState()==PIKISTATE_Hanged),"actual throw selected foreign or ineligible White");held=actual;}
+  if(!held&&actual){
+   const bool known=live.count(actual)!=0;
+   const bool valid=known&&restored.count(actual)&&!captured.count(actual)&&pc_p2_is_white(actual)&&actual->mNavi==n&&actual->mMode==PikiMode::FormationMode&&(actual->getState()==PIKISTATE_Normal||actual->getState()==PIKISTATE_GoHang||actual->getState()==PIKISTATE_Hanged);
+   if(!valid)std::printf("P2_WHITE_ADULT_GRAB_REFUSE frame=%d actual=%p live=%d restored=%d previously_captured=%d species=%d state=%d mode=%d owned=%d held=%p pending=%p\n",frame,(void*)actual,int(known),int(restored.count(actual)!=0),int(captured.count(actual)!=0),known?int(pc_p2_species(actual)):-1,known?actual->getState():-1,known?actual->mMode:-1,known?int(actual->mNavi==n):-1,(void*)grab->mHeldThrowPiki,(void*)grab->mPendingThrowPiki);
+   require(valid,"actual throw selected foreign or ineligible White");held=actual;
+  }
   require((!grab->mHeldThrowPiki||grab->mHeldThrowPiki==held)&&(!grab->mPendingThrowPiki||grab->mPendingThrowPiki==held),"actual native throw pointer swapped");
   if(held&&grab->mHeldThrowPiki==held&&grab->mIsHoldingThrowPiki&&held->getState()==PIKISTATE_Hanged){next(7);return result;}
  }
