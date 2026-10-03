@@ -295,6 +295,7 @@ set(PC_PORT_SOURCES
     pc_port/pc_p2_original_gate_cache.cpp
     pc_port/pc_p2_original_gate_native.cpp
     pc_port/pc_p2_original_bridge.cpp
+    pc_port/pc_p2_original_barrel.cpp
     pc_port/pc_p2_original_bridge_native.cpp
     pc_port/pc_p2_campaign_goal_probe.cpp
     pc_port/pc_bbft.cpp
@@ -3630,3 +3631,9 @@ if(PIKMIN_BUILD_TESTS)
     target_compile_options(pc_p2_spicy_policy_test PRIVATE -UNDEBUG)
     add_test(NAME p2_spicy_policy COMMAND pc_p2_spicy_policy_test)
 endif()
+
+add_executable(pc_p2_original_barrel_test tools/test_p2_original_barrel.cpp
+    pc_port/pc_p2_original_barrel.cpp pc_port/pc_p2_original_bridge.cpp)
+target_include_directories(pc_p2_original_barrel_test PRIVATE pc_port)
+target_compile_options(pc_p2_original_barrel_test PRIVATE -UNDEBUG)
+add_test(NAME p2_original_barrel COMMAND pc_p2_original_barrel_test)
