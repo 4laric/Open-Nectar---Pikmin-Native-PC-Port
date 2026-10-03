@@ -28,9 +28,8 @@ struct Native::Impl final:Engine {
   const int type=nativeType(row.enemy.source);auto* shape=tekiMgr->getTekiShapeObject(type);
   if(!tekiMgr->hasModel(type)||!shape||!shape->mShape||!shape->mAnimMgr||!tekiMgr->getTekiParameters(type)||!tekiMgr->getStrategy(type))return refuse(e,"Hanachirashi chassis model/animation/parameters/strategy not preloaded");
   Heap heap;
-  const u32 corpse=TekiMgr::getTypeId(type);
-  // View-backed corpses use the enemy's dead visual, not a standalone pellet shape.
-  if(!pelletMgr||!pelletMgr->getConfig(corpse)||tekiMgr->getTekiParameters(type)->getI(TPI_CorpseType)!=TEKICORPSE_LeaveCorpse)return refuse(e,"original Hanachirashi physical corpse config unavailable");
+  // Retail Hanachirashi::onInit disables EB_LeaveCarcass. Source55 has
+  // no carryable corpse and must not require its borrowed Mar pellet config.
   // This family owns a source-mesh body fit; actual latch mechanics still
   // require gameplay qualification. Register before the visual bank fit.
   pc_p2_body_coll_manage("flying|Hanachirashi");
@@ -38,8 +37,8 @@ struct Native::Impl final:Engine {
  }
  bool reserve(const std::vector<CatalogRow>& rows,unsigned count,std::string& e)override{
   if(!tekiMgr||tekiMgr->getMax()-tekiMgr->getSize()<int(count))return refuse(e,"original Hanachirashi real actor pool capacity insufficient");
-  unsigned pellets=0;for(const auto& row:rows)if(species(row.enemy.source))pellets+=(row.enemy.count-row.enemy.deathCount)*(1+(row.enemy.pelletProbability>0?std::max(row.enemy.pelletMinimum,row.enemy.pelletMaximum):0));
-  if(!pelletMgr||pelletMgr->getMax()-pelletMgr->getSize()<int(pellets))return refuse(e,"original Hanachirashi corpse/drop pellet pool capacity insufficient");
+  unsigned pellets=0;for(const auto& row:rows)if(species(row.enemy.source))pellets+=(row.enemy.count-row.enemy.deathCount)*(row.enemy.pelletProbability>0?std::max(row.enemy.pelletMinimum,row.enemy.pelletMaximum):0);
+  if(!pelletMgr||pelletMgr->getMax()-pelletMgr->getSize()<int(pellets))return refuse(e,"original Hanachirashi number-drop pellet pool capacity insufficient");
   e.clear();return true;
  }
  bool allocate(Host& host,const Position& p,float facing,std::string& e)override{
