@@ -15,6 +15,7 @@
 #include "pc_p2_original_captain_pluck.h"
 #include "pc_p2_original_captain_dope.h"
 #include "pc_p2_original_captain_container.h"
+#include "pc_p2_original_captain_pressed.h"
 #endif
 #include "pc_p2_purple.h"
 #include "pc_p2_white.h"
@@ -155,6 +156,7 @@ void NaviStateMachine::init(Navi* navi)
 	p2original::captain::registerPluckStates(*this);
 	p2original::captain::registerDopeState(*this);
 	p2original::captain::registerContainerAbsorbStates(*this);
+	p2original::captain::registerPressedFallMeckStates(*this);
 	registerState(pc_demon_drop_state_create());
 	registerState(pc_demon_escape_state_create());
 #endif

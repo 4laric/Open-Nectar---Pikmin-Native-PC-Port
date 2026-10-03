@@ -296,6 +296,7 @@ set(PC_PORT_SOURCES
     pc_port/pc_p2_original_captain_pluck.cpp
     pc_port/pc_p2_original_captain_dope.cpp
     pc_port/pc_p2_original_captain_container.cpp
+    pc_port/pc_p2_original_captain_pressed.cpp
     pc_port/pc_p2_original_chappy.cpp
     pc_port/pc_p2_original_chappy_native.cpp
     pc_port/pc_p2_original_group_engine.cpp
