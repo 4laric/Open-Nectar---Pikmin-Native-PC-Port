@@ -33,6 +33,7 @@
 #include "pc_window.h"
 #include "pc_gpu_preference.h"
 #include "pc_p2_original_foliage_native.h"
+#include "p2_original_foliage_guard.h"
 #include "pc_p2_original_group_engine.h"
 #include "pc_randomizer.h"
 #include "pc_coop.h"
@@ -155,7 +156,15 @@ public:
   const auto budget=std::chrono::seconds(human?600:90);
   if(std::chrono::steady_clock::now()-started>=budget){if(native){std::string e;if(!pc_p2_original_course_unload(e))std::fprintf(stderr,"ORIGINAL_FOLIAGE_GUARD_CLEANUP %s\n",e.c_str());}std::puts("ORIGINAL_FOLIAGE_GUARD_EXIT exit=86 bounded=1");std::fflush(nullptr);std::_Exit(86);}
   int result=PlugPikiApp::idle();auto* n=naviMgr?naviMgr->getNavi():nullptr;const bool initialized=n&&n->getCurrState();if(initialized)captainSeen=true;
-  require(!captainSeen||initialized,"initialized captain retained");if(initialized)require(!GameStat::orimaDead&&!naviMgr->isNaviDead(n)&&n->getCurrState()->getID()!=NAVISTATE_Dead&&std::isfinite(n->mHealth)&&n->mHealth>0,"captain guard");
+  require(!captainSeen||initialized,"initialized captain retained");
+  if(initialized){
+   // Canonical fixture-only guard: all actual death signals precede every
+   // movie/pause/readiness return and observation counter. A negative probe
+   // changes the guard input only, never captain health or production state.
+   const bool forced=std::getenv("P2_ORIGINAL_FOLIAGE_FORCE_CAPTAIN_DOWN")!=nullptr;
+   p2_fixture_require_captain(GameStat::orimaDead||forced,
+     naviMgr->isNaviDead(n)||n->getCurrState()->getID()==NAVISTATE_Dead,n->mHealth,age);
+  }
   if(gameflow.mMoviePlayer&&gameflow.mMoviePlayer->mIsActive){gameflow.mMoviePlayer->requestSkip();return result;}
   if(!initialized||!pc_randomizer_ready()||!pikiMgr||!tekiMgr||!pelletMgr||!itemMgr||!mapMgr||gameflow.mPauseAll||gameflow.mIsUIOverlayActive)return result;
   if(!phase){if(n->getCurrState()->getID()!=NAVISTATE_Walk||++ready<45)return result;int live=0,red=0;Iterator it(pikiMgr);CI_LOOP(it){auto* p=static_cast<Piki*>(*it);if(p->isAlive()){++live;red+=p->mColor==Red;}}require(live==20&&red==20,"actual20 Red Pikmin baseline");setup(n);phase=1;return result;}
