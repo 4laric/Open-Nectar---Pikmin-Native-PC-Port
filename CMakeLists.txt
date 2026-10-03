@@ -268,6 +268,9 @@ set(PC_PORT_SOURCES
     pc_port/pc_p2_original_actor.cpp
     pc_port/pc_p2_original_lifecycle.cpp
     pc_port/pc_p2_original_group.cpp
+    pc_port/pc_p2_original_dispatch.cpp
+    pc_port/pc_p2_original_course.cpp
+    pc_port/pc_p2_original_manifest.cpp
     pc_port/pc_p2_original_progress.cpp
     pc_port/pc_p2_original_group_engine.cpp
     pc_port/pc_p2_original_piki_init.cpp
@@ -3246,6 +3249,16 @@ add_test(NAME pc_midday_render_graph COMMAND pc_midday_render_graph_test)
         pc_port/pc_p2_original_lifecycle.cpp)
     target_include_directories(pc_p2_original_group_test PRIVATE "${PROJECT_SOURCE_DIR}/pc_port")
     add_test(NAME p2_original_group COMMAND pc_p2_original_group_test)
+    add_executable(pc_p2_original_dispatch_test tools/pc_p2_original_dispatch_test.cpp
+        pc_port/pc_p2_original_dispatch.cpp pc_port/pc_p2_original_catalog.cpp
+        pc_port/pc_p2_original_spawn_plan.cpp)
+    target_include_directories(pc_p2_original_dispatch_test PRIVATE "${PROJECT_SOURCE_DIR}/pc_port")
+    add_test(NAME p2_original_dispatch COMMAND pc_p2_original_dispatch_test)
+    add_executable(pc_p2_original_manifest_test tools/pc_p2_original_manifest_test.cpp
+        pc_port/pc_p2_original_manifest.cpp pc_port/pc_p2_original_catalog.cpp
+        pc_port/pc_p2_original_spawn_plan.cpp pc_port/pc_p2_original_lifecycle.cpp)
+    target_include_directories(pc_p2_original_manifest_test PRIVATE "${PROJECT_SOURCE_DIR}/pc_port")
+    add_test(NAME p2_original_manifest COMMAND pc_p2_original_manifest_test)
     add_executable(pc_p2_original_progress_test tools/pc_p2_original_progress_test.cpp
         pc_port/pc_p2_original_progress.cpp)
     target_include_directories(pc_p2_original_progress_test PRIVATE "${PROJECT_SOURCE_DIR}/pc_port")

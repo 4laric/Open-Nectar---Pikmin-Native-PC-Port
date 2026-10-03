@@ -34,9 +34,13 @@ public:
  bool restoreState(Generator*,const std::string& fingerprint,const std::string& bytes,std::string&);
  bool state(const Generator*,GeneratorState&,unsigned& alive)const;
  bool unload(std::string&);
+ bool encodeFrontier(std::string& bytes,std::string& e)const{return mFrontier.encode(bytes,e);}
+ // Checkpoint owner must adopt before scene construction, never over live groups.
+ bool decodeFrontier(const std::string& campaign,const std::string& bytes,std::string&);
 private:
  struct Actor {Creature* pointer=nullptr;unsigned token=0;std::uint64_t handle=0;bool dead=false,released=false,registryBound=false;};
  struct Group {GeneratorState state;std::uint64_t handle=0;bool initialized=false,started=false;std::vector<Actor> actors;};
  ActorRegistry& mActors;GroupProvider* mProvider=nullptr;bool mCleaning=false;std::map<Generator*,Group> mGroups;
+ IncarnationFrontier mFrontier;
 };
 }

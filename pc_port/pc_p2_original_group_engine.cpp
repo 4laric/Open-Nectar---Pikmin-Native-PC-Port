@@ -1,6 +1,8 @@
 #include "pc_p2_original_group_engine.h"
 #include "pc_p2_original_group.h"
 #include "pc_p2_original_drop_engine.h"
+#include "pc_p2_original_course.h"
+#include "pc_p2_original_progress.h"
 #include "Generator.h"
 #include "MapMgr.h"
 #include "gameflow.h"
@@ -28,7 +30,10 @@ bool pc_p2_original_course_install(const std::vector<p2original::GroupBinding>& 
  return groupCourse().install(bindings,provider,error);
 }
 bool pc_p2_original_course_unload(std::string& error){return groupCourse().unload(error);}
+bool pc_p2_original_incarnation_encode(std::string& bytes,std::string& error){return groupCourse().encodeFrontier(bytes,error);}
+bool pc_p2_original_incarnation_decode(const std::string& campaign,const std::string& bytes,std::string& error){return groupCourse().decodeFrontier(campaign,bytes,error);}
 bool pc_p2_original_generator_init(Generator* generator,bool& handled,std::string& error){
+ if(pc_p2_original_course_shadow(generator)){handled=true;error.clear();return true;}
  handled=pc_p2_original_groups().owns(generator);if(!handled)return true;
  p2original::Math math;
  math.draw=[](float& out,std::string&){out=pc_sim_randf(1.0f);return true;};
@@ -37,7 +42,8 @@ bool pc_p2_original_generator_init(Generator* generator,bool& handled,std::strin
  // Original map-null semantics preserve authored height; otherwise query the
  // actual installed terrain per actor immediately before its physical birth.
  auto floor=[](const p2original::Position& position,float& y,std::string&){y=mapMgr?mapMgr->getMinY(position.x,position.z,true):position.y;return true;};
- if(!groupCourse().initialize(generator,unsigned(gameflow.mWorldClock.mCurrentDay),!Generator::ramMode,math,floor,error))return false;
+ const unsigned day=pc_p2_original_course_prepared()?p2original::originalProgress().context().day:unsigned(gameflow.mWorldClock.mCurrentDay);
+ if(!groupCourse().initialize(generator,day,!Generator::ramMode,math,floor,error))return false;
  mirror(generator);return true;
 }
 bool pc_p2_original_generator_death(Generator* generator,Creature* creature,bool& handled,std::string& error){
@@ -51,4 +57,5 @@ void pc_p2_original_native_retired(Creature* creature){
  if(!groupCourse().retiredNative(creature,error)){
   std::fprintf(stderr,"P2_ORIGINAL_NATIVE_RETIRE_FAIL %s\n",error.c_str());std::abort();
  }
+ pc_p2_original_course_retired(creature);
 }
