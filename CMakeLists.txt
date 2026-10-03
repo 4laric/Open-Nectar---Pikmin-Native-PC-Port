@@ -3064,6 +3064,11 @@ endfunction()
 pikmin_add_ci_fixture(captain_switch tools/p2_captain_switch_runtime.cpp)
 
 # #1154/#1161 ordinary natural WFG acquisition and cave party route; build only.
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/pc_port/pc_p2_cave_campaign.cpp")
+    pikmin_add_ci_fixture(cave_visible tools/p2_cave_visible_runtime.cpp)
+    target_include_directories(pikmin_ci_fixture_cave_visible PRIVATE ${P2_CHALLENGE_GUARD_INCLUDE_DIR})
+endif()
+# #1154/#1161 ordinary natural WFG acquisition and cave party route; build only.
 pikmin_add_ci_fixture(cave_route tools/p2_cave_route_runtime.cpp)
 if(TARGET pikmin_ci_fixture_cave_route)
     target_include_directories(pikmin_ci_fixture_cave_route PRIVATE ${P2_CHALLENGE_GUARD_INCLUDE_DIR})
