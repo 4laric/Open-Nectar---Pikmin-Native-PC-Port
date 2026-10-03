@@ -268,6 +268,8 @@ set(PC_PORT_SOURCES
     pc_port/pc_p2_original_actor.cpp
     pc_port/pc_p2_original_lifecycle.cpp
     pc_port/pc_p2_original_group.cpp
+    pc_port/pc_p2_original_chappy.cpp
+    pc_port/pc_p2_original_chappy_native.cpp
     pc_port/pc_p2_original_progress.cpp
     pc_port/pc_p2_original_group_engine.cpp
     pc_port/pc_p2_original_piki_init.cpp
@@ -3130,11 +3132,19 @@ pikmin_add_ci_fixture(captain_reentry tools/p2_captain_reentry_runtime.cpp)
 # #1079 local native card save/resume acceptance, built only on CI.
 pikmin_add_ci_fixture(captain_campaign_resume tools/p2_captain_campaign_resume_runtime.cpp)
 pikmin_add_ci_fixture(original_pelplant tools/p2_original_pelplant_runtime.cpp)
+pikmin_add_ci_fixture(original_chappy tools/p2_original_chappy_runtime.cpp)
 add_executable(pc_p2_original_pelplant_test tools/test_p2_original_pelplant.cpp
     pc_port/pc_p2_original_pelplant.cpp pc_port/pc_p2_original_spawn_plan.cpp)
 target_include_directories(pc_p2_original_pelplant_test PRIVATE pc_port)
 target_compile_options(pc_p2_original_pelplant_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
 add_test(NAME pc_p2_original_pelplant_test COMMAND pc_p2_original_pelplant_test)
+add_executable(pc_p2_original_chappy_test tools/pc_p2_original_chappy_test.cpp
+    pc_port/pc_p2_original_chappy.cpp pc_port/pc_p2_original_spawn_plan.cpp
+    pc_port/pc_p2_original_drop.cpp pc_port/pc_p2_original_catalog.cpp
+    pc_port/netplay/pc_netplay_sha256.h)
+target_include_directories(pc_p2_original_chappy_test PRIVATE pc_port)
+target_compile_options(pc_p2_original_chappy_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME pc_p2_original_chappy_test COMMAND pc_p2_original_chappy_test)
 pikmin_add_ci_fixture(captain_onion_owner_sdl tools/p2_captain_onion_owner_sdl_fixture.cpp)
 if(TARGET pikmin_ci_fixture_captain_onion_owner_sdl)
     target_include_directories(pikmin_ci_fixture_captain_onion_owner_sdl PRIVATE ${P2_CHALLENGE_GUARD_INCLUDE_DIR})
