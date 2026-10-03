@@ -80,3 +80,11 @@ bool pc_p2_original_piki_contact_owner_allowed(Piki* p,int playerId,unsigned cap
  if(!source)return fail(e,"ordinary contact retains native player ownership");
  return true; // Commit still rechecks actual movie/callable state before writes.
 }
+
+bool pc_p2_original_piki_recruit_pair_ready() noexcept {
+ const auto& progress=p2original::originalProgress();
+ return !selectedCampaign.empty()&&!admittedCatalog.empty()
+     &&owner==std::this_thread::get_id()&&progress.ready()
+     &&progress.snapshot().campaign==selectedCampaign
+     &&pc_p2_original_piki_catalog_fingerprint()==admittedCatalog;
+}

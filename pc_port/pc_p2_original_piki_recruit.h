@@ -18,3 +18,6 @@ bool pc_p2_original_piki_recruit_accepted(Piki*,unsigned captain,bool movieActiv
 // split. Ordinary P1 and versus retain the original player-ID gate exactly.
 bool pc_p2_original_piki_contact_owner_allowed(Piki*,int playerId,unsigned captain,
     bool versus,std::string& error);
+
+// Read-only authority check for original-only captain lifecycle hooks.
+bool pc_p2_original_piki_recruit_pair_ready() noexcept;

@@ -744,6 +744,7 @@ void Navi::rideUfo()
 void Navi::reset()
 {
 #if defined(PIKI_PC_PORT)
+	mOriginalP2ContactClock.reset();
 	pc_demon_reset(this);
 	pc_demon_drop_reset(this);
 #endif
@@ -1443,6 +1444,8 @@ void Navi::update()
 	PcAudioSource audioSource(mNaviID); // issue #1030: whose sounds these are
 #endif
 #if defined(PIKI_PC_PORT)
+	if(pc_p2_original_piki_recruit_pair_ready())
+		mOriginalP2ContactClock.update(mTargetVelocity.x,mTargetVelocity.y,mTargetVelocity.z);
 	pcUpdateLockOn();
 #endif
 	if (!mGroundTriangle) {
@@ -2043,6 +2046,14 @@ void Navi::releasePikis()
 		}
 	}
 
+#if defined(PIKI_PC_PORT)
+    // A mixed diagnostic scene must not change ordinary-only P1 disbanding.
+    bool originalDisband=false;
+    if(pc_p2_original_piki_recruit_pair_ready())for(int i=0;i<pikiCount;++i){
+        OriginalPikiBody body;
+        if(pc_p2_original_piki_body_query(pikiList[i],body)){originalDisband=true;break;}
+    }
+#endif
 	for (pikiIdx = 0; pikiIdx < pikiCount; pikiIdx++) {
 		pikiList[pikiIdx]->changeMode(PikiMode::FreeMode, this);
         int color = pc_p2_purples_enabled()?pc_throw_selection_class(pikiList[pikiIdx]):pikiList[pikiIdx]->mColor;
@@ -2056,6 +2067,9 @@ void Navi::releasePikis()
 			pikiList[pikiIdx]->mNavi = nullptr;
 		}
 	}
+#if defined(PIKI_PC_PORT)
+    if(originalDisband)mOriginalP2ContactClock.disband();
+#endif
 }
 
 /**
