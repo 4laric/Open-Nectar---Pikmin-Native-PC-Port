@@ -1,6 +1,9 @@
 #include "pc_p2_original_captain_damage.h"
 #include "Navi.h"
 #include "NaviState.h"
+#include "Controller.h"
+#include "Kontroller.h"
+#include <cmath>
 #include <array>
 #include <limits>
 extern const p2original::captain::LoadedScene* pc_p2_original_captain_loaded_scene() __attribute__((weak));
@@ -19,6 +22,7 @@ public:
  std::array<Navi*,2> captains{};
  std::array<bool,2> alive{};
  std::array<std::uint8_t,2> frames{};
+ std::array<PcOriginalCaptainTimers,2> timers{};
  const std::string& selectedCampaign()const override{return campaign;}
  const std::string& selectedFingerprint()const override{return fingerprint;}
  const std::string& sourceCatalog()const override{return catalog;}
@@ -30,7 +34,7 @@ public:
   return !player?Demo::Absent:(player==observedMovie?observedDemo:Demo::Unknown);
  }
  Navi* captainAt(unsigned slot)const override{return slot<2?captains[slot]:nullptr;}
- void clear(){scene=nullptr;epoch=0;campaign.clear();fingerprint.clear();catalog.clear();game=Phase::Inactive;player=nullptr;captains={};alive={};frames={};}
+ void clear(){scene=nullptr;epoch=0;campaign.clear();fingerprint.clear();catalog.clear();game=Phase::Inactive;player=nullptr;captains={};alive={};frames={};timers={};}
  const LoadedScene* canonical()const {
   if(!pc_p2_original_captain_loaded_scene||!pc_randomizer_original_session
    ||!pc_randomizer_original_session()||!pc_randomizer_original_campaign
@@ -59,7 +63,7 @@ public:
   // Source Creature::init enables CF_IsAlive; Navi::onInit resets the u8
   // invincibility counter to zero. This event is after actual original roster
   // reset/loading, not an inference from HP or native Creature::isAlive().
-  alive={true,true};frames={0,0};game=Phase::GameWorldActive;
+  alive={true,true};frames={0,0};timers={};game=Phase::GameWorldActive;
  }
 } runtime;
 State* ownedState(Navi* n,StateId id){
@@ -78,6 +82,14 @@ void pc_p2_original_captain_actor_update(Navi* n){
  // Retail Navi::update decrements mInvincibleTimer once per actor update,
  // independent of delta seconds and current state, never per global idle tick.
  if(runtime.frames[slot])--runtime.frames[slot];
+ auto& timers=runtime.timers[slot];
+ const auto& velocity=n->mTargetVelocity;
+ const float speed=std::sqrt(velocity.x*velocity.x+velocity.y*velocity.y+velocity.z*velocity.z);
+ if(timers.disbandDisable>0&&speed>20.0f)--timers.disbandDisable;
+ if(timers.throwDisable){
+  if(n->mKontroller&&(n->mKontroller->mCurrentInput&KBBTN_A))timers.throwDisable=10;
+  --timers.throwDisable;
+ }
 }
 bool pc_p2_original_captain_actor_alive(const Navi* n){const int slot=runtime.slot(n);return slot>=0&&runtime.alive[slot];}
 bool pc_p2_original_captain_actor_lifetime(const Navi* n,bool& out){const int slot=runtime.slot(n);if(slot<0)return false;out=runtime.alive[slot];return true;}
@@ -88,3 +100,7 @@ bool pc_p2_original_captain_damaged_cleanup(Navi* n){
 bool pc_p2_original_captain_dead_entered(Navi* n){
  if(!ownedState(n,StateId::Dead))return false;runtime.alive[runtime.slot(n)]=false;return true;
 }
+
+bool pc_p2_original_captain_actor_timers(const Navi* n,PcOriginalCaptainTimers& out){const int slot=runtime.slot(n);if(slot<0)return false;out=runtime.timers[slot];return true;}
+bool pc_p2_original_captain_start_throw_disable(Navi* n){if(!ownedState(n,StateId::Nuku))return false;runtime.timers[runtime.slot(n)].throwDisable=10;return true;}
+bool pc_p2_original_captain_party_released(Navi* n){const int slot=runtime.slot(n);auto* native=n?n->getCurrState():nullptr;auto* state=dynamic_cast<State*>(native);if(slot<0||runtime.game!=Phase::GameWorldActive||!state||state->nativeState()!=native)return false;runtime.timers[slot].disbandDisable=60;return true;}

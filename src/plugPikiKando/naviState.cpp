@@ -12,6 +12,7 @@
 #include "pc_p2_original_captain_throw.h"
 #include "pc_p2_original_captain_actions_party.h"
 #include "pc_p2_original_captain_punch.h"
+#include "pc_p2_original_captain_pluck.h"
 #endif
 #include "pc_p2_purple.h"
 #include "pc_p2_white.h"
@@ -149,6 +150,7 @@ void NaviStateMachine::init(Navi* navi)
 	p2original::captain::registerThrowStates(*this);
 	p2original::captain::registerPartyStates(*this);
 	p2original::captain::registerPunchState(*this);
+	p2original::captain::registerPluckStates(*this);
 	registerState(pc_demon_drop_state_create());
 	registerState(pc_demon_escape_state_create());
 #endif

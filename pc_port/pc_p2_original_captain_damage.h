@@ -110,3 +110,10 @@ bool pc_p2_original_captain_actor_frames(const Navi*,std::uint8_t&);
 // verify the current genuine State identity. Unsupported states cannot write.
 bool pc_p2_original_captain_damaged_cleanup(Navi*);
 bool pc_p2_original_captain_dead_entered(Navi*);
+
+// Source Navi::onInit resets these counters; queries refuse absent actors.
+struct PcOriginalCaptainTimers {std::uint8_t throwDisable=0;std::int8_t disbandDisable=0;};
+bool pc_p2_original_captain_actor_timers(const Navi*,PcOriginalCaptainTimers&);
+// Actual source Nuku cleanup and successful releasePikis events only.
+bool pc_p2_original_captain_start_throw_disable(Navi*);
+bool pc_p2_original_captain_party_released(Navi*);

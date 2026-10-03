@@ -9,6 +9,7 @@
 extern p2original::captain::SourceBank* pc_p2_original_captain_source_bank() __attribute__((weak));
 extern p2original::captain::WalkEnvironment* pc_p2_original_captain_walk_environment(const Navi*) __attribute__((weak));
 extern bool pc_p2_original_captain_throw_preflight(Navi*,p2original::captain::StateId,std::string&) __attribute__((weak));
+extern bool pc_p2_original_captain_pluck_preflight(Navi*,p2original::captain::StateId,std::string&) __attribute__((weak));
 extern bool pc_p2_original_captain_punch_preflight(Navi*,std::string&) __attribute__((weak));
 extern bool pc_p2_original_captain_party_preflight(Navi*,p2original::captain::StateId,std::string&) __attribute__((weak));
 using namespace p2original::captain;
@@ -140,6 +141,7 @@ bool pc_p2_original_captain_core_preflight(Navi* n,StateId id,std::string& e){
  if(id==StateId::Dead)return pc_p2_original_captain_down_preflight(n,e);
  if(id==StateId::Walk){auto* env=environment(n,e);walk::Frame frame;return env&&nativecontrol::sceneAnimationTimer(n)&&env->capture(*n,frame,e)&&frame.actor.has_value();}
  if(id==StateId::Damaged)return true;
+ if(id==StateId::Nuku||id==StateId::NukuAdjust)return pc_p2_original_captain_pluck_preflight&&pc_p2_original_captain_pluck_preflight(n,id,e);
  if(id==StateId::Punch)return pc_p2_original_captain_punch_preflight&&pc_p2_original_captain_punch_preflight(n,e);
  if(id==StateId::Gather||id==StateId::Throw||id==StateId::ThrowWait)return pc_p2_original_captain_throw_preflight&&pc_p2_original_captain_throw_preflight(n,id,e);
  if(id==StateId::Follow||id==StateId::Change)return pc_p2_original_captain_party_preflight&&pc_p2_original_captain_party_preflight(n,id,e);

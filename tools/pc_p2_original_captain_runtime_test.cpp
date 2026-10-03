@@ -58,6 +58,23 @@ int main(){
  check(pc_p2_original_captain_dead_entered(&a));check(!pc_p2_original_captain_actor_alive(&a)&&pc_p2_original_captain_actor_alive(&b));
  check(pc_p2_original_captain_actor_lifetime(&a,life)&&!life);
  pc_p2_original_captain_main_game_left();check(pc_p2_original_captain_world()->phase()==Phase::Inactive);
+ // Exact source timer semantics: held A never arms an idle counter.
+ PcOriginalCaptainTimers timers;Controller controller;a.mKontroller=&controller;controller.mCurrentInput=KBBTN_A;
+ check(pc_p2_original_captain_actor_timers(&a,timers)&&timers.throwDisable==0&&timers.disbandDisable==0);
+ pc_p2_original_captain_actor_update(&a);check(pc_p2_original_captain_actor_timers(&a,timers)&&timers.throwDisable==0);
+ state.id=StateId::Walk;check(!pc_p2_original_captain_start_throw_disable(&a));
+ state.id=StateId::Nuku;check(pc_p2_original_captain_start_throw_disable(&a));
+ pc_p2_original_captain_actor_update(&a);check(pc_p2_original_captain_actor_timers(&a,timers)&&timers.throwDisable==9);
+ pc_p2_original_captain_actor_update(&a);check(pc_p2_original_captain_actor_timers(&a,timers)&&timers.throwDisable==9);
+ controller.mCurrentInput=0;for(int i=0;i<12;++i)pc_p2_original_captain_actor_update(&a);
+ check(pc_p2_original_captain_actor_timers(&a,timers)&&timers.throwDisable==0);
+ check(!pc_p2_original_captain_party_released(&a));pc_p2_original_captain_main_game_entered();
+ check(pc_p2_original_captain_party_released(&a));a.mTargetVelocity.x=20;
+ pc_p2_original_captain_actor_update(&a);check(pc_p2_original_captain_actor_timers(&a,timers)&&timers.disbandDisable==60);
+ a.mTargetVelocity.x=21;pc_p2_original_captain_actor_update(&a);check(pc_p2_original_captain_actor_timers(&a,timers)&&timers.disbandDisable==59);
+ a.mTargetVelocity.x=0;pc_p2_original_captain_actor_update(&a);check(pc_p2_original_captain_actor_timers(&a,timers)&&timers.disbandDisable==59);
+ pc_p2_original_captain_main_game_entered();check(pc_p2_original_captain_actor_timers(&a,timers)&&timers.disbandDisable==59);
+ timers.throwDisable=88;check(!pc_p2_original_captain_actor_timers(&outsider,timers)&&timers.throwDisable==88);
  // Changed incarnation is refused even when all addresses are reused.
  scene.epoch=2;check(!pc_p2_original_captain_world());check(!pc_p2_original_captain_actor_frames(&a,frames));
  int movie=0,wrongMovie=0;scene.player=reinterpret_cast<MoviePlayer*>(&movie);
