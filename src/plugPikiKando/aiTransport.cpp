@@ -15,6 +15,7 @@
 #include "Navi.h"
 #include "Pellet.h"
 #include "pc_p2_preview.h"
+#include "pc_p2_cave_items_engine.h"
 #include "PelletState.h"
 #include "PikiAI.h"
 #include "PikiMgr.h"
@@ -86,6 +87,7 @@ void ActTransport::turnOver()
 void ActTransport::initWait()
 {
 	Pellet* pel = mPellet.getPtr();
+    if(Suckable* pod=pc_p2_cave_items_goal_for(pel)) {mGoal=pod;pel->mTargetGoal=pod;return;}
 	mState      = STATE_Wait;
 	mPiki->startLook(&pel->mSRT.t);
 	mPiki->startMotion(PaniMotionInfo(PIKIANIM_Wait), PaniMotionInfo(PIKIANIM_Wait));
