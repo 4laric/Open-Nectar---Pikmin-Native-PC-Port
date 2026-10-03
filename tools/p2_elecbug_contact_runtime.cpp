@@ -107,13 +107,16 @@ class ContactApp:public PlugPikiApp {
         const unsigned uid=p2original::originalSourceCatalogUid(key);
         std::string error;
         require(pc_p2_original_piki_origin_install(fingerprint,{{key,uid,20,2}},error),"Yellow fixture catalog");
-        require(p2original::originalProgress().initialize("yellow1263-electric-fixture",error),"Yellow fixture progress");
-        require(pc_p2_original_piki_recruit_bind("yellow1263-electric-fixture",fingerprint,error),"Yellow paired recruitment");
+        const std::string campaign="6a012015368158125b7b88bdd14000ed2a10613f02474b0f08830d9a3b5ec029";
+        require(p2original::originalProgress().initialize(campaign,error),"Yellow fixture progress");
+        auto context=p2original::originalProgress().context();context.story=false;
+        require(p2original::originalProgress().restoreContext(context,error),"disclosed non-story Yellow fixture context");
+        require(pc_p2_original_piki_recruit_bind(campaign,fingerprint,error),"Yellow paired recruitment");
         OriginalPikiBody body{{key,uid,0,1,fingerprint},{2,false,false}};
         const auto& pos=captain->mSRT.t;
         require(pc_p2_original_piki_physical_birth(body,{{pos.x+12,pos.y,pos.z}},stagedYellow,error)==p2original::PikiBirthResult::Born,"disclosed Yellow replacement");
         require(pc_p2_original_rgb_throw_species(stagedYellow)==2,"canonical staged Yellow");
-        std::printf("P2_ELECBUG_YELLOW_STAGED piki=%p species=2 relocated_debug_member=1 acquisition=0 campaign=0\n",static_cast<void*>(stagedYellow));
+        std::printf("P2_ELECBUG_YELLOW_STAGED piki=%p species=2 relocated_debug_member=1 non_story_fixture=1 acquisition=0 campaign=0\n",static_cast<void*>(stagedYellow));
     }
     std::map<Piki*,int> observedSpecies;
     void guardCaptains(){
