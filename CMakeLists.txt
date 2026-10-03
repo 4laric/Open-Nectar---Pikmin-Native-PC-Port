@@ -3156,6 +3156,10 @@ add_executable(pc_p2_original_chappy_test tools/pc_p2_original_chappy_test.cpp
 target_include_directories(pc_p2_original_chappy_test PRIVATE pc_port)
 target_compile_options(pc_p2_original_chappy_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
 add_test(NAME pc_p2_original_chappy_test COMMAND pc_p2_original_chappy_test)
+add_executable(pc_p2_fire_flick_test tools/test_p2_fire_flick.cpp)
+target_include_directories(pc_p2_fire_flick_test PRIVATE pc_port)
+target_compile_options(pc_p2_fire_flick_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME pc_p2_fire_flick_test COMMAND pc_p2_fire_flick_test)
 add_executable(pc_p2_original_tank_test tools/test_p2_original_tank.cpp
     pc_port/pc_p2_original_tank.cpp pc_port/pc_p2_original_spawn_plan.cpp
     pc_port/pc_p2_original_drop.cpp pc_port/pc_p2_original_catalog.cpp)
