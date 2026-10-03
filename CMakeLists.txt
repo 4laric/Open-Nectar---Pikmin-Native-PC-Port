@@ -273,6 +273,15 @@ set(PC_PORT_SOURCES
     pc_port/pc_p2_original_progress.cpp
     pc_port/pc_p2_original_captain_damage.cpp
     pc_port/pc_p2_original_captain_runtime.cpp
+    pc_port/pc_p2_original_captain_control.cpp
+    pc_port/pc_p2_original_captain_walk.cpp
+    pc_port/pc_p2_original_captain_native_control.cpp
+    pc_port/pc_p2_original_captain_down_sequence.cpp
+    pc_port/pc_p2_original_captain_down.cpp
+    pc_port/pc_p2_original_captain_states.cpp
+    pc_port/pc_p2_original_captain_throw.cpp
+    pc_port/pc_p2_original_captain_actions_party.cpp
+    pc_port/pc_p2_original_captain_punch.cpp
     pc_port/pc_p2_original_chappy.cpp
     pc_port/pc_p2_original_chappy_native.cpp
     pc_port/pc_p2_original_group_engine.cpp
