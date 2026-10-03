@@ -294,6 +294,8 @@ set(PC_PORT_SOURCES
     pc_port/pc_p2_original_gate_state.cpp
     pc_port/pc_p2_original_gate_cache.cpp
     pc_port/pc_p2_original_gate_native.cpp
+    pc_port/pc_p2_original_bridge.cpp
+    pc_port/pc_p2_original_bridge_native.cpp
     pc_port/pc_p2_campaign_goal_probe.cpp
     pc_port/pc_bbft.cpp
     pc_port/pc_p2_surface_topology.cpp

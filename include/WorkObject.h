@@ -83,6 +83,8 @@ public:
 	static int getShapeNameIndex(immut char*);
 	static immut char* getShapeName(int);
 	void addUseList(int);
+	void originalAdopt(WorkObject*);
+	bool originalForget(WorkObject*);
 
 protected:
 	// _00     = VTBL 1
