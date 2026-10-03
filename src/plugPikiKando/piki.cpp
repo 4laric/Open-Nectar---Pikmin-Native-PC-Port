@@ -11,6 +11,8 @@
 #include "pc_randomizer.h"
 #include "pc_bbft.h"
 #include "Piki.h"
+#include "pc_p2_original_piki_origin.h"
+#include "pc_p2_cave_campaign_party_engine.h"
 #include "pc_p2_kurage_receiver.h"
 #include "AIConstant.h"
 #include "AIPerf.h"
@@ -1328,7 +1330,7 @@ int Piki::graspSituation(Creature** outTarget)
 void Piki::initColor(int color)
 {
     mP2Purple=false;mP2White=false;mP2Bulbmin=false;mP2AnimationTime=0;
-    if (!pc_bbft_color_access(color)) color = Red;
+    if (!pc_bbft_color_access(color) && !pc_p2_original_piki_saved_color_held(this,color)) color = Red;
 	mColor = color;
 #if defined(PIKI_PC_PORT)
 	// VS del port: cada jugador tiene los tres colores, así que el dueño no
@@ -1390,7 +1392,7 @@ void Piki::endKinoko()
  */
 void Piki::setColor(int color)
 {
-    if (!pc_bbft_color_access(color)) color = Red;
+    if (!pc_bbft_color_access(color) && !pc_p2_original_piki_saved_color_held(this,color)) color = Red;
 	mColor = color;
 	if (isKinoko()) {
 		mDefaultColour = kinokoColors[mColor];
@@ -2523,6 +2525,7 @@ void Piki::resetPosition(immut Vector3f& pos)
 void Piki::init(Navi* navi)
 {
 	pc_p2_purple_flight_cancel(this);
+	pc_p2_cave_campaign_party_forget(this);
 	pc_p2_purple_impact_forget(this);
 	mHorizontalRotation = 0.0f;
 	mVerticalRotation   = 0.0f;
