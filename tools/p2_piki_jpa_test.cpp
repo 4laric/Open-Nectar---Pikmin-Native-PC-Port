@@ -12,12 +12,22 @@
 #include <cstdlib>
 // Pure-core allocation control only; never creates Scene/Stage authority.
 static bool failNextAllocation=false;
-void* operator new(std::size_t n){if(failNextAllocation){failNextAllocation=false;throw std::bad_alloc();}if(void* p=std::malloc(n?n:1))return p;throw std::bad_alloc();}
-void* operator new[](std::size_t n){return ::operator new(n);}
-void operator delete(void* p)noexcept{std::free(p);}
-void operator delete[](void* p)noexcept{std::free(p);}
-void operator delete(void* p,std::size_t)noexcept{std::free(p);}
-void operator delete[](void* p,std::size_t)noexcept{std::free(p);}
+// Keep replacement allocation boundaries opaque to optimized GNU diagnostics:
+// these paired replacements intentionally use malloc/free for fault controls.
+#if defined(_MSC_VER)
+#define P2_TEST_NOINLINE __declspec(noinline)
+#elif defined(__GNUC__)
+#define P2_TEST_NOINLINE __attribute__((noinline))
+#else
+#define P2_TEST_NOINLINE
+#endif
+P2_TEST_NOINLINE void* operator new(std::size_t n){if(failNextAllocation){failNextAllocation=false;throw std::bad_alloc();}if(void* p=std::malloc(n?n:1))return p;throw std::bad_alloc();}
+P2_TEST_NOINLINE void* operator new[](std::size_t n){return ::operator new(n);}
+P2_TEST_NOINLINE void operator delete(void* p)noexcept{std::free(p);}
+P2_TEST_NOINLINE void operator delete[](void* p)noexcept{std::free(p);}
+P2_TEST_NOINLINE void operator delete(void* p,std::size_t)noexcept{std::free(p);}
+P2_TEST_NOINLINE void operator delete[](void* p,std::size_t)noexcept{std::free(p);}
+#undef P2_TEST_NOINLINE
 using namespace p2original::pikiJPA;
 int main(int argc,char** argv){
  #ifdef _WIN32
