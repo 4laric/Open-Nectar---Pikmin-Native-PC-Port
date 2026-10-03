@@ -1,3 +1,4 @@
+#include "pc_p2_original_captain_damage.h"
 #include "pc_p2_purple.h"
 #include "pc_p2_mamuta_rules.h"
 #include "pc_p2_hazard_reaction.h"
@@ -625,6 +626,9 @@ bool InteractKill::actPiki(Piki* piki) immut
  */
 bool InteractKill::actNavi(Navi* navi) immut
 {
+#if defined(PIKI_PC_PORT)
+	if (pc_p2_original_captain_body_owned(navi)) return false;
+#endif
 	navi->kill(false);
 	return true;
 }

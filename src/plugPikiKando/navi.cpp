@@ -17,6 +17,15 @@
 #include "pc_p2_umimushi.h"
 #include "Navi.h"
 #if defined(PIKI_PC_PORT)
+#include "pc_p2_original_captain_damage.h"
+#include "pc_p2_hanachirashi_receiver.h"
+bool Navi::isAlive()
+{
+	bool alive;
+	if (pc_p2_original_captain_actor_lifetime(this, alive)) return alive;
+	if (pc_p2_original_captain_body_owned(this)) return false;
+	return Creature::isAlive();
+}
 #include "pc_p2_original_piki_origin.h"
 #include "pc_p2_source_body.h"
 #include "pc_p2_original_piki_recruit.h"
@@ -197,6 +206,9 @@ bool Navi::isNuking()
  */
 void Navi::startMovie(bool doStopEffects)
 {
+#if defined(PIKI_PC_PORT)
+	if (pc_p2_original_captain_body_owned(this)) return;
+#endif
 	int state = mStateMachine->getCurrID(this);
 	if (doStopEffects) {
 		mNaviLightEfx->stop();
@@ -278,6 +290,9 @@ void Navi::startDayEnd()
  */
 void Navi::updateDayEnd(immut Vector3f& pos)
 {
+#if defined(PIKI_PC_PORT)
+	if (pc_p2_original_captain_body_owned(this)) return;
+#endif
 	if (mIsDayEnd) {
 		mIsDayEnd = 0;
 
@@ -452,6 +467,9 @@ bool Navi::isRopable()
 bool Navi::startDamage()
 {
 #if defined(PIKI_PC_PORT)
+	if (pc_p2_original_captain_body_owned(this)) return false;
+#endif
+#if defined(PIKI_PC_PORT)
 	PcAudioSource audioSource(mNaviID); // issue #1030: whose sounds these are (the hurt state starts here)
 #endif
 	int stateID      = mStateMachine->getCurrID(this);
@@ -562,6 +580,9 @@ void Navi::pauseForDownIfLast()
  */
 void Navi::finishDamage()
 {
+#if defined(PIKI_PC_PORT)
+	if (pc_p2_original_captain_body_owned(this)) return;
+#endif
 #if defined(PIKI_PC_PORT)
 	PcAudioSource audioSource(mNaviID); // issue #1030: whose sounds these are
 #endif
@@ -1086,6 +1107,9 @@ void Navi::findNextThrowPiki()
  */
 void Navi::startMotion(immut PaniMotionInfo& motion1, immut PaniMotionInfo& motion2)
 {
+#if defined(PIKI_PC_PORT)
+	if (pc_p2_original_captain_body_owned(this)) return;
+#endif
 	mNaviAnimMgr.startMotion(motion1, motion2);
 	mPreBlendLowerMotionID = -1;
 }
@@ -1095,6 +1119,9 @@ void Navi::startMotion(immut PaniMotionInfo& motion1, immut PaniMotionInfo& moti
  */
 void Navi::enableMotionBlend()
 {
+#if defined(PIKI_PC_PORT)
+	if (pc_p2_original_captain_body_owned(this)) return;
+#endif
 	mPreBlendLowerMotionID = mNaviAnimMgr.getLowerAnimator().getCurrentMotionIndex();
 	mNaviAnimMgr.getLowerAnimator().startMotion(PaniMotionInfo(PIKIANIM_Nigeru));
 	mNaviAnimMgr.getLowerAnimator().mAnimationCounter = 10.0f;
@@ -1441,6 +1468,19 @@ void Navi::pcPinCursorFirstPerson()
 
 void Navi::update()
 {
+#if defined(PIKI_PC_PORT)
+ pc_p2_original_captain_actor_update(this);
+ // A real source scene's roster never executes the legacy manual animator,
+ // control, formation or body update below. The source common animation/AI/
+ // simulation phase integration is incomplete and explicitly refuses here.
+ // This fence also applies during Loading before the typed Walk bootstrap.
+ if(pc_p2_original_captain_body_owned(this)){
+  static bool reported[2]={};const auto* scene=pc_p2_original_captain_loaded_scene();
+  const unsigned slot=scene&&scene->captainAt(1)==this?1:0;
+  if(!reported[slot]){std::fprintf(stderr,"[original captain body refused] genuine source common update/simulation phases are not installed\n");reported[slot]=true;}
+  return;
+ }
+#endif
 #if defined(PIKI_PC_PORT)
 	PcAudioSource audioSource(mNaviID); // issue #1030: whose sounds these are
 #endif
@@ -2079,6 +2119,7 @@ void Navi::releasePikis()
 void Navi::doAI()
 {
 #if defined(PIKI_PC_PORT)
+	if(pc_p2_original_captain_body_owned(this))return;
 	PcAudioSource audioSource(mNaviID); // issue #1030: whose sounds these are
 #endif
 	if (pc_demon_bound(this)) {
@@ -2315,6 +2356,9 @@ void Navi::offwallCallback(DynCollObject* wall)
  */
 void Navi::wallCallback(immut Plane& wallPlane, DynCollObject* wallObj)
 {
+#if defined(PIKI_PC_PORT)
+	if (pc_p2_original_captain_body_owned(this)) return;
+#endif
 	mWallPlane   = &wallPlane;
 	mAiHitWall   = 1;
 	mWallCollObj = wallObj;
@@ -2362,6 +2406,9 @@ bool Navi::ignoreAtari(Creature* target)
  */
 void Navi::bounceCallback()
 {
+#if defined(PIKI_PC_PORT)
+ if(pc_p2_original_captain_body_owned(this))return;
+#endif
 	MsgBounce msg(Vector3f(0.0f, 1.0f, 0.0f));
 	sendMsg(&msg);
 }
@@ -2410,6 +2457,9 @@ void Navi::letPikiWork()
  */
 void Navi::collisionCallback(immut CollEvent& event)
 {
+#if defined(PIKI_PC_PORT)
+	if (pc_p2_original_captain_body_owned(this)) return;
+#endif
 #if defined(PIKI_PC_PORT)
 	PcAudioSource audioSource(mNaviID); // issue #1030: whose sounds these are
 #endif
@@ -3569,6 +3619,9 @@ void Navi::refresh2d(Graphics& gfx)
  */
 void Navi::sendMsg(Msg* msg)
 {
+#if defined(PIKI_PC_PORT)
+	if (pc_p2_original_captain_body_owned(this)) return;
+#endif
 	mStateMachine->procMsg(this, msg);
 }
 
@@ -3586,6 +3639,16 @@ void Navi::procDamage(f32)
 bool Navi::stimulate(immut Interaction& interaction)
 {
 #if defined(PIKI_PC_PORT)
+	if (pc_p2_original_captain_body_owned(this)) {
+		// Source attacks authenticate their emitter and all source guards before mutation.
+		if (const auto* attack = dynamic_cast<const InteractAttack*>(&interaction))
+			return p2original::captain::attack(this, attack->mOwner, attack->mDamage).interactionAccepted;
+		bool handled=false;
+		const bool accepted=pc_p2_source_navi_interaction_dispatch(interaction,this,handled);
+		return handled&&accepted; // Unknown source interactions refuse before legacy actCommon.
+	}
+#endif
+#if defined(PIKI_PC_PORT)
 	// Issue #1030: the hurt and fired sounds of Interact*::actNavi (SE_DAMAGED, SE_FIRED) belong to the navi that is
 	// hit, not to the enemy code that raised them: only the PC that plays that captain should hear them.
 	PcAudioSource audioSource(mNaviID);
@@ -3602,6 +3665,9 @@ bool Navi::stimulate(immut Interaction& interaction)
  */
 bool InteractGeyzer::actNavi(Navi* navi) immut
 {
+#if defined(PIKI_PC_PORT)
+	if (pc_p2_original_captain_body_owned(navi)) return false;
+#endif
 	if (navi->isDamaged()) {
 		return false;
 	}
@@ -3626,6 +3692,9 @@ bool InteractGeyzer::actNavi(Navi* navi) immut
  */
 bool InteractBury::actNavi(Navi* navi) immut
 {
+#if defined(PIKI_PC_PORT)
+	if (pc_p2_original_captain_body_owned(navi)) return false;
+#endif
 	int mamuta = pc_p2_mamuta_bury_navi(mOwner, navi);
 	if (mamuta >= 0) {
 		return mamuta > 0;
@@ -3658,6 +3727,9 @@ bool InteractBury::actNavi(Navi* navi) immut
 bool InteractWind::actNavi(Navi* navi) immut
 {
 #if defined(PIKI_PC_PORT)
+	if (pc_p2_original_captain_body_owned(navi)) return false;
+#endif
+#if defined(PIKI_PC_PORT)
     if (pc_p2_equipment_has(p2equipment::RepugnantAppendage)) return false;
 #endif
 	NaviState* state = navi->mStateMachine->getNaviState(navi);
@@ -3683,6 +3755,9 @@ bool InteractWind::actNavi(Navi* navi) immut
  */
 __attribute__((used)) bool InteractDenki::actNavi(Navi* navi) immut
 {
+#if defined(PIKI_PC_PORT)
+	if (pc_p2_original_captain_body_owned(navi)) return false;
+#endif
 #if defined(PIKI_PC_PORT)
     if (pc_p2_equipment_has(p2equipment::DreamMaterial)) return false;
 #endif
@@ -3712,6 +3787,9 @@ __attribute__((used)) bool InteractDenki::actNavi(Navi* navi) immut
  */
 bool InteractSuck::actNavi(Navi* navi) immut
 {
+#if defined(PIKI_PC_PORT)
+	if (pc_p2_original_captain_body_owned(navi)) return false;
+#endif
 	BUGPRINT("actNavi");
 	if (!navi->isAlive()) {
 		return false;
@@ -3755,6 +3833,11 @@ bool InteractSuck::actNavi(Navi* navi) immut
  */
 bool InteractAttack::actNavi(Navi* navi) immut
 {
+#if defined(PIKI_PC_PORT)
+	if (p2original::captain::selectedOriginal()) {
+		return p2original::captain::attack(navi, mOwner, mDamage).interactionAccepted;
+	}
+#endif
 	if (navi->isDamaged()) {
 		return false;
 	}
@@ -3789,6 +3872,9 @@ bool InteractAttack::actNavi(Navi* navi) immut
  */
 bool InteractPress::actNavi(Navi* navi) immut
 {
+#if defined(PIKI_PC_PORT)
+	if (pc_p2_original_captain_body_owned(navi)) return false;
+#endif
 	if (navi->isDamaged()) {
 		return false;
 	}
@@ -3819,6 +3905,9 @@ bool InteractPress::actNavi(Navi* navi) immut
  */
 bool InteractSwallow::actNavi(Navi* navi) immut
 {
+#if defined(PIKI_PC_PORT)
+	if (pc_p2_original_captain_body_owned(navi)) return false;
+#endif
 	PRINT("NAVI GOT SWALLOW INTERACTION !\n");
 	if (!navi->startDamage()) {
 		return false;
@@ -3852,6 +3941,9 @@ bool InteractSwallow::actNavi(Navi* navi) immut
  */
 bool InteractBomb::actNavi(Navi* navi) immut
 {
+#if defined(PIKI_PC_PORT)
+	if (pc_p2_original_captain_body_owned(navi)) return false;
+#endif
 	if (navi->mStateMachine->getNaviState(navi)->invincible(navi)) {
 		return false;
 	}
@@ -3893,6 +3985,9 @@ bool Navi::orimaDamaged()
  */
 bool InteractFlick::actNavi(Navi* navi) immut
 {
+#if defined(PIKI_PC_PORT)
+	if (pc_p2_original_captain_body_owned(navi)) return false;
+#endif
 	if (navi->mStateMachine->getCurrID(navi) == NAVISTATE_PikiZero) {
 		return false;
 	}
@@ -3931,6 +4026,9 @@ bool InteractFlick::actNavi(Navi* navi) immut
  */
 bool InteractBubble::actNavi(Navi* navi) immut
 {
+#if defined(PIKI_PC_PORT)
+	if (pc_p2_original_captain_body_owned(navi)) return false;
+#endif
 	if (navi->mStateMachine->getNaviState(navi)->invincible(navi)) {
 		return false;
 	}
@@ -3956,6 +4054,9 @@ bool InteractBubble::actNavi(Navi* navi) immut
  */
 bool InteractFire::actNavi(Navi* navi) immut
 {
+#if defined(PIKI_PC_PORT)
+	if (pc_p2_original_captain_body_owned(navi)) return false;
+#endif
 #if defined(PIKI_PC_PORT)
     if (pc_p2_equipment_has(p2equipment::ForgedCourage)) return false;
 #endif
@@ -4092,6 +4193,9 @@ void Navi::throwLocus(immut Vector3f& pos)
  */
 void Navi::swapMotion(immut PaniMotionInfo& motion1, immut PaniMotionInfo& motion2)
 {
+#if defined(PIKI_PC_PORT)
+	if (pc_p2_original_captain_body_owned(this)) return;
+#endif
 	STACK_PAD_VAR(4);
 
 	f32* frame1 = &mNaviAnimMgr.mUpperAnimator.mAnimationCounter;

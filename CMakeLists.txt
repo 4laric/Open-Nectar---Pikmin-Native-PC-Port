@@ -687,6 +687,29 @@ pc_port/pc_p2_projectile_host.cpp
     pc_port/pc_p2_original_egg_save.cpp
     pc_port/pc_p2_original_honey_save.cpp
     pc_port/pc_p2_original_wisp_save.cpp
+    pc_port/pc_p2_original_captain_actions_party.cpp
+    pc_port/pc_p2_original_captain_container.cpp
+    pc_port/pc_p2_original_captain_control.cpp
+    pc_port/pc_p2_original_captain_damage.cpp
+    pc_port/pc_p2_original_captain_dope.cpp
+    pc_port/pc_p2_original_captain_down.cpp
+    pc_port/pc_p2_original_captain_down_sequence.cpp
+    pc_port/pc_p2_original_captain_native_control.cpp
+    pc_port/pc_p2_original_captain_pluck.cpp
+    pc_port/pc_p2_original_captain_pressed.cpp
+    pc_port/pc_p2_original_captain_punch.cpp
+    pc_port/pc_p2_original_captain_runtime.cpp
+    pc_port/pc_p2_original_captain_states.cpp
+    pc_port/pc_p2_original_captain_throw.cpp
+    pc_port/pc_p2_original_captain_walk.cpp
+    pc_port/pc_p2_original_captain_scene.cpp
+    pc_port/pc_p2_retail_scene_input.cpp
+    pc_port/pc_p2_retail_start.cpp
+    pc_port/pc_p2_retail_geometry.cpp
+    pc_port/pc_p2_retail_scene_map.cpp
+    pc_port/pc_p2_retail_starting_piki.cpp
+    pc_port/pc_p2_retail_starting_piki_selected.cpp
+    pc_port/pc_p2_retail_exit.cpp
 )
 if (ANDROID)
     list(APPEND PC_PORT_SOURCES

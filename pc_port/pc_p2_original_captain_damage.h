@@ -26,6 +26,10 @@ public:
  // cannot supply this fact. Source actor lifetime owner supplies it.
  virtual bool sourceAlive(const Navi&) const=0;
  virtual bool sourceInvincible() const=0;
+ // Literal Game::NaviState base defaults; concrete source states override the
+ // retail exclusions. These are behavior flags, not lifecycle authority.
+ virtual bool sourcePressable() const{return true;}
+ virtual bool sourceVsUsableY() const{return true;}
  // Actor-owned source mInvincibleTimer, never a P1 hurt/flick timer.
  virtual std::optional<std::uint8_t> actorInvincibleFrames(const Navi&) const=0;
  // Must preflight a genuine source Dead transition BEFORE HP mutation.
@@ -33,6 +37,14 @@ public:
  virtual void enterSourceDead(Navi&)=0;
  // Retail optional feedback. No P1 startDamageEffect/Mods damage wrapper.
  virtual void sourceDamageFeedback(Navi&)=0;
+};
+// Ordinary InteractAttack/startDamage enters the source Damaged state before
+// subtracting health. Recovery-only source receivers need not implement this.
+class DamageTransitions {
+public:
+ virtual ~DamageTransitions()=default;
+ virtual bool canEnterSourceDamaged(const Navi&)const=0;
+ virtual void enterSourceDamaged(Navi&,float reducedDamage)=0;
 };
 // Concrete source startup owns this descriptor; Runtime only accepts the
 // canonical live query. Course loading alone does not activate the world.
@@ -61,16 +73,25 @@ public:
 enum class Refusal { None, MissingWorld, WrongSession, InactiveWorld,
  MissingCaptain, MissingSourceState, InvalidHealth, InvalidDamage,
  MissingMovieAuthority, DemoPlaying, NotAlive, StateInvincible, MissingActorAuthority, ActorInvincible, MissingDeadTransition,
- NotReunited, MissingEnemy };
+ NotReunited, MissingEnemy, MissingDamagedTransition };
 struct DamageResult {
  Refusal refusal=Refusal::MissingWorld;
  float applied=0;
  bool knockedOut=false;
+ // InteractAttack's accepted interaction is distinct from startDamage's
+ // mutation result: known CF-dead bodies can accept an admitted no-op. Missing
+ // genuine providers/transitions never count as an accepted interaction.
+ bool interactionAccepted=false;
  explicit operator bool() const { return refusal==Refusal::None; }
 };
 // Requeries world/session/FSM/timer on each call. Raw damage is reduced once
 // here; source Flick invokes it only at Koke END, not at interaction admission.
 DamageResult addDamage(Navi*,float rawDamage,bool playFeedback);
+DamageResult startDamage(Navi*,float rawDamage);
+// Actual original InteractAttack receiver; source enemy ownership and reunion
+// are established before entering startDamage. Missing source producers refuse.
+DamageResult attack(Navi*,const Creature* sourceAttacker,float rawDamage);
+bool selectedOriginal();
 // InteractFlick's outer active-world + DEMO_Reunite_Captains guard. This does
 // not apply addDamage's later immunity checks early or consume RNG.
 Refusal flickAdmission(const Creature* authenticatedEnemy,const Navi*);
@@ -82,15 +103,39 @@ const p2original::captain::World* pc_p2_original_captain_world();
 const p2original::captain::LoadedScene* pc_p2_original_captain_loaded_scene();
 // Actual engine event hooks. No call accepts a source-ready/authentication bool.
 // An absent/wrong selected LoadedScene refuses activation and actor writes.
+// Concrete stage owner calls this AFTER genuine stage/two-body/bank reset.
+// Publishes Loading so source control/typed Walk bootstrap can bind; never
+// activates, and repeated same-incarnation calls never reset life or timers.
+bool pc_p2_original_captain_body_reset_loaded(std::string&);
+// Fresh Loading requires readonly actual typed Walk/control completion;
+// same-incarnation Inactive resume requires readonly owned-state continuation.
+bool pc_p2_original_captain_activate_after_bootstrap(std::string&);
 void pc_p2_original_captain_main_game_entered();
 void pc_p2_original_captain_main_game_left();
+// Exact retained physical source roster ownership, independent of
+// whether its body-reset/Walk bootstrap has completed. Missing World must not
+// turn a known source body into a legacy actor.
+bool pc_p2_original_captain_body_owned(const Navi*);
+// Terminal for this exact retained incarnation. Keep canonical inactive World
+// readable until consumers retire; repeated reset/activation cannot resume it.
+void pc_p2_original_captain_begin_retirement();
 void pc_p2_original_captain_movie_started(MoviePlayer*);
 void pc_p2_original_captain_movie_ended(MoviePlayer*);
 void pc_p2_original_captain_actor_update(Navi*);
 // Query actor lifetime/iframes only for the exact live source scene roster.
 bool pc_p2_original_captain_actor_alive(const Navi*);
+// Distinguishes a source actor with CF_IsAlive clear from an absent source
+// actor. On refusal the output is unchanged; never infer source life from HP.
+bool pc_p2_original_captain_actor_lifetime(const Navi*,bool&);
 bool pc_p2_original_captain_actor_frames(const Navi*,std::uint8_t&);
 // Source state owners call these at actual Damaged::cleanup/Dead::init; both
 // verify the current genuine State identity. Unsupported states cannot write.
 bool pc_p2_original_captain_damaged_cleanup(Navi*);
 bool pc_p2_original_captain_dead_entered(Navi*);
+
+// Source Navi::onInit resets these counters; queries refuse absent actors.
+struct PcOriginalCaptainTimers {std::uint8_t throwDisable=0;std::int8_t disbandDisable=0;};
+bool pc_p2_original_captain_actor_timers(const Navi*,PcOriginalCaptainTimers&);
+// Actual source Nuku cleanup and successful releasePikis events only.
+bool pc_p2_original_captain_start_throw_disable(Navi*);
+bool pc_p2_original_captain_party_released(Navi*);

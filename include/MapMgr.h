@@ -189,6 +189,8 @@ public:
 
 	void initEffects();
 	void initShape();
+	// Selected original scene owns this parsed model; no ambient file/cache read.
+	void initShape(Shape* selectedModel, bool retailCave = false);
 	void createLights();
 	void updateSimulation();
 	void update();

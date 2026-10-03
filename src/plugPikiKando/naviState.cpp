@@ -8,6 +8,14 @@
 #include "pc_p2_demon_drop_state.h"
 #include "pc_p2_demon_escape_state.h"
 #include "pc_p2_demon_bridge.h"
+#include "pc_p2_original_captain_states.h"
+#include "pc_p2_original_captain_throw.h"
+#include "pc_p2_original_captain_actions_party.h"
+#include "pc_p2_original_captain_punch.h"
+#include "pc_p2_original_captain_pluck.h"
+#include "pc_p2_original_captain_dope.h"
+#include "pc_p2_original_captain_container.h"
+#include "pc_p2_original_captain_pressed.h"
 #endif
 #include "pc_p2_purple.h"
 #include "pc_p2_white.h"
@@ -118,6 +126,18 @@ NaviState* NaviStateMachine::getNaviState(Navi* navi)
 #if defined(PIKI_PC_PORT)
 void NaviStateMachine::transit(Navi* navi, int next)
 {
+	int mapped = next;
+	const auto sourceRoute = pc_p2_original_captain_route_transition(navi, next, mapped);
+	if (sourceRoute == PcOriginalCaptainRoute::Refused) return;
+	if (sourceRoute == PcOriginalCaptainRoute::Handled) {
+		if (mapped >= p2original::captain::NativeStateBase) {
+			std::string error;
+			pc_p2_original_captain_transit(navi, static_cast<p2original::captain::StateId>(mapped - p2original::captain::NativeStateBase), error);
+			return;
+		}
+		next = mapped;
+		pc_p2_original_captain_before_transition(navi);
+	}
 	pc_demon_before_transition(navi, next);
 	pc_demon_drop_before_transition(navi, next);
 	StateMachine<Navi>::transit(navi, next);
@@ -129,6 +149,14 @@ void NaviStateMachine::init(Navi* navi)
 	create(NAVISTATE_Count);
 	registerState(pc_p2_hanachirashi_navi_state_create());
 #if defined(PIKI_PC_PORT)
+	p2original::captain::registerCoreStates(*this);
+	p2original::captain::registerThrowStates(*this);
+	p2original::captain::registerPartyStates(*this);
+	p2original::captain::registerPunchState(*this);
+	p2original::captain::registerPluckStates(*this);
+	p2original::captain::registerDopeState(*this);
+	p2original::captain::registerContainerAbsorbStates(*this);
+	p2original::captain::registerPressedFallMeckStates(*this);
 	registerState(pc_demon_drop_state_create());
 	registerState(pc_demon_escape_state_create());
 #endif

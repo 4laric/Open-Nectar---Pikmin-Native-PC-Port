@@ -2,6 +2,9 @@
 #include <cstdlib>
 #include <cstring>
 #include "pc_randomizer.h"
+#if defined(PIKI_PC_PORT)
+#include "pc_p2_retail_scene.h"
+#endif
 #include "gameflow.h"
 #include "pc_bbft.h"
 
@@ -654,6 +657,15 @@ void GameFlow::hardReset(BaseApp* baseApp)
  */
 void GameFlow::softReset()
 {
+#if defined(PIKI_PC_PORT)
+    {
+        std::string error;
+        if (!pc_p2_retail_scene_release_map(error)) {
+            std::fprintf(stderr,"P2_RETAIL_MAP_HEAP_RESET_REFUSED %s\n",error.c_str());
+            std::abort();
+        }
+    }
+#endif
 #if PIKI_PC_PORT
 	// N3: the synchronous stage load below blocks GekkoNet pumping. The
 	// netplay hook opens the load guard's window and runs the test stall /

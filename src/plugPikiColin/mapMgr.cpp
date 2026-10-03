@@ -1218,10 +1218,15 @@ void MapMgr::initEffects()
  */
 void MapMgr::initShape()
 {
+	initShape(gameflow.loadShape(flowCont.mMapModelFilePath, true));
+}
+
+void MapMgr::initShape(Shape* selectedModel, bool retailCave)
+{
 	mSoftLightMgr = nullptr;
 
 	// set up model
-	mMapModel = gameflow.loadShape(flowCont.mMapModelFilePath, true);
+	mMapModel = selectedModel;
 	mMapModel->mShapeFlags |= ShapeFlags::AlwaysRedraw;
 
 	// set up instances for every animated material used by the map model
@@ -1237,8 +1242,13 @@ void MapMgr::initShape()
 	// set up collisions (with grid size of 64)
 	mMapModel->createCollisions(MAP_GRID_SIZE);
 #if defined(PIKI_PC_PORT)
-	pc_p2_surface_topology_init(mMapModel);
-	pc_p2_surface_water_init(mMapModel);
+	if (retailCave) {
+		pc_p2_surface_topology_reset();
+		pc_p2_surface_water_reset();
+	} else {
+		pc_p2_surface_topology_init(mMapModel);
+		pc_p2_surface_water_init(mMapModel);
+	}
 #endif
 	mMapBounds.expandBound(mMapModel->mCourseExtents);
 

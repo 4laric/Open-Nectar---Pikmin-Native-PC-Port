@@ -71,6 +71,9 @@ public:
 	virtual f32 getiMass();                                    // _38
 	virtual f32 getSize();                                     // _3C
 	virtual bool isVisible();                                  // _74
+#if defined(PIKI_PC_PORT)
+	virtual bool isAlive(); // original CF_IsAlive is independent of native HP
+#endif
 	virtual bool isBuried();                                   // _80
 	virtual bool isAtari();                                    // _84
 	virtual bool ignoreAtari(Creature*);                       // _98
