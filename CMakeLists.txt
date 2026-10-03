@@ -354,6 +354,9 @@ set(PC_PORT_SOURCES
     pc_port/pc_p2_white_poison.cpp
     pc_port/pc_p2_cave.cpp
     pc_port/pc_p2_cave_campaign_cache_engine.cpp
+    pc_port/pc_p2_campaign_flush.cpp
+    pc_port/pc_p2_cave_campaign_party_engine.cpp
+    pc_port/pc_p2_surface_save.cpp
     pc_port/pc_p2_cave_dialog_window.cpp
     pc_port/pc_p2_cave_generate.cpp
     pc_port/pc_p2_cave_generator.cpp
@@ -3294,3 +3297,13 @@ endif()
 # Real native factory/cache transport fixture; synthetic zero-birth admission only.
 pikmin_add_ci_fixture(original_gen_object tools/p2_original_gen_object_runtime.cpp)
 pikmin_add_ci_fixture(original_piki_init tools/p2_original_piki_init_runtime.cpp)
+
+# Shared party codec and living surface descriptor: no assets or gameplay stubs.
+add_executable(p2_surface_session_test tools/test_p2_surface_session.cpp)
+target_include_directories(p2_surface_session_test PRIVATE pc_port)
+target_compile_options(p2_surface_session_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+add_test(NAME p2_surface_session COMMAND p2_surface_session_test)
+add_executable(p2_cave_campaign_party_test tools/test_p2_cave_campaign_party.cpp)
+target_include_directories(p2_cave_campaign_party_test PRIVATE pc_port)
+target_compile_options(p2_cave_campaign_party_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+add_test(NAME p2_cave_campaign_party COMMAND p2_cave_campaign_party_test)
