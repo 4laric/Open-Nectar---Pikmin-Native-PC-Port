@@ -53,15 +53,9 @@ bool ensure(std::string& error) {
     if(!p2treasureheld::load_verified(catalog,config)||config.identity!=p2treasurestate::state.source())return fail(error,"literal held source/catalog/model descriptor mismatch");
     // A real typed original ship is required; verify its literal manifest before
     // any enemy reservation or birth. The ship actor itself is born afterwards.
-    const char* directory=std::getenv("PIKMIN_P2_ORIGINAL_CATALOG");
-    std::vector<p2original::OnyonRecord> receivers;
-    if(!p2original::readOnyons(std::string(directory)+"/"+config.course+".p2on",receivers,error))return false;
-    bool receiver=false;
-    for(const auto& row:receivers)if(row.uid==config.receiver) {
-        if(row.index!=4||row.sourceSha+":"+row.sourceKey!=config.receiverIdentity)return fail(error,"held receiver is not the literal typed ship");
-        receiver=true;
-    }
-    if(!receiver||!gsys||!pc_p2_original_drop_host_ready())return fail(error,"held original receiver/physical host resources missing");
+    // load_verified already parsed the exact hashed receiver buffer. Reopening
+    // its path here would introduce an unauthenticated second source buffer.
+    if(!gsys||!pc_p2_original_drop_host_ready())return fail(error,"held original receiver/physical host resources missing");
     const int heap=gsys->setHeap(SYSHEAP_App);
     for(const auto& row:config.rows) {
         const std::string path="courses/pikmin2treasures/"+row.id+".mod";

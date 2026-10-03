@@ -4,6 +4,7 @@
 #include <fstream>
 #include <set>
 #include <cstring>
+#include <sstream>
 namespace p2original {
 namespace {bool fail(std::string& e,const char* s){e=s;return false;}}
 bool validateOnyon(const OnyonRecord& r,std::string& e){
@@ -31,8 +32,9 @@ std::string onyonDigest(const OnyonRecord& r){
  unsigned char digest[32];pc_netplay_sha::sha256(bytes.data(),bytes.size(),digest);
  std::string result;const char* hex="0123456789abcdef";for(unsigned char c:digest){result.push_back(hex[c>>4]);result.push_back(hex[c&15]);}return result;
 }
-bool readOnyons(const std::string& path,std::vector<OnyonRecord>& out,std::string& e){
- std::ifstream in(path);std::string magic;unsigned n=0;
+bool readOnyonsFromBytes(const std::string& bytes,std::vector<OnyonRecord>& out,std::string& e){
+ if(bytes.empty()||bytes.size()>4u*1024u*1024u)return fail(e,"empty or oversized original onyn manifest");
+ std::istringstream in(bytes);std::string magic;unsigned n=0;
  if(!(in>>magic>>n)||magic!="P2_ORIGINAL_ONYON_1"||!n||n>4096)return fail(e,"invalid original onyn manifest envelope");
  std::vector<OnyonRecord> rows;std::set<unsigned> uids;std::set<std::string> keys;
  for(unsigned i=0;i<n;++i){OnyonRecord r;std::string object,local;
@@ -45,5 +47,16 @@ bool readOnyons(const std::string& path,std::vector<OnyonRecord>& out,std::strin
  }
  if(in>>magic)return fail(e,"trailing original onyn manifest data");
  out.swap(rows);e.clear();return true;
+}
+bool readOnyons(const std::string& path,std::vector<OnyonRecord>& out,std::string& e){
+ std::ifstream in(path,std::ios::binary);if(!in)return fail(e,"original onyn manifest unavailable");
+ std::string bytes;char buffer[4096];
+ while(in.read(buffer,sizeof(buffer))||in.gcount()){
+  const auto size=static_cast<std::size_t>(in.gcount());
+  if(size>4u*1024u*1024u-bytes.size())return fail(e,"oversized original onyn manifest");
+  bytes.append(buffer,size);
+ }
+ if(!in.eof())return fail(e,"original onyn manifest read failed");
+ return readOnyonsFromBytes(bytes,out,e);
 }
 }
