@@ -16,6 +16,7 @@
 #include "pc_randomizer.h"
 #include "pc_p2_purple_flight.h"
 #include "pc_p2_purple_impact.h"
+#include "pc_p2_cave_campaign_party_engine.h"
 
 /**
  * @todo: Documentation
@@ -123,6 +124,8 @@ void Piki::doKill()
 	mFSM->transit(this, PIKISTATE_Dead);
 	_500.reset();
 	pikiMgr->mDeadPikis++;
+    // Source death observers above retain identity until actual pool retirement.
+    pc_p2_cave_campaign_party_forget(this);
 	pikiMgr->kill(this);
 
 	STACK_PAD_VAR(10);

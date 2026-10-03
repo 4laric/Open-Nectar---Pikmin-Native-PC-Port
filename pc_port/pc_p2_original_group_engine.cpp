@@ -52,3 +52,7 @@ void pc_p2_original_native_retired(Creature* creature){
   std::fprintf(stderr,"P2_ORIGINAL_NATIVE_RETIRE_FAIL %s\n",error.c_str());std::abort();
  }
 }
+
+bool pc_p2_original_incarnation_encode(std::string& bytes,std::string& error){return groupCourse().encodeFrontier(bytes,error);}
+bool pc_p2_original_incarnation_initialize(const std::string& campaign,std::string& error){return groupCourse().initializeFrontier(campaign,error);}
+bool pc_p2_original_incarnation_decode(const std::string& campaign,const std::string& bytes,std::string& error){return groupCourse().decodeFrontier(campaign,bytes,error);}

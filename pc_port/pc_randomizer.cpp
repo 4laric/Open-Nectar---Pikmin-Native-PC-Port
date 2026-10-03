@@ -7,6 +7,12 @@
 #include "pc_p2_proxy.h"
 #include "pc_p2_cave_seed_binding.h"
 #include "pc_p2_cave_campaign_cache.h"
+#include "pc_p2_campaign_checkpoint_state.h"
+#include "pc_p2_campaign_treasure_config.h"
+#if !defined(PC_RANDOMIZER_NO_ORIGINAL_ENGINE)
+#include "pc_p2_original_group_engine.h"
+#include "pc_p2_original_session.h"
+#endif
 #include "pc_randomizer.h"
 #include "pc_randomizer_catalog.h"
 #include "pc_randomizer_spawn_catalog.h"
@@ -140,6 +146,12 @@ bool generatedCave = false;
 P2CaveSeedBinding generatedCaveBinding;
 P2CaveSeedBudget generatedCaveBudget;
 P2CaveCacheBanks generatedCaveCache;
+P2SurfaceSession surfaceSession;
+std::string originalCampaign, treasureSource;
+std::string originalCatalogRoot;
+p2original::SourceCalendar originalCalendar;
+bool originalStandalone=false;
+p2treasure::Catalog verifiedTreasureCatalog;
 std::unordered_map<unsigned, unsigned> p2CheckIndices;
 std::unordered_map<unsigned, std::set<std::pair<unsigned, int>>> p2CheckSources;
 unsigned campaignAssignments[72] = {};
@@ -217,6 +229,8 @@ struct CkptScan {
     p2whitecampaign::Budget whiteBudget;
     P2CaveSeedBudget caveBudget;
     P2CaveCacheBanks caveCache;
+    P2SurfaceSession surface;
+    P2CampaignCheckpointState originalState;
     p2whitetreasure::Ledger whiteTreasure;
     unsigned thelynkUsed[18] = {};
 };
@@ -231,6 +245,9 @@ CkptScanStatus scanCampaignCheckpoint(CkptScan& s) {
         if (generation > s.generation) { s.generation = generation; s.latest = entry.path(); }
     }
     if (s.latest.empty()) return kCkptNone;
+    std::error_code sizeError;
+    const auto checkpointSize=std::filesystem::file_size(s.latest,sizeError);
+    if(sizeError||checkpointSize<32768||checkpointSize>8*1024*1024)return kCkptDamaged;
     std::ifstream file(s.latest, std::ios::binary);
     std::string header; std::getline(file, header);
     std::istringstream meta(header);
@@ -249,6 +266,12 @@ CkptScanStatus scanCampaignCheckpoint(CkptScan& s) {
     }
     if (generatedCave) valid = valid && s.caveBudget.read(meta) && s.caveCache.read(meta);
     if (thelynk) for (int i = 0; i < 18; ++i) valid = valid && bool(meta >> s.thelynkUsed[i]) && s.thelynkUsed[i] <= 330;
+    // Optional extension: legacy cards end immediately in their numeric hash.
+    meta >> std::ws;
+    if (valid && meta.peek()=='S') valid = s.surface.read(meta);
+    meta >> std::ws;
+    if(valid&&meta.peek()=='C')valid=s.originalState.read(meta,treasureSource.empty()?nullptr:&verifiedTreasureCatalog,treasureSource);
+    valid=valid&&s.originalState.matches(originalCampaign,treasureSource,treasureSource.empty()?nullptr:&verifiedTreasureCatalog);
     if (!valid || !(meta >> hash) || magic != (thelynk ? "THELYNK_CAMPAIGN_1" : generatedCave ? "PIKMIN_CAMPAIGN_GENERATED_CAVE_2" : whiteTreasureCampaign ? "PIKMIN_CAMPAIGN_WHITE_TREASURE_1" : whiteCampaign ? "PIKMIN_CAMPAIGN_WHITE_1" : purpleCampaign ? "PIKMIN_CAMPAIGN_PURPLE_1" : prereleaseTraps ? "PIKMIN_CAMPAIGN_5" : proggTraps ? "PIKMIN_CAMPAIGN_4" : bombTraps ? "PIKMIN_CAMPAIGN_3" : bombDeliveries ? "PIKMIN_CAMPAIGN_2" : "PIKMIN_CAMPAIGN_1")
         || savedFingerprint != fingerprint || generation != s.generation || (meta >> extra))
         return kCkptMismatch;
@@ -271,12 +294,32 @@ void loadCampaignCheckpoint() {
     campaignGeneration = s.generation;
     if (st == kCkptNone) return;
     if (st != kCkptOk) fail(ckptScanReason(st));
+    // The enclosing selected card has passed identity, integrity and size checks.
+    // Stage scalar state first; a live scene prevents frontier adoption.
+    std::string originalError;
+    auto progress=p2original::originalProgress();
+    auto treasure=p2treasurestate::state;
+    if(!originalCampaign.empty()){
+        if(!progress.decode(s.originalState.progress,originalCampaign,originalError)
+            ||!progress.decodeContext(s.originalState.context,originalCampaign,originalError))fail("original campaign state adoption failed");
+    }
+    if(!treasureSource.empty()){
+        p2treasurestate::Snapshot snapshot;
+        if(!p2treasurestate::decode(s.originalState.treasure,verifiedTreasureCatalog,treasureSource,snapshot)
+            ||!treasure.restore(snapshot,verifiedTreasureCatalog,treasureSource))fail("campaign treasure adoption failed");
+    }
+#if !defined(PC_RANDOMIZER_NO_ORIGINAL_ENGINE)
+    if(!originalCampaign.empty()&&!pc_p2_original_incarnation_decode(originalCampaign,s.originalState.frontier,originalError))fail("original incarnation adoption requires unloaded scene");
+#endif
+    p2original::originalProgress()=std::move(progress);
+    p2treasurestate::state=std::move(treasure);
     campaignBlock = s.block;
     for (int i=0; i<7; ++i) consumedBenefits[i] = s.used[i];
     p2ship::stock = s.ship;
     p2whitecampaign::budget = s.whiteBudget;
     generatedCaveBudget = s.caveBudget;
     generatedCaveCache = s.caveCache;
+    surfaceSession = s.surface;
     p2whitetreasure::ledger = s.whiteTreasure;
     for (int i = 0; i < 18; ++i) thelynkUsed[i] = s.thelynkUsed[i];
     campaignResumed = true;
@@ -741,6 +784,47 @@ bool pc_randomizer_init(int argc, char** argv) {
     std::ifstream input(bootstrap);
     if (!input) fail("cannot open standalone bootstrap");
     std::string magic; input >> magic;
+    if(magic=="ORIGINAL_P2_CAMPAIGN"){
+#if defined(PC_RANDOMIZER_NO_ORIGINAL_ENGINE)
+        fail("original campaign session requires the native engine");
+#else
+#if !defined(PIKMIN_P2_ORIGINAL_COURSE_PROVIDER)
+        fail("actual original course startup provider is unavailable");
+#endif
+        bool explicitCampaign=false;
+        for(int i=1;i<argc;++i)if(!std::strcmp(argv[i],"--experimental-pikmin2-campaign"))explicitCampaign=true;
+        if(!explicitCampaign||netplay_session())fail("original session requires explicit local campaign launch");
+        expect(input,"1");expect(input,"SESSION");input>>token;expect(input,"FINGERPRINT");input>>fingerprint;
+        expect(input,"ORIGINAL_SOURCE");input>>originalCampaign;expect(input,"COURSE");std::string course;input>>course;
+        const char* courses[]={"tutorial","forest","yakushima","last"};startStage=-1;
+        for(int c=0;c<4;++c)if(course==courses[c])startStage=c;
+        if(!hex64(token)||!hex64(fingerprint)||!hex64(originalCampaign)||startStage<0)fail("original session selection invalid");
+        for(int i=1;i<argc;++i)if(!std::strcmp(argv[i],"--experimental-pikmin2-campaign")&&(i+1>=argc||course!=argv[i+1]))fail("original session course differs from launch");
+        expect(input,"CAPTAINS");expect(input,"2");secondCaptain=true;
+        std::string end;input>>end;
+        if(end=="TREASURE_SOURCE"){
+            p2treasureplacements::Config config;
+            if(!(input>>treasureSource)||!hex64(treasureSource)||!p2treasureplacements::load_verified(verifiedTreasureCatalog,config)||config.source!=treasureSource||!p2treasurestate::state.bind(treasureSource))fail("original treasure source/assets invalid");input>>end;
+        }
+        std::string extra;if(end!="END"||(input>>extra))fail("original bootstrap has trailing or missing data");
+        p2originalsession::Bundle bundle;std::string error;
+        if(!p2originalsession::load(fingerprint,originalCampaign,bundle,error))fail("original immutable session inputs invalid");
+        std::string calendarBytes,rawStages;
+        if(!p2treasureplacements::bounded("p2-original/calendar.p2sc",16*1024*1024,calendarBytes)
+            ||!p2treasureplacements::bounded("p2-original/stages.txt",1024*1024,rawStages)
+            ||!originalCalendar.read(calendarBytes,originalCampaign,p2treasureplacements::hash(rawStages),error))fail("original source calendar invalid");
+        originalCatalogRoot=std::filesystem::canonical("p2-original").generic_string();
+        const char* catalogLocator=std::getenv("PIKMIN_P2_ORIGINAL_CATALOG");
+        if(!catalogLocator||!*catalogLocator||std::filesystem::canonical(catalogLocator).generic_string()!=originalCatalogRoot)fail("original source directory differs from verified session inputs");
+        if(!p2original::originalProgress().initialize(originalCampaign,error)||!pc_p2_original_incarnation_initialize(originalCampaign,error))fail("original source authority initialization failed");
+        directory=std::filesystem::absolute(bootstrap).parent_path();campaignDirectory=directory.parent_path().parent_path()/"campaign";saveRoot=(campaignDirectory/"card").generic_string();
+        if(std::filesystem::exists(directory/"hello.txt")||std::filesystem::exists(directory/"checks.txt"))fail("original run directory already used");
+        originalStandalone=true;schema=1;checkCount=0;loadCampaignCheckpoint();enabled=true;pc_randomizer_update();
+        std::ofstream hello(directory/"hello.txt");hello<<"ORIGINAL_P2_HELLO 1 "<<token<<' '<<fingerprint<<" original-campaign-state-v1 p2-second-captain-v1";
+        if(!treasureSource.empty())hello<<" source-treasure-state-v1";hello<<" END\n";hello.close();if(!hello)fail("cannot publish original native handshake");
+        return true;
+#endif
+    }
     if (magic == "PIKMIN_THELYNK") return initTheLynk(input, bootstrap);
     if (magic != "PIKMIN_RANDOMIZER") fail("unsupported bootstrap contract");
     std::string version; input >> version;
@@ -1055,6 +1139,21 @@ bool pc_randomizer_init(int argc, char** argv) {
         generatedCave = true;
         input >> end;
     }
+    if(end=="ORIGINAL_SOURCE"){
+#if defined(PC_RANDOMIZER_NO_ORIGINAL_ENGINE)
+        fail("original source session requires the native engine");
+#else
+        if(thelynk||generatedCave||netplay_session()||!(input>>originalCampaign)||!hex64(originalCampaign))fail("invalid original campaign source selection");
+        fail("original source marker requires ORIGINAL_P2_CAMPAIGN contract");
+#endif
+    }
+    if(end=="TREASURE_SOURCE"){
+        p2treasureplacements::Config config;
+        if(thelynk||netplay_session()||!(input>>treasureSource)||!hex64(treasureSource)
+            ||!p2treasureplacements::load_verified(verifiedTreasureCatalog,config)||config.source!=treasureSource
+            ||!p2treasurestate::state.bind(treasureSource))fail("campaign treasure source/assets invalid");
+        input>>end;
+    }
     if (end != "END") fail("unsupported or malformed bootstrap");
     std::string extra;
     if (input >> extra) fail("trailing bootstrap data");
@@ -1148,6 +1247,8 @@ bool pc_randomizer_init(int argc, char** argv) {
     if (!resolvedCheckNames.empty()) hello << " resolved-enemy-checks-v1";
     if (secondCaptain) hello << " p2-second-captain-v1";
     if (generatedCave) hello << " generated-cave-checks-v1";
+    if(!originalCampaign.empty())hello<<" original-campaign-state-v1";
+    if(!treasureSource.empty())hello<<" source-treasure-state-v1";
     hello << " END\n";
     hello.close();
     if (!hello) fail("cannot write native handshake");
@@ -1297,6 +1398,11 @@ void stream_host_take(const ParsedRand& parsed) {
 } // namespace
 
 void pc_randomizer_update() {
+    if(originalStandalone){
+        std::ifstream state(directory/"state.txt");std::string magic,version,session,identity,end,extra;unsigned value=2;
+        if(!(state>>magic>>version>>session>>identity>>value>>end)||magic!="ORIGINAL_P2_STATE"||version!="1"||session!=token||identity!=fingerprint||value>1||end!="END"||(state>>extra))fail("invalid original session state");
+        ready=value!=0;return;
+    }
     if (!enabled) return;
     // Netplay M4 lane A (issue #885): when the session is active and the
     // external-state stream is enabled, file polling changes meaning. The
@@ -2079,6 +2185,12 @@ int pc_randomizer_next_day(int day) {
 }
 bool pc_randomizer_has(const char* name) {
     if (!enabled || !name) return false;
+    if(originalStandalone){
+        if(!std::strcmp(name,"Blue Onion"))return p2original::originalProgress().booted(0);
+        if(!std::strcmp(name,"Red Onion"))return p2original::originalProgress().booted(1);
+        if(!std::strcmp(name,"Yellow Onion"))return p2original::originalProgress().booted(2);
+        return false;
+    }
     if (thelynk) {
         if (!std::strcmp(name, "Pikmin: Impact Site Access") || !std::strcmp(name, "Red Onion")) return true;
         if (!std::strcmp(name, "Pikmin Access") || !std::strcmp(name, "Pikmin: Forest of Hope Access") || !std::strcmp(name, "Yellow Onion")) return repairs >= 1;
@@ -2337,6 +2449,15 @@ bool pc_randomizer_white_campaign() { return enabled && whiteCampaign; }
 bool pc_randomizer_white_treasure_campaign() { return enabled && whiteTreasureCampaign; }
 bool pc_randomizer_second_captain() { return enabled && secondCaptain; }
 bool pc_randomizer_resumed() { return enabled && campaignResumed; }
+std::string pc_randomizer_original_campaign(){return originalCampaign;}
+bool pc_randomizer_original_session(){return originalStandalone;}
+const char* pc_randomizer_original_catalog_root(){return originalStandalone?originalCatalogRoot.c_str():nullptr;}
+bool pc_randomizer_original_calendar_plan(const std::string& course,const p2original::CalendarState& flags,std::vector<p2original::CalendarLoad>& out,std::string& error){
+    if(!originalStandalone||!p2original::originalProgress().context().story){error="original story calendar is inactive";return false;}
+    return originalCalendar.plan(course,p2original::originalProgress().context().day,flags,out,error);
+}
+std::string pc_randomizer_campaign_treasure_source(){return treasureSource;}
+std::string pc_randomizer_session_fingerprint(){return hex64(fingerprint)&&enabled?fingerprint:std::string{};}
 bool pc_randomizer_load_campaign(void* destination) {
     if (!pc_randomizer_resumed()) return false;
     std::memcpy(destination, campaignBlock.data(), 32768);
@@ -2352,6 +2473,9 @@ namespace {
 bool write_campaign_checkpoint(const void* source, unsigned long long generation, bool fatal,
                                std::string* bytesOut, std::filesystem::path* finalOut,
                                const char* suffix = nullptr) {
+    // Scalar codecs do not make an original actor/cache graph restorable.
+    // Keep publication closed until typed graph producers are composed.
+    if(originalStandalone){if(fatal)fail("original graph checkpoint coverage is incomplete");return false;}
     if (fatal) std::filesystem::create_directories(campaignDirectory);
     else {
         std::error_code ec;
@@ -2373,6 +2497,24 @@ bool write_campaign_checkpoint(const void* source, unsigned long long generation
         generatedCaveCache.write(meta);
     }
     if (thelynk) for (int i = 0; i < 18; ++i) meta << ' ' << thelynkUsed[i];
+    if (!surfaceSession.valid()) {if(fatal)fail("invalid living surface session");return false;}
+    surfaceSession.write(meta);
+    P2CampaignCheckpointState originalState;
+    originalState.present=!originalCampaign.empty()||!treasureSource.empty();
+    originalState.original=originalCampaign;
+    std::string originalError;
+#if !defined(PC_RANDOMIZER_NO_ORIGINAL_ENGINE)
+    if(!originalCampaign.empty()&&(!p2original::originalProgress().encode(originalState.progress,originalError)
+        ||!p2original::originalProgress().encodeContext(originalState.context,originalError)
+        ||!pc_p2_original_incarnation_encode(originalState.frontier,originalError))){if(fatal)fail("original campaign save state invalid");return false;}
+#endif
+    if(!treasureSource.empty()){
+        p2treasure::Catalog catalog;p2treasureplacements::Config config;
+        if(!p2treasureplacements::load_verified(catalog,config)||config.source!=treasureSource){if(fatal)fail("campaign treasure save assets changed");return false;}
+        originalState.treasure=p2treasurestate::encode(p2treasurestate::state.snapshot());
+    }
+    if(!originalState.matches(originalCampaign,treasureSource,treasureSource.empty()?nullptr:&verifiedTreasureCatalog)){if(fatal)fail("campaign state save binding invalid");return false;}
+    originalState.write(meta);
     std::string block(static_cast<const char*>(source), 32768);
     const auto hash = checkpointHash(meta.str() + "\n" + block);
     std::string bytes = meta.str() + " " + std::to_string(hash) + "\n" + block;
@@ -2697,6 +2839,7 @@ bool pc_randomizer_adopt_checkpoint() {
     p2whitecampaign::budget = p2whitecampaign::Budget();
     generatedCaveBudget = P2CaveSeedBudget();
     generatedCaveCache = P2CaveCacheBanks();
+    surfaceSession = P2SurfaceSession();
     p2whitetreasure::ledger = p2whitetreasure::Ledger();
     loadCampaignCheckpoint();
     if (campaignResumed) {
@@ -2978,3 +3121,10 @@ void pc_randomizer_mirror_save_fail(uint32_t frame, unsigned long long gen) {
     if (line.empty()) { std::printf("[netplay] mirror skip SAVE_FAIL gen=%llu: not expressible\n", gen); return; }
     mirror_append(std::vector<std::string>{ line });
 }
+
+const P2SurfaceSession& pc_randomizer_surface_session() { return surfaceSession; }
+void pc_randomizer_surface_session_set(const P2SurfaceSession& next) {
+    if (!enabled || !next.valid()) fail("invalid living surface session adoption");
+    surfaceSession=next;
+}
+std::uint64_t pc_randomizer_active_campaign_generation() {return enabled?campaignGeneration:0;}

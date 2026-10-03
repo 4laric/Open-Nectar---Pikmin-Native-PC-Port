@@ -1,3 +1,4 @@
+#include "pc_p2_surface_save.h"
 #include "pc_p2_ship.h"
 #include "pc_p2_original_onyon_native.h"
 #include "pc_dev_console.h"
@@ -678,6 +679,9 @@ void GameCoreSection::enterFreePikmins()
 void GameCoreSection::cleanupDayEnd()
 {
 #if defined(PIKI_PC_PORT)
+    pc_p2_surface_save_before_day_cleanup();
+#endif
+#if defined(PIKI_PC_PORT)
     if (bossMgr) bossMgr->endPrereleaseTrap();
 #endif
 	finishPause();
@@ -1008,6 +1012,10 @@ void GameCoreSection::prepareBadEnd()
  */
 void GameCoreSection::exitStage()
 {
+#if defined(PIKI_PC_PORT)
+    pc_p2_surface_save_scene_exit();
+    pc_p2_original_piki_origin_scene_exit();
+#endif
 #if defined(PIKI_PC_PORT)
 	pc_demon_drop_scene_exit();
 	pc_demon_scene_exit();
@@ -1604,19 +1612,24 @@ void GameCoreSection::initStage()
 	const bool resumeRoomCache = pc_pikipelago_room_preview() && std::getenv("PIKMIN_P2_CACHE_RESUME");
 #else
 	const bool resumeRoomCache = false;
+
 #endif
+	const bool livingSurfaceCache = pc_p2_surface_save_living_scene();
+	if(livingSurfaceCache&&!hasAuthoritativeStageCache){
+        std::fprintf(stderr,"Living surface checkpoint lost its authoritative stage cache\n");std::abort();
+    }
 	sprintf(path2, "%sdefault.gen", path);
 	// On a room cache-resume boot, skip the disk default.gen entirely (the
 	// generator list already came from GeneratorCache::preload); do not even
 	// open the stream, so it is neither leaked nor double-read.
-	RandomAccessStream* data = resumeRoomCache ? nullptr : gsys->openFile(path2);
+	RandomAccessStream* data = (resumeRoomCache||livingSurfaceCache) ? nullptr : gsys->openFile(path2);
 	if (data) {
 		PRINT("DEFAULT GEN LOADED **********************************\n");
 		generatorMgr->read(*data, false);
 		data->close();
 		generatorMgr->updateUseList();
 		useDefault = true;
-	} else if (!resumeRoomCache) {
+	} else if (!resumeRoomCache&&!livingSurfaceCache) {
 		PRINT("*** NO GENERATOR FILE\n");
 		mNavi->mSRT.t.set(0.0f, 0.0f, 0.0f);
 		mNavi->mDayEndPosition = mNavi->mSRT.t;
@@ -1638,7 +1651,7 @@ void GameCoreSection::initStage()
 #endif
 
 	sprintf(path2, "%s%d.gen", path, (gameflow.mWorldClock.mCurrentDay - 1) % MAX_DAYS);
-	data = gsys->openFile(path2);
+	data = livingSurfaceCache ? nullptr : gsys->openFile(path2);
 	if (data) {
 		PRINT("** FILE %s READING\n", path2);
 		dailyGeneratorMgr->read(*data, true);
@@ -1660,7 +1673,7 @@ void GameCoreSection::initStage()
 		flowCont.mCurrentStage->mHasInitialised = TRUE;
 
 		sprintf(path2, "%sinit.gen", path);
-		data = gsys->openFile(path2);
+		data = livingSurfaceCache ? nullptr : gsys->openFile(path2);
 		if (data) {
 			PRINT("** FILE %s READING\n", path2);
 			onceGeneratorMgr->read(*data, true);
@@ -1671,7 +1684,7 @@ void GameCoreSection::initStage()
 	}
 
 	sprintf(path2, "%splants.gen", path);
-	data = gsys->openFile(path2);
+	data = livingSurfaceCache ? nullptr : gsys->openFile(path2);
 	if (data) {
 		PRINT("** FILE %s READING\n", path2);
 		plantGeneratorMgr->read(*data, true);
@@ -1685,7 +1698,7 @@ void GameCoreSection::initStage()
 	int j  = 0;
 	u8 day = gameflow.mWorldClock.mCurrentDay - 1;
 	for (gfInfo = (GenFileInfo*)flowCont.mCurrentStage->mGenFileList.mChild; gfInfo; gfInfo = (GenFileInfo*)gfInfo->mNext) {
-		if (day >= gfInfo->mFirstSpawnDay && day <= gfInfo->mLastSpawnDay && playerState->checkLimitGenFlag(i) == 0) {
+		if (!livingSurfaceCache && day >= gfInfo->mFirstSpawnDay && day <= gfInfo->mLastSpawnDay && playerState->checkLimitGenFlag(i) == 0) {
 			sprintf(path2, "%s%s", path, gfInfo->mName);
 			data = gsys->openFile(path2);
 			if (data) {
@@ -1767,10 +1780,12 @@ void GameCoreSection::initStage()
 		PRINT("*** GEN1\n");
 		generatorMgr->init();
 	}
+    pc_p2_surface_save_sources_preinit();
 	generatorList->createRamGenerators();
 
 	memStat->start("genCache");
 	generatorCache->load(genCacheStage);
+    pc_p2_surface_save_sources_loaded();
 	memStat->end("genCache");
 
 	if (useDay) {
@@ -1843,6 +1858,12 @@ void GameCoreSection::initStage()
 		PRINT("@@@@ FREE = %d ACTIVE = %d\n", inf->mBPikiInfMgr.getFreeNum(), inf->mBPikiInfMgr.getActiveNum());
 		BaseInf* a = (BaseInf*)inf->mBPikiInfMgr.mActiveList.mChild;
 		while (a) {
+#if defined(PIKI_PC_PORT)
+            if(pc_p2_surface_save_owns_heads()){
+                BaseInf* retired=a;a=static_cast<BaseInf*>(a->mNext);
+                inf->mBPikiInfMgr.delInf(retired);continue;
+            }
+#endif
 			PikiHeadItem* item = static_cast<PikiHeadItem*>(itemMgr->birth(OBJTYPE_Pikihead));
 			if (item) {
 				a->restore(item);
@@ -1929,7 +1950,7 @@ void GameCoreSection::finalSetup()
 	PRINT("********* BONUS PIKI CHECK\n");
 	GameStat::dump();
 
-	if (playerState->mHasExtinctionDemoPlayed == false && !playerState->isTutorial() PC_NOT_VS
+	if (!pc_p2_surface_save_living_scene() && playerState->mHasExtinctionDemoPlayed == false && !playerState->isTutorial() PC_NOT_VS
 	    && ((GameStat::allPikis[Blue] == 0 && playerState->hasContainer(Blue))
 	        || (GameStat::allPikis[Red] == 0 && playerState->hasContainer(Red))
 	        || (GameStat::allPikis[Yellow] == 0 && playerState->hasContainer(Yellow)))) {
@@ -2048,6 +2069,7 @@ void GameCoreSection::finalSetup()
         std::printf("P2_SHIP_READY stored=%d controls=F10_withdraw_ShiftF10_deposit near_ship=180\n", p2ship::stock.total());
     }
 	pc_p2_snow_campaign_setup();
+    pc_p2_surface_save_scene_setup();
 	// Actor-lifetime (#397): mark the new scene ready for lifecycle fixtures.
 	pc_p2_scene_begin();
 	PRINT("====================== FINAL SETUP DONE ======================\n");
@@ -5512,6 +5534,7 @@ void GameCoreSection::draw(Graphics& gfx)
 		routeMgr->refresh(gfx);
 	}
 	pc_p2_cave_draw_transition(gfx);
+    pc_p2_surface_save_draw(gfx);
 	pc_p2_breadbug_visual_draw(gfx);
 	pc_p2_breadbug_teki_draw_nests(gfx);
 	pc_p2_giant_breadbug_visual_draw(gfx);

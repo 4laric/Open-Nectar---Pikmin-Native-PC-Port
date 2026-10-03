@@ -1,4 +1,6 @@
 #pragma once
+#include "pc_p2_surface_session.h"
+#include "pc_p2_original_calendar.h"
 
 #include "netplay/pc_netplay_randstate.h"
 #include <cstddef>
@@ -25,6 +27,14 @@ float pc_randomizer_color_multiplier(int color, PcPikminStat stat);
 int pc_randomizer_carry_strength(int color);
 // Standalone file-IPC adapter. No game state is touched before validation.
 bool pc_randomizer_init(int argc, char** argv);
+// Explicit authenticated bootstrap selections; empty for historical sessions.
+std::string pc_randomizer_original_campaign();
+bool pc_randomizer_original_session();
+const char* pc_randomizer_original_catalog_root();
+bool pc_randomizer_original_calendar_plan(const std::string& course,const p2original::CalendarState& actualCacheFlags,std::vector<p2original::CalendarLoad>& out,std::string& error);
+std::string pc_randomizer_campaign_treasure_source();
+// Stable selected immutable descriptor fingerprint; never a process token.
+std::string pc_randomizer_session_fingerprint();
 bool pc_randomizer_enabled();
 // SAVE1229 supplies this verified ORIGINAL_P2_CAMPAIGN bootstrap boundary.
 // Terrain, typed engineering fixtures and AP seeds do not enable it.
@@ -240,3 +250,7 @@ bool pc_randomizer_white_campaign();
 bool pc_randomizer_white_treasure_campaign();
 // Fingerprint-bound campaign choice; absent on legacy seeds means one captain.
 bool pc_randomizer_second_captain();
+
+const P2SurfaceSession& pc_randomizer_surface_session();
+void pc_randomizer_surface_session_set(const P2SurfaceSession&);
+std::uint64_t pc_randomizer_active_campaign_generation();
