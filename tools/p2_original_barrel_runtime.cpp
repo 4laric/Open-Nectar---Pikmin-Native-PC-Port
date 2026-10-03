@@ -109,7 +109,7 @@ void run(){
  pc_p2_original_barrel_before_teardown();
  // Replay previously serialized pending bytes to exercise dying-node teardown.
  auto* pendingGenerator=inventory.front();int calendar=pendingGenerator->mLatestSpawnDay;RamStream replay(pendingBytes.front().data(),112);bool handled=false;checked(pc_p2_original_barrel_generator_load(pendingGenerator,replay,handled,e),e);require(handled&&pc_p2_original_barrel_owned(pendingGenerator->mLatestSpawnCreature)&&!pendingGenerator->mLatestSpawnCreature->isAlive(),"pending replay creates actual dying physical node");require(itemMgr->mMeltingPotMgr->getSize()==baseline+1,"dying replay adopts one node");pc_p2_original_barrel_before_teardown();require(itemMgr->mMeltingPotMgr->getSize()==baseline&&!pendingGenerator->mLatestSpawnCreature&&pendingGenerator->mLatestSpawnDay==calendar,"explicit dying teardown unlinks without replaying calendar death");
- pc_p2_original_barrel_unload();for(auto& g:generators)g->mGenObject=nullptr;
+ auto allocationBefore=piki_pc_allocation_stats();pc_p2_original_barrel_unload();auto allocationAfter=piki_pc_allocation_stats();require(allocationAfter.unknownFrees==allocationBefore.unknownFrees&&allocationAfter.liveBlocks<allocationBefore.liveBlocks,"owned concrete allocations released with matching PC allocator");for(auto& g:generators)g->mGenObject=nullptr;
  std::printf("PASS ORIGINAL_BARREL_NATIVE checks=%u physical_factory=1 assigned_work_hook=1 injected_damage=1 manager_animation=1 direct_creature_cache=1 full_generator_cache=0 water_restore_controls=1 natural_gameplay=0\n",checks);std::fflush(nullptr);std::_Exit(0);
 }
 class TestApp:public PlugPikiApp {
