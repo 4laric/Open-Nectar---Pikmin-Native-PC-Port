@@ -1,5 +1,4 @@
 #include "pc_p2_original_pod_floor.h"
-#include "pc_p2_original_pod_paths.h"
 #include <cassert>
 #include <fstream>
 #include <iterator>
@@ -10,15 +9,6 @@ struct UnusedAuthority:p2retail::FloorIdentityAuthority {
                     unsigned,unsigned,p2retail::BirthIdentity&,std::string&)const override{++calls;return false;}
 };
 int main(int argc,char** argv){
- std::string modelPath;
- assert(p2originalpod::engineModelPath("","dataDir/","courses/pikmin2retailpod/pod.mod",modelPath));
- assert(modelPath=="assets/dataDir/courses/pikmin2retailpod/pod.mod");
- assert(p2originalpod::engineModelPath("/","dataDir/","pod.mod",modelPath)&&modelPath=="assets/dataDir/pod.mod");
- assert(p2originalpod::engineModelPath("private/","dataDir/","pod.mod",modelPath)&&modelPath=="assets/private/dataDir/pod.mod");
- assert(!p2originalpod::engineModelPath(nullptr,"dataDir/","pod.mod",modelPath));
- assert(!p2originalpod::engineModelPath("","dataDir/","pod.mod?alias",modelPath));
- assert(!p2originalpod::engineModelPath("","dataDir/",std::string(256,'a'),modelPath));
- assert(!p2originalpod::engineModelPath(std::string(250,'a').c_str(),"dataDir/","pod.mod",modelPath));
  assert(argc==3);std::ifstream in(argv[1],std::ios::binary);assert(in);
  std::string bytes{std::istreambuf_iterator<char>(in),{}};std::string error;
  p2retail::FloorPlan plan;assert(p2retail::parseFloorPlan(bytes,argv[2],plan,error));
@@ -26,6 +16,10 @@ int main(int argc,char** argv){
  p2retail::Snapshot floor{cave->cave,cave->source,cave->sourceSha256,cave->catalogSha256,
                          plan.floor,cave->maxFloor,{"selected","visit",argv[2],1},true,true};
  UnusedAuthority authority;p2originalpod::Resources resources;p2originalpod::Config out;
+ assert(!p2originalpod::floorConfig(plan,floor,&authority,resources,out,error));
+ // This never emits bytes or authenticates resources; the plan helper does not
+ // invoke it. Actual native preflight cannot proceed with this denial callback.
+ resources.input=[](const std::string&,std::string&,std::string&){return false;};
  assert(p2originalpod::floorConfig(plan,floor,&authority,resources,out,error));
  assert(out.x==plan.pod.x&&out.y==plan.pod.y&&out.z==plan.pod.z&&out.unit==plan.pod.unit&&out.slot==plan.pod.slot);
  auto changed=plan;changed.pod.x+=200;changed.cave="forged";

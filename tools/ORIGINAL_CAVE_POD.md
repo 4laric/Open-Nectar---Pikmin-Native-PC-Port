@@ -13,14 +13,14 @@ authority. It never creates an economy ledger, seeds, or P1 ship repairs.
 
 Preflight verifies exact source archive, raw model, collision text and converted
 model bytes against the fixed SHA-256 pins in pure `pc_p2_original_pod_sources.h`. Resources
-stay in private output; no game bytes are distributed in source. The known
-converted model path is engine-relative (`courses/pikmin2retailpod/pod.mod` by
-default). Preflight hashes the exact file reached by System's active directory
-and data root plus DVDOpen's `assets/` prefix, then loads a fresh shape without
-cache reuse. The model staged at the manifest's native destination must contain
-those verified bytes; a same-named file at the working-directory root is not
-the engine resource. Raw provenance files use their explicit filesystem paths.
-The known
+stay in private output; no game bytes are distributed in source. Preflight
+requires the actual selected-session `SourceInput` callback, supplied by
+`pc_randomizer_original_input`. Model role is
+`assets/dataDir/courses/pikmin2retailpod/pod.mod`; raw provenance roles are
+`p2-original/retail-cargo/pod/{arc.szs,pot.bmd,coll.txt,texts.szs}`.
+All five are read and hashed before ownership. The exact retained model buffer
+is parsed by bounded `RamStream`, with scoped App heap/current shape/texture
+bases. No file reopening or shape cache supplies model data. The known
 conversion is the existing `pod.mod` generated from `user/Kando/pod/arc.szs`
 `pot.bmd`. The four spheres are original `user/Kando/pod/texts.szs` `coll.txt`,
 transformed by the model's original bind-pose joint matrices 2/3. Their radii
@@ -90,7 +90,8 @@ concrete retail `SceneOps` owner: `prepare`, `birth`, `commit`, and `release`.
 It re-parses the selected `FloorPlan.authenticatedBytes` against the supplied
 selected snapshot's layout hash before deriving the Pod anchor. The imported
 plan parser is unchanged from cave-owner commit `0f4f7f0d68dd052e6492749e2805a54858b878a0`.
-The caller supplies original resource paths, independent birth authority and
+The caller supplies canonical resource roles and the actual selected-input
+getter (`Resources.input`), independent birth authority and
 its authenticated selected-prepared context provider. That provider must work
 before `FloorSession` becomes active and during teardown after active authority
 is revoked; it must be revoked after accepted teardown. It grants no live
