@@ -39,6 +39,34 @@ loop keys; source87 is a 74-frame BCA with attribute0 and no keys. Both use
 normal-layer Plants behavior. Their fp27 child birth heights are 85 and 70.
 Conversion alone does not admit either sentinel into gameplay.
 
+The canonical Honey adapter is `pc_p2_original_shijimi_honey.{h,cpp}` and
+`pc_p2_original_shijimi_honey_native.cpp`. It preserves the full plant root
+identity and appends `(EmitterKind::PlantSpectralid, emission=0, member=0..4)`
+with Honey slot0. It calls the real owner-pinned `honey::Manager::birth` with
+the same source RNG. Successful init(nullptr) consumes its original draw;
+capacity failure is true/null and consumes none. The actual scene owner's
+Honey consumed callback must dispatch this ancestry to `PlantGroups::consume`.
+No Egg contents record is created. Spectralid facing is not copied onto Honey:
+retail genItem sets only position and velocity after initialization.
+
+`pc_p2_original_shijimi_state.{h,cpp}` carries the plant-origin Wait/Fly/Fall/
+Dead/Leave transitions and separate simulation, culling and leader-cluster
+phases. Its source controls check attachment-only Fall, the authored END
+boundary for drops, exact source counters and the absence of timed Leave
+cleanup. It is an unbound mechanical component, not a native gameplay test.
+Native services still must provide genuine attachment, floor triangles,
+source animation keys, transforms, appearance and scene-owned retirement.
+
+`tools/p2_shijimi_effect_resources.py` extracts verified genuine PID21/22/23
+and `IP2_stardust1_i` from GPVE01 game.jpc into private output. This does not
+reuse the Watage PID484 renderer. The native continuous chase emitter and
+billboard rendering remain unqualified.
+
+The private composition entry is `tools/original_sentinel_build/`. It consumes
+the real resource owner's build harness and adds Sentinel Honey/state sources
+and strict controls. Only the coordinated GitHub runner may qualify the heavy
+native composition. Syntax-only compilation is not a linked executable proof.
+
 ## Direct gameplay smoke script
 
 Use a fresh private original Forest arena/card with 20 starting Pikmin and a

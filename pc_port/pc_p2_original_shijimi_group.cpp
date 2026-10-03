@@ -9,6 +9,11 @@ namespace {
 bool reject(std::string& e,const char* s){e=s;return false;}
 bool finite(const Position& p){return std::isfinite(p.x)&&std::isfinite(p.y)&&std::isfinite(p.z);}
 bool color(Color c){return unsigned(c)<=2;}
+bool parentIdentity(const InstanceIdentity& id){
+ if(id.catalog.size()!=64||!id.generator||!id.epoch||!id.activation)return false;
+ for(char c:id.catalog)if(!((c>='0'&&c<='9')||(c>='a'&&c<='f')))return false;
+ return true;
+}
 constexpr float tau=6.2831853071795864769f;
 struct Rollback {
  Engine& engine;Group& group;std::string& error;bool finished=false;
@@ -18,7 +23,7 @@ struct Rollback {
 bool PlantGroups::touch(const InstanceIdentity& id,unsigned source,const Position& plant,float height,
  Engine& engine,Group& out,std::string& e){
  if((source!=50&&source!=87)||!finite(plant)||!std::isfinite(height)||height<0
-   ||id.catalog.empty()||!id.epoch||!id.activation||!engine.parent(id,source,e))return reject(e,"invalid authoritative Sentinel parent");
+   ||!parentIdentity(id)||!engine.parent(id,source,e))return reject(e,"invalid authoritative Sentinel parent");
  auto previous=mGroups.find(id);
  if(previous!=mGroups.end()){
   Position origin=plant;origin.y+=height;
@@ -84,7 +89,7 @@ bool PlantGroups::restore(const std::vector<Group>& rows,Engine& engine,std::str
  std::map<InstanceIdentity,Group> prospective;
  for(const auto& g:rows){
   if(!g.consumed||!g.complete||!finite(g.origin)||g.sourceGroupCount>4||(g.plantSource!=50&&g.plantSource!=87)
-    ||g.plant.catalog.empty()||!g.plant.epoch||!g.plant.activation||!engine.parent(g.plant,g.plantSource,e)||!engine.emission(g,e)
+    ||!parentIdentity(g.plant)||!engine.parent(g.plant,g.plantSource,e)||!engine.emission(g,e)
     ||!prospective.emplace(g.plant,g).second)return reject(e,"invalid saved Sentinel emission parent");
   unsigned last=0;
   for(unsigned n=0;n<5;++n){const auto& c=g.children[n];

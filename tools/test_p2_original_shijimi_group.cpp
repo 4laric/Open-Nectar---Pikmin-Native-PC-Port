@@ -6,7 +6,7 @@
 using namespace p2original;
 using namespace p2original::shijimi;
 namespace {
-InstanceIdentity parent{"actual-catalog",0x1234,0,2,3};
+InstanceIdentity parent{std::string(64,'a'),0x1234,0,2,3};
 struct TestEngine final:Engine {
  bool available=true,spicy=false,bitter=false,nullHoney=false;
  float leaderSelection=0.15f,selection=0.15f;
