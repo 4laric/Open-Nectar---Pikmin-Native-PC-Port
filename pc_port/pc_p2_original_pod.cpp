@@ -100,6 +100,7 @@ Config config;ContextProvider contextProvider;Shape* shape=nullptr;Pod* pod=null
 CreatureNode* node=nullptr;MeltingPotMgr* manager=nullptr;
 std::map<Pellet*,Cargo> cargo;
 bool prepared=false,committed=false,everSucked=false,retaining=false;Pellet* completing=nullptr;
+struct RetainScope {RetainScope(){retaining=true;}~RetainScope(){retaining=false;}};
 bool current(p2retail::Snapshot* out=nullptr){
  p2retail::Snapshot actual;
  if(!prepared||!contextProvider||!contextProvider(config.floor.scene,actual)||!source(actual)||!same(actual,config.floor))return false;
@@ -179,7 +180,7 @@ bool pc_p2_original_pod_completed(Pellet* p,Suckable* receiver,const p2retail::S
  return completing==p&&it!=cargo.end()&&it->second.phase==Phase::Sucking&&it->second.scene==scene
   &&p->getState()==PELSTATE_Goal&&p->mTargetGoal==receiver&&pc_p2_original_pod_context(receiver,scene,out);
 }
-unsigned pc_p2_original_pod_pending(){unsigned n=completing?1:0;for(const auto& row:cargo)if(moving(row.first,row.second))++n;return n;}
+unsigned pc_p2_original_pod_pending(){unsigned n=(completing||retaining)?1:0;for(const auto& row:cargo)if(moving(row.first,row.second))++n;return n;}
 bool pc_p2_original_pod_snapshot(const p2retail::SceneIdentity& scene,p2originalpod::Snapshot& out){
  if(!pod||!committed||completing||!(scene==config.floor.scene)||!current())return false;
  p2originalpod::Snapshot capture;capture.floor=config.floor;capture.unit=config.unit;capture.slot=config.slot;capture.committed=true;
@@ -203,7 +204,7 @@ bool pc_p2_original_pod_release_uncollected(const p2retail::SceneIdentity& scene
  }
  // No state is changed on a failed capture. The callback must retain/verify,
  // not retire/rebind actors or grant any consumed/seen/Poko receipt.
- retaining=true;bool retained=retain(config.floor,loose,e);retaining=false;
+ bool retained=false;{RetainScope scope;retained=retain(config.floor,loose,e);}
  if(!retained)return false;
  unsigned unfinished=0;for(const auto& row:cargo)if(row.second.phase!=Phase::Completed)++unfinished;
  if(!current()||pc_p2_original_pod_pending()||loose.size()!=unfinished)return reject(e,"pod_boundary_changed_during_retention");
