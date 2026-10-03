@@ -15,6 +15,16 @@ public:
  virtual bool current(std::string&)const=0;
  virtual Shape* shape(const std::string& exactSelectedRole)const=0;
 };
+// Required source arithmetic producer: authentic JMath LUT yaw and ordered
+// source SDK matrix concatenation. No host-trig/default implementation exists.
+// Inputs are the animator's captured genuine body transform and dense local root;
+// source output is atomic. Numeric authority and qualification belong to producer.
+class SourceRootWorldTransform {
+public:
+ virtual ~SourceRootWorldTransform()=default;
+ virtual bool transform(float sourceFace,Vector3f sourceBodyPosition,
+                        Vector3f sourceRootLocal,Vector3f&,std::string&)const=0;
+};
 struct AnimatedPose {
  Shape* shape=nullptr;
  Shape* happaShapes[3]={};
@@ -45,6 +55,15 @@ public:
  bool finish(Handle,std::string&);
  bool loopStart(Handle,std::string&);
  bool pose(Handle,AnimatedPose&,std::string&)const;
+ // Genuine source model joint0 local translation. World output additionally
+ // requires the authentic source arithmetic producer for the one-part collider.
+ // Full authenticated BCA at the actual bound-animation clock;
+ // source BMD hierarchy must establish unparented joint0. Loading permits
+ // geometry construction only; actor eligibility/radius remains producer-owned.
+ // RGB source body scale is literal1; unsupported species refuse. No sparse
+ // sampled MOD joint/camera matrix/native bounding-centre substitution.
+ bool collisionRootLocal(Handle,Vector3f&,std::string&)const;
+ bool collisionRoot(Handle,const SourceRootWorldTransform&,Vector3f&,std::string&)const;
  // Source draw branch, before ordinary ViewPiki::refresh/Pani. The source
  // actor dispatcher owns alive/movie eligibility. Native matrix/draw calls
  // consume the actual selected pose/happa Shapes, never P1 model instances.
@@ -58,6 +77,7 @@ public:
  std::size_t retainedBodies()const noexcept;
  bool owned()const noexcept;
 private:
+ bool observeRoot(Handle,const SourceRootWorldTransform*,Vector3f&,std::string&)const;
  struct Impl;
  std::unique_ptr<Impl> impl;
 };

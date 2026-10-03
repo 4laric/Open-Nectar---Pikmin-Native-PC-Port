@@ -1,4 +1,6 @@
 #include "pc_p2_original_piki_animator.h"
+#include "pc_p2_original_piki_joint_pose.h"
+#include "Piki.h"
 #include "pc_p2_original_piki_origin.h"
 #include "pc_p2_original_captain_damage.h"
 #include "pc_randomizer.h"
@@ -41,8 +43,8 @@ bool bca(const std::string& raw,unsigned duration){
 }
 struct Key {unsigned frame=0,type=0;};
 struct Sample {unsigned frame=0;Shape* shape=nullptr;std::array<float,12> happa{};};
-struct Clip {unsigned duration=0,id=0;std::string name,rawSha;std::vector<Key> keys;std::vector<Sample> samples;};
-struct Bank {std::string prefix;std::array<Shape*,3> happa{};std::map<Motion,Clip> clips;};
+struct Clip {unsigned duration=0,id=0;std::string name,rawSha,raw;std::vector<Key> keys;std::vector<Sample> samples;};
+struct Bank {std::string prefix,model;std::array<Shape*,3> happa{};std::map<Motion,Clip> clips;};
 // Retail registry is a linked list in authored order, not a sorted event list.
 // getLowestAnimKey picks the first minimum qualifying frame; animate then walks
 // the original successors. Equal-frame and unsorted authored keys retain order.
@@ -111,6 +113,7 @@ bool NativeAnimator::prepare(unsigned species,std::string& e){
  std::istringstream header(line);std::string magic,modelHash,paramHash;if(!(header>>magic>>modelHash>>paramHash)||magic!="P2_SOURCE_PIKI_BANK_1"||!digest(modelHash)||!digest(paramHash)||!tail(header))return fail(e,"invalid selected source animation bank header");
  std::string params;if(!pc_randomizer_original_input(bank.prefix+"pikiParms.txt",params,e)||sha(params)!=paramHash)return fail(e,"selected source animation parameter identity changed");
  std::string model;if(!pc_randomizer_original_input(bank.prefix+color+".bmd",model,e)||sha(model)!=modelHash)return fail(e,"selected source animation model identity changed");
+ bank.model=model;
  Clip* active=nullptr;std::size_t happa=0;
  while(std::getline(lines,line)){if(line.empty()||line=="\r")continue;std::istringstream row(line);std::string kind,name;row>>kind>>name;
   if(kind=="clip"){
@@ -126,6 +129,7 @@ bool NativeAnimator::prepare(unsigned species,std::string& e){
    const auto r=registrations.find(c.id);if(r==registrations.end()||r->second.first!=name)return fail(e,"selected source motion ID mismatch");c.keys=r->second.second;
    for(const auto& key:c.keys)if(key.frame>=c.duration)return fail(e,"selected source key exceeds actual animation duration");
    std::string raw;if(!pc_randomizer_original_input(bank.prefix+name+".bca",raw,e)||sha(raw)!=c.rawSha||!bca(raw,c.duration))return fail(e,"selected source BCA duration or identity mismatch");
+   c.raw=std::move(raw);
    active=&bank.clips.emplace(found->motion,std::move(c)).first->second;happa=0;
   }else if(kind=="happa"){
    unsigned index=0;if(!active||name!=active->name||!(row>>index)||index!=happa||index>=active->samples.size())return fail(e,"invalid selected happa sample association");
@@ -169,6 +173,28 @@ bool NativeAnimator::advance(Handle h,float seconds,std::string& e){
  return p.current(e);
 }
 bool NativeAnimator::pose(Handle h,AnimatedPose& out,std::string& e)const{auto& p=*impl;auto* a=p.actor(h,e);if(!a)return false;const auto& c=p.clip(*a);const Sample* sample=&c.samples.front();for(const auto& s:c.samples){if(float(s.frame)>a->timer)break;sample=&s;}AnimatedPose value;value.shape=sample->shape;value.sourceFrame=a->timer;value.sampledFrame=sample->frame;std::copy(sample->happa.begin(),sample->happa.end(),value.happa);std::copy(p.banks.at(a->species).happa.begin(),p.banks.at(a->species).happa.end(),value.happaShapes);out=value;return true;}
+bool NativeAnimator::collisionRootLocal(Handle h,Vector3f& out,std::string& e)const{return observeRoot(h,nullptr,out,e);}
+bool NativeAnimator::collisionRoot(Handle h,const SourceRootWorldTransform& transform,Vector3f& out,std::string& e)const{return observeRoot(h,&transform,out,e);}
+bool NativeAnimator::observeRoot(Handle h,const SourceRootWorldTransform* transform,Vector3f& out,std::string& e)const{
+ auto& p=*impl;if(p.busy)return fail(e,"source root geometry owner is busy");
+ struct Inspection {Impl& p;Inspection(Impl& value):p(value){p.busy=p.inspecting=true;}~Inspection(){p.busy=p.inspecting=false;}} guard(p);
+ auto* actor=p.actor(h,e);if(!actor||!p.writable(e)||actor->species>2)return false;
+ const auto species=actor->species;const auto motion=actor->motion;const auto generation=actor->generation;const float clock=actor->timer;
+ const auto phase=p.world->phase();const auto position=h.body->mSRT.t;const float face=h.body->mFaceDirection;
+ if(!std::isfinite(face)||!std::isfinite(position.x)||!std::isfinite(position.y)||!std::isfinite(position.z))return fail(e,"nonfinite source body root transform");
+ const auto& bank=p.banks.at(species);const auto& clip=p.clip(*actor);Vector3f local;
+ if(!sourceRootTranslation(bank.model,clip.raw,clock,local,e))return false;
+ // World composition is owned by the genuine source Numeric producer. The
+ // dense local observation remains useful without silently substituting host
+ // trig or the converted MOD's rigid root/camera matrix.
+ Vector3f value=local;
+ if(transform&&!transform->transform(face,position,local,value,e))return false;
+ actor=p.actor(h,e);if(!actor||actor->species!=species||actor->motion!=motion||actor->generation!=generation||actor->timer!=clock||p.world->phase()!=phase||
+    h.body->mSRT.t.x!=position.x||h.body->mSRT.t.y!=position.y||h.body->mSRT.t.z!=position.z||h.body->mFaceDirection!=face)
+  return fail(e,"source root observation changed actual pose/body ownership");
+ if(!std::isfinite(value.x)||!std::isfinite(value.y)||!std::isfinite(value.z))return fail(e,"nonfinite source joint0 world translation");
+ out=value;e.clear();return true;
+}
 bool NativeAnimator::canDetach(Handle h,std::string& e)const{auto& p=*impl;if(p.busy)return fail(e,"source animator callback is in flight");struct Busy{Impl& p;Busy(Impl& x):p(x){p.busy=p.inspecting=true;}~Busy(){p.busy=p.inspecting=false;}}busy(p);if(!p.actor(h,e))return false;if(piki::retains(h))return fail(e,"source runtime still owns this animator consumer");if(!p.current(e)||!pc_p2_original_piki_body_current(h.body,h.lifetime))return false;return piki::retains(h)?fail(e,"source runtime reacquired this animator consumer"):true;}
 bool NativeAnimator::detach(Handle h,std::string& e){if(!canDetach(h,e))return false;impl->actors.erase(h.body);return true;}
 bool NativeAnimator::canRetire(std::string& e)const{auto& p=*impl;if(p.busy)return fail(e,"source animator callback is in flight");struct Busy{Impl& p;Busy(Impl& x):p(x){p.busy=p.inspecting=true;}~Busy(){p.busy=p.inspecting=false;}}busy(p);if(p.banks.empty()&&p.actors.empty())return true;if(!p.current(e))return false;for(const auto& item:p.actors)if(!pc_p2_original_piki_body_current(item.first,item.second.handle.lifetime))return fail(e,"source animator cleanup lifetime changed");if(piki::owned())return fail(e,"source runtime still owns animator consumers");return true;}
