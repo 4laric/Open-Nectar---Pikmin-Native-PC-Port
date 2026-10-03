@@ -32,6 +32,7 @@
 #include "TekiPersonality.h"
 #include "Generator.h"
 #include "MapMgr.h"
+#include "MapCode.h"
 #include "Shape.h"
 #include "Collision.h"
 #include "Route.h"
@@ -505,6 +506,7 @@ class PurpleKochappyApp:public PlugPikiApp {
  PcKochappyReentryProgress reentryProgress;
  PcKochappyRouteCatchup routeCatchup;
  PcKochappyPrefixProgress prefixProgress;
+ PcKochappyPrefixContactGate prefixContact;
  int neutralEdgeGuide=-1,neutralEdgeAge=-1;
  bool neutralEdgeVerified=false;
  bool seenCaptain=false,wasActive=false,sawFit=false,sawPause=false,recovered=false,deathDuringStun=false;
@@ -559,22 +561,39 @@ class PurpleKochappyApp:public PlugPikiApp {
  bool approachPrefix(Navi* n) {
   if(prefixProgress.guide==ReceiverPrefixCount)return false;
   receiverWallCache();
-  bool present[20]={};int count=0;float width=0.f,lag=0.f;
+  bool present[20]={};Piki* current[20]={};int count=0;float width=0.f,lag=0.f;bool allContact=true;
   Iterator bodies(pikiMgr);CI_LOOP(bodies){Piki* p=static_cast<Piki*>(*bodies);
    if(!p)continue;
    int slot=-1;for(int i=0;i<initialBodyCount;++i)if(initialBodies[i]==p){slot=i;break;}
-   require(slot>=0&&!present[slot],"prefix foreign/duplicate current body");present[slot]=true;++count;
+   require(slot>=0&&!present[slot],"prefix foreign/duplicate current body");present[slot]=true;current[slot]=p;++count;
    require(p->isAlive()&&std::isfinite(p->mHealth)&&p->mHealth>0&&p->mGenerator
     &&unsigned(p->mGenerator->_70)==initialGeneratorIds[slot]&&initialGeneratorIds[slot]!=0,
     "prefix original live generator identity lost");
    require(p->getCurrState()&&p->getState()==PIKISTATE_Normal&&p->mMode==PikiMode::FormationMode
     &&p->mNavi==n&&!p->isStickTo()&&!pc_p2_is_purple(p)&&!p->mP2White&&p->mColor==Red,
     "prefix original owned Normal Formation roster lost");
-   require(rvfinite({p->mSRT.t.x,p->mSRT.t.y,p->mSRT.t.z})&&p->mInWaterTimer==0&&p->mGroundTriangle
-    &&std::isfinite(p->mGroundTriangle->mTriangle.mNormal.y)&&p->mGroundTriangle->mTriangle.mNormal.y>.5f,
-    "prefix original body contact/hazard changed");
+   const bool finiteBody=rvfinite({p->mSRT.t.x,p->mSRT.t.y,p->mSRT.t.z}),dry=p->mInWaterTimer==0;
+   const bool ground=p->mGroundTriangle!=nullptr;
+   const float normalY=ground?p->mGroundTriangle->mTriangle.mNormal.y:0.f;
+   const auto contact=pc_kochappy_prefix_contact(finiteBody,dry,ground,normalY);
+   if(contact!=PcKochappyPrefixContact::Admit)
+    std::printf("P2_PURPLE_KOCHAPPY_PREFIX_CONTACT age=%d guide=%d waits=%d slot=%d generator=%u state=%d mode=%d xyz=%.6f,%.6f,%.6f velocity=%.6f,%.6f,%.6f finite_body=%d water_timer=%d ground=%d normal_y=%.9g source_slip=%d contact=%d read_only=1 actor_writes=0\n",
+     age,prefixProgress.guide,prefixContact.waits,slot,unsigned(p->mGenerator->_70),p->getState(),int(p->mMode),
+     p->mSRT.t.x,p->mSRT.t.y,p->mSRT.t.z,p->mVelocity.x,p->mVelocity.y,p->mVelocity.z,int(finiteBody),
+     int(p->mInWaterTimer),int(ground),normalY,ground?MapCode::getSlipCode(p->mGroundTriangle):-1,int(contact));
+   require(contact!=PcKochappyPrefixContact::Refuse,"prefix nonfinite body/normal or water hazard");
+   allContact=allContact&&contact==PcKochappyPrefixContact::Admit;
    const float bodySpan=distance(n->mSRT.t,p->mSRT.t);
    require(std::isfinite(bodySpan)&&bodySpan<512.f,"prefix original body outside verified span");lag=std::max(lag,bodySpan);
+  }
+  const bool roster=initialBodyCount==20&&count==20&&n->getPlatePikis()==20;
+  require(roster,"prefix original20 roster closure failed");
+  const auto contact=prefixContact.observe(allContact);
+  require(contact!=PcKochappyPrefixContact::Refuse,"prefix bounded native contact settling exhausted");
+  if(contact==PcKochappyPrefixContact::Wait){input();return true;}
+  // All original grounded/dry/normal>.5 contacts are required before any
+  // footprint/path admission or movement. A transient does not bypass them.
+  for(Piki* p:current){
    Vector3f target;PcKochappyCrowdObservation observation;
    require(CrowdObserver::target(*p,*n,target,observation),"prefix actual owned Crowd target missing/unsupported");
    const float targetSpan=distance(n->mSRT.t,target);
@@ -590,7 +609,6 @@ class PurpleKochappyApp:public PlugPikiApp {
     "prefix slot source floor missing/unsafe");
    receiverCheckSphere({target.x,double(y)+r/floor->mTriangle.mNormal.y,target.z},r+.10);
   }
-  const bool roster=initialBodyCount==20&&count==20&&n->getPlatePikis()==20;
   const auto& w=ReceiverPrefix[prefixProgress.guide];const Vector3f goal(w.x,0.f,w.z);
   auto* floor=mapMgr->getCurrTri(w.x,w.z,true);const float y=mapMgr->getMinY(w.x,w.z,true);
   require(floor&&std::isfinite(y)&&std::isfinite(floor->mTriangle.mNormal.y)&&floor->mTriangle.mNormal.y>.5f,

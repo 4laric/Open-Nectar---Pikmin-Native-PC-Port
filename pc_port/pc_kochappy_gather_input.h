@@ -98,6 +98,21 @@ inline int pc_kochappy_neutral_edge(bool sent,bool locked,bool neutral,bool safe
 // Ordinary west-ramp guidance before the unchanged receiver corridor. A guide
 // observation is not a prediction of future native follower trajectories.
 enum class PcKochappyPrefixInput { Walk, Reached, Done, Refuse };
+enum class PcKochappyPrefixContact { Admit, Wait, Refuse };
+inline PcKochappyPrefixContact pc_kochappy_prefix_contact(bool finiteBody,bool dry,bool ground,float normalY) {
+    using I=PcKochappyPrefixContact;
+    if(!finiteBody || !dry || (ground&&!std::isfinite(normalY)))return I::Refuse;
+    if(!ground || normalY<=.5f)return I::Wait;
+    return I::Admit;
+}
+struct PcKochappyPrefixContactGate {
+    int waits=0;
+    PcKochappyPrefixContact observe(bool allContact) {
+        if(waits>90)return PcKochappyPrefixContact::Refuse;
+        if(allContact)return PcKochappyPrefixContact::Admit;
+        return ++waits<=90?PcKochappyPrefixContact::Wait:PcKochappyPrefixContact::Refuse;
+    }
+};
 struct PcKochappyPrefixProgress {
     int guide=0,elapsed=0,lastProgress=0;
     float best=-1.f;

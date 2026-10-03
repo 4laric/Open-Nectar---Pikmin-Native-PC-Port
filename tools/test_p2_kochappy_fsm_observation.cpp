@@ -5,6 +5,18 @@
 #include <limits>
 #define CHECK(x) do {if(!(x)){std::fprintf(stderr,"FSM observation check failed: %s line%d\n",#x,__LINE__);return 1;}}while(false)
 int main(){
+ CHECK(pc_kochappy_prefix_contact(true,true,true,1.f)==PcKochappyPrefixContact::Admit);
+ CHECK(pc_kochappy_prefix_contact(true,true,true,.5f)==PcKochappyPrefixContact::Wait);
+ CHECK(pc_kochappy_prefix_contact(true,true,true,std::nextafter(.5f,1.f))==PcKochappyPrefixContact::Admit);
+ CHECK(pc_kochappy_prefix_contact(true,true,false,0.f)==PcKochappyPrefixContact::Wait);
+ CHECK(pc_kochappy_prefix_contact(false,true,false,0.f)==PcKochappyPrefixContact::Refuse);
+ CHECK(pc_kochappy_prefix_contact(true,false,false,0.f)==PcKochappyPrefixContact::Refuse);
+ CHECK(pc_kochappy_prefix_contact(true,true,true,std::numeric_limits<float>::quiet_NaN())==PcKochappyPrefixContact::Refuse);
+ PcKochappyPrefixContactGate contactWait;
+ for(int i=0;i<90;++i)CHECK(contactWait.observe(false)==PcKochappyPrefixContact::Wait);
+ CHECK(contactWait.observe(false)==PcKochappyPrefixContact::Refuse);
+ CHECK(contactWait.observe(true)==PcKochappyPrefixContact::Refuse&&contactWait.waits==91);
+ CHECK(contactWait.observe(false)==PcKochappyPrefixContact::Refuse);
  PcKochappyPrefixProgress prefix;
  CHECK(prefix.observe(20.f,true,4)==PcKochappyPrefixInput::Walk);
  CHECK(prefix.observe(.5f,true,4)==PcKochappyPrefixInput::Reached&&prefix.guide==1);
