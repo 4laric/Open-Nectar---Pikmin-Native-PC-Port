@@ -12,6 +12,21 @@ Manager::Manager(const Bank& bank):mBank(std::make_shared<const Bank>(bank)){
 }
 Manager::~Manager(){if(mLive){std::fprintf(stderr,"P2_JPA_MANAGER_RETAINED_EMITTERS_REFUSED live=%u\n",mLive);std::fflush(stderr);std::abort();}}
 bool Manager::owns(const EmitterHandle& h)const{return h&&h->poolIndex()<capacity&&mSlots[h->poolIndex()].get()==h.get()&&mSlots[h->poolIndex()]->admission()==h->admission();}
+bool Manager::rebindSelectedBank(const Bank& bank,std::string& e){
+ try{
+ if(mLive)return fail(e,"JPA selected bank rebind retains live emitters");
+ if(mBank->selected().campaignSHA.empty()||bank.selected().campaignSHA!=mBank->selected().campaignSHA)
+  return fail(e,"JPA selected bank rebind requires same actual fixed-manager campaign");
+ std::size_t count=0;const auto* roles=resourceRoles(count);
+ for(std::size_t i=0;i<count;++i){
+  const auto* old=mBank->bytes(roles[i].role);const auto* next=bank.bytes(roles[i].role);
+  if(!old||!next||old->size()!=roles[i].bytes||*old!=*next)return fail(e,"JPA selected bank rebind requires all identical authenticated roles");
+ }
+ std::shared_ptr<const Bank> replacement;
+ replacement=std::make_shared<const Bank>(bank);
+ mBank=std::move(replacement);e.clear();return true;
+ }catch(const std::bad_alloc&){return fail(e,"JPA selected bank rebind allocation failed");}
+}
 bool Manager::create(unsigned id,EmitterHandle& out,std::string& e){
  if(out)return fail(e,"JPA admission output already retains an emitter");
  std::size_t count=0;const auto* roles=resourceRoles(count);const ResourceRole* role=nullptr;

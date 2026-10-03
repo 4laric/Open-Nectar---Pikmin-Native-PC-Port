@@ -30,6 +30,9 @@ public:
  bool create(unsigned sourceId,EmitterHandle& out,std::string& error);
  bool erase(EmitterHandle& owned,std::string& error);
  bool owns(const EmitterHandle&)const;
+ // Same fixed-manager campaign only, zero live emitters, all16 identical raw
+ // roles. Atomic bank replacement never resets RNG/admission/free-list history.
+ bool rebindSelectedBank(const Bank&,std::string& error);
  // Caller retires actual particle/render owners before these source deletions.
  // Source forceDeleteAll visits groups ascending, each group's tail first.
  void killAll();void reset(){killAll();}
@@ -39,7 +42,7 @@ public:
  const Bank& bank()const{return *mBank;}
 private:
  void retire(unsigned slot);
- const std::shared_ptr<const Bank> mBank;
+ std::shared_ptr<const Bank> mBank;
  std::array<EmitterHandle,capacity> mSlots{};
  std::array<int,capacity> mNext{},mPrev{};
  std::array<int,9> mHead{},mTail{};
