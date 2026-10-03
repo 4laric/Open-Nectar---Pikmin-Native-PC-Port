@@ -3,6 +3,7 @@
 #include "pc_bbft.h"
 #if defined(PIKI_PC_PORT)
 #include "pc_p2_original_course.h"
+#include "pc_p2_original_number_lod_native.h"
 #include "netplay/pc_netplay_camlead.h"
 #include "netplay/pc_netplay_det.h"
 #include "netplay/pc_netplay_present.h"
@@ -1612,6 +1613,7 @@ ModeState* DayOverModeState::update(u32& result)
 			gameflow.mMoviePlayer->fixMovieList();
 			Jac_SceneSetup(SCENE_Results, JACRES_EndOfDay);
 #if defined(PIKI_PC_PORT)
+			pc_p2_original_number_lod_release_views(gamecore);
 			sGamecoreLive = false;
 			containerWindow2 = nullptr;
 			cameraMgrP2      = nullptr;
@@ -2469,6 +2471,18 @@ public:
 		                      && !gameflow.mMoviePlayer->mIsActive
 		                      && !(gameflow.mDemoFlags & CinePlayerFlags::NonGameMovie) && !memcardWindow;
 		mSplitViews = splitScreen ? 2 : 1;
+		// Publish the actual selected roster; Number LOD captures its cameras
+		// after this section's camera update, before the actual AI phase below.
+		PcOriginalNumberViewScope numberScope=PcOriginalNumberViewScope::OrdinarySingle;
+		if(!sGamecoreLive||!gamecore)numberScope=PcOriginalNumberViewScope::MissingOwner;
+		else if(mIsInitialSetup)numberScope=PcOriginalNumberViewScope::InitialSetup;
+		else if(pc_netplay_present_two_pass_active())numberScope=PcOriginalNumberViewScope::Netplay;
+		else if(memcardWindow)numberScope=PcOriginalNumberViewScope::Memcard;
+		else if(gameflow.mMoviePlayer->mIsActive||gameflow.mMoviePlayer->mCamTransitionFactor>0)numberScope=PcOriginalNumberViewScope::MovieOrTransition;
+		else if(gameflow.mDemoFlags&CinePlayerFlags::NonGameMovie)numberScope=PcOriginalNumberViewScope::NonGameMovie;
+		else if(gamecore->isSplitScreen())numberScope=PcOriginalNumberViewScope::Split;
+		std::string numberViewError;
+		pc_p2_original_number_lod_publish_views(gamecore,unsigned(mSplitViews),numberScope,numberViewError);
 		for (int view = 0; view < mSplitViews; view++) {
 			if (sGamecoreLive && gamecore) gamecore->mRenderPass = view;
 			if (splitScreen) {
@@ -2655,8 +2669,10 @@ public:
 #endif
 				if (mUpdateFlags & UPDATE_AI && !(gameflow.mDemoFlags & CinePlayerFlags::NonGameMovie)) {
 					// update enemy/boss/pikmin/etc AI
+					pc_p2_original_number_lod_capture_views(gamecore,numberViewError);
 					gamecore->updateAI();
 				}
+				pc_p2_original_number_lod_close_views(gamecore);
 				if (profiling) {
 					pc_tick_profiler_record(
 					    kPcTickWorldSim,
