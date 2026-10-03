@@ -209,8 +209,9 @@ struct PcKochappyGuidePulse {
   if(++pulses>64)return I::Refuse;
   // Actual slippery floors need sustained ordinary input to overcome native
   // tau-based acceleration plus per-tick gravity; geometry is rechecked each
-  // tick by the caller. Revert to capture braking within two units.
-  walk=slipping&&remaining>2.f?5:1;neutral=1;return I::Walk;
+  // tick by the caller. Keep normal braking while making progress; only
+  // sustain input after thirty stalled observations. Revert within two units.
+  walk=slipping&&remaining>2.f&&elapsed-lastProgress>=30?5:1;neutral=1;return I::Walk;
  }
 };
 
