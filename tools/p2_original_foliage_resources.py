@@ -23,9 +23,14 @@ def main():
     parser.add_argument('--source', type=Path, required=True)
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--pose-limit', type=int, default=12)
+    parser.add_argument('--sources', type=int, nargs='+', choices=(47, 49, 88, 91),
+                        default=[91, 88],
+                        help='Literal source IDs to convert; default preserves original 91/88 bank')
     args = parser.parse_args()
     if not 2 <= args.pose_limit <= 64:
         raise ValueError('pose-limit must be 2..64')
+    if len(set(args.sources)) != len(args.sources):
+        raise ValueError('Duplicate source selection')
     if args.output.exists():
         raise ValueError('Output already exists; preserve previous evidence')
     root = args.randomizer_root.resolve(strict=True)
@@ -40,8 +45,13 @@ def main():
     from experimental.pikmin2_sheargrub_assets import joints
     from experimental.pikmin2_skinning import draw_matrices
 
-    species = ((91, 'KareOoinu_s', 'kareooinu_s', 'normal'),
-               (88, 'Nekojarashi', 'nekojarashi', 'postshadow'))
+    # Literal identities and authored BCA metadata; never alias red Figwort49
+    # to brown Figwort91 or globally admit arbitrary animation loop attributes.
+    catalog = {91: ('KareOoinu_s', 'kareooinu_s', 'normal', 0),
+               88: ('Nekojarashi', 'nekojarashi', 'postshadow', 0),
+               47: ('Clover', 'clover', 'normal', 0),
+               49: ('Ooinu_s', 'ooinu_s', 'normal', 2)}
+    species = [(source_id, *catalog[source_id]) for source_id in args.sources]
     index = disc_files(args.iso)
     hashes = {}
     args.output.mkdir(parents=True)
@@ -59,13 +69,15 @@ def main():
         for filename in ('include/Game/enemyInfo.h', 'include/Game/plantsMgr.h',
                          'src/plugProjectMorimuraU/plants.cpp',
                          'src/plugProjectMorimuraU/plantsMgr.cpp',
-                         'src/plugProjectYamashitaU/enemyBase.cpp')}
+                         'src/plugProjectYamashitaU/enemyBase.cpp',
+                         'src/sysGCU/sysShape.cpp')}
     report['parameter_order'] = ['health_fp00', 'territory_fp09', 'private_fp11',
                                  'home_fp10', 'lod_radius_fp32', 'floor_parameter_fp01']
     report['source_semantics'] = {
         'collision': 'Static frame0 joint transforms; root bounding sphere; child contact spheres.',
         'position': 'Authored generator position; no fp01 vertical translation. Plants::Obj::doSimulation is empty.',
         'animation': 'Idle frame0; contact/earthquake activates stop-at-end source clip; ordinary Plants::Obj behavior.',
+        'animation_end_clock': 'SysShape::Animator::animate (sysShape.cpp133-187) clamps manual timer at duration-1 and emits END. Registered LOOP_END keys govern repetition; these plant registrations have none. Raw BCA loop attribute49=2 is retained without repeating the actor touch clock.',
         'resources': 'Literal original species model.szs/anim.szs and parameter directory; no aliases.',
         'rewards': 'Plants::Mgr plain EnemyParmsBase; invulnerable nonliving actor, carcass disabled.',
         'foxtail_lod': 'Cylinder origin offset -50*sin(face), -50*cos(face); height fp11; radius fp10.'}
@@ -85,7 +97,7 @@ def main():
             return raw
 
         params = archive_files(read('enemy/parm/enemyParms.szs'))
-        for source_id, name, expected_clip, layer in species:
+        for source_id, name, expected_clip, layer, expected_loop in species:
             directory = args.output / name
             directory.mkdir()
             models = archive_files(read(f'enemy/data/{name}/model.szs'))
@@ -113,8 +125,8 @@ def main():
                 raise ValueError('Missing or ambiguous literal source motion')
             raw = motions[matching[0]]
             directory.joinpath(matching[0]).write_bytes(raw)
-            if raw[40] != 0:
-                raise ValueError('Touched plant animation must stop at end')
+            if len(raw) <= 40 or raw[40] != expected_loop:
+                raise ValueError(f'Literal source{source_id} BCA loop metadata mismatch; expected {expected_loop}')
             duration, _ = bca_pose(raw, 0, len(joint_names), allow_scale=True)
             frames = sample_frames(duration, args.pose_limit)
             stem = f'flora_{name}_{expected_clip}'

@@ -25,6 +25,27 @@ it performs no captain transform/velocity writes or synthetic collision calls.
 The initialized fixture positions are explicitly relocated. These checks do not
 establish whole-course startup, original-placement acceptance or RAM resume.
 
+Forest species work is tracked separately in
+[issue1267](https://github.com/4laric/pikmin-randomizer/issues/1267); issue1251
+remains the initial91/88 scope. Optional `P2_ORIGINAL_FOLIAGE_FOREST=1` selects Clover47
+from `forest/plantsgen.txt#23` (UID1376717705, facing0) and small Figwort49 from
+`forest/plantsgen.txt#0` (UID1389527839, facing180). Their original count1,
+reserved0, respawn0, common fields and empty `????` tail remain literal; only
+placement moves to the same surveyed east tutorial camp positions. The scene
+still starts with `--experimental-pikmin2-surface tutorial`. This is a species
+fixture, and does not qualify the whole forest course or original forest ground.
+The other original47/49 forest rows and the full ten physical placements remain
+startup integration gates after the two representative actors qualify.
+Use a genuine four-species bank for this batch. Default behavior remains91/88.
+
+The Linux supervisor accepts `--batch tutorial|forest` (default `tutorial`) with
+its existing `--mode diagnostic|walk|refusal|captain-down`. It clears inherited
+batch/mode flags, records the selected source IDs in evidence, and requires
+batch-specific diagnostic/walk PASS markers. Forest results say `sources=47,49`.
+Set both `P2_ORIGINAL_FOLIAGE_FOREST=1` and `P2_ORIGINAL_FOLIAGE_HUMAN=1` for the
+same human walking script below using Clover and small Figwort in place of the
+brown Figwort and Foxtail. Preserve the20Red baseline and centered960x540 window.
+
 Human test (set `P2_ORIGINAL_FOLIAGE_HUMAN=1`; fixture remains open10minutes):
 
 1. Confirm centered960x540 gameplay and20Red Pikmin. Walk toward each of the two
