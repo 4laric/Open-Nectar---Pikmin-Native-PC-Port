@@ -101,7 +101,7 @@ public:
             std::string e;p2originalresource::ResourceSnapshot injected;
             injected.sprayCounts[0]=2;require(stock.restore(injected,contents,e),"fixture inventory install");
             require(!pc_p2_sprays_bind(&stock,nullptr,e),"bind accepted missing source receiver");
-            require(bank.resources(resources,e),"actual source Honey receiver bank missing");
+            if(!bank.resources(resources,e))require(false,e.c_str());
             require(pc_p2_sprays_bind(&stock,&resources.receiverClips[1],e),"source-clock/inventory binding");
             require(input(n),"spicy input did not consume");
             require(stock.sprayCount(p2originalresource::HoneyKind::Spicy)==1,"wrong stock decrement");
