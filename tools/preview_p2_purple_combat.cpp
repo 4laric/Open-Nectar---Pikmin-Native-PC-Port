@@ -39,6 +39,7 @@
 #include "PelletState.h"
 #include "PikiAI.h"
 #include "GoalItem.h"
+#include "UfoItem.h"
 #include "Route.h"
 #include "Pom.h"
 #include "Boss.h"
@@ -560,6 +561,10 @@ class PurpleCombatApp : public PlugPikiApp {
     PcPurpleSaveBudget ordinarySaveBudget{mode("sdl_dayend")&&std::getenv("P2_PURPLE_ENGINEERING_ACQUIRE90")&&std::strcmp(std::getenv("P2_PURPLE_ENGINEERING_ACQUIRE90"),"1")==0};
     PcWorldMapResumeInput ordinaryResumeMapInput;
     int sunsetTicks=0, sunsetDay=-1, expectedDay=-1, savedMaturity=-1, resumeReady=0;
+    int shipResumePhase=0,shipResumeField=0;
+    int shipResumeRgb[3][3]{};
+    bool shipResumeKeyboardSeen=false;
+    Vector3f shipResumeCaptainStart,shipResumePurpleStart,shipResumeWalkGoal;
     int ordinaryMenuFrames=0,ordinaryDiaryFrames=0;
     bool releaseDiaryInput=false,diaryRevealObserved=false,diaryAdvanceObserved=false;
     bool releaseObservedSaveInput=false;
@@ -637,7 +642,7 @@ class PurpleCombatApp : public PlugPikiApp {
     }
     bool sdlAcquisitionMode() const { return mode("sdl_acquire") || mode("sdl_dayend"); }
     bool ordinarySaveMode() const { return mode("natural_dayend") || mode("sdl_dayend"); }
-    bool ordinaryResumeMode() const { return mode("natural_resume") || mode("natural_resume_consistency"); }
+    bool ordinaryResumeMode() const { return mode("natural_resume") || mode("natural_resume_consistency") || mode("natural_resume_withdraw"); }
     void injectInitializedGuard(Navi* n) {
         const char* test=std::getenv("P2_PURPLE_GUARD_CASE");
         if(!test && std::getenv("P2_FIXTURE_FORCE_CAPTAIN_DOWN")) test="health";
@@ -1452,6 +1457,85 @@ class PurpleCombatApp : public PlugPikiApp {
         std::printf("P2_PURPLE_PLUCK_ATTEMPT attempt=%d captain_position_staged=0 native_input=1 forced_pluck_state=0 distance=%.3f player_controls_validated=0\n",pluckAttempts,distance);
         return true;
     }
+    // Fresh native-card continuation only. The host sends a real keyboard F10
+    // edge to this process's window; gamepad input handles walking. Never call
+    // the ship helper here, rewrite SDL keyboard state, or relocate a body.
+    void ordinaryShipResume(Navi* n) {
+        const double seconds=std::chrono::duration<double>(std::chrono::steady_clock::now()-fixtureStarted).count();
+        require(seconds<=60.,"ordinary ship resume/withdraw/movement 60-second deadline");
+        savedMaturity=expectedNumber("P2_PURPLE_EXPECT_MATURITY",0,2);
+        expectedDay=expectedNumber("P2_PURPLE_EXPECT_DAY",1,99999);
+        require(pc_randomizer_resumed() && gameflow.mWorldClock.mCurrentDay==expectedDay && ordinaryCards()==1,
+            "ship resume genuine checkpoint/day identity");
+        UfoItem* ship=itemMgr->getUfo();require(ship!=nullptr,"ship resume actual UFO missing");
+        const Vector3f goal=ship->getGoalPos();
+        const float dx=goal.x-n->mSRT.t.x,dz=goal.z-n->mSRT.t.z;
+        const float distance=std::sqrt(dx*dx+dz*dz);
+        int purpleCount=0;Piki* purple=nullptr;int bodyCount=0;
+        Iterator bodies(pikiMgr);CI_LOOP(bodies) {
+            Piki* p=static_cast<Piki*>(*bodies);if(!p || !p->isAlive())continue;
+            ++bodyCount;if(pc_p2_is_purple(p)) {++purpleCount;purple=p;}
+        }
+        if(shipResumePhase==0) {
+            require(stockOne() && purpleCount==0 && bodyCount==0,"ship resume duplicate field body or stock mismatch");
+            GameStat::update();shipResumeField=int(GameStat::mapPikis);
+            require(shipResumeField==0,"ship resume field statistics mismatch");
+            require(itemMgr->getPikiHeadMgr()!=nullptr,"ship resume sprout manager missing");
+            int heads=0;Iterator sprouts(itemMgr->getPikiHeadMgr());CI_LOOP(sprouts) {
+                PikiHeadItem* h=static_cast<PikiHeadItem*>(*sprouts);if(h && h->isAlive())++heads;
+            }
+            require(heads==0,"ship resume duplicate live sprout");
+            for(int c=0;c<3;++c)for(int m=0;m<3;++m) {
+                shipResumeRgb[c][m]=pikiInfMgr.mPikiCounts[c][m];
+                std::printf("P2_PURPLE_RESUME_STOCK kind=rgb color=%d maturity=%d count=%d read_only=1\n",c,m,shipResumeRgb[c][m]);
+            }
+            for(int s=0;s<2;++s)for(int m=0;m<3;++m)
+                std::printf("P2_PURPLE_RESUME_STOCK kind=p2 color=%d maturity=%d count=%d read_only=1\n",s+3,m,p2ship::stock.counts[s][m]);
+            std::printf("P2_PURPLE_SHIP_RESUME_BASELINE day=%d stock=1 field=0 heads=0 checkpoint_resumed=1 saved_bytes_injected=0 read_only=1\n",expectedDay);
+            shipResumePhase=1;
+        }
+        for(int c=0;c<3;++c)for(int m=0;m<3;++m)
+            require(shipResumeRgb[c][m]==pikiInfMgr.mPikiCounts[c][m],"ship withdrawal changed RGB stock");
+        const Uint8* keys=SDL_GetKeyboardState(nullptr);
+        const bool f10=keys && keys[SDL_SCANCODE_F10];
+        if(shipResumePhase==1) {
+            require(stockOne() && purpleCount==0,"ship stock changed before UI ready");
+            if(distance>120.f) {sdlDirection(n,dx,dz,60);return;}
+            ordinaryInput();shipResumePhase=2;
+            std::printf("P2_PURPLE_SHIP_F10_READY distance=%.3f window_id=%u external_keyboard_required=1 direct_stock_helpers=0 actor_state_writes=0\n",
+                distance,SDL_GetWindowID(SDL_GL_GetCurrentWindow()));std::fflush(nullptr);
+        }
+        if(shipResumePhase==2) {
+            ordinaryInput();shipResumeKeyboardSeen=shipResumeKeyboardSeen||f10;
+            require(distance<=180.f,"captain left ordinary ship UI range while waiting");
+            if(purpleCount==0) {
+                require(stockOne(),"UI consumed stock without actual Purple birth");
+                if(ticks%120==0)std::printf("P2_PURPLE_SHIP_F10_WAIT distance=%.3f keydown=%d stock=%d read_only=1\n",distance,int(f10),p2ship::stock.total());
+                return;
+            }
+            require(shipResumeKeyboardSeen && purpleCount==1 && bodyCount==shipResumeField+1 && p2ship::stock.total()==0,
+                "ordinary F10 edge/stock/field conservation");
+            require(purple->mHappa==savedMaturity && purple->mNavi==n && purple->mMode==PikiMode::FormationMode
+                && pc_piki_carry_strength(purple)==10 && pc_throw_selection_class(purple)==4,
+                "ordinary F10 Purple identity/maturity/formation");
+            GameStat::update();require(int(GameStat::mapPikis)==shipResumeField+1,"ordinary F10 field count");
+            acquired=purple;shipResumeCaptainStart=n->mSRT.t;shipResumePurpleStart=purple->mSRT.t;
+            shipResumeWalkGoal=n->mSRT.t+Vector3f(100.f,0,0);shipResumePhase=3;
+            std::printf("P2_PURPLE_SHIP_F10_WITHDRAW_OBSERVED piki=%p maturity=%d stock_before=1 stock_after=0 field_before=0 field_after=1 keyboard_edge_observed=1 strength=10 selection=4 direct_stock_helpers=0 actor_state_writes=0\n",static_cast<void*>(acquired),savedMaturity);
+        }
+        require(purpleCount==1 && purple==acquired && acquired->isAlive() && p2ship::stock.total()==0,
+            "withdrawn Purple disappeared/duplicated");
+        const Vector3f nd=n->mSRT.t-shipResumeCaptainStart,pd=acquired->mSRT.t-shipResumePurpleStart;
+        const float nTravel=std::sqrt(nd.x*nd.x+nd.z*nd.z),pTravel=std::sqrt(pd.x*pd.x+pd.z*pd.z);
+        if(nTravel<80.f) {
+            sdlDirection(n,shipResumeWalkGoal.x-n->mSRT.t.x,shipResumeWalkGoal.z-n->mSRT.t.z,60);return;
+        }
+        ordinaryInput();
+        if(pTravel<40.f || acquired->mMode!=PikiMode::FormationMode || acquired->getState()!=PIKISTATE_Normal)return;
+        std::printf("P2_PURPLE_ORDINARY_WITHDRAW_MOVE_PASS piki=%p captain_travel=%.3f purple_travel=%.3f seconds=%.6f stock=0 field=1 maturity=%d SDL_walk=1 keyboard_F10=1 direct_stock_helpers=0 actor_state_writes=0 combat_validated=0\n",
+            static_cast<void*>(acquired),nTravel,pTravel,seconds,savedMaturity);
+        std::fflush(nullptr);std::_Exit(0);
+    }
     void ordinaryResume(Navi*) {
         savedMaturity=expectedNumber("P2_PURPLE_EXPECT_MATURITY",0,2);
         expectedDay=expectedNumber("P2_PURPLE_EXPECT_DAY",1,99999);
@@ -2091,7 +2175,8 @@ public:
             // active walk/idle gate before checking live combat bindings.
             const int state=n->getCurrState()->getID();
             if(state==NAVISTATE_Walk || state==NAVISTATE_Idle) {
-                if(ordinaryResumeMode()) ordinaryResume(n);else resumePersistence(n);
+                if(mode("natural_resume_withdraw"))ordinaryShipResume(n);
+                else if(ordinaryResumeMode()) ordinaryResume(n);else resumePersistence(n);
             }
             return result;
         }
@@ -2170,8 +2255,8 @@ int main(int argc,char** argv) {
         || !std::strcmp(guardCase,"global") || !std::strcmp(guardCase,"dead_state") || !std::strcmp(guardCase,"missing")
         || !std::strcmp(guardCase,"health_pause") || !std::strcmp(guardCase,"missing_movie"),"unknown initialized guard case");
     const char* mode=std::getenv("P2_PURPLE_COMBAT_MODE");
-    if(mode && std::strcmp(mode,"sdl_acquire") && std::strcmp(mode,"sdl_dayend") && std::strcmp(mode,"natural_dayend") && std::strcmp(mode,"natural_resume") && std::strcmp(mode,"natural_resume_consistency") && std::strcmp(mode,"adult_direct") && std::strcmp(mode,"persistence_dayend") && std::strcmp(mode,"persistence_resume") && std::strcmp(mode,"transport_delivery") && std::strcmp(mode,"transport_positive") && std::strcmp(mode,"transport_red_control") && std::strcmp(mode,"transport_staged") && std::strcmp(mode,"transport_manual")) {
-        std::printf("P2_PURPLE_COMBAT_UNIMPLEMENTED mode=%s implemented=sdl_acquire,sdl_dayend,adult_direct,persistence_dayend,persistence_resume,natural_dayend,natural_resume,natural_resume_consistency,transport_delivery,transport_positive,transport_red_control,transport_staged,transport_manual\n",mode); return 2;
+    if(mode && std::strcmp(mode,"sdl_acquire") && std::strcmp(mode,"sdl_dayend") && std::strcmp(mode,"natural_dayend") && std::strcmp(mode,"natural_resume") && std::strcmp(mode,"natural_resume_consistency") && std::strcmp(mode,"natural_resume_withdraw") && std::strcmp(mode,"adult_direct") && std::strcmp(mode,"persistence_dayend") && std::strcmp(mode,"persistence_resume") && std::strcmp(mode,"transport_delivery") && std::strcmp(mode,"transport_positive") && std::strcmp(mode,"transport_red_control") && std::strcmp(mode,"transport_staged") && std::strcmp(mode,"transport_manual")) {
+        std::printf("P2_PURPLE_COMBAT_UNIMPLEMENTED mode=%s implemented=sdl_acquire,sdl_dayend,adult_direct,persistence_dayend,persistence_resume,natural_dayend,natural_resume,natural_resume_consistency,natural_resume_withdraw,transport_delivery,transport_positive,transport_red_control,transport_staged,transport_manual\n",mode); return 2;
     }
     const char* birthFlag=std::getenv("P2_PURPLE_BIRTH_LEDGER");
     require(!birthFlag || (!std::strcmp(birthFlag,"1") && mode && !std::strcmp(mode,"sdl_dayend") && !guardCase),"birth ledger requires explicit fresh sdl_dayend diagnostic optin");
@@ -2180,7 +2265,7 @@ int main(int argc,char** argv) {
     require(pc_randomizer_purple_campaign() && pc_randomizer_p2_bridge(),"ordinary Purple seed campaign required");
     if(!pc_window_init(mode && !std::strcmp(mode,"transport_manual")?"Purple carry smoke - staged Purple - F7 resets":"Purple campaign combat fixture",960,540)) return 3;
     pc_settings_init(); pc_window_set_display_mode(PC_WINDOW_FULLSCREEN_WINDOWED);
-    if(mode && (!std::strcmp(mode,"sdl_acquire") || !std::strcmp(mode,"sdl_dayend") || !std::strcmp(mode,"natural_dayend") || !std::strcmp(mode,"natural_resume") || !std::strcmp(mode,"natural_resume_consistency"))) ordinaryController();
+    if(mode && (!std::strcmp(mode,"sdl_acquire") || !std::strcmp(mode,"sdl_dayend") || !std::strcmp(mode,"natural_dayend") || !std::strcmp(mode,"natural_resume") || !std::strcmp(mode,"natural_resume_consistency") || !std::strcmp(mode,"natural_resume_withdraw"))) ordinaryController();
     pc_window_set_window_size(960,540); pc_window_center();
     std::puts("Experimental preview window set to 960x540 windowed and centered");
     int w=0,h=0,x=0,y=0; SDL_Window* window=SDL_GL_GetCurrentWindow();
@@ -2189,7 +2274,7 @@ int main(int argc,char** argv) {
     std::printf("P2_FIXTURE_WINDOW width=%d height=%d x=%d y=%d\n",w,h,x,y);
     milestone("window_ready",0);
     std::printf("P2_PURPLE_COMBAT_SCOPE mode=%s natural_acquisition=%d player_controls_validated=0 production_collision_marker_required=1\n",
-        mode?mode:"adult_direct",int(!mode || (std::strcmp(mode,"natural_resume") && std::strcmp(mode,"natural_resume_consistency") && std::strcmp(mode,"persistence_resume") && std::strcmp(mode,"transport_red_control") && std::strcmp(mode,"transport_staged") && std::strcmp(mode,"transport_manual"))));
+        mode?mode:"adult_direct",int(!mode || (std::strcmp(mode,"natural_resume") && std::strcmp(mode,"natural_resume_consistency") && std::strcmp(mode,"natural_resume_withdraw") && std::strcmp(mode,"persistence_resume") && std::strcmp(mode,"transport_red_control") && std::strcmp(mode,"transport_staged") && std::strcmp(mode,"transport_manual"))));
     gsys->Initialise(); pc_settings_p2d_init(); nodeMgr=new NodeMgr();
     gsys->run(new PurpleCombatApp()); return 0;
 }
