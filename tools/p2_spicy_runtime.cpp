@@ -50,7 +50,7 @@ class SpicyApp : public PlugPikiApp {
     p2originalresource::honey::SourceBank bank;
     p2originalresource::honey::Resources resources;
     std::vector<float> pausedRemaining;
-    float phaseTime=0;
+    float phaseTime=0,setupTime=0;
     bool input(Navi* n) {
         auto previous=n->mKontroller->mInputPressed;
         n->mKontroller->mInputPressed=KBBTN_DPAD_UP;
@@ -79,10 +79,15 @@ public:
         }
         if(gameflow.mPauseAll||n->getCurrState()->getID()!=NAVISTATE_Walk) return result;
         if(phase==0) {
+            setupTime+=gsys->getFrameTime();
             Iterator pikis(pikiMgr);int alive=0;CI_LOOP(pikis) { auto* p=static_cast<Piki*>(*pikis);if(p&&p->isAlive()) ++alive; }
             require(alive==20,"fresh fixture must have exactly20 live Pikmin");
+            squad.clear();
             Iterator party(n->mPlateMgr);CI_LOOP(party) { auto* p=static_cast<Piki*>(*party);if(p&&p->isAlive()&&p->getState()==PIKISTATE_Normal) squad.push_back({p,p->getAttackPower(),p->getSpeed(.25f),p->mHappa}); }
-            require(!squad.empty(),"no eligible actual formation Pikmin");
+            if(squad.empty()) {
+                if(ticks%30==0) { Iterator pending(pikiMgr);CI_LOOP(pending) { auto* p=static_cast<Piki*>(*pending);if(p&&p->isAlive())std::printf("P2_SPICY_SETUP state=%d mode=%d captain=%d\n",p->getState(),p->mMode,p->mNavi==n); } }
+                require(setupTime<8,"no eligible actual formation after initialization");return result;
+            }
             std::string e;p2originalresource::ResourceSnapshot injected;
             injected.sprayCounts[0]=2;require(stock.restore(injected,contents,e),"fixture inventory install");
             require(!pc_p2_sprays_bind(&stock,nullptr,e),"bind accepted missing source receiver");
