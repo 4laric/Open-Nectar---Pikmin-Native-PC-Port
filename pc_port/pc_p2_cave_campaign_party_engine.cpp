@@ -107,6 +107,31 @@ bool pc_p2_cave_campaign_party_capture(P2CaveCampaignParty& party,bool inside){
     party=std::move(captured);provenance=std::move(nextProvenance);return true;
 }
 void pc_p2_cave_campaign_party_forget(Piki* body){provenance.erase(body);birthOrigins.erase(body);pc_p2_original_piki_origin_forget(body);}
+void pc_p2_cave_campaign_party_observe(){
+    if(!pc_randomizer_generated_cave()||!pikiMgr)return;
+    unsigned members=0,living=0,known=0;
+    Iterator bodies(pikiMgr);CI_LOOP(bodies){auto* p=static_cast<Piki*>(*bodies);
+        ++members;const bool alive=p->isAlive();if(alive)++living;
+        const auto found=provenance.find(p);if(found!=provenance.end())++known;
+        std::printf("P2_CAMPAIGN_BODY_OBSERVE key=%llu alive=%d species=%d health=%.9g xyz=%.9g,%.9g,%.9g state=%d mode=%d\n",
+            static_cast<unsigned long long>(found!=provenance.end()?found->second.key:0),int(alive),pc_p2_species(p),p->mHealth,
+            p->mSRT.t.x,p->mSRT.t.y,p->mSRT.t.z,p->getCurrState()?p->getCurrState()->getID():-1,int(p->mMode));
+    }
+    std::printf("P2_CAMPAIGN_POPULATION_OBSERVE members=%u living=%u known=%u saved=%zu map=%d all=%d formation=%d free=%d work=%d dead=%d fall=%d\n",
+        members,living,known,pc_randomizer_generated_cave_party().bodies.size(),int(GameStat::mapPikis),int(GameStat::allPikis),
+        int(GameStat::formationPikis),int(GameStat::freePikis),int(GameStat::workPikis),int(GameStat::deadPikis),int(GameStat::fallPikis));
+    std::fflush(stdout);
+}
+void pc_p2_cave_campaign_party_died(Piki* body){
+    const auto found=provenance.find(body);
+    if(body&&found!=provenance.end()){
+        std::printf("P2_CAMPAIGN_BODY_DIED key=%llu species=%d health=%.9g xyz=%.9g,%.9g,%.9g state=%d\n",
+            static_cast<unsigned long long>(found->second.key),pc_p2_species(body),body->mHealth,
+            body->mSRT.t.x,body->mSRT.t.y,body->mSRT.t.z,body->getCurrState()?body->getCurrState()->getID():-1);
+        std::fflush(stdout);
+    }
+    pc_p2_cave_campaign_party_forget(body);
+}
 void pc_p2_cave_campaign_party_scene_exit(){for(const auto& entry:provenance)pc_p2_original_piki_origin_forget(entry.first);
     for(const auto& entry:birthOrigins)pc_p2_original_piki_origin_forget(entry.first);
     provenance.clear();birthOrigins.clear();}

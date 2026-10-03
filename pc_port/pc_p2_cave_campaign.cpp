@@ -235,6 +235,7 @@ bool pc_p2_cave_campaign_request_boundary(const P2CaveBoundarySnapshot& selected
         int(gameflow.mPauseAll),int(gameflow.mIsUIOverlayActive),int(gameflow.mIsDayEndActive),
         int(gameflow.mMoviePlayer&&gameflow.mMoviePlayer->mIsActive),reason);
     std::fflush(stdout);
+    pc_p2_cave_campaign_party_observe();
     if(!matches||!spatial)return false;
     // Direct randomizer startup bypasses the title/file menu. Reuse its real
     // preparation and controller-driven file choice at each cave boundary;

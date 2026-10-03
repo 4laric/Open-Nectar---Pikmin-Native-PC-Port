@@ -129,7 +129,7 @@ void Piki::doKill()
 #if defined(PIKI_PC_PORT)
 	// Death observers above must see canonical source identity. Retire the
 	// consumer, then canonical origin, before the physical slot is released.
-	pc_p2_cave_campaign_party_forget(this);
+	pc_p2_cave_campaign_party_died(this);
 #endif
 	pikiMgr->kill(this);
 
