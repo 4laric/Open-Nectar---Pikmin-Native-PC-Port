@@ -12,6 +12,7 @@ extern bool pc_p2_original_captain_throw_preflight(Navi*,p2original::captain::St
 extern bool pc_p2_original_captain_pluck_preflight(Navi*,p2original::captain::StateId,std::string&) __attribute__((weak));
 extern bool pc_p2_original_captain_punch_preflight(Navi*,std::string&) __attribute__((weak));
 extern bool pc_p2_original_captain_party_preflight(Navi*,p2original::captain::StateId,std::string&) __attribute__((weak));
+extern bool pc_p2_original_captain_dope_preflight(Navi*,std::string&) __attribute__((weak));
 extern bool pc_p2_source_navi_reaction_animation_key(Navi*,int,std::string&) __attribute__((weak));
 using namespace p2original::captain;
 namespace {
@@ -146,6 +147,7 @@ bool pc_p2_original_captain_core_preflight(Navi* n,StateId id,std::string& e){
  if(id==StateId::Damaged){auto* bank=bankFor(n,e);return bank&&bank->supports(n,Motion::Damage,e)&&bank->supports(n,Motion::Nigeru,e);}
  if(id==StateId::Nuku||id==StateId::NukuAdjust)return pc_p2_original_captain_pluck_preflight&&pc_p2_original_captain_pluck_preflight(n,id,e);
  if(id==StateId::Punch)return pc_p2_original_captain_punch_preflight&&pc_p2_original_captain_punch_preflight(n,e);
+ if(id==StateId::Dope)return pc_p2_original_captain_dope_preflight&&pc_p2_original_captain_dope_preflight(n,e);
  if(id==StateId::Gather||id==StateId::Throw||id==StateId::ThrowWait)return pc_p2_original_captain_throw_preflight&&pc_p2_original_captain_throw_preflight(n,id,e);
  if(id==StateId::Follow||id==StateId::Change)return pc_p2_original_captain_party_preflight&&pc_p2_original_captain_party_preflight(n,id,e);
  e="source action preflight provider is unavailable";return false;
