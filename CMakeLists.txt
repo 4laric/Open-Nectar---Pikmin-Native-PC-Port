@@ -337,6 +337,7 @@ set(PC_PORT_SOURCES
     pc_port/pc_p2_preview.cpp
     pc_port/pc_p2_campaign_treasure.cpp
     pc_port/pc_p2_campaign_treasure_held.cpp
+    pc_port/pc_p2_retail_treasure_engine.cpp
     pc_port/pc_p2_captain.cpp
     pc_port/pc_p2_second_captain.cpp
     pc_port/pc_p2_economy.cpp
@@ -3432,3 +3433,8 @@ add_executable(p2_retail_treasure_policy_test pc_port/pc_p2_retail_treasure_poli
 target_include_directories(p2_retail_treasure_policy_test PRIVATE pc_port)
 target_compile_options(p2_retail_treasure_policy_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
 add_test(NAME p2_retail_treasure_policy_test COMMAND p2_retail_treasure_policy_test)
+add_executable(p2_retail_treasure_session_test pc_port/pc_p2_retail_treasure_session_test.cpp
+    pc_port/pc_p2_retail_treasure_engine.cpp pc_port/pc_p2_original_progress.cpp)
+target_include_directories(p2_retail_treasure_session_test PRIVATE pc_port)
+target_compile_options(p2_retail_treasure_session_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_retail_treasure_session_test COMMAND p2_retail_treasure_session_test)
