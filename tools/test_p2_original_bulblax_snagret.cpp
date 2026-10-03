@@ -10,8 +10,8 @@ class Creature {};
 class Generator {};
 using namespace p2original;
 struct Engine:bulblax_snagret::Engine {
- Creature physical[8];unsigned resourcesCalled=0,reserved=0,born=0,bound=0,killed=0;bool capacity=true,failBind=false,failCleanup=false,nullBirth=false,partialFailure=false;
- bool resources(const CatalogRow&,std::string&)override{++resourcesCalled;return true;}
+ Creature physical[8];unsigned resourcesCalled=0,reserved=0,born=0,bound=0,killed=0;bool capacity=true,failBind=false,failCleanup=false,nullBirth=false,partialFailure=false,heldReady=false;
+ bool resources(const CatalogRow& row,std::string& error)override{++resourcesCalled;if(row.enemy.treasureCode&&!heldReady){error="authenticated physical held treasure unavailable";return false;}return true;}
  bool reserve(const std::vector<CatalogRow>&,unsigned n,std::string&)override{reserved=n;return capacity;}
  bool allocate(bulblax_snagret::Host& h,const Position& p,float f,std::string&)override{assert(p.x==42&&f==1.25f);if(!nullBirth)h.actor=&physical[born];++born;return !partialFailure;}
  bool bind(bulblax_snagret::Host& h,std::string&)override{assert(h.token&&h.row.enemy.source>=33&&h.row.enemy.source<=34);++bound;return !failBind;}
@@ -20,6 +20,15 @@ struct Engine:bulblax_snagret::Engine {
 CatalogRow row(unsigned source,unsigned index){CatalogRow r;r.course="tutorial";r.member="initgen.txt";r.index=index;r.sourceKey=r.course+"/"+r.member+"#"+std::to_string(index);r.enemy.uid=originalGeneratorUid(r.sourceKey);r.enemy.source=source;r.enemy.count=3;r.enemy.deathCount=1;return r;}
 int main(int argc,char** argv){
  std::string e;auto a=row(33,37),b=row(34,38),c=row(34,39);std::vector<CatalogRow> rows={a,b,c};
+ // Literal day5 FireChappy watch must survive decode and reach resources.
+ auto watch=row(33,17);watch.enemy.count=1;watch.enemy.deathCount=0;watch.enemy.treasureCode=841;
+ assert(watch.enemy.uid==1382830758u&&bulblax_snagret::decode(watch,e));
+ Engine held;bulblax_snagret::Provider heldProvider(held);
+ assert(!heldProvider.preflight({watch},e)&&held.resourcesCalled==1&&!heldProvider.prepared());
+ assert(!heldProvider.reserve({watch},e)&&held.reserved==0&&held.born==0);
+ held.heldReady=true;assert(heldProvider.preflight({watch},e)&&heldProvider.prepared());
+ auto unsupported=watch;unsupported.enemy.treasureCode=840;assert(!bulblax_snagret::decode(unsupported,e));
+ unsupported=watch;unsupported.enemy.source=34;assert(!bulblax_snagret::decode(unsupported,e));
  for(const auto& r:rows){assert(bulblax_snagret::decode(r,e));assert(bulblax_snagret::nativeType(r.enemy.source)==(r.enemy.source==33?4:3));}
  auto invalid=a;invalid.enemy.source=15;assert(!bulblax_snagret::decode(invalid,e));invalid=a;invalid.enemy.generatorVersion="0000";assert(!bulblax_snagret::decode(invalid,e));invalid=a;invalid.enemy.generatorTail={"0"};assert(!bulblax_snagret::decode(invalid,e));
  Engine engine;bulblax_snagret::Provider p(engine);auto bad=rows;bad.back()=invalid;assert(!p.preflight(bad,e)&&engine.resourcesCalled==0);

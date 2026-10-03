@@ -32,7 +32,7 @@ struct Native::Impl final:Engine {
  }
  bool reserve(const std::vector<CatalogRow>& rows,unsigned count,std::string& e)override{
   if(!tekiMgr||tekiMgr->getMax()-tekiMgr->getSize()<int(count))return refuse(e,"original Bulblax/Snagret actor pool capacity insufficient");
-  unsigned pellets=0;for(const auto& row:rows)pellets+=(row.enemy.count-row.enemy.deathCount)*(1+(row.enemy.pelletProbability>0?std::max(row.enemy.pelletMinimum,row.enemy.pelletMaximum):0));
+  unsigned pellets=0;for(const auto& row:rows)pellets+=(row.enemy.count-row.enemy.deathCount)*(1+(row.enemy.treasureCode?1:0)+(row.enemy.pelletProbability>0?std::max(row.enemy.pelletMinimum,row.enemy.pelletMaximum):0));
   if(!pelletMgr||pelletMgr->getMax()-pelletMgr->getSize()<int(pellets))return refuse(e,"original Bulblax/Snagret corpse/drop pool capacity insufficient");
   e.clear();return true;
  }

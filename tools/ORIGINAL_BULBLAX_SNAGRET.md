@@ -9,7 +9,9 @@ These IDs belong to the original catalog; no AP source roster is required.
 Retail genEnemy.cpp chooses EnemyGeneratorBase for both: literal ???? version,
 empty tail and null initArg. Common placement, UID, count/deathCount, facing,
 drop settings and lifecycle remain in the original catalog and GroupCourse.
-Unsupported tails/birthType/treasure providers refuse whole admission.
+Unsupported tails/birthType/treasure codes refuse whole admission. Source33
+supports literal held code841 only; native preflight passes its unchanged row
+to pc_p2_original_drop_resources and requires genuine authenticated held cargo.
 
 Provider: p2original::bulblax_snagret::Native::provider(), a GroupProvider.
 Central native forget must call pc_p2_original_bulblax_snagret_forget(actor)
@@ -39,6 +41,12 @@ never substitute an AP slot or generated proxy encounter.
    damage and flick. Verify vulnerable colors catch fire and reds resist it.
 2. Defeat it through ordinary attacks, wait through the actual death clip,
    and verify one natural corpse plus literal probability/count number drops.
+   Verify the literal watch841 releases once as a physical treasure without
+   granting Pokos. Its retail carry minimum30 exceeds this20-Pikmin baseline:
+   ordinary delivery testing requires recruiting sufficient Pikmin through
+   gameplay. Carry it to the typed ship; require completed suction before the
+   unique110-Poko receipt. Checkpoint must refuse pending uncollected cargo
+   until the physical graph has authenticated save/restore support.
    Carry its real corpse to an Onion and observe population and removal.
 3. Approach the Burrowing Snagret. Observe the buried state, authored fast/slow
    emergence, directional peck, held Pikmin capture and swallow, dive/flick,
@@ -62,9 +70,32 @@ natural attack/save acceptance. Use canonical bounded run_pikmin2_fixture.py
 with --experimental-pikmin2-surface tutorial arguments, a fresh staged private
 run directory and PASS P2_ORIGINAL_SNAGRET_RUNTIME marker. --manual-encounter
 leaves that unmodified literal Snagret running for ordinary human controls.
-Actual source33 initgen.txt#17 carries treasure841 and remains explicitly
-refused until genuine original treasure resource/birth/delivery/persistence
-integration exists. Never remove that treasure to manufacture an accepted row.
+Actual source33 initgen.txt#17 carries treasure841 and is structurally supported.
+Physical admission still refuses without held provider9a2aaba90e218bfea4cd2c45f1c73bfd51cdfcdf,
+its typed startup/collector dependencies, and an authenticated TREASURE_SOURCE
+activation matching the literal catalog/ship/model descriptor. Consumer must
+call held_unload before course/App-heap teardown and block SAVE while
+held_pending is nonzero. No completed delivery or persistence is claimed.
+Never remove that treasure to manufacture an accepted row.
+
+Held dependency composition from the607c base (coordinate typed startup APIs
+with their owner; do not import the entire startup branch automatically):
+4001c9a65a80d18d64713579392f14fc3912f29b receipt codec,
+d2dec15dc4bb33f56802a72583afdbb664d78881 physical descriptor,
+a1a55f19a5444fdf6b40aedf2bea4de5495f68f2 input verifier,
+78da5f594cb7506eceb815081422b9eefa5004e1 receipt query,
+d8e5924a174242edfb9b31f0d53069b30f0cf567 equipment reconcile,
+then9a2aaba90e218bfea4cd2c45f1c73bfd51cdfcdf held provider.
+Equivalent composed collector pins are ac34e5c379be42b64202d8e0348206233d795a83,
+89f18c391e4c3cc26dc3149fdb4f2b95d3a844d7,
+003d618a16f589e663fe4c4eef791ff955acfc2b and
+f59c35d1908d52d1b1ef2ac058e0df2ff70f055b. Preserve all existing CMake
+targets and new -UNDEBUG test flags when resolving additive tail conflicts.
+Typed startup must provide original manifest and Onyon identity APIs;
+SAVE must provide TREASURE_SOURCE dual verification and its selected source
+getter, authenticated receipt restore, and pending cargo refusal before mutation.
+Source33 needs no additional geometry hook: held provider uses the actor's
+actual bounding centre and treasure velocity(0,200,0).
 
 The fixture vendors scripts/p2_fixture_captain_guard.h exactly as the owned
 p2_original_snagret_captain_guard.h. It checks dead state, dead flag,

@@ -26,7 +26,9 @@ bool decode(const CatalogRow& row,std::string& e){
  if(row.sourceKey!=row.course+"/"+row.member+"#"+std::to_string(row.index)||row.enemy.uid!=originalGeneratorUid(row.sourceKey))return refuse(e,"Bulblax/Snagret original UID/sourceKey mismatch");
  if(!validateOriginalRecord(row.enemy,e)||!validateOriginalDrop(row.enemy,e))return false;
  if(row.enemy.birthType!=0)return refuse(e,"Bulblax/Snagret dropped birthType is not implemented");
- if(row.enemy.treasureCode)return refuse(e,"Bulblax/Snagret original treasure provider is not implemented");
+ // Only the retail FireChappy watch is structurally supported. Native
+ // preflight still requires the authenticated physical held-drop provider.
+ if(row.enemy.treasureCode&&(row.enemy.source!=33||row.enemy.treasureCode!=841))return refuse(e,"Bulblax/Snagret original held treasure code is unsupported");
  if(row.enemy.generatorVersion!="????"||!row.enemy.generatorTail.empty())return refuse(e,"Bulblax/Snagret EnemyGeneratorBase requires literal ???? version and empty tail");
  e.clear();return true;
 }
