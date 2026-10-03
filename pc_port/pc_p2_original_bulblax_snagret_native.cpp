@@ -18,14 +18,16 @@ struct Heap {int previous;Heap():previous(gsys->setHeap(SYSHEAP_App)){}~Heap(){g
 }
 struct Native::Impl final:Engine {
  Provider provider;
- Impl():provider(*this){}
+ CorpseResources corpseResources;
+ explicit Impl(CorpseResources corpse):provider(*this),corpseResources(corpse){}
  bool resources(const CatalogRow& row,std::string& e)override{
   if(!gsys||!tekiMgr||!pelletMgr)return refuse(e,"original Bulblax/Snagret managers unavailable");
   const int type=nativeType(row.enemy.source);auto* shape=tekiMgr->getTekiShapeObject(type);
   if(!tekiMgr->hasModel(type)||!shape||!shape->mShape||!shape->mAnimMgr||!tekiMgr->getTekiParameters(type)||!tekiMgr->getStrategy(type))return refuse(e,"Bulblax/Snagret physical chassis unavailable");
   Heap heap;
-  // Real PelletView corpse uses the actor's dead bank, not a standalone shape.
-  if(!pelletMgr->getConfig(TekiMgr::getTypeId(type))||tekiMgr->getTekiParameters(type)->getI(TPI_CorpseType)!=TEKICORPSE_LeaveCorpse)return refuse(e,"original Bulblax/Snagret physical corpse config unavailable");
+  // Literal original corpse identity/carry/yield requires the typed provider.
+  // A P1 chassis fourcc/corpse number is not original source evidence.
+  if(!requireCorpse(corpseResources,row.enemy.source,e))return false;
   if(!pc_p2_original_drop_resources(row,e))return false;
   if(row.enemy.source==33)return pc_p2_chappy_prepare_original({33},e);
   return pc_p2_batch3_original_resources(34,e)&&pc_p2_snakejoint_original_resources(e);
@@ -66,7 +68,7 @@ struct Native::Impl final:Engine {
   e.clear();return true;
  }
 };
-Native::Native():m(std::make_unique<Impl>()){natives().insert(this);}
+Native::Native(CorpseResources corpse):m(std::make_unique<Impl>(corpse)){natives().insert(this);}
 Native::~Native(){natives().erase(this);}
 Provider& Native::provider(){return m->provider;}
 void Native::retired(Creature* actor){m->provider.retired(actor);}

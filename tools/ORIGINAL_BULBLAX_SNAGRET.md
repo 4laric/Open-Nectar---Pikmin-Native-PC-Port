@@ -153,3 +153,20 @@ a coherent consumer build and ordinary play. Original34 still captures into
 the host Chappy `slot` children rather than authored SnakeCrow kamu joints;
 its spine/body collider is not a source physical hierarchy. This correction
 does not qualify those, original33 flicks, bitter behavior or SAVE.
+
+The Native constructor now requires a typed original corpse resource callback.
+Default/null refuses preflight; P1 chassis config/fourcc and corpseType are not
+original source qualification. Consumer constructs
+`bulblax_snagret::Native(pc_p2_original_corpse_resources)` with the real
+`pc_p2_original_corpse_native.h` API from reviewed PR167, including its
+`9424cd4422a1c2c591bfa2c1ff82d6a19ef720c7` /
+`e5c2c3fe2e1044532fdf3f8a0093589104a18527` base plus
+`5f728981045233981f4d852f3d72b4c0b325dce3` /
+`6a72fc7ad7c5652c0c31dfb15d462c4fb98951cb` lifecycle corrections.
+Family resource checks still
+require the genuine dead animation bank; the callback owns literal original
+corpse profile/carry/yield resource qualification. The real diagnostic fixture
+wires that callback directly and requires the complete dependency; mock
+callbacks in unit refusal checks never qualify runtime assets or gameplay.
+Actual death, carry, Onion yield, corpse teardown and save/resume still need
+ordinary composed-gameplay evidence.

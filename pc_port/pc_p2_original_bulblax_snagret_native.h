@@ -1,11 +1,12 @@
 #pragma once
 #include "pc_p2_original_bulblax_snagret.h"
+#include "pc_p2_original_bulblax_snagret_corpse.h"
 #include <memory>
 class BTeki;
 namespace p2original { namespace bulblax_snagret {
 class Native {
 public:
- Native();~Native();
+ explicit Native(CorpseResources corpseResources=nullptr);~Native();
  Native(const Native&)=delete;Native& operator=(const Native&)=delete;
  Provider& provider();
  void retired(Creature*);

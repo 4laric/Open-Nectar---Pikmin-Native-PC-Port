@@ -25,6 +25,7 @@
 #include "pc_window.h"
 #include "pc_gpu_preference.h"
 #include "pc_p2_original_bulblax_snagret_native.h"
+#include "pc_p2_original_corpse_native.h"
 #include "pc_p2_original_group_engine.h"
 #include "pc_p2_snakejoint.h"
 #include "settings/pc_settings.h"
@@ -46,7 +47,7 @@ class SnagretApp:public PlugPikiApp {
  GeneratorState state;Creature* actor=nullptr;unsigned token=0;int frame=0,age=0,entries=0,before=0;
  void enter(){
   struct Heap{int prior;Heap():prior(gsys->setHeap(SYSHEAP_App)){}~Heap(){gsys->setHeap(prior);}} heap;
-  if(!native)native=std::make_unique<bulblax_snagret::Native>();
+  if(!native)native=std::make_unique<bulblax_snagret::Native>(pc_p2_original_corpse_resources);
   if(!generator)generator=std::make_unique<Generator>();
   require(!generator->mGenType,"genuine original null P1 GenType boundary");
   generator->mRespawnInterval=state.resurrectionDays;

@@ -2,6 +2,7 @@
 #include "pc_p2_original_snagret_bank.h"
 #include "pc_p2_original_snagret_death.h"
 #include "pc_p2_original_snagret_clock.h"
+#include "pc_p2_original_bulblax_snagret_corpse.h"
 
 #include <sstream>
 #include <fstream>
@@ -10,9 +11,12 @@
 class Creature {};
 class Generator {};
 using namespace p2original;
+unsigned corpseCalls=0;
+bool corpseRefuse(unsigned source,std::string& error){++corpseCalls;assert(source==33||source==34);error="unit resource refusal";return false;}
 struct Engine:bulblax_snagret::Engine {
  Creature physical[8];unsigned resourcesCalled=0,reserved=0,born=0,bound=0,killed=0;bool capacity=true,failBind=false,failCleanup=false,nullBirth=false,partialFailure=false,heldReady=false;
- bool resources(const CatalogRow& row,std::string& error)override{++resourcesCalled;if(row.enemy.treasureCode&&!heldReady){error="authenticated physical held treasure unavailable";return false;}return true;}
+ bool corpseRequired=false;bulblax_snagret::CorpseResources corpse=nullptr;
+ bool resources(const CatalogRow& row,std::string& error)override{++resourcesCalled;if(corpseRequired&&!bulblax_snagret::requireCorpse(corpse,row.enemy.source,error))return false;if(row.enemy.treasureCode&&!heldReady){error="authenticated physical held treasure unavailable";return false;}return true;}
  bool reserve(const std::vector<CatalogRow>&,unsigned n,std::string&)override{reserved=n;return capacity;}
  bool allocate(bulblax_snagret::Host& h,const Position& p,float f,std::string&)override{assert(p.x==42&&f==1.25f);if(!nullBirth)h.actor=&physical[born];++born;return !partialFailure;}
  bool bind(bulblax_snagret::Host& h,std::string&)override{assert(h.token&&h.row.enemy.source>=33&&h.row.enemy.source<=34);++bound;return !failBind;}
@@ -20,7 +24,17 @@ struct Engine:bulblax_snagret::Engine {
 };
 CatalogRow row(unsigned source,unsigned index){CatalogRow r;r.course="tutorial";r.member="initgen.txt";r.index=index;r.sourceKey=r.course+"/"+r.member+"#"+std::to_string(index);r.enemy.uid=originalGeneratorUid(r.sourceKey);r.enemy.source=source;r.enemy.count=3;r.enemy.deathCount=1;return r;}
 int main(int argc,char** argv){
+ std::string corpseError;
+ assert(!bulblax_snagret::requireCorpse(nullptr,34,corpseError)&&corpseCalls==0);
+ assert(!bulblax_snagret::requireCorpse(corpseRefuse,2,corpseError)&&corpseCalls==0);
+ assert(!bulblax_snagret::requireCorpse(corpseRefuse,33,corpseError)&&corpseCalls==1);
+ assert(!bulblax_snagret::requireCorpse(corpseRefuse,34,corpseError)&&corpseCalls==2);
  std::string e;auto a=row(33,37),b=row(34,38),c=row(34,39);std::vector<CatalogRow> rows={a,b,c};
+ Engine corpseGate;corpseGate.corpseRequired=true;bulblax_snagret::Provider corpseProvider(corpseGate);
+ assert(!corpseProvider.preflight({b},e)&&!corpseProvider.prepared());
+ assert(!corpseProvider.reserve({b},e)&&corpseGate.reserved==0&&corpseGate.born==0);
+ corpseGate.corpse=corpseRefuse;
+ assert(!corpseProvider.preflight({b},e)&&!corpseProvider.prepared()&&corpseGate.born==0);
  // Literal day5 FireChappy watch must survive decode and reach resources.
  auto watch=row(33,17);watch.enemy.count=1;watch.enemy.deathCount=0;watch.enemy.treasureCode=841;
  assert(watch.enemy.uid==1382830758u&&bulblax_snagret::decode(watch,e));
