@@ -12,6 +12,7 @@
 // old 180 / 0.5 rad cone.
 #include "pc_p2_kabuto_fsm.h"
 #include "pc_p2_original_cannon_bank.h"
+#include "pc_p2_original_cannon_combat.h"
 #include "pc_p2_attachments.h"
 #include "pc_p2_body_coll.h"
 #include "pc_p2_original_cannon_native.h"
@@ -233,7 +234,8 @@ int doFlick(BTeki* actor,bool stuckOnly=false,bool backwards=false){
     if(pikiMgr){Iterator it(pikiMgr);CI_LOOP(it){Piki* q=static_cast<Piki*>(*it);if(!q||!q->isAlive())continue;
         if((!stuckOnly&&distXZ(q->getPosition(),pos)<range)||(original&&q->mStickTarget==actor))pikis.push_back(q);}}
     for(Piki* q:pikis){if(!q||!q->isAlive())continue;
-        if(q->stimulate(InteractFlick(actor,original?400.0f:300.0f,original?1.0f:0.0f,original&&!backwards?actor->getDirection():FLICK_BACKWARDS_ANGLE)))++hit;}
+        const float angle=original?p2original::cannon::pikminFlickAngle(actor->getDirection(),backwards,FLICK_BACKWARDS_ANGLE):FLICK_BACKWARDS_ANGLE;
+        if(q->stimulate(InteractFlick(actor,original?400.0f:300.0f,original?1.0f:0.0f,angle)))++hit;}
     for(Navi* n:pc_p2_navis()){if(!stuckOnly&&n->isAlive()&&distXZ(n->getPosition(),pos)<range)
         if(n->stimulate(InteractFlick(actor,original?400.0f:300.0f,original?1.0f:0.0f,FLICK_BACKWARDS_ANGLE)))++hit;}
     if(original)actor->mDamageCount=0.0f;return hit;
@@ -512,7 +514,9 @@ void pc_p2_kabuto_fsm_update(BTeki* actor){
         break;}
     case KB_FLICK:{
         stop(actor);
-        if(!s.flickDone&&(!s.original||s.stateTime>=(31.0f/30.0f-1e-4f))){s.flickDone=true;int hit=doFlick(actor);std::printf("P2_KABUTO_FLICK generator=%u source_id=%u hit=%d\n",gen,s.source,hit);std::fflush(stdout);}
+        const auto key=s.original?p2original::cannon::flickKey(s.flickDone,s.stateTime,actor->mHealth):p2original::cannon::FlickKey::None;
+        if((!s.original&&!s.flickDone)||key!=p2original::cannon::FlickKey::None){s.flickDone=true;int hit=doFlick(actor);std::printf("P2_KABUTO_FLICK generator=%u source_id=%u hit=%d\n",gen,s.source,hit);std::fflush(stdout);
+         if(key==p2original::cannon::FlickKey::FlickDead){die(actor,s,gen,priorForDeath);break;}}
         if(s.stateTime>=seconds(s,"flick")){
             // KEYEVENT_END (KabutoState.cpp:306-311): Dead, else Attack.
             if(actor->mHealth<=0.0f){die(actor,s,gen,priorForDeath);break;}
