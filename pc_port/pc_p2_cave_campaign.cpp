@@ -219,7 +219,23 @@ P2CaveBoundarySnapshot pc_p2_cave_campaign_boundary(){
     return result;
 }
 bool pc_p2_cave_campaign_request_boundary(const P2CaveBoundarySnapshot& selected){
-    if(!p2CaveBoundaryMatches(selected,pc_p2_cave_campaign_boundary())||!atBoundary())return false;
+    const auto current=pc_p2_cave_campaign_boundary();
+    const bool matches=p2CaveBoundaryMatches(selected,current);
+    const bool spatial=atBoundary();
+    const auto* n=naviMgr?naviMgr->getActiveNavi():nullptr;
+    const float x=inside()?config.exitX:config.entryX,z=inside()?config.exitZ:config.entryZ;
+    const char* reason=!current.ready?"provider_not_ready":!matches?"identity_mismatch":
+        !spatial?"outside_radius":"accepted";
+    std::printf("P2_CAMPAIGN_BOUNDARY_REQUEST navi=%d xyz=%.3f,%.3f,%.3f state=%d health=%.3f "
+        "target=%.3f,%.3f distance=%.3f radius=80 ready=%d matches=%d spatial=%d "
+        "pause=%d overlay=%d day_end=%d movie=%d reason=%s\n",
+        int(n!=nullptr),n?n->mSRT.t.x:0.f,n?n->mSRT.t.y:0.f,n?n->mSRT.t.z:0.f,
+        n&&n->getCurrState()?n->getCurrState()->getID():-1,n?n->mHealth:0.f,x,z,
+        n?std::hypot(n->mSRT.t.x-x,n->mSRT.t.z-z):-1.f,int(current.ready),int(matches),int(spatial),
+        int(gameflow.mPauseAll),int(gameflow.mIsUIOverlayActive),int(gameflow.mIsDayEndActive),
+        int(gameflow.mMoviePlayer&&gameflow.mMoviePlayer->mIsActive),reason);
+    std::fflush(stdout);
+    if(!matches||!spatial)return false;
     // Direct randomizer startup bypasses the title/file menu. Reuse its real
     // preparation and controller-driven file choice at each cave boundary;
     // physical backup slots are derived by the native card inventory.
