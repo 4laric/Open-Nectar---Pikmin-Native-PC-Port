@@ -42,7 +42,7 @@ bool buildCaveGrid(const std::vector<Vec3>& vertices,const std::vector<std::arra
  out=std::move(grid);e.clear();return true;
 }
 bool caveCandidates(const CaveGrid& grid,Vec3 p,float radius,std::vector<unsigned>& out,std::string& e){
- if(!finite(p)||!std::isfinite(radius)||radius<=0||!finite(grid.minimum)||!finite(grid.maximum)||
+ if(!finite(p)||!std::isfinite(radius)||radius<0||!finite(grid.minimum)||!finite(grid.maximum)||
     !grid.countX||grid.countX>48||!grid.countZ||grid.countZ>48||grid.cells.size()!=grid.countX*grid.countZ||
     !std::isfinite(grid.scaleX)||grid.scaleX<=0||!std::isfinite(grid.scaleZ)||grid.scaleZ<=0)return fail(e,"source cave candidate scope invalid");
  const float a=((p.x-radius)-grid.minimum.x)/grid.scaleX,b=((p.z-radius)-grid.minimum.z)/grid.scaleZ;

@@ -298,6 +298,7 @@ set(PC_PORT_SOURCES
     pc_port/pc_p2_original_number_lod.cpp
     pc_port/pc_p2_original_number_lod_native.cpp
     pc_port/pc_p2_original_number_rigid.cpp
+    pc_port/pc_p2_original_number_five_motion.cpp
     pc_port/pc_p2_original_number_trace_native.cpp
     pc_port/pc_p2_original_egg_number_journal.cpp
     pc_port/pc_p2_original_resource_contents.cpp
@@ -3539,6 +3540,12 @@ add_executable(p2_original_number_room_test tools/p2_original_number_room_test.c
 target_include_directories(p2_original_number_room_test PRIVATE pc_port)
 target_compile_options(p2_original_number_room_test PRIVATE -Wall -Wextra -Werror -UNDEBUG -ffp-contract=off)
 add_test(NAME p2_original_number_room COMMAND p2_original_number_room_test)
+add_executable(p2_original_number_five_motion_test tools/p2_original_number_five_motion_test.cpp
+    pc_port/pc_p2_original_number_five_motion.cpp pc_port/pc_p2_original_number_rigid.cpp
+    pc_port/pc_p2_original_number_motion.cpp pc_port/pc_p2_original_number_lod.cpp)
+target_include_directories(p2_original_number_five_motion_test PRIVATE pc_port)
+target_compile_options(p2_original_number_five_motion_test PRIVATE -Wall -Wextra -Werror -UNDEBUG -ffp-contract=off)
+add_test(NAME p2_original_number_five_motion COMMAND p2_original_number_five_motion_test)
 # Explicit f32 operation boundaries and finite admission checks survive optional
 # target optimization; only written std::fma operations may fuse in these ports.
 set_source_files_properties(
@@ -3547,6 +3554,7 @@ set_source_files_properties(
     pc_port/pc_p2_original_number_grid.cpp
     pc_port/pc_p2_original_number_lod.cpp
     pc_port/pc_p2_original_number_room.cpp
+    pc_port/pc_p2_original_number_five_motion.cpp
     PROPERTIES COMPILE_OPTIONS "-ffp-contract=off;-fno-fast-math")
 
 pikmin_add_ci_fixture(surface_campaign_sdl tools/p2_surface_campaign_sdl_fixture.cpp)

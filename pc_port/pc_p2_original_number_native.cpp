@@ -249,8 +249,12 @@ bool pc_p2_original_number_update(Pellet* p){
  trace.hardIntersect=false;
  if(!pc_p2_original_number_trace_platforms(p,trace,nullptr,contacts,e))fault(e);
  if(!sameBinding())return true;
+ // Source MoveInfo points at the actual velocity by the platform/bounce phase.
+ // First-floor callbacks observe the traced velocity, before floor forces.
+ p->mVelocity.set(trace.velocity.x,trace.velocity.y,trace.velocity.z);
  // Source first-floor bounce callback precedes floor assignment and force.
  if(contacts.floor&&!previousFloor){p->bounceCallback();if(!sameBinding())return true;}
+ trace.velocity={p->mVelocity.x,p->mVelocity.y,p->mVelocity.z};
  if(contacts.floor&&!motion::finishSimple(trace.velocity,contacts.floorNormal,dt,picked,false,trace.velocity))fault("numeric source floor force invalid");
  p->mGroundTriangle=contacts.floor;p->mPreviousTriangle=contacts.floor;p->mCurrCollisionModel=contacts.floorModel;p->mCollPlatform=contacts.floorPlatform;
  if(contacts.floor){

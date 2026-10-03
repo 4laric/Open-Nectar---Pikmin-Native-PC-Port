@@ -24,7 +24,7 @@ bool edge(Vec3 a,Vec3 b,Vec3 center,float radius,Contact& hit){
 }
 }
 Intersection intersect(const Triangle& t,Vec3 center,float radius,bool hard,Contact& out)noexcept{
- if(!finite(center)||!finite(t.normal)||!std::isfinite(t.offset)||!std::isfinite(radius)||radius<=0)return Intersection::Invalid;
+ if(!finite(center)||!finite(t.normal)||!std::isfinite(t.offset)||!std::isfinite(radius)||radius<0)return Intersection::Invalid;
  for(const auto v:t.vertices)if(!finite(v))return Intersection::Invalid;
  const float distance=dot(t.normal,center)-t.offset;
  if(!std::isfinite(distance))return Intersection::Invalid;
@@ -53,7 +53,7 @@ bool restitution(Vec3 v,Vec3 n,float factor,Vec3& out)noexcept{
  out=candidate;return true;
 }
 bool stepCount(float dt,float speed,float radius,unsigned& count,float& step,unsigned maximum)noexcept{
- if(!std::isfinite(dt)||dt<0||!std::isfinite(speed)||speed<0||!std::isfinite(radius)||radius<=0||(maximum!=8&&maximum!=16))return false;
+ if(!std::isfinite(dt)||dt<0||!std::isfinite(speed)||speed<0||!std::isfinite(radius)||radius<0||(maximum!=8&&maximum!=16))return false;
  unsigned next=1;float length=dt;
  // Strict >; source room/surface families cap at eight/sixteen respectively.
  while(length*speed>radius&&next<maximum){next*=2;length*=0.5f;}
@@ -79,7 +79,7 @@ bool finishSimple(Vec3 v,Vec3 n,float dt,bool picked,bool always,Vec3& out)noexc
  out=v;return true;
 }
 bool hiddenFloor(rigid::Trace& trace,bool hidden,bool floor,Contact& out,bool& applied)noexcept{
- if(!finite(trace.position)||!finite(trace.velocity)||!std::isfinite(trace.radius)||trace.radius<=0||
+ if(!finite(trace.position)||!finite(trace.velocity)||!std::isfinite(trace.radius)||trace.radius<0||
     !std::isfinite(trace.restitution)||trace.restitution<0)return false;
  if(!hidden||floor||!(trace.position.y-trace.radius<0)){applied=false;return true;}
  auto candidate=trace;candidate.position.y=trace.radius;

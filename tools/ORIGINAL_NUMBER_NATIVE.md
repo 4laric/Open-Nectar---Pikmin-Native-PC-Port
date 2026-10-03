@@ -58,6 +58,19 @@ No producer installs this factory yet. The pure ledger, animation and geometry
 controls and compiled production objects are engineering evidence. They do not
 prove a physical Egg birth, carry, source Onyon delivery or campaign SAVE.
 
+The pure Five motion composition implements the source resting probe, two
+held-base particle halfsteps, final center trace with rigid Y retained and
+actual LOD-selected simple fallback. Its explicit Events interface executes
+first-simple-floor and accepted-particle bounce at their source phases and
+propagates callback lifetime refusal. Actual wrappers must require those events;
+report counts alone do not execute gameplay. The focused controls qualify
+ordering and refusal, while host sqrt, source sound/water/onBounce composition,
+quaternion rendering and native carry transforms remain unqualified.
+One now advances carry animation after physical movement, then refreshes its
+colliders. First-floor bounce observes the traced live velocity before forces.
+Shared source trace math permits the literal zero-radius FakePiki point trace;
+numeric profiles and birth admission still require their positive source radii.
+
 ## Producer integration contract
 
 This branch includes the exact reviewed `NumberJournalAuthority` policy from

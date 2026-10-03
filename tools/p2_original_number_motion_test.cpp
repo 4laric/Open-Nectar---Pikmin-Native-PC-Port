@@ -29,7 +29,9 @@ int main(){
  check(stepCount(1,100000,3.8f,count,step,8)&&count==8&&step==0.125f);
  check(!stepCount(1,10,3.8f,count,step,32));
  check(stepCount(0,10,3.8f,count,step)&&count==1&&step==0);
- check(!stepCount(1,10,0,count,step));
+ check(stepCount(1,10,0,count,step,8)&&count==8&&step==0.125f);
+ check(stepCount(1,0,0,count,step,8)&&count==1&&step==1);
+ check(!stepCount(1,10,-1,count,step));
  const Triangle floor{{Vec3{0,0,0},Vec3{10,0,0},Vec3{0,0,10}},Vec3{0,1,0},0};
  Contact hit;
  check(intersect(floor,{2,3,2},3.8f,true,hit)==Intersection::Hit&&close(hit.overlap,0.8f)&&hit.normal.y==1&&close(hit.point.y,-0.8f));
@@ -44,7 +46,9 @@ int main(){
  check(intersect(floor,{2,0,-2},2,false,hit)==Intersection::Miss);
  Contact unchanged=hit;
  check(intersect(floor,{std::numeric_limits<float>::infinity(),0,0},2,false,hit)==Intersection::Invalid&&hit.overlap==unchanged.overlap);
- check(intersect(floor,{2,0,2},0,false,hit)==Intersection::Invalid);
+ check(intersect(floor,{2,0,2},0,false,hit)==Intersection::Hit&&hit.overlap==0&&hit.point.x==2&&hit.point.y==0);
+ check(intersect(floor,{2,0.001f,2},0,false,hit)==Intersection::Miss);
+ check(intersect(floor,{2,0,2},-1,false,hit)==Intersection::Invalid);
  p2originalnumber::rigid::Trace hidden;hidden.position={2,-100,3};hidden.velocity={1,-10,2};hidden.radius=3.8f;hidden.restitution=0.5f;bool applied=false;
  check(hiddenFloor(hidden,true,false,hit,applied)&&applied&&hidden.position.y==3.8f&&hidden.velocity.y==-5&&hit.point.y==0&&hit.normal.y==1);
  hidden.position.y=-100;hidden.velocity.y=10;

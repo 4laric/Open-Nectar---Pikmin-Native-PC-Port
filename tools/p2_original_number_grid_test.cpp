@@ -28,8 +28,9 @@ int main(){
  std::vector<std::array<unsigned,3>> crowded(1026,{0,1,2});
  check(buildCaveGrid(vertices,crowded,grid,error));
  check(grid.cells.front().size()==1024&&grid.cells.front().front()==0&&grid.cells.front().back()==1023);
+ check(caveCandidates(grid,{0,0,0},0,out,error)&&out.size()==1024&&out.front()==0&&out.back()==1023);
  const auto oldOut=out;
- check(!caveCandidates(grid,{0,0,0},0,out,error)&&out==oldOut);
+ check(!caveCandidates(grid,{0,0,0},-1,out,error)&&out==oldOut);
  grid.cells.front().push_back(1024);
  check(!caveCandidates(grid,{-100,0,-100},1,out,error)&&out==oldOut);
  std::printf("Original number source cave grid: %u controls passed\n",checks);

@@ -14,6 +14,8 @@ Intersection intersect(const Triangle&,Vec3 center,float radius,bool hard,Contac
 bool restitution(Vec3 velocity,Vec3 normal,float factor,Vec3& out)noexcept;
 // ShapeMapMgr permits 16; source RoomMapMgr permits 8. Actual scene provider
 // selects the map family; this is never inferred from a numeric model size.
+// Literal zero-radius point traces are valid (actual FakePiki initializer).
+// Numeric birth profiles separately require their positive source radii.
 bool stepCount(float dt,float speed,float radius,unsigned& count,float& step,unsigned maximum=16)noexcept;
 bool beginSimple(Vec3 velocity,float dt,bool picked,bool alwaysCarried,bool previousFloor,Vec3& out)noexcept;
 bool finishSimple(Vec3 velocity,Vec3 normal,float dt,bool picked,bool alwaysCarried,Vec3& out)noexcept;
