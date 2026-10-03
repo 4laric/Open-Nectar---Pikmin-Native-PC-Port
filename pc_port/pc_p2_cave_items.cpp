@@ -217,6 +217,11 @@ void pc_p2_cave_items_setup()
         std::fflush(stdout);
         return;
     }
+    if (pc_randomizer_generated_cave() && !pelletMgr->pcEnsureShape(templateConfig->mModelId.mId)) {
+        std::puts("P2_CAVE_ITEMS FAILED reason=no exact native treasure shape");
+        std::fflush(stdout);
+        return;
+    }
 
     itemShape = gameflow.loadShape("courses/pikmin2room/treasure.mod", true);
     if (!itemShape) {
