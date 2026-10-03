@@ -100,3 +100,28 @@ Required native gates remain unqualified until the real dynamic source77
 adapter, native receiver/animation clocks, shared typed Honey ancestry, genuine
 TChouDown effects, and source checkpoint provider execute together. Preserve
 failed runs and label source controls separately from direct gameplay.
+
+## Draft actual native factory contract
+
+`pc_p2_original_shijimi_native` owns real native pool bodies and distinct private
+geometry, with source77 sphere seating and motion bank. `foliage::Native` borrows
+this manager before preflight. Only the private Sentinel composition enables
+these hooks; ordinary production rejects source50/87 without that composition.
+
+The scene owner supplies actual parent/emission authority, dynamic child ledger,
+surface/cave identity, same source RNG raw discard, genuine appearance/fade/latch
+effects, and actual AILOD culling. Source77 raw capacity is 10 on the surface and
+25 in caves; capacity exhaustion remains a successful null birth with no scale
+or init RNG. Culling uses source visibility/Pikmin-cell state and suppresses FSM,
+animation and physics updates. The source Cullable flag starts disabled, is
+reenabled by follower flight, disabled on Fly entry and enabled on Leave entry.
+
+State retirement is deferred until the source state callback completes, then
+retires the actual event/journal, detaches real Pikmin and releases geometry.
+Unexpected native kill removes ownership without recursively killing the body.
+
+This factory is not qualified gameplay. The actual scene composition, genuine
+continuous 21/22/23 renderer and Hit24, original color material application,
+source physical checkpoint provider, native map/receiver behavior and direct
+20-Pikmin gameplay remain open. The source-manager and native pool limits are
+separate; root reservation does not promise all later children will be born.

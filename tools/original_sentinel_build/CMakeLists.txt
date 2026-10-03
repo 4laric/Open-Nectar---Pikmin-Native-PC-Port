@@ -10,10 +10,13 @@ add_subdirectory("${SENTINEL_SOURCE}/tools/original_resource_build" resources)
 set_target_properties(pc_p2_original_shijimi_group_test PROPERTIES
  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 target_sources(pikmin_pc PRIVATE
+ "${SENTINEL_SOURCE}/pc_port/pc_p2_original_shijimi_native.cpp"
  "${SENTINEL_SOURCE}/pc_port/pc_p2_original_shijimi_bank.cpp"
  "${SENTINEL_SOURCE}/pc_port/pc_p2_original_shijimi_state.cpp"
  "${SENTINEL_SOURCE}/pc_port/pc_p2_original_shijimi_honey.cpp"
  "${SENTINEL_SOURCE}/pc_port/pc_p2_original_shijimi_honey_native.cpp")
+target_compile_definitions(pikmin_pc PRIVATE PIKMIN_ORIGINAL_SENTINEL=1)
+target_compile_definitions(pikmin_legacy PRIVATE PIKMIN_ORIGINAL_SENTINEL=1)
 add_executable(p2_original_shijimi_honey_identity
  "${SENTINEL_SOURCE}/tools/test_p2_original_shijimi_honey.cpp"
  "${SENTINEL_SOURCE}/pc_port/pc_p2_original_shijimi_honey.cpp"
