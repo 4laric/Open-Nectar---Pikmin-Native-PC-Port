@@ -44,7 +44,9 @@ struct Actions:actions::ActionSource {
  bool throwPiki(Navi&,actions::PikiHandle,actions::Vec3,std::string&)override{return false;}bool feedback(Navi&,actions::Feedback,actions::PikiHandle,std::string&)override{return false;}
 } actionsProvider;
 nc::AnimationFrame observation;int commitMode=0,commitCalls=0;bool controlFacts=false;
-std::function<void()> animationFrameCallback,startAnimatorCallback;
+std::function<void()> animationFrameCallback,startAnimatorCallback,stateReadCallback,lockReadCallback,listenerReadCallback,supportCallback;
+int stateReads[2]={0,0},lockReads=0,listenerReads[2]={0,0},supportReads=0;
+void clearBankReads(){stateReads[0]=stateReads[1]=lockReads=listenerReads[0]=listenerReads[1]=supportReads=0;}
 struct Plan:nc::PreparedEffects {float resultingSceneAnimationTimer()const override{return 7;}bool commit(Navi&,std::string&)override;};
 struct Effects:nc::Effects {
  const LoadedScene& scene()const override{return ::scene;}bool facts(const Navi&,nc::ControlFacts& out,std::string&)const override{out={};return controlFacts;}
@@ -61,7 +63,7 @@ void check(bool value,const std::string& label){++checks;if(!value)throw std::ru
 void reset(Motion self,Motion bound,int boundLock){
  ++scene.epoch;a.current=&typed;b.current=&typed;typed.id=StateId::Punch;nc::forget(&a);
  channels[0]={self,29,++generation,false,false};channels[1]={bound,11,++generation,false,false};listeners[0]=Listener::SourceActor;listeners[1]=Listener::None;lock=boundLock;
- starts.clear();advances.clear();amounts.clear();sendEvents=false;listenerAvailable=true;effectsProvider=&effects;animationFrameCallback={};startAnimatorCallback={};observation={};observation.deltaTime=1;observation.gameFrozen=false;
+ starts.clear();advances.clear();amounts.clear();sendEvents=false;listenerAvailable=true;effectsProvider=&effects;animationFrameCallback={};startAnimatorCallback={};stateReadCallback={};lockReadCallback={};listenerReadCallback={};supportCallback={};clearBankReads();observation={};observation.deltaTime=1;observation.gameFrozen=false;
  check(nc::resetAfterBootstrap(&a,error),error);
 }
 bool animate(){return nc::animateWalk(&a,[](int){return true;},error);}
@@ -80,10 +82,10 @@ struct SourceBank::Impl{};SourceBank::SourceBank():m(new Impl){}SourceBank::~Sou
 bool SourceBank::ready()const{return true;}
 bool SourceBank::parameters(SourceParameters& out,std::string&)const{out={};out.rawSourceSha=control::parameterSha256();return true;}
 bool SourceBank::state(const Navi* n,MotionState& out,std::string& e)const{return stateAnimator(n,Animator::Self,out,e);}
-bool SourceBank::stateAnimator(const Navi*,Animator channel,MotionState& out,std::string&)const{out=channels[unsigned(channel)];return true;}
-bool SourceBank::listenerAnimator(const Navi*,Animator channel,Listener& out,std::string& e)const{if(!listenerAvailable){e="test listener authority missing";return false;}out=listeners[unsigned(channel)];return true;}
-bool SourceBank::boundMotionLock(const Navi*,int& out,std::string&)const{out=lock;return true;}
-bool SourceBank::supports(Navi*,Motion,std::string&)const{return true;}
+bool SourceBank::stateAnimator(const Navi*,Animator channel,MotionState& out,std::string&)const{++stateReads[unsigned(channel)];out=channels[unsigned(channel)];if(stateReadCallback)stateReadCallback();return true;}
+bool SourceBank::listenerAnimator(const Navi*,Animator channel,Listener& out,std::string& e)const{++listenerReads[unsigned(channel)];if(listenerReadCallback)listenerReadCallback();if(!listenerAvailable){e="test listener authority missing";return false;}out=listeners[unsigned(channel)];return true;}
+bool SourceBank::boundMotionLock(const Navi*,int& out,std::string&)const{++lockReads;out=lock;if(lockReadCallback)lockReadCallback();return true;}
+bool SourceBank::supports(Navi*,Motion,std::string&)const{++supportReads;if(supportCallback)supportCallback();return true;}
 bool SourceBank::startAnimator(Navi*,Animator channel,Motion target,bool preserve,Listener listener,std::string&){auto i=unsigned(channel);starts.push_back({channel,target,preserve,listener,channels[i].frame});channels[i]={target,preserve?channels[i].frame:0,++generation,false,false};listeners[i]=listener;if(startAnimatorCallback)startAnimatorCallback();return true;}
 bool SourceBank::advanceAnimator(Navi*,Animator channel,float amount,const std::function<bool(int)>& emit,std::string&){auto i=unsigned(channel);advances.push_back(channel);amounts.push_back(amount);channels[i].frame+=amount;if(sendEvents&&listeners[i]!=Listener::None){if(!emit(200))return true;emit(1000);}return true;}
 }}
@@ -194,6 +196,25 @@ int main(int argc,char** argv){try{
  check(!animate()&&nestedAttempted&&!nestedAccepted,"nested actual animation refuses and invalidates outer preflight");
  check(starts.empty()&&advances.empty()&&amounts.empty(),"nested observation animation causes no clock or motion effects");
  check(nc::animationSpeed(&a)==30,"nested refusal leaves actual prior source rate unchanged");
+ // Counts begin at the observation boundary: bind's genuine Self read is
+ // outside this scope. An expired provider must not receive the next call.
+ reset(Motion::Damage,Motion::Damage,-1);animationFrameCallback=[&]{clearBankReads();bankProvider=nullptr;};
+ check(!animate(),"observation bank retirement refuses source animation");
+ check(stateReads[0]==0&&stateReads[1]==0&&lockReads==0&&listenerReads[0]==0&&listenerReads[1]==0&&supportReads==0&&starts.empty()&&advances.empty(),"observation retirement makes zero subsequent calls to captured bank");bankProvider=&bank;
+ reset(Motion::Damage,Motion::Damage,-1);animationFrameCallback=[&]{clearBankReads();stateReadCallback=[&]{nc::forget(&a);};};
+ check(!animate(),"first Self bank read retirement refuses source preflight");
+ check(stateReads[0]==1&&stateReads[1]==0&&lockReads==0&&listenerReads[0]==0&&starts.empty()&&advances.empty(),"Self read retirement stops Bound and every following bank call");
+ reset(Motion::Damage,Motion::Damage,-1);animationFrameCallback=[&]{clearBankReads();lockReadCallback=[&]{nc::forget(&a);};};
+ check(!animate(),"bound lock callback retirement refuses source preflight");
+ check(stateReads[0]==1&&stateReads[1]==1&&lockReads==1&&listenerReads[0]==0&&listenerReads[1]==0&&starts.empty()&&advances.empty(),"lock retirement stops first listener read and all animation effects");
+ reset(Motion::Damage,Motion::Damage,-1);animationFrameCallback=[&]{clearBankReads();listenerReadCallback=[&]{nc::forget(&a);};};
+ check(!animate(),"Self listener callback retirement refuses source preflight");
+ check(listenerReads[0]==1&&listenerReads[1]==0&&starts.empty()&&advances.empty(),"Self listener retirement stops Bound listener and animation effects");
+ reset(Motion::Walk,Motion::Walk,-1);observation.gameFrozen=true;observation.displacement={40,0};
+ for(int i=0;i<4;++i)check(nc::selectWalkAnimation(&a,error),error);
+ clearBankReads();supportCallback=[&]{nc::forget(&a);};
+ check(!nc::selectWalkAnimation(&a,error),"source supports callback retirement refuses transition");
+ check(supportReads==1&&starts.empty()&&advances.empty()&&!nc::animationSpeed(&a),"supports retirement cannot start captured bank or publish retired rate");
  // No SourceBank::advance definition is linked. Using state-style advancement
  // would fail the standalone link rather than silently pass an empty counter.
  std::cout<<"P2_ORIGINAL_NATIVE_DUAL_ANIMATOR_ACTUAL_TU_CONTROLS_PASS checks="<<checks<<" gameplay=UNTESTED providers=DOUBLES\n";return 0;
