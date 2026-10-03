@@ -1,6 +1,7 @@
 #include "pc_p2_original_drop_engine.h"
 #include "pc_p2_original_drop.h"
 #include "pc_p2_original_actor.h"
+#include "pc_p2_original_foliage.h"
 #include "Pellet.h"
 #include "teki.h"
 #include "netplay/pc_sim_rng.h"
@@ -15,6 +16,9 @@ std::set<unsigned> droppedTokens;
 }
 bool pc_p2_original_drop_resources(const p2original::CatalogRow& row,std::string& e){
  if(!p2original::validateOriginalDrop(row.enemy,e))return false;
+ // Invulnerable source Plants never execute a death/drop path. Preserve
+ // literal common fields without demanding unused number-pellet assets.
+ if(p2original::foliage::supported(row.enemy.source)){e.clear();return true;}
  if(row.enemy.treasureCode){e="original treasure birth/delivery provider is not implemented";return false;}
  if(!pelletMgr){e="original number pellet manager unavailable";return false;}
  const int size=sizeIndex(row.enemy.pelletSize);
@@ -29,6 +33,7 @@ bool pc_p2_original_spawn_items(BTeki* actor){
  if(!actor)return false;
  unsigned source=0,token=0;p2original::InstanceIdentity identity;
  if(!p2original::originalActors().query(static_cast<Creature*>(actor),source,token,&identity))return false;
+ if(p2original::foliage::supported(source))return true;
  if(droppedTokens.count(token))return true;
  const auto* row=p2original::originalActors().find(identity.generator);std::string e;
  if(!row||!pc_p2_original_drop_resources(*row,e))failure(e);

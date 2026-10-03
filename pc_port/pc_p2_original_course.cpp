@@ -9,6 +9,7 @@
 #include "pc_p2_original_red_native.h"
 #include "pc_p2_original_tank_native.h"
 #include "pc_p2_original_armor_native.h"
+#include "pc_p2_original_foliage_native.h"
 #include "pc_p2_original_onyon_native.h"
 #include "pc_p2_original_manifest.h"
 #include "pc_p2_original_progress.h"
@@ -32,6 +33,7 @@ struct Course {
  std::unique_ptr<red::Native> reds;
  std::unique_ptr<tank::Native> tanks;
  std::unique_ptr<armor::Native> armors;
+ std::unique_ptr<foliage::Native> foliage;
  Dispatch dispatch;
  std::map<unsigned,GeneratorState> literal;
  std::set<const Generator*> shadows;
@@ -48,6 +50,7 @@ bool pc_p2_original_course_prepare(const std::string& fingerprint,const std::vec
  auto next=std::make_unique<Course>();next->plants=std::make_unique<pelplant::Native>(std::move(metColor));
  next->chappies=std::make_unique<chappy::Native>();next->frogs=std::make_unique<frog::Native>();next->ujis=std::make_unique<uji::Native>();
  next->reds=std::make_unique<red::Native>();next->tanks=std::make_unique<tank::Native>();next->armors=std::make_unique<armor::Native>();
+ next->foliage=std::make_unique<foliage::Native>();
  if(!next->dispatch.add(0,next->plants->provider(),[](const CatalogRow& r,std::string& e){pelplant::Initial value;return pelplant::decode(r,value,e);},e))return false;
  for(unsigned source:{2u,43u})if(!next->dispatch.add(source,next->chappies->provider(),chappy::admits,e))return false;
  for(unsigned source:{17u,18u})if(!next->dispatch.add(source,next->frogs->provider(),frog::capability,e))return false;
@@ -55,6 +58,7 @@ bool pc_p2_original_course_prepare(const std::string& fingerprint,const std::vec
  if(!next->dispatch.add(1,next->reds->provider(),red::capability,e))return false;
  for(unsigned source:{24u,25u})if(!next->dispatch.add(source,next->tanks->provider(),tank::decode,e))return false;
  if(!next->dispatch.add(15,next->armors->provider(),armor::admits,e))return false;
+ for(unsigned source:{91u,88u})if(!next->dispatch.add(source,next->foliage->provider(),foliage::decode,e))return false;
  // Validate structural/source metadata atomically BEFORE publishing catalog.
  Catalog checked;
  if(!checked.install(fingerprint,rows,[&](const CatalogRow& r,std::string& e){return next->dispatch.capability(r,e);},e))return false;
@@ -118,7 +122,7 @@ bool pc_p2_original_course_start(GeneratorList* list,std::string& e){
  unsigned roots=0,pellets=0;
  for(const auto& row:originalActors().rows()){
   const auto& r=row.second.enemy;roots+=r.count;
-  pellets+=r.count*(1+(r.pelletProbability>0?std::max(r.pelletMinimum,r.pelletMaximum):0));
+  if(!foliage::supported(r.source))pellets+=r.count*(1+(r.pelletProbability>0?std::max(r.pelletMinimum,r.pelletMaximum):0));
  }
  if(!tekiMgr||!pelletMgr||tekiMgr->getMax()-tekiMgr->getSize()<int(roots)
   ||pelletMgr->getMax()-pelletMgr->getSize()<int(pellets))return fail(e,"original whole-course native actor/corpse/drop capacity insufficient");
@@ -201,6 +205,7 @@ bool pc_p2_original_course_use_models(std::string& e){
  for(const auto& entry:originalActors().rows()){
   const unsigned source=entry.second.enemy.source;int type=-1;
   if(source==0)type=TEKI_Palm;
+  else if(foliage::supported(source))type=TEKI_Palm;
   else if(source==1||source==15)type=TEKI_Chappy;
   else if(source==2||source==43)type=TEKI_Swallow;
   else if(source==17)type=TEKI_Frog;
