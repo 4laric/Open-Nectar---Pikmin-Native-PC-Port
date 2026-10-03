@@ -25,28 +25,28 @@ struct P2AuthoredCaveStage {
 struct P2AuthoredCaveRoute {
     bool present=false;
     std::uint64_t seed=0;
-    std::string token,routeSha;
+    std::string token,routeSha,pikiGeneratorsSha;
     P2AuthoredCaveStage surface,floor;
     P2CavePartyPoint exit;
     bool valid()const{
-        if(!present)return token.empty()&&routeSha.empty();
+        if(!present)return token.empty()&&routeSha.empty()&&pikiGeneratorsSha.empty();
         return token.size()==32&&token.find_first_not_of("0123456789abcdef")==std::string::npos
-            &&P2AuthoredCaveStage::digest(routeSha)&&surface.valid()&&floor.valid()&&exit.valid()
+            &&P2AuthoredCaveStage::digest(routeSha)&&P2AuthoredCaveStage::digest(pikiGeneratorsSha)&&surface.valid()&&floor.valid()&&exit.valid()
             &&floor.file=="stages/generated-forest.ini"&&surface.file!=floor.file
             &&surface.stage==floor.stage&&surface.index==floor.index;
     }
     bool matches(const P2CaveSeedBinding& selected)const{return present&&valid()&&seed==selected.seed&&token==selected.token;}
-    bool operator==(const P2AuthoredCaveRoute& r)const{return present==r.present&&seed==r.seed&&token==r.token&&routeSha==r.routeSha&&surface==r.surface&&floor==r.floor&&exit.x==r.exit.x&&exit.y==r.exit.y&&exit.z==r.exit.z;}
+    bool operator==(const P2AuthoredCaveRoute& r)const{return present==r.present&&seed==r.seed&&token==r.token&&routeSha==r.routeSha&&pikiGeneratorsSha==r.pikiGeneratorsSha&&surface==r.surface&&floor==r.floor&&exit.x==r.exit.x&&exit.y==r.exit.y&&exit.z==r.exit.z;}
     bool read(std::istream& in,bool markerConsumed=false){
         P2AuthoredCaveRoute next;std::string tag,version,seedText;
         if(markerConsumed)tag="AUTHORED_CAVE_ROUTE";else if(!(in>>tag))return false;
-        if(!(in>>version>>seedText>>next.token>>next.routeSha)||tag!="AUTHORED_CAVE_ROUTE"||version!="1"
+        if(!(in>>version>>seedText>>next.token>>next.routeSha>>next.pikiGeneratorsSha)||tag!="AUTHORED_CAVE_ROUTE"||version!="2"
             ||!p2CaveSeedUint64(seedText,next.seed)||!next.surface.read(in)||!next.floor.read(in)||!next.exit.read(in))return false;
         next.present=true;
         if(!next.valid())return false;
         *this=std::move(next);return true;
     }
-    void write(std::ostream& out)const{out<<std::setprecision(std::numeric_limits<float>::max_digits10)<<" AUTHORED_CAVE_ROUTE 1 "<<seed<<' '<<token<<' '<<routeSha;surface.write(out);floor.write(out);exit.write(out);}
+    void write(std::ostream& out)const{out<<std::setprecision(std::numeric_limits<float>::max_digits10)<<" AUTHORED_CAVE_ROUTE 2 "<<seed<<' '<<token<<' '<<routeSha<<' '<<pikiGeneratorsSha;surface.write(out);floor.write(out);exit.write(out);}
 };
 struct P2AuthoredCaveSession {
     bool present=false;

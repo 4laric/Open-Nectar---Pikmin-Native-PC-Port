@@ -1,4 +1,5 @@
 #include "pc_p2_surface_save.h"
+#include "pc_p2_authored_cave_campaign.h"
 #include "Generator.h"
 #include "Age.h"
 #include "DebugLog.h"
@@ -673,7 +674,7 @@ void Generator::init()
 	}
 
 #if defined(PIKI_PC_PORT) && PIKI_PC_PORT
-    if (ramMode && pc_p2_surface_save_living_scene() && (mCarryOverFlags & GENCARRY_SaveCreature)) {
+    if (ramMode && (pc_p2_surface_save_living_scene()||pc_p2_cave_campaign_owns_heads()) && (mCarryOverFlags & GENCARRY_SaveCreature)) {
         // The authenticated living card's creature record is the sole birth
         // authority. loadCreature increments this count after restoring it;
         // count-based births here would duplicate the exact saved actor.
@@ -683,7 +684,7 @@ void Generator::init()
 #endif
 
 	if (ramMode && (mCarryOverFlags & GENCARRY_SaveSpawnCount)) {
-		if (!pc_p2_surface_save_living_scene() && gameflow.mWorldClock.mCurrentDay >= mLatestSpawnDay + mRespawnInterval) {
+        if (!pc_p2_surface_save_living_scene() && !pc_p2_cave_campaign_owns_heads() && gameflow.mWorldClock.mCurrentDay >= mLatestSpawnDay + mRespawnInterval) {
 			// we're due to respawn afresh.
 			PRINT("****** RESET DAY (curr=%d / save=%d interval=%d)\n", gameflow.mWorldClock.mCurrentDay, mLatestSpawnDay,
 			      mRespawnInterval);
@@ -905,6 +906,13 @@ void Generator::read(RandomAccessStream& input)
 	STACK_PAD_TERNARY(this, 5);
 	STACK_PAD_INLINE(3);
 #if defined(PIKI_PC_PORT)
+    if(ramMode&&pc_randomizer_authored_piki_cache_active()&&mGenObject&&mGenObject->mID=='piki'){
+        if(input.getPending()<12||input.readInt()!=0x41504731)pc_randomizer_bad_spawn_cache();
+        const auto stableUid=static_cast<unsigned>(input.readInt());
+        const auto sourceUid=static_cast<unsigned>(input.readInt());
+        if(!pc_randomizer_authored_piki_restore_generator(this,stableUid,sourceUid))pc_randomizer_bad_spawn_cache();
+        _70=sourceUid;
+    }
     if (ramMode && (pc_randomizer_spawn_slots() || pc_randomizer_p2_bridge()) && mGenObject && (mGenObject->mID == 'teki' || mGenObject->mID == 'boss')) {
         if (input.getPending() < 12 || input.readInt() != 0x534c5431) pc_randomizer_bad_spawn_cache();
         pc_randomizer_set_generator_id(this, static_cast<unsigned>(input.readInt()));
@@ -990,6 +998,11 @@ void Generator::write(RandomAccessStream& output)
 		output.writeInt(0);
 	}
 #if defined(PIKI_PC_PORT)
+    if(ramMode&&pc_randomizer_authored_piki_cache_active()&&mGenObject&&mGenObject->mID=='piki'){
+        const auto stableUid=pc_randomizer_generator_id(this);
+        if(!pc_randomizer_authored_piki_restore_generator(this,stableUid,_70))pc_randomizer_bad_spawn_cache();
+        output.writeInt(0x41504731);output.writeInt(static_cast<int>(stableUid));output.writeInt(static_cast<int>(_70));
+    }
     if (ramMode && (pc_randomizer_spawn_slots() || pc_randomizer_p2_bridge()) && mGenObject && (mGenObject->mID == 'teki' || mGenObject->mID == 'boss')) {
         output.writeInt(0x534c5431);
         output.writeInt(static_cast<int>(pc_randomizer_generator_id(this)));
@@ -1290,7 +1303,10 @@ Creature* GenObjectPiki::birth(BirthInfo& info)
 	}
 	}
 
-	return piki;
+#if defined(PIKI_PC_PORT)
+    if(piki&&(mSpawnState()==1||mSpawnState()==2))pc_p2_authored_piki_birth(static_cast<Piki*>(piki),info.mGenerator);
+#endif
+    return piki;
 }
 
 /**

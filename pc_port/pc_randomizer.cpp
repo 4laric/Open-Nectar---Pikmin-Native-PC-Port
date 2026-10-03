@@ -21,6 +21,8 @@ bool pc_p2_original_calendar_decode(const std::string&,unsigned,const std::strin
 #endif
 #include "pc_randomizer.h"
 #if defined(PIKMIN_P2_AUTHORED_CAVE_PROVIDER)
+#include "pc_p2_authored_piki_catalog.h"
+bool pc_p2_authored_piki_generator(const void*);
 // Strong provider validates the selected physical route and both INI inputs.
 bool pc_p2_authored_cave_route_validate(const P2AuthoredCaveRoute&,const std::string&,std::string&);
 #endif
@@ -1995,6 +1997,22 @@ unsigned pc_randomizer_generator_id(const void* generator) {
     auto it = generatorIds.find(generator);
     return it == generatorIds.end() ? 0 : it->second;
 }
+bool pc_randomizer_authored_piki_cache_active(){
+#if defined(PIKMIN_P2_AUTHORED_CAVE_PROVIDER) && !defined(PC_RANDOMIZER_NO_ORIGINAL_ENGINE)
+    return generatedCave&&authoredCaveRoute.present&&!pc_randomizer_original_session();
+#else
+    return false;
+#endif
+}
+bool pc_randomizer_authored_piki_restore_generator(const void* generator,unsigned uid,unsigned sourceUid){
+#if defined(PIKMIN_P2_AUTHORED_CAVE_PROVIDER) && !defined(PC_RANDOMIZER_NO_ORIGINAL_ENGINE)
+    if(!pc_randomizer_authored_piki_cache_active()||!pc_p2_authored_piki_generator(generator)
+        ||!pc_p2_authored_piki_catalog_saved(authoredCaveRoute,uid,sourceUid))return false;
+    generatorIds[generator]=uid;return true;
+#else
+    return false;
+#endif
+}
 void pc_randomizer_set_generator_id(const void* generator, unsigned uid) {
     if (!uid) { generatorIds.erase(generator); return; }
     // Populate under the P2 enemy bridge too: ENEMY_P2 forbids the P1 slot
@@ -2033,6 +2051,13 @@ unsigned pc_randomizer_placement_slot_uid(unsigned sourceId70) {
 
 void pc_randomizer_bind_generator(const void* generator, int stage, const char* file, int offset, unsigned sourceId70) {
     pc_randomizer_set_generator_id(generator, 0);
+#if defined(PIKMIN_P2_AUTHORED_CAVE_PROVIDER) && !defined(PC_RANDOMIZER_NO_ORIGINAL_ENGINE)
+    unsigned authoredUid=0;
+    if(pc_randomizer_authored_piki_cache_active()&&pc_p2_authored_piki_generator(generator)
+        &&pc_p2_authored_piki_catalog_bind(authoredCaveRoute,stage,file,offset,sourceId70,authoredUid)){
+        generatorIds[generator]=authoredUid;return;
+    }
+#endif
     if ((!pc_randomizer_spawn_slots() && !pc_randomizer_p2_bridge()) || !file) return;
     for (const auto& row : randomizerSpawnSlots)
         if (row.stage == stage && row.offset == offset && !std::strcmp(row.file, file)) {

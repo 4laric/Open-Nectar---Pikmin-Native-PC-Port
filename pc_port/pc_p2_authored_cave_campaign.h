@@ -5,6 +5,15 @@
 #include "pc_p2_cave_campaign_boundary.h"
 class Controller;
 class Graphics;
+class Generator;
+class Piki;
+struct P2CavePartyBody;
+struct P2CavePartyPoint;
+bool pc_p2_authored_piki_generator(const void*);
+void pc_p2_authored_piki_birth(Piki*,Generator*);
+void pc_p2_authored_piki_forget(Piki*);
+bool pc_p2_authored_piki_origin(Piki*,std::uint32_t&,P2CavePartyPoint&);
+bool pc_p2_authored_piki_matches(Piki*,const P2CavePartyBody&);
 struct P2CaveSaveChoiceSnapshot {
     bool active=false;
     int state=-1,slot=-1;
