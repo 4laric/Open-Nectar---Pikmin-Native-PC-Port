@@ -1242,7 +1242,10 @@ void MapMgr::initShape(Shape* selectedModel, bool retailCave)
 	// set up collisions (with grid size of 64)
 	mMapModel->createCollisions(MAP_GRID_SIZE);
 #if defined(PIKI_PC_PORT)
-	if (!retailCave) {
+	if (retailCave) {
+		pc_p2_surface_topology_reset();
+		pc_p2_surface_water_reset();
+	} else {
 		pc_p2_surface_topology_init(mMapModel);
 		pc_p2_surface_water_init(mMapModel);
 	}

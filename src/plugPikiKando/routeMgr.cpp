@@ -303,6 +303,13 @@ PathFinder::PathFinder(RouteMgr::Group& group)
 	mClient      = new Client[mMaxClients];
 }
 
+void PathFinder::disposeOwned()
+{
+	delete[] mBuffer; mBuffer = nullptr;
+	delete[] mClient; mClient = nullptr;
+	mGroup = nullptr; mBufferSize = mClientCount = mMaxClients = 0;
+}
+
 /**
  * @todo: Documentation
  * @note UNUSED Size: 000048
@@ -1362,6 +1369,21 @@ void RouteMgr::construct(MapMgr* map)
 		}
 		routeGroup = static_cast<RouteGroup*>(routeGroup->mNext);
 	}
+}
+
+void RouteMgr::disposeOwned()
+{
+	for (int i = 0; i < mRouteCount; ++i) {
+		if (mPathFinders && mPathFinders[i]) {
+			mPathFinders[i]->disposeOwned();
+			delete mPathFinders[i];
+		}
+		if (mGroupList) delete[] mGroupList[i].mWayPoints;
+	}
+	delete[] mPathFinders; mPathFinders = nullptr;
+	delete[] mGroupList; mGroupList = nullptr;
+	delete[] mRouteGroupIDs; mRouteGroupIDs = nullptr;
+	mRouteCount = 0;
 }
 
 /**

@@ -75,3 +75,9 @@ bool pc_p2_retail_scene_current_activity(const p2retail::SceneIdentity&,
 // refusal never falls back to a surface map. Installation is resource ownership,
 // not a committed physical floor or running World.
 bool pc_p2_retail_scene_install_map(MapMgr*,bool& handled,std::string& error);
+// Independently reserved from the actual selected source definition AFTER real
+// Stage/map installation, BEFORE native actor allocation. Not a SAVE/card proof.
+const p2retail::FloorIdentityAuthority* pc_p2_retail_scene_births() noexcept;
+// Before App heap or map reuse, after actual floor/Pod/body/World teardown.
+// Resource-only refusal leaves the owned context intact for cleanup retry.
+bool pc_p2_retail_scene_release_map(std::string& error);

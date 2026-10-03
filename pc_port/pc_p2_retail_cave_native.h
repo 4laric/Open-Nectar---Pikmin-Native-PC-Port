@@ -52,6 +52,7 @@ public:
  // Trusted installation lookup for cargo/Pod adapters; raw plan remains rechecked.
  // Read-only actual installed census; revokes before any release/teardown.
  FloorPhase phase()const noexcept;
+ bool ownsResources(const SceneIdentity&)const noexcept;
  bool bindingFacts(Snapshot&,std::uint64_t& floorEpoch,FloorPhase&,std::string&)const;
  bool bindingCurrent(const SceneIdentity&,std::uint64_t floorEpoch)const noexcept;
  bool installed(Snapshot&,std::uint64_t& floorEpoch,std::string&)const;
@@ -71,3 +72,5 @@ private:struct Impl;std::unique_ptr<Impl> m;
 };
 } // namespace p2retail
 bool pc_p2_retail_cave_native_retired(Creature*,std::string&);
+// Cleanup guard only. Includes partial/releasing owners and grants no activity.
+bool pc_p2_retail_cave_native_scene_owned(const p2retail::SceneIdentity&) noexcept;
