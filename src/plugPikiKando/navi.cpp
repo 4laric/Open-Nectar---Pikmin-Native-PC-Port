@@ -3766,7 +3766,7 @@ bool InteractAttack::actNavi(Navi* navi) immut
 {
 #if defined(PIKI_PC_PORT)
 	if (p2original::captain::selectedOriginal()) {
-		return bool(p2original::captain::attack(navi, mOwner, mDamage));
+		return p2original::captain::attack(navi, mOwner, mDamage).interactionAccepted;
 	}
 #endif
 	if (navi->isDamaged()) {

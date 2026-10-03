@@ -110,7 +110,10 @@ int main(int argc,char** argv){try{
  check(argc==2,"private verified parameter argument");std::ifstream file(argv[1],std::ios::binary);resourceBytes=std::string((std::istreambuf_iterator<char>(file)),{});control::Params params;check(control::parseParameters(resourceBytes,params,error),error);
  observed=ordinary();SourceBank bank;bankProvider=&bank;envProvider=&env;NaviStateMachine fsm;a.mStateMachine=&fsm;b.mStateMachine=&fsm;
  registerCoreStates(fsm);check(fsm.mStateCount==3,"actual factory registers ONLY3core states");check(fsm.mStates[0]->getID()==48&&fsm.mStates[1]->getID()==61&&fsm.mStates[2]->getID()==67,"actual typed Walk/Damaged/Dead native48/61/67");
- for(int i=0;i<3;++i){auto* state=dynamic_cast<State*>(fsm.mStates[i]);check(state&&state->nativeState()==fsm.mStates[i],"registered source State exact pointer");check(state->sourceInvincible()==(i==2),"source Walk/Damaged false and Dead true invincibility");}
+ for(int i=0;i<3;++i){auto* state=dynamic_cast<State*>(fsm.mStates[i]);check(state&&state->nativeState()==fsm.mStates[i],"registered source State exact pointer");check(state->sourceInvincible()==(i!=0),"retail Walk noninvincible; Damaged and Dead invincible");}
+ check(dynamic_cast<State*>(fsm.mStates[0])->sourcePressable()&&dynamic_cast<State*>(fsm.mStates[0])->sourceVsUsableY(),"retail Walk inherits source press and Y admission");
+ check(dynamic_cast<State*>(fsm.mStates[1])->sourcePressable()&&!dynamic_cast<State*>(fsm.mStates[1])->sourceVsUsableY(),"retail Damaged blocks Y while retaining source pressable default");
+ check(!dynamic_cast<State*>(fsm.mStates[2])->sourcePressable()&&!dynamic_cast<State*>(fsm.mStates[2])->sourceVsUsableY(),"retail Dead blocks source press and Y");
  int mapped=777;loaded=nullptr;check(pc_p2_original_captain_route_transition(&a,1,mapped)==PcOriginalCaptainRoute::NonSource&&mapped==777,"nonSource route preserves output");check(!pc_p2_original_captain_transit(&a,StateId::Damaged,error)&&transitions==0&&a.mHealth==50,"missing scene refuses before transit/HP");loaded=&scene;
  active=nullptr;check(!pc_p2_original_captain_core_preflight(&a,StateId::Walk,error),"missing world refuses");active=&world;
  check(!pc_p2_original_captain_core_preflight(&outsider,StateId::Damaged,error),"outsider is not actual source captain slot");
