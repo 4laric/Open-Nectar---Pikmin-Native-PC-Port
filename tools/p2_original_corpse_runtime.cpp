@@ -72,7 +72,7 @@ class CorpseApp:public PlugPikiApp {
  Pellet* live(){Iterator it(pelletMgr);CI_LOOP(it){if(*it==corpse){auto* body=static_cast<Pellet*>(*it);
   const auto* profile=pc_p2_original_corpse_profile(body);require(profile&&profile->source==2,"live body retains original source binding");return body;}}return nullptr;}
  void birth(Navi* n){
-  Iterator items(itemMgr);CI_LOOP(items){auto* c=static_cast<Creature*>(*items);if(c->mObjType==OBJTYPE_Goal){auto* g=static_cast<GoalItem*>(c);if(g->mOnionColour==Red)onion=g;}}
+  onion=itemMgr->getContainer(Red);
   require(onion,"actual Red Onion");std::string e;checked(pc_p2_original_corpse_resources(2,e),e);
   const int old=gsys->setHeap(SYSHEAP_App);auto* t=tekiMgr->newTeki(TEKI_Swallow);require(t,"actual chassis birth");
   t->mPersonality->reset();Vector3f pos(n->mSRT.t.x+180,n->mSRT.t.y,n->mSRT.t.z+100);pos.y=mapMgr->getMinY(pos.x,pos.z,true);
@@ -95,6 +95,7 @@ public:
    const auto* p=pc_p2_original_corpse_profile(corpse);require(p&&p->source==2&&corpse->mConfig->mCarryMinPikis()==10&&corpse->mConfig->mCarryMaxPikis()==20&&corpse->mConfig->mNonMatchingOnyonSeeds()==12,"actual typed source profile before carry");
    require(corpse->mPelletView==static_cast<PelletView*>(actor)&&corpse->mCollInfo,"retained dead P2 view and real collision");
    CorpseSnapshot snapshot;std::string e;checked(pc_p2_original_corpse_snapshot(snapshot,e),e);require(snapshot.records.size()==1&&receipt(snapshot.records[0],false),"full birth source identity/yield and no reward");
+   require(!pc_p2_original_corpse_set_death_cause(actor,CorpseDeathCause::StoneShatter,e),"late Stone cause refuses a body already born");
    require(!pc_p2_original_corpse_unload(e),"pending physical corpse refuses course unload");
    require(population()==baseline,"death creates no stock");release=corpse->mSRT.t;phase=2;age=0;return result;}
   auto* body=live();
