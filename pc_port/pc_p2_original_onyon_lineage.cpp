@@ -122,6 +122,14 @@ QueryResult Lineage::query(const std::map<const void*,Binding>& bindings,const v
 }
 QueryResult Lineage::queryHead(const void* p,const std::string& s,MemberRecord& r,std::uint64_t& h,std::string& e)const{return query(mHeads,p,s,r,h,e);}
 QueryResult Lineage::queryBody(const void* p,const std::string& s,MemberRecord& r,std::uint64_t& h,std::string& e)const{return query(mBodies,p,s,r,h,e);}
+bool Lineage::ownsBody(const void* p)const noexcept{return mBodies.find(p)!=mBodies.end();}
+bool Lineage::bodyHandle(const void* p,std::uint64_t& out)const noexcept{
+ auto b=mBodies.find(p);if(b==mBodies.end())return false;out=b->second.handle;return true;
+}
+void Lineage::retireSceneBodies() noexcept{
+ for(const auto& b:mBodies){auto m=mMembers.find(b.second.serial);if(m!=mMembers.end())m->second.location=Location::Dead;}
+ mBodies.clear();
+}
 bool Lineage::markUnknownStock(std::uint8_t species,std::uint64_t count,std::string& e){
  if(!hex(mSession)||species>=3||!count||count>std::numeric_limits<std::uint64_t>::max()-mUnknown[species])return fail(e,"invalid/overflowed unknown source stock marker");
  mUnknown[species]+=count;e.clear();return true;

@@ -138,5 +138,25 @@ int main(){
  sentinel.count=999;check(!capacity.preflightReward(r,cause(601),1,sentinel,e)&&sentinel.count==999,"65537th retained member refused atomically");
  Lineage invalidSession("bad");check(!invalidSession.preflightReward(r,c,1,p,e),"invalid configured session refuses births");
  check(l.sessionFingerprint()==session&&authored.sessionFingerprint()==otherSession,"readonly constanttime strong session getter");
+ static_assert(noexcept(l.ownsBody(nullptr)),"ownsBody must be noexcept");
+ static_assert(noexcept(l.bodyHandle(nullptr,h)),"bodyHandle must be noexcept");
+ static_assert(noexcept(l.retireSceneBodies()),"scene retirement must be noexcept");
+ // Scene disposal occurs after the party observer. It only retires BODY
+ // pointers/history and cannot manufacture a deposit or retire pending/HEAD.
+ Lineage scene(session);check(scene.preflightReward(r,cause(900),4,p,e)&&scene.commitReward(p,e),"scene teardown members prepared");
+ int sceneHead=0,sceneBody=0;std::uint64_t sh=0,sb=0;
+ check(scene.bindPendingHead(1,r,&sceneHead,sh,e)&&scene.headToBody(&sceneHead,sh,&sceneBody,sb,e),"scene BODY bound");
+ check(scene.bindPendingHead(2,r,&sceneHead,sh,e)&&scene.storePending(3,r,e),"scene retains separate HEAD and stock");
+ std::uint64_t observedHandle=999;
+ check(scene.ownsBody(&sceneBody)&&scene.bodyHandle(&sceneBody,observedHandle)&&observedHandle==sb,"persistent nonallocating body label and handle");
+ check(!scene.ownsBody(&ordinary)&&!scene.bodyHandle(&ordinary,observedHandle)&&observedHandle==sb,"missing reader output unchanged");
+ check(scene.queryBody(&sceneBody,otherSession,untouched,queryHandle,e)==QueryResult::Unavailable&&scene.ownsBody(&sceneBody)&&scene.bodyHandle(&sceneBody,observedHandle)&&observedHandle==sb,"wrongsession query preserves persistent owned label");
+ const auto beforeScene=scene.report();scene.retireSceneBodies();const auto afterScene=scene.report();
+ check(!scene.ownsBody(&sceneBody)&&afterScene.liveBodies==0&&afterScene.liveHeads==1&&afterScene.members.size()==4,"scene retirement only clears BODY bindings");
+ check(afterScene.members[0].location==Location::Dead&&emissionSame(afterScene.members[0].origin,beforeScene.members[0].origin)&&afterScene.members[1].location==Location::Head&&afterScene.members[2].location==Location::Stored&&afterScene.members[3].location==Location::Pending,"scene preserves immutable origin HEAD stock pending without deposit");
+ observedHandle=999;check(!scene.bodyHandle(&sceneBody,observedHandle)&&observedHandle==999,"retired body handle reader unchanged");
+ check(!scene.courseUnload(e)&&!scene.newSession(otherSession,e),"scene BODY teardown cannot bypass HEAD/pending guard");
+ check(scene.retireBody(&sceneBody,sb,e),"postscene native body cleanup harmless");
+ check(!scene.commitReward(p,e),"scene dead history prevents source reward replay");
  std::printf("original_onyon_lineage checks=%u failures=%u engine=0 native_authentication=caller codec=0\n",checks,failures);return failures?1:0;
 }
