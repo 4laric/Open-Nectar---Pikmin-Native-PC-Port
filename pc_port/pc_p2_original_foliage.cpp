@@ -135,9 +135,18 @@ bool Provider::collision(Creature* c,Creature* collider,bool navi,bool teki,floa
  auto* h=lookup(c);if(!h)return reject(e,"foliage collision lacks owned actor");
  if(!collider||teki||!visible||y<h->position.y-5||!(std::fabs(vx)>1||std::fabs(vz)>1)){e.clear();return true;}
  if(navi&&!h->touched){if(!mEngine.touchSound(*h,collider,e))return false;h->touched=true;}
- if(!h->active){h->frame=0;h->active=true;}e.clear();return true;
+ if(!activate(*h,collider,e))return false;
+ e.clear();return true;
 }
-bool Provider::earthquake(Creature* c,std::string& e){auto* h=lookup(c);if(!h)return reject(e,"foliage earthquake lacks owned actor");if(!h->active){h->active=true;h->frame=0;}e.clear();return true;}
+bool Provider::activate(Host& h,Creature* collider,std::string& e){
+ if(h.active)return true;
+ const float previous=h.frame;h.frame=0;
+ // Retail startMotion -> virtual touched -> active. A refused child/effect
+ // hook must remain recoverable without committing the new motion frame.
+ if(!mEngine.touched(h,collider,e)){h.frame=previous;h.active=false;return false;}
+ h.active=true;return true;
+}
+bool Provider::earthquake(Creature* c,std::string& e){auto* h=lookup(c);if(!h)return reject(e,"foliage earthquake lacks owned actor");if(!activate(*h,nullptr,e))return false;e.clear();return true;}
 } }
 
 

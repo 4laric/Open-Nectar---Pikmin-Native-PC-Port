@@ -15,13 +15,15 @@ struct ControlledEngine final:Engine {
  Resources bank{true,true,true,100,31};
  std::map<unsigned,unsigned> resourceCalls;
  std::vector<std::unique_ptr<Creature>> actors;
+ struct Touch{Creature* plant;Creature* instigator;unsigned source,token;};std::vector<Touch> touches;
  unsigned reserved=999,allocations=0,cleanups=0,sounds=0;
- bool resourceFails=false,reserveFails=false,allocateFails=false,cleanupFails=false,soundFails=false;
+ bool resourceFails=false,reserveFails=false,allocateFails=false,cleanupFails=false,soundFails=false,touchedFails=false;
  bool resources(unsigned source,Resources& out,std::string& e)override{++resourceCalls[source];out=bank;if(resourceFails)e="resources failed";return !resourceFails;}
  bool reserve(unsigned count,std::string& e)override{reserved=count;if(reserveFails)e="reserve failed";return !reserveFails;}
  bool allocate(Host& h,const Position&,float,std::string& e)override{++allocations;actors.emplace_back(new Creature);h.creature=actors.back().get();if(allocateFails)e="allocation failed";return !allocateFails;}
  bool cleanup(Host&,std::string& e)override{++cleanups;if(cleanupFails)e="cleanup failed";return !cleanupFails;}
  bool touchSound(Host&,Creature*,std::string& e)override{++sounds;if(soundFails)e="sound failed";return !soundFails;}
+ bool touched(Host& h,Creature* collider,std::string& e)override{touches.push_back({h.creature,collider,h.row.enemy.source,h.token});if(touchedFails)e="typed touched failed";return !touchedFails;}
 };
 CatalogRow row(unsigned uid,unsigned source=91,unsigned count=1){CatalogRow r;r.course="tutorial";r.member="plantsgen.txt";r.sourceKey="literal-source:"+std::to_string(uid);r.index=uid;r.enemy.uid=uid;r.enemy.source=source;r.enemy.count=count;return r;}
 void identityAndResources(){
@@ -165,4 +167,27 @@ void caveLifetimeAndRegistry(){
  CHECK(!p.caveBirth(rows[0],&other,0,{},0,failed,e)&&!failed);CHECK(p.caveBirth(rows[0],&association,1,{},0,failed,e));CHECK(!p.bind(rows[0],failed,123,e));CHECK(p.bind(rows[0],failed,124,e)&&p.release(failed,124,e));
  CHECK(p.preflight({row(1)},e)&&p.reserve({row(1)},e));CHECK(!p.caveBirth(rows[0],&association,0,{},0,failed,e));
 }
-int main(){try{identityAndResources();reservationAndCleanup();forestIdentityAndResources();allNineOwnership();literalCylinderPlanes();caveAuthenticationAndResources();caveLifetimeAndRegistry();for(auto source:{46u,47u,49u,51u,52u,80u,88u,90u,91u})touchAndTiming(source);std::cout<<"Foliage sources46,47,49,51,52,80,88,90,91 literal identities, distinct banks, zero resource rows, lifecycle, cylinder planes and touch timing controls PASS; native gameplay not claimed\n";}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}
+void typedTouchHooks(const CatalogRow& r,bool cave){
+ ControlledEngine engine;Provider p(engine);Generator g;Creature captain,pikmin;Creature* plant=nullptr;std::string e;
+ auto prepare=[&](){return cave?(p.cavePrepare({r},e)&&p.caveReserve({r},e)):(p.preflight({r},e)&&p.reserve({r},e));};
+ auto birth=[&](){return cave?p.caveBirth(r,&g,0,{0,10,0},0,plant,e):p.birth(r,&g,0,{0,10,0},0,plant,e);};
+ CHECK(prepare()&&birth()&&p.bind(r,plant,700,e));auto* h=p.lookup(plant);
+ // No family callback for ignored geometry/velocity/visibility/Teki contacts.
+ CHECK(p.collision(plant,&captain,true,true,10,2,0,true,e));CHECK(p.collision(plant,&captain,true,false,10,2,0,false,e));
+ CHECK(p.collision(plant,&captain,true,false,4,2,0,true,e));CHECK(p.collision(plant,&captain,true,false,10,1,0,true,e));CHECK(engine.touches.empty()&&engine.sounds==0);
+ engine.touchedFails=true;CHECK(!p.collision(plant,&captain,true,false,10,2,0,true,e));CHECK(!h->active&&h->frame==0&&h->touched&&engine.sounds==1&&e=="typed touched failed");
+ CHECK(engine.touches.size()==1&&engine.touches.back().plant==plant&&engine.touches.back().instigator==&captain&&engine.touches.back().source==r.enemy.source&&engine.touches.back().token==700);
+ engine.touchedFails=false;CHECK(p.collision(plant,&pikmin,false,false,10,0,2,true,e));CHECK(h->active&&h->frame==0&&engine.touches.size()==2&&engine.touches.back().instigator==&pikmin&&engine.sounds==1);
+ CHECK(p.tick(plant,.1f,true,e)&&h->frame==3);engine.touchedFails=true;CHECK(p.collision(plant,&captain,true,false,10,2,0,true,e)&&p.earthquake(plant,e));CHECK(engine.touches.size()==2&&engine.sounds==1&&h->frame==3);engine.touchedFails=false;
+ CHECK(p.tick(plant,2,true,e)&&!h->active&&!h->touched&&h->frame==30);
+ // A rejected quake must preserve a completed pose and remain retryable.
+ engine.touchedFails=true;CHECK(!p.earthquake(plant,e)&&!h->active&&h->frame==30&&!h->touched&&engine.sounds==1);CHECK(engine.touches.size()==3&&engine.touches.back().instigator==nullptr);
+ engine.touchedFails=false;CHECK(p.earthquake(plant,e)&&h->active&&h->frame==0&&!h->touched&&engine.sounds==1);CHECK(engine.touches.size()==4&&engine.touches.back().instigator==nullptr&&engine.touches.back().plant==plant);
+ CHECK(p.tick(plant,.1f,true,e)&&h->frame==3);CHECK(p.collision(plant,&captain,true,false,10,2,0,true,e)&&h->touched&&engine.sounds==2&&engine.touches.size()==4&&h->frame==3);
+ CHECK(p.collision(plant,&pikmin,false,false,10,2,0,true,e)&&p.earthquake(plant,e)&&engine.touches.size()==4&&h->frame==3);
+ CHECK(p.tick(plant,2,false,e)&&!h->active&&!h->touched);CHECK(p.collision(plant,&captain,true,false,10,2,0,true,e)&&engine.touches.size()==5&&engine.sounds==3&&h->frame==0);
+ CHECK(p.release(plant,700,e));CHECK(!p.earthquake(plant,e)&&!p.collision(plant,&captain,true,false,10,2,0,true,e)&&engine.touches.size()==5);
+ // A fresh reservation owns a fresh actor even when source/ordinal repeat.
+ CHECK(prepare()&&birth()&&p.bind(r,plant,701,e));CHECK(p.earthquake(plant,e)&&engine.touches.size()==6&&engine.touches.back().plant==plant&&engine.touches.back().token==701&&engine.touches.back().instigator==nullptr);CHECK(p.release(plant,701,e));
+}
+int main(){try{identityAndResources();reservationAndCleanup();forestIdentityAndResources();allNineOwnership();literalCylinderPlanes();caveAuthenticationAndResources();caveLifetimeAndRegistry();for(auto source:{46u,47u,49u,51u,52u,80u,88u,90u,91u})typedTouchHooks(row(source,source),false);for(const auto& r:caveRows())typedTouchHooks(r,true);for(auto source:{46u,47u,49u,51u,52u,80u,88u,90u,91u})touchAndTiming(source);std::cout<<"Foliage sources46,47,49,51,52,80,88,90,91 literal identities, distinct banks, zero resource rows, lifecycle, cylinder planes and touch timing controls PASS; native gameplay not claimed\n";}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

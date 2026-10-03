@@ -173,12 +173,8 @@ struct Native::Impl final:Engine {
   // Surface owns a native generator; genuine cave births deliberately carry
   // no P1 generator. Cave registry associations remain with the floor caller.
   actor->mGenerator=h.generator;actor->mSRT.t.set(p.x,p.y,p.z);actor->mFaceDirection=facing;actor->mSRT.r.set(0,facing,0);actor->mSRT.s.set(1,1,1);
-<<<<<<< HEAD
   actor->mHealth=actor->mMaxHealth=b.health;actor->mVelocity.set(0,0,0);actor->mCollisionRadius=b.spheres[0].radius;actor->mSize=b.spheres[0].radius;
   actor->mVolatileVelocity.set(0,0,0);actor->mTargetVelocity.set(0,0,0);
-=======
-  actor->mHealth=actor->mMaxHealth=b.health;actor->mVelocity.set(0,0,0);actor->mVolatileVelocity.set(0,0,0);actor->mTargetVelocity.set(0,0,0);actor->mCollisionRadius=b.spheres[0].radius;actor->mSize=b.spheres[0].radius;
->>>>>>> 42152ddab (Preserve retail foliage contact without host collision impulses)
   actor->setCreatureFlag(CF_DisableMovement);actor->setCreatureFlag(CF_IsAiDisabled);
   for(unsigned option:{BTeki::TEKI_OPTION_VISIBLE,BTeki::TEKI_OPTION_ATARI,BTeki::TEKI_OPTION_ALIVE,BTeki::TEKI_OPTION_SHAPE_VISIBLE,BTeki::TEKI_OPTION_INVINCIBLE})actor->setTekiOption(option);
   actor->clearTekiOption(BTeki::TEKI_OPTION_ORGANIC);actor->clearTekiOption(BTeki::TEKI_OPTION_GRAVITATABLE);
@@ -220,12 +216,8 @@ bool Native::tick(BTeki* actor,float dt,std::string& e){
  auto* h=m->provider.lookup(actor);if(!h)return false;auto& t=*m->tracks.at(actor);
  m->simulationVisibility(actor,t);
  if(!m->provider.tick(actor,dt,t.visible,e))return false;
-<<<<<<< HEAD
  actor->mVelocity.set(0,0,0);actor->mStoredDamage=0;actor->mHealth=t.bank->health;
  actor->mVolatileVelocity.set(0,0,0);actor->mTargetVelocity.set(0,0,0);
-=======
- actor->mVelocity.set(0,0,0);actor->mVolatileVelocity.set(0,0,0);actor->mTargetVelocity.set(0,0,0);actor->mStoredDamage=0;actor->mHealth=t.bank->health;
->>>>>>> 42152ddab (Preserve retail foliage contact without host collision impulses)
  actor->mSRT.t.set(h->position.x,h->position.y,h->position.z);actor->mGrid.updateGrid(actor->mSRT.t);actor->mGrid.updateAIGrid(actor->mSRT.t,false);
  t.presented.advance(dt);m->follow(actor,t);return true;
 }
