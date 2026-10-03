@@ -1,5 +1,6 @@
 #if defined(PIKI_PC_PORT)
 #include "pc_p2_original_captain_damage.h"
+#include "pc_p2_original_captain_down.h"
 #endif
 #include "MoviePlayer.h"
 #include "pc_bbft.h"
@@ -700,6 +701,10 @@ void MoviePlayer::sndStopMovie(MovieInfo* info)
  */
 void MoviePlayer::update()
 {
+#if defined(PIKI_PC_PORT)
+ // The authenticated source Studio owner advances once in this actual update.
+ pc_p2_original_captain_down_update(this, gsys->getFrameTime());
+#endif
     if (pc_bbft_take_skip() && mIsActive) requestSkip();
 	gameflow.mDemoFlags = CinePlayerFlags::Empty;
 	if (gsys->mDvdErrorCode >= DvdError::ReadingDisc) {
