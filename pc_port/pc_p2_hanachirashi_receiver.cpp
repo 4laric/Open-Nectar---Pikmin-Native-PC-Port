@@ -152,6 +152,7 @@ struct WindInteraction : Interaction {
     bool actNavi(Navi* n) immut override {
         if(!n||!n->getCurrState()||!n->mStateMachine)return false;
         bool alive;const auto* world=pc_p2_original_captain_world();if(!world||world->phase()!=p2original::captain::Phase::GameWorldActive||!pc_p2_original_captain_actor_lifetime(n,alive))return false;
+        int mapped=-1;if(pc_p2_original_captain_route_transition(n,NAVISTATE_HanachirashiFlick,mapped)!=PcOriginalCaptainRoute::Handled||mapped!=NAVISTATE_HanachirashiFlick)return false;
         if(generated&&p2original::captain::flickAdmission(mOwner,n)!=p2original::captain::Refusal::None)return false;
         if(wither&&pc_p2_equipment_has(p2equipment::Item::RepugnantAppendage))return false;
         auto* bank=pc_p2_original_captain_source_bank();std::string error;
