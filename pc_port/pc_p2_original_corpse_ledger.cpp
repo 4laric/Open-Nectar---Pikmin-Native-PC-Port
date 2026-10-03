@@ -10,9 +10,7 @@ const std::uint8_t magic[8]={'P','2','C','O','R','P','S','E'};
 bool fail(std::string& e,const char* text){e=text;return false;}
 bool fingerprint(const std::string& s){if(s.size()!=64)return false;for(char c:s)if(!((c>='0'&&c<='9')||(c>='a'&&c<='f')))return false;return true;}
 bool valid(const CorpseRecord& r,const std::string& catalog){
- return fingerprint(catalog)&&r.identity.catalog==catalog&&
- (r.identity.generator&0xff000000u)==0x52000000u&&r.identity.ordinal<10&&
- r.identity.epoch&&r.identity.activation&&r.sourceType<=65535&&r.sourceType!=55&&
+ return validCorpseIdentity(r.identity,catalog)&&r.sourceType<=65535&&r.sourceType!=55&&
  r.yield>0&&r.yield<=65535;
 }
 bool validate(const CorpseSnapshot& s,std::string& e){
@@ -23,6 +21,10 @@ bool validate(const CorpseSnapshot& s,std::string& e){
 }
 void put(std::vector<std::uint8_t>& out,std::uint64_t v,unsigned n){for(unsigned i=0;i<n;++i){out.push_back(static_cast<std::uint8_t>(v));v>>=8;}}
 std::uint64_t get(const std::vector<std::uint8_t>& in,std::size_t& p,unsigned n){std::uint64_t v=0;for(unsigned i=0;i<n;++i)v|=std::uint64_t(in[p++])<<(8*i);return v;}
+}
+bool validCorpseIdentity(const InstanceIdentity& id,const std::string& catalog){
+ return fingerprint(catalog)&&id.catalog==catalog&&
+  (id.generator&0xff000000u)==0x52000000u&&id.ordinal<10&&id.epoch&&id.activation;
 }
 bool encodeCorpseSnapshot(const CorpseSnapshot& s,std::vector<std::uint8_t>& out,std::string& e){
  if(!validate(s,e))return false;
