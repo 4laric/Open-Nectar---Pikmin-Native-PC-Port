@@ -1856,7 +1856,7 @@ void testTitanSeedStandoff()
     CHECK(scale < 0.5f, "titan-seed/look_band_aim");
 }
 
-void testAftermathCursorAimCorpse()
+void testAftermathCursorAimCorpse(unsigned testedSource = 38)
 {
     // #898: a cursor-aim corpse (Breadbug 38) is never walked onto. Far: walk
     // in, no throws. Near: step back. In the band: look-band stick slides the
@@ -1870,7 +1870,7 @@ void testAftermathCursorAimCorpse()
     brain.update(0.05f, s);
     brain.update(0.05f, s); // -> select
     s.targetToken = 1945764764u;
-    s.targetSource = 38;
+    s.targetSource = testedSource;
     s.targetAlive = true;
     s.targetDist = 100.0f;
     s.naviX = 0.0f;
@@ -1907,9 +1907,10 @@ void testAftermathCursorAimCorpse()
     CHECK(brain.command().moveX < -0.9f, "cursor-aim/steps_back_near");
     CHECK(!(brain.command().buttons & unsigned(p2autoplay::PadA)), "cursor-aim/no_throw_near");
     // Band (d=55), cursor 30 u past the corpse: look-band slide, no release.
-    s.targetDist = 55.0f;
-    s.tgtX = 55.0f;
-    s.cursorX = 85.0f;
+    const float band = testedSource == 35 ? 95.0f : 55.0f;
+    s.targetDist = band;
+    s.tgtX = band;
+    s.cursorX = band + 30.0f;
     bool bandThrow = false;
     for (int i = 0; i < 10; ++i) {
         brain.update(0.05f, s);
@@ -1919,7 +1920,7 @@ void testAftermathCursorAimCorpse()
     }
     CHECK(!bandThrow, "cursor-aim/no_throw_off_target");
     // Cursor on the corpse: stand still (no walk stick) and throw.
-    s.cursorX = 58.0f;
+    s.cursorX = band + 3.0f;
     bool onThrow = false, walked = false;
     for (int i = 0; i < 10; ++i) {
         brain.update(0.05f, s);
@@ -1975,6 +1976,64 @@ void testAftermathCursorAimCorpse()
     other.update(0.05f, o);
     other.update(0.05f, o);
     CHECK(other.current() == p2autoplay::State::Aftermath && other.command().moveX > 0.9f, "cursor-aim/other_species_walks_onto");
+}
+
+void testOrdinaryCorpseResupply()
+{
+    setEnv("PIKMIN_RANDOMIZER_AUTOPLAY_POWER", nullptr);
+    setEnv("PIKMIN_RANDOMIZER_AUTOPLAY_RESUPPLY", nullptr);
+    for (int scenario = 0; scenario < 6; ++scenario) {
+        p2autoplay::Config cfg;
+        cfg.wantSquad = 15;
+        cfg.ordinaryResupply = scenario != 1;
+        p2autoplay::Brain brain(cfg);
+        auto s = liveSenses();
+        s.fieldPikmin = 20;
+        brain.update(0.05f, s);
+        brain.update(0.05f, s);
+        s.targetToken = 1221001;
+        s.targetSource = 35;
+        s.targetAlive = true;
+        s.targetDist = 100;
+        s.tgtX = 100;
+        brain.update(0.05f, s);
+        brain.update(0.05f, s);
+        s.targetHealthFrac = 0.5f;
+        brain.update(0.05f, s);
+        s.targetAlive = false;
+        s.targetDead = true;
+        s.pelletExists = true;
+        s.carryWant = 10;
+        s.fieldPikmin = scenario == 3 ? 10 : 8;
+        s.hasOnion = true;
+        s.onionStored = scenario == 2 ? 0 : 20;
+        s.onionX = -500;
+        s.onionDist = 500;
+        s.trackingPart = scenario == 4;
+        s.receiptSeen = scenario == 5;
+        brain.update(0.05f, s);
+        for (int i = 0; i < 120; ++i) brain.update(0.05f, s);
+        auto markers = brain.takeMarkers();
+        if (scenario == 0) {
+            CHECK(brain.current() == p2autoplay::State::WithdrawSeek, "ordinary-resupply/short_crew_returns_to_onion");
+            CHECK(hasMarker(markers, "AUTOPLAY_ORDINARY_RESUPPLY"), "ordinary-resupply/names_real_stock_and_attempt");
+            CHECK(brain.command().moveX < 0, "ordinary-resupply/steers_through_normal_pad");
+            CHECK(s.fieldPikmin == 8 && s.onionStored == 20, "ordinary-resupply/does_not_synthesize_stock");
+            s.containerOpen = true;
+            brain.update(0.05f, s);
+            brain.update(0.05f, s);
+            CHECK(brain.current() == p2autoplay::State::WithdrawMenu && brain.command().menuHold,
+                  "ordinary-resupply/withdraws_through_real_menu_input");
+            for (int i = 0; i < 240; ++i) brain.update(0.05f, s);
+            s.containerOpen = false;
+            s.fieldPikmin = 10; // sensed result of a real withdrawal, not a bot write
+            brain.update(0.05f, s);
+            brain.update(0.05f, s);
+            CHECK(brain.current() == p2autoplay::State::Aftermath, "ordinary-resupply/preserves_dead_engagement");
+        } else {
+            CHECK(!hasMarker(markers, "AUTOPLAY_ORDINARY_RESUPPLY"), "ordinary-resupply/guards_disabled_empty_enough_part_and_receipt");
+        }
+    }
 }
 
 void testAftermathNoWhistle()
@@ -4353,6 +4412,7 @@ int main()
     testGenericDeath();
     testNoDeliverAbandonsCorpse();
     testAftermathCursorAimCorpse();
+    testAftermathCursorAimCorpse(35);
     testDoneReengagesLateTarget();
     testWithdrawRepeat();
     testSaraiFlyer();
@@ -4370,6 +4430,7 @@ int main()
     testResupply();
     testAftermathEscortExtension();
     testAftermathNoWhistle();
+    testOrdinaryCorpseResupply();
     testTitanAftermathRegroup();
     testObstacleWorkAndDetourProgress();
     testTitanRegroupWalksToStrays();

@@ -234,6 +234,8 @@ bool bfsPath(int selfIdx, int tgtIdx, std::vector<std::pair<float, float>>& out)
         for (int k = 0; k < links; ++k) {
             const int nx = wp->mLinkIndices[k];
             if (nx < 0 || nx >= n || parent[nx] != -1) continue;
+            WayPoint* next = routeMgr->getWayPoint(handle, nx);
+            if (!next || !next->mIsOpen || next->inWater()) continue;
             parent[nx] = cur;
             q.push(nx);
         }
@@ -532,6 +534,54 @@ bool planHinderRock(float naviX, float naviZ)
                 double(box->mDestinationPosition.z), double(size), box->mAmountPushersToStart, double(naviX),
                 double(naviZ), double(sPath[0].first), double(sPath[0].second));
     std::fflush(stdout);
+    return true;
+}
+
+// #1221 private diagnostic: work an ordinary gate using only normal swarm
+// input. Never attack bomb gates, edit gate health or open route waypoints.
+// Re-find the building each tick; scene changes cannot leave a stale pointer.
+float sGateWorkSeconds = 0.0f;
+bool ordinaryGateCommand(Navi* navi, float targetX, float targetZ, float dt,
+                         p2autoplay::Command& command)
+{
+    const char* enabled = std::getenv("PIKMIN_RANDOMIZER_AUTOPLAY_GATE_WORK");
+    if (!enabled || std::strcmp(enabled, "1") != 0 || !itemMgr || !itemMgr->getMeltingPotMgr() || !navi
+        || sGateWorkSeconds >= 180.0f) return false;
+    BuildingItem* gate = nullptr;
+    float best = 280.0f;
+    const Vector3f pos = navi->getPosition();
+    Iterator it(itemMgr->getMeltingPotMgr());
+    CI_LOOP(it) {
+        auto* item = static_cast<ItemCreature*>(*it);
+        if (!item || (item->mObjType != OBJTYPE_SluiceSoft && item->mObjType != OBJTYPE_SluiceHard)) continue;
+        auto* wall = static_cast<BuildingItem*>(item);
+        if (wall->isCompleted() || !wall->mWayPoint || wall->mWayPoint->mIsOpen) continue;
+        const Vector3f at = wall->getPosition();
+        const float dx = at.x - pos.x, dz = at.z - pos.z;
+        if (dx * (targetX - pos.x) + dz * (targetZ - pos.z) <= 0.0f) continue;
+        const float distance = distXZ(pos.x, pos.z, at.x, at.z);
+        if (distance < best) { best = distance; gate = wall; }
+    }
+    if (!gate) return false;
+    sGateWorkSeconds += dt > 0.0f && dt <= 0.5f ? dt : 0.016f;
+    const Vector3f at = gate->getPosition();
+    const float nx = std::sin(gate->mSRT.r.y), nz = std::cos(gate->mSRT.r.y);
+    const float side = (pos.x - at.x) * nx + (pos.z - at.z) * nz < 0.0f ? -1.0f : 1.0f;
+    const float standX = at.x + side * nx * 130.0f;
+    const float standZ = at.z + side * nz * 130.0f;
+    command = p2autoplay::Command{};
+    const float dx = standX - pos.x, dz = standZ - pos.z;
+    const float length = std::sqrt(dx * dx + dz * dz);
+    if (length > 25.0f) { command.moveX = dx / length; command.moveZ = dz / length; }
+    const float sx = at.x - pos.x, sz = at.z - pos.z;
+    const float distance = std::sqrt(sx * sx + sz * sz);
+    if (distance > 1.0f) { command.swarmX = sx / distance; command.swarmZ = sz / distance; }
+    if (sTicks % 300 == 0) {
+        std::printf("AUTOPLAY_GATE_WORK pos=(%.0f,%.0f) stand=(%.0f,%.0f) navi=(%.0f,%.0f) stage=%d/%d health=%.4f seconds=%.1f input_only=1\n",
+                    at.x, at.z, standX, standZ, pos.x, pos.z, gate->mCurrStage, gate->mNumStages,
+                    gate->mHealth, sGateWorkSeconds);
+        std::fflush(stdout);
+    }
     return true;
 }
 
@@ -1792,7 +1842,10 @@ void pc_p2_autoplay_tick(void)
         }
     }
 
-    sBrain.update(dt, senses);
+    p2autoplay::Command gateCommand;
+    const bool gateWorking = sBrain.current() == p2autoplay::State::Approach
+        && ordinaryGateCommand(navi, senses.tgtX, senses.tgtZ, dt, gateCommand);
+    if (!gateWorking) sBrain.update(dt, senses);
 
     // Completed-target bookkeeping from emitted RESULT lines.
     for (const std::string& marker : sBrain.takeMarkers()) {
@@ -1814,6 +1867,7 @@ void pc_p2_autoplay_tick(void)
 
     // --- Pad synthesis through the live camera basis ---
     p2autoplay::Command cmd = sBrain.command();
+    if (gateWorking) cmd = gateCommand;
     // TEST-ONLY coarse water map (PIKMIN_RANDOMIZER_AUTOPLAY_WATER_MAP=1): one dump of
     // ground (.), water (W) and no-ground (x) on a 50 u grid so a lure path can be planned.
     {

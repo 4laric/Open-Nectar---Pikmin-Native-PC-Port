@@ -190,6 +190,13 @@ inline bool isPowerEnabled()
     return v && v[0] && std::strcmp(v, "0") != 0;
 }
 
+inline bool ordinaryResupplyEnabled()
+{
+    if (!isEnabled()) return false;
+    const char* v = std::getenv("PIKMIN_RANDOMIZER_AUTOPLAY_RESUPPLY");
+    return v && std::strcmp(v, "1") == 0;
+}
+
 // #958 test tooling: PIKMIN_RANDOMIZER_AUTOPLAY_PURPLE=1 makes the power-mode
 // squad Purple (through the ordinary pc_p2_make_purple, like the power-mode
 // flowering above) so a bot run can press the Giant Breadbug (OoPanModoki
@@ -391,7 +398,7 @@ inline bool isPressOnly(unsigned source) { return source == 38 || source == 40; 
 // these corpses the bot stands off, slides the cursor onto the corpse with
 // the P1 look band (the captain stands still) and throws only when the
 // cursor is on it. Pad input only, like every other bot stance.
-inline bool aimsCorpseWithCursor(unsigned source) { return source == 38 || source == 40; }
+inline bool aimsCorpseWithCursor(unsigned source) { return source == 35 || source == 38 || source == 40; }
 
 // #884 round 4: KingChappy (53) keeps the captain OUT of the source
 // invisible range while attacking. Source searchTarget prefers a captain in
@@ -491,6 +498,7 @@ struct Config {
     float corpseCursorTol = 12.0f; // #898 cursor-aim corpses: throw only with the cursor this close
     float corpseAimWhistleCooldown = 10.0f; // #898 cursor-aim corpses: throw window after a regroup whistle
     bool noDeliver = false; // #898 TEST-ONLY: abandon corpses (also env NO_DELIVER)
+    bool ordinaryResupply = ordinaryResupplyEnabled(); // #1221 normal Onion menu, no stock edits
     float noDeliverWhistle = 3.0f; // #898 whistle hold before abandoning a corpse
     // #246: the Titan Dweevil (73) soaks 4 x 6000 weapon HP before its 5000
     // body HP is exposed, and only a Pikmin stuck on a weapon's own part
@@ -970,6 +978,9 @@ public:
         rollerMode = -1;
         rollerWhistleTime = 0.0f;
         powerResupplying = false;
+        ordinaryResupplying = false;
+        ordinaryWant = 0;
+        ordinaryRestocks = 0;
         powerAtOnion = false;
         pushTime = 0.0f;
         pushing = false;
@@ -1055,6 +1066,7 @@ private:
     }
     void enter(State next, const Senses& in)
     {
+        if (next == State::Aftermath) ordinaryResupplying = false;
         state = next;
         stateTime = 0.0f;
         pressPhase = 0.0f;
@@ -1195,6 +1207,10 @@ private:
     void cursorAimThrow(const Senses& in)
     {
         const float d = in.targetDist;
+        // #1221 the Bulbear corpse is pushed by contact steering. Hold near
+        // the live ~95-unit throw cursor, outside the body, and aim before release.
+        const float near = in.targetSource == 35 ? 80.0f : cfg.corpseAimNear;
+        const float far = in.targetSource == 35 ? 110.0f : cfg.corpseAimFar;
         // Regroup: throws need Pikmin at the captain. After the presses the
         // squad is spread over the kill site (y1: 53 on the field, fewer than
         // 5 near the captain, 2 carriers for 100 s, no throw ever landed).
@@ -1216,13 +1232,13 @@ private:
             pressPhase = 0.0f;
             return;
         }
-        if (d > cfg.corpseAimFar) {
+        if (d > far) {
             steer(in.naviX, in.naviZ, in.tgtX, in.tgtZ);
             pressOn = false; // no throws while walking: the cursor trails the stick
             pressPhase = 0.0f;
             return;
         }
-        if (d < cfg.corpseAimNear) {
+        if (d < near) {
             steerAway(in.naviX, in.naviZ, in.tgtX, in.tgtZ);
             pressOn = false;
             pressPhase = 0.0f;
@@ -1276,7 +1292,7 @@ private:
             }
             return; // neutral pad: no A taps, no menu, the queue lands on its own
         }
-        if (in.fieldPikmin >= effectiveWantSquad(cfg)) {
+        if (in.fieldPikmin >= wantedSquad()) {
             enter(State::Select, in);
             return;
         }
@@ -1335,7 +1351,7 @@ private:
         if (!in.containerOpen) {
             // UI closed after our A confirm: one withdraw cycle landed.
             if (menuConfirmed) {
-                if (in.fieldPikmin >= effectiveWantSquad(cfg) || in.onionStored <= 0
+                if (in.fieldPikmin >= wantedSquad() || in.onionStored <= 0
                     || withdrawCycles + 1 >= effectiveMaxWithdrawCycles(cfg)) {
                     enter(State::Select, in);
                     return;
@@ -1359,7 +1375,7 @@ private:
             }
             return;
         }
-        if (in.fieldPikmin >= effectiveWantSquad(cfg) || in.onionStored <= 0) {
+        if (in.fieldPikmin >= wantedSquad() || in.onionStored <= 0) {
             // Already have a squad (e.g. re-entered): confirm and leave, but
             // NEVER while the container UI is still open (bot-v3: leaving
             // dirty strands the navi in NAVISTATE_Container, where the stick
@@ -1961,6 +1977,22 @@ private:
         if (in.corpseMoving || in.corpseMoved) sawMove = true;
         observeDeath(in);
         observeReceipt(in);
+        if (cfg.ordinaryResupply && !isPowerEnabled() && !cfg.noDeliver && !noDeliverEnabled()
+            && !in.trackingPart && sawKill && !sawReceipt && in.pelletExists
+            && stateTime >= 5.0f && in.carryWant > in.fieldPikmin
+            && in.hasOnion && in.onionStored > 0 && ordinaryRestocks < 2) {
+            ordinaryResupplying = true;
+            ordinaryWant = in.carryWant;
+            ++ordinaryRestocks;
+            withdrawCycles = 0;
+            char buf[200];
+            std::snprintf(buf, sizeof(buf), "AUTOPLAY_ORDINARY_RESUPPLY token=%u field=%d want=%d stored=%d attempt=%d input_only=1",
+                          in.targetToken, in.fieldPikmin, ordinaryWant, in.onionStored, ordinaryRestocks);
+            markers.emplace_back(buf);
+            enter(State::WithdrawSeek, in);
+            wantReplan = true;
+            return;
+        }
         if (in.trackingPart && noPartCarry()) {
             // #901 TEST-ONLY: hold the whistle a few seconds so every Pikmin
             // near the part rejoins the party, then stop engaging; the part
@@ -2983,6 +3015,10 @@ public:
 
 private:
     Config cfg;
+    int wantedSquad() const { return ordinaryResupplying ? ordinaryWant : effectiveWantSquad(cfg); }
+    bool ordinaryResupplying = false;
+    int ordinaryWant = 0;
+    int ordinaryRestocks = 0;
     State state = State::Idle;
     float stateTime = 0.0f;
     float engageTime = 0.0f;
