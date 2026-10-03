@@ -5,10 +5,13 @@
 class Piki;
 struct OriginalPikiOrigin {
  std::string sourceKey;
+ // Synthetic external catalog UID, distinct from retail/runtime UID0.
+ // No native Generator is fabricated for a source GenPiki body.
  std::uint32_t recordUid=0,attempt=0;
  std::uint64_t activation=0;
  std::string catalogFingerprint;
 };
+// uid is originalSourceCatalogUid(sourceKey), not the retail Piki UID.
 struct OriginalPikiSource {std::string sourceKey;std::uint32_t uid=0,count=0;std::uint8_t species=0;};
 // Full immutable Piki catalog, including currently inactive calendar members.
 // Install only before births/after old scene associations have been forgotten.
@@ -48,3 +51,8 @@ bool pc_p2_cave_campaign_survivor_body(const std::string& sourceKey,
  std::uint32_t recordUid,std::uint32_t attempt,std::uint64_t activation,
  const std::string& catalogFingerprint,OriginalPikiBodyState& state,
  std::uint64_t* generation,std::uint8_t sha[32]);
+
+// Read-only source admission before a physical birth; exact member/species,
+// fresh flags and no current live association. No native allocation or RNG.
+bool pc_p2_original_piki_body_birth_admit(const OriginalPikiBody&);
+bool pc_p2_original_piki_body_wild(const Piki*) noexcept;

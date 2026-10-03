@@ -1,11 +1,16 @@
 #include "pc_p2_original_piki_origin.h"
-#include "pc_p2_original_catalog.h"
+#include "pc_p2_original_source_uid.h"
 #include <map>
+#include <set>
+#include <tuple>
 namespace {
 std::string fingerprint;
 std::map<std::string,OriginalPikiSource> sources;
 struct Body {OriginalPikiOrigin origin;OriginalPikiBodyState state;bool hasState=false;};
 std::map<const Piki*,Body> bodies;
+using BirthKey=std::tuple<std::string,std::uint32_t,std::uint32_t,std::uint64_t>;
+std::set<BirthKey> bornMembers;
+BirthKey birthKey(const OriginalPikiOrigin&o){return {o.sourceKey,o.recordUid,o.attempt,o.activation};}
 bool fp(const std::string& f){if(f.size()!=64)return false;for(char c:f)if(!((c>='0'&&c<='9')||(c>='a'&&c<='f')))return false;return true;}
 bool key(const std::string& s){
  if(s.empty()||s.size()>256)return false;
@@ -38,8 +43,12 @@ bool attach(Piki* p,const OriginalPikiOrigin& o,const OriginalPikiBodyState* sta
 bool pc_p2_original_piki_origin_install(const std::string& f,const std::vector<OriginalPikiSource>& rows,std::string& e){
  if(!bodies.empty()||!fp(f)||rows.empty()||rows.size()>65536){e="original Piki authority requires empty old scene and a full bound catalog";return false;}
  std::map<std::string,OriginalPikiSource> next;std::map<std::uint32_t,bool> uids;
- for(const auto& row:rows)if(!key(row.sourceKey)||row.count>65535||row.species>5||row.uid!=p2original::originalGeneratorUid(row.sourceKey)||!uids.emplace(row.uid,true).second||!next.emplace(row.sourceKey,row).second){e="invalid/duplicate original Piki source or count";return false;}
- std::string nextFingerprint=f;sources.swap(next);fingerprint.swap(nextFingerprint);e.clear();return true;
+ for(const auto& row:rows)if(!key(row.sourceKey)||row.count>65535||row.species>5||row.uid!=p2original::originalSourceCatalogUid(row.sourceKey)||!uids.emplace(row.uid,true).second||!next.emplace(row.sourceKey,row).second){e="invalid/duplicate original Piki source or count";return false;}
+ if(f==fingerprint){
+  if(next.size()!=sources.size()){e="same original Piki fingerprint changed catalog";return false;}
+  for(const auto& row:next){auto old=sources.find(row.first);if(old==sources.end()||old->second.uid!=row.second.uid||old->second.count!=row.second.count||old->second.species!=row.second.species){e="same original Piki fingerprint changed catalog";return false;}}
+ }
+ std::string nextFingerprint=f;if(f!=fingerprint)bornMembers.clear();sources.swap(next);fingerprint.swap(nextFingerprint);e.clear();return true;
 }
 bool pc_p2_original_piki_origin_associate_birth(Piki* p,const OriginalPikiOrigin& o){return attach(p,o);}
 bool pc_p2_original_piki_origin_query(const Piki* p,OriginalPikiOrigin& out){auto i=bodies.find(p);if(i==bodies.end())return false;OriginalPikiOrigin next=i->second.origin;out=std::move(next);return true;}
@@ -56,8 +65,11 @@ void pc_p2_original_piki_origin_forget(Piki* p){bodies.erase(p);}
 
 bool pc_p2_original_piki_body_associate_birth(Piki* p,const OriginalPikiBody& body){
  // Fresh source setZikatu(true/false) never produces a previously-recruited body.
- if(body.state.wild!=body.state.wasWild)return false;
- return attach(p,body.origin,&body.state);
+ if(!p||!pc_p2_original_piki_body_birth_admit(body))return false;
+ auto inserted=bornMembers.insert(birthKey(body.origin));if(!inserted.second)return false;
+ try {if(attach(p,body.origin,&body.state))return true;}
+ catch(...) {bornMembers.erase(inserted.first);throw;}
+ bornMembers.erase(inserted.first);return false;
 }
 bool pc_p2_original_piki_body_query(const Piki* p,OriginalPikiBody& out){
  auto i=bodies.find(p);if(i==bodies.end()||!i->second.hasState)return false;
@@ -72,10 +84,27 @@ bool pc_p2_original_piki_body_restore_saved(Piki* p,const OriginalPikiBody& body
      o.catalogFingerprint,selected,&generation,sha)||!generation
      ||!stateValid(selected)||!stateSame(selected,body.state))return false;
  bool nonzero=false;for(auto byte:sha)nonzero|=byte!=0;if(!nonzero)return false;
- return attach(p,o,&body.state);
+ // Restoration may legitimately reuse a durable member from an older selected
+ // SAVE, but subsequent fresh-source spawning must not replay that member.
+ auto remembered=bornMembers.insert(birthKey(o));
+ try {if(attach(p,o,&body.state))return true;}
+ catch(...) {if(remembered.second)bornMembers.erase(remembered.first);throw;}
+ if(remembered.second)bornMembers.erase(remembered.first);
+ return false;
 }
 bool pc_p2_original_piki_body_recruited(Piki* p){
  auto i=bodies.find(p);if(i==bodies.end()||!i->second.hasState
      ||i->second.state.species>2||!i->second.state.wild)return false;
  i->second.state.wild=false;return true;
+}
+
+bool pc_p2_original_piki_body_birth_admit(const OriginalPikiBody& b){
+ if(!valid(b.origin)||!stateValid(b.state)||b.state.wild!=b.state.wasWild
+     ||sources.at(b.origin.sourceKey).species!=b.state.species
+     ||bornMembers.count(birthKey(b.origin)))return false;
+ for(const auto& current:bodies)if(same(current.second.origin,b.origin))return false;
+ return true;
+}
+bool pc_p2_original_piki_body_wild(const Piki* p) noexcept {
+ auto i=bodies.find(p);return i!=bodies.end()&&i->second.hasState&&i->second.state.wild;
 }

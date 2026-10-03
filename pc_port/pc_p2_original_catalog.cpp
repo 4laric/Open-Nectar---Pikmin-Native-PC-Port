@@ -1,5 +1,5 @@
 #include "pc_p2_original_catalog.h"
-#include "netplay/pc_netplay_sha256.h"
+#include "pc_p2_original_source_uid.h"
 #include <limits>
 #include <set>
 namespace p2original {
@@ -9,7 +9,7 @@ bool fingerprintValid(const std::string& s){if(s.size()!=64)return false;for(cha
 bool componentValid(const std::string& s){if(s.empty()||s=="."||s==".."||s.size()>255)return false;for(unsigned char c:s)if(!((c>='a'&&c<='z')||(c>='A'&&c<='Z')||(c>='0'&&c<='9')||c=='_'||c=='-'||c=='.'))return false;return true;}
 bool memberValid(const std::string& s){if(s.empty()||s.size()>2048)return false;size_t begin=0;for(;;){auto end=s.find('/',begin);if(!componentValid(s.substr(begin,end==std::string::npos?end:end-begin)))return false;if(end==std::string::npos)return true;begin=end+1;}}
 }
-unsigned originalGeneratorUid(const std::string& key){unsigned char bytes[32];pc_netplay_sha::sha256(key.data(),key.size(),bytes);return 0x52000000u|(unsigned(bytes[0])<<16)|(unsigned(bytes[1])<<8)|bytes[2];}
+unsigned originalGeneratorUid(const std::string& key){return originalSourceCatalogUid(key);}
 bool Catalog::install(const std::string& fingerprint,const std::vector<CatalogRow>& rows,const Capability& capability,std::string& error){
  if(!mActors.empty()||!mGenerators.empty())return fail(error,"original catalog has live native bindings");
  if(!fingerprintValid(fingerprint)||rows.empty()||rows.size()>65536||!capability)return fail(error,"invalid original catalog envelope");
