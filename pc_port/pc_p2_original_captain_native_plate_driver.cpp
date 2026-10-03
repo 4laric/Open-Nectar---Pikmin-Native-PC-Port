@@ -22,7 +22,7 @@ public:
    ||s->sourceCatalog()!=catalog||w->sourceCatalog()!=catalog||pc_p2_original_captain_native_reader()!=reader
    ||piki::nativePlate(*s,e)!=plate||(w->phase()!=Phase::Loading&&w->phase()!=Phase::GameWorldActive)
    ||(n&&n!=s->captainAt(0)&&n!=s->captainAt(1)))return fail(e,"actual source CPlate driver lost sole Body/Reader owner");
-  return true;
+  return !n||reader->currentBody(n,e);
  }
  bool execute(Navi* n,const cstick::Command& command,std::string& e)override {
   if(!n||!current(n,e))return false;

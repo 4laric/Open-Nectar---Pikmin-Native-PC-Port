@@ -40,6 +40,8 @@ public:
  // then Navi::onInit. Repeated onInit preserves PelletView's existing pointer.
  bool initializeAfterBodyReset(std::string&);
  bool bindPlate(PlateDriver&,std::string&);
+ // Read-only exact body lifetime check for the ordered child driver.
+ bool currentBody(const Navi*,std::string&)const;
  bool prepareCStick(Navi*,const nativecontrol::Request&,Plan&,std::string&)const;
  // Every commit preflights actual nativecontrol Effects.commit in flight before
  // any prefix write; active clock reset precedes Refresh at navi.cpp4871.

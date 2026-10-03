@@ -43,6 +43,7 @@ struct Reader::Impl {
  }
 };
 Reader::Reader():m(std::make_unique<Impl>()){}Reader::~Reader()=default;
+bool Reader::currentBody(const Navi* n,std::string& e)const{return n&&m->check(n,e);}
 const LoadedScene& Reader::scene()const{if(!m->owner)std::abort();return *m->owner;}
 const std::string& Reader::naviParameterBytes()const{return m->bytes;}
 piki::PlateSource& Reader::plateSource()const{return *const_cast<Reader*>(this);}

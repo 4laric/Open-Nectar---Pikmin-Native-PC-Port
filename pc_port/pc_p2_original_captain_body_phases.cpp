@@ -100,7 +100,7 @@ struct Owner::Impl {
    if(!call(n,e,[&]{return trace.map(*n,info,rate,e);}))return false;
    if(!finite(info.velocity)||!finite(info.sphere.center)||!finite(info.floorNormal)||!finite(info.wallNormal))return fail(e,"invalid actual map trace output");
    put(n->mVelocity,info.velocity);
-   if(info.roomIndex!=-1){if(!call(n,e,[&]{return trace.room(*n,info.roomIndex,e);}))return false;a->fields.roomIndex=info.roomIndex;}
+   if(info.roomIndex!=-1){a->fields.roomIndex=info.roomIndex;if(!call(n,e,[&]{return trace.room(*n,info.roomIndex,e);}))return false;}
   }else{info.sphere.center=add(info.sphere.center,scale(get(n->mVelocity),rate));info.floor={};}
   if(!a->fields.floor.triangle&&info.floor.triangle)if(!call(n,e,[&]{FlagEvent event(*this);return provider.bounce(*n,info.floor,e);},true))return false;
   a->fields.floor=info.floor;a->fields.floorNormal=info.floorNormal;
