@@ -39,6 +39,7 @@
 #include "pc_p2_demon_host.h"
 #include "pc_p2_sarai_manager.h"
 #include "pc_p2_cave.h"
+#include "pc_p2_cave_visible.h"
 #include "pc_p2_cave_items_engine.h"
 #include "pc_p2_kurage_receiver.h"
 #include "pc_p2_captain.h"
@@ -5511,6 +5512,7 @@ void GameCoreSection::draw(Graphics& gfx)
 		routeMgr->refresh(gfx);
 	}
 	pc_p2_cave_draw_transition(gfx);
+	pc_p2_cave_visible_draw(gfx);
 	pc_p2_breadbug_visual_draw(gfx);
 	pc_p2_breadbug_teki_draw_nests(gfx);
 	pc_p2_giant_breadbug_visual_draw(gfx);
