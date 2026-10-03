@@ -3363,3 +3363,15 @@ add_executable(pc_p2_original_red_test tools/test_p2_original_red.cpp
 target_include_directories(pc_p2_original_red_test PRIVATE pc_port)
 target_compile_options(pc_p2_original_red_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
 add_test(NAME pc_p2_original_red_test COMMAND pc_p2_original_red_test)
+# Compile the real rescue implementation against minimal observable engine doubles.
+if(PIKMIN_BUILD_TESTS)
+add_executable(rescue_actual_test tools/test_rescue_actual.cpp src/plugPikiKando/aiRescue.cpp)
+target_include_directories(rescue_actual_test BEFORE PRIVATE tools/rescue_stubs)
+target_compile_options(rescue_actual_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG -Wno-multichar)
+add_test(NAME rescue_actual_test COMMAND rescue_actual_test)
+endif()
+# #1232: engine-free economy controls; actual carry/save acceptance is separate.
+add_executable(p2_campaign_economy_test tools/test_p2_campaign_economy.cpp)
+target_include_directories(p2_campaign_economy_test PRIVATE pc_port)
+target_compile_options(p2_campaign_economy_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_campaign_economy_test COMMAND p2_campaign_economy_test)
