@@ -20,6 +20,10 @@ bool pc_p2_original_calendar_encode(std::string&,std::string&);
 bool pc_p2_original_calendar_decode(const std::string&,unsigned,const std::string&,std::string&);
 #endif
 #include "pc_randomizer.h"
+#if defined(PIKMIN_P2_AUTHORED_CAVE_PROVIDER)
+// Strong provider validates the selected physical route and both INI inputs.
+bool pc_p2_authored_cave_route_validate(const P2AuthoredCaveRoute&,const std::string&,std::string&);
+#endif
 #include "pc_randomizer_catalog.h"
 #include "pc_randomizer_spawn_catalog.h"
 #include "pc_randomizer_campaign_catalog.h"
@@ -153,6 +157,8 @@ P2CaveSeedBinding generatedCaveBinding;
 P2CaveSeedBudget generatedCaveBudget;
 P2CaveCacheBanks generatedCaveCache;
 P2SurfaceSession surfaceSession;
+P2AuthoredCaveRoute authoredCaveRoute;
+P2AuthoredCaveSession authoredCaveSession;
 std::string originalCampaign, treasureSource;
 std::string originalCatalogRoot;
 p2original::SourceCalendar originalCalendar;
@@ -238,6 +244,8 @@ struct CkptScan {
     P2CaveSeedBudget caveBudget;
     P2CaveCacheBanks caveCache;
     P2SurfaceSession surface;
+    P2AuthoredCaveRoute authoredRoute;
+    P2AuthoredCaveSession authored;
     P2CampaignCheckpointState originalState;
     p2whitetreasure::Ledger whiteTreasure;
     unsigned thelynkUsed[18] = {};
@@ -273,14 +281,18 @@ CkptScanStatus scanCampaignCheckpoint(CkptScan& s) {
         valid = valid && p2whitetreasure::read_config(config) && s.whiteTreasure.read(meta,config);
     }
     if (generatedCave) valid = valid && s.caveBudget.read(meta) && s.caveCache.read(meta);
+    if(authoredCaveRoute.present){
+        valid=valid&&s.authoredRoute.read(meta)&&s.authoredRoute==authoredCaveRoute
+            &&s.authored.read(meta)&&(s.authored.present?s.authored.matches(authoredCaveRoute,s.caveCache):!s.caveCache.inside);
+    }
     if (thelynk) for (int i = 0; i < 18; ++i) valid = valid && bool(meta >> s.thelynkUsed[i]) && s.thelynkUsed[i] <= 330;
     // Optional extension: legacy cards end immediately in their numeric hash.
     meta >> std::ws;
-    if (valid && meta.peek()=='S') valid = s.surface.read(meta);
+    if (valid && meta.peek()=='S') valid = !authoredCaveRoute.present&&s.surface.read(meta);
     meta >> std::ws;
-    if(valid&&meta.peek()=='C')valid=s.originalState.read(meta,treasureSource.empty()?nullptr:&verifiedTreasureCatalog,treasureSource);
+    if(valid&&meta.peek()=='C')valid=!authoredCaveRoute.present&&s.originalState.read(meta,treasureSource.empty()?nullptr:&verifiedTreasureCatalog,treasureSource);
     valid=valid&&s.originalState.matches(originalCampaign,treasureSource,treasureSource.empty()?nullptr:&verifiedTreasureCatalog);
-    if (!valid || !(meta >> hash) || magic != (thelynk ? "THELYNK_CAMPAIGN_1" : generatedCave ? "PIKMIN_CAMPAIGN_GENERATED_CAVE_2" : whiteTreasureCampaign ? "PIKMIN_CAMPAIGN_WHITE_TREASURE_1" : whiteCampaign ? "PIKMIN_CAMPAIGN_WHITE_1" : purpleCampaign ? "PIKMIN_CAMPAIGN_PURPLE_1" : prereleaseTraps ? "PIKMIN_CAMPAIGN_5" : proggTraps ? "PIKMIN_CAMPAIGN_4" : bombTraps ? "PIKMIN_CAMPAIGN_3" : bombDeliveries ? "PIKMIN_CAMPAIGN_2" : "PIKMIN_CAMPAIGN_1")
+    if (!valid || !(meta >> hash) || magic != (thelynk ? "THELYNK_CAMPAIGN_1" : generatedCave ? (authoredCaveRoute.present?"PIKMIN_CAMPAIGN_GENERATED_CAVE_3":"PIKMIN_CAMPAIGN_GENERATED_CAVE_2") : whiteTreasureCampaign ? "PIKMIN_CAMPAIGN_WHITE_TREASURE_1" : whiteCampaign ? "PIKMIN_CAMPAIGN_WHITE_1" : purpleCampaign ? "PIKMIN_CAMPAIGN_PURPLE_1" : prereleaseTraps ? "PIKMIN_CAMPAIGN_5" : proggTraps ? "PIKMIN_CAMPAIGN_4" : bombTraps ? "PIKMIN_CAMPAIGN_3" : bombDeliveries ? "PIKMIN_CAMPAIGN_2" : "PIKMIN_CAMPAIGN_1")
         || savedFingerprint != fingerprint || generation != s.generation || (meta >> extra))
         return kCkptMismatch;
     s.block.resize(32768);
@@ -331,6 +343,7 @@ void loadCampaignCheckpoint() {
     generatedCaveBudget = s.caveBudget;
     generatedCaveCache = s.caveCache;
     surfaceSession = s.surface;
+    authoredCaveSession = s.authored;
     p2whitetreasure::ledger = s.whiteTreasure;
     for (int i = 0; i < 18; ++i) thelynkUsed[i] = s.thelynkUsed[i];
     campaignResumed = true;
@@ -1155,6 +1168,26 @@ bool pc_randomizer_init(int argc, char** argv) {
         generatedCave = true;
         input >> end;
     }
+    if(end=="AUTHORED_CAVE_ROUTE"){
+#if !defined(PIKMIN_P2_AUTHORED_CAVE_PROVIDER)
+        fail("authored cave requires the linked native provider");
+#else
+        if(!generatedCave||thelynk||netplay_session()||!originalCampaign.empty()
+            ||!authoredCaveRoute.read(input,true)||!authoredCaveRoute.matches(generatedCaveBinding))
+            fail("invalid authored cave route selection");
+        const auto routePath=std::filesystem::absolute(bootstrap).parent_path()/"p2-authored-cave-route.txt";
+        std::error_code routeError;const auto routeSize=std::filesystem::file_size(routePath,routeError);
+        if(routeError||!routeSize||routeSize>65536)fail("authored cave route input missing or oversized");
+        std::ifstream routeFile(routePath,std::ios::binary);
+        const std::string routeBytes((std::istreambuf_iterator<char>(routeFile)),{});
+        if(routeBytes.size()!=routeSize||P2AuthoredCaveSession::hash(routeBytes)!=authoredCaveRoute.routeSha)
+            fail("authored cave route input digest mismatch");
+        std::string routeReason;
+        if(!pc_p2_authored_cave_route_validate(authoredCaveRoute,std::filesystem::absolute(bootstrap).parent_path().generic_string(),routeReason))
+            fail("authored cave physical route inputs differ");
+        input>>end;
+#endif
+    }
     if(end=="ORIGINAL_SOURCE"){
 #if defined(PC_RANDOMIZER_NO_ORIGINAL_ENGINE)
         fail("original source session requires the native engine");
@@ -1171,6 +1204,7 @@ bool pc_randomizer_init(int argc, char** argv) {
         input>>end;
     }
     if (end != "END") fail("unsupported or malformed bootstrap");
+    if(authoredCaveRoute.present&&!treasureSource.empty())fail("authored cave cannot adopt original treasure state");
     std::string extra;
     if (input >> extra) fail("trailing bootstrap data");
     directory = std::filesystem::absolute(bootstrap).parent_path();
@@ -2280,6 +2314,19 @@ void pc_randomizer_generated_cave_cache_set(const P2CaveCacheBanks& banks) {
         fail("inactive or invalid generated cave cache image");
     generatedCaveCache = banks;
 }
+const P2AuthoredCaveRoute& pc_randomizer_authored_cave_route(){return authoredCaveRoute;}
+const P2AuthoredCaveSession& pc_randomizer_authored_cave_session(){return authoredCaveSession;}
+bool pc_randomizer_authored_cave_checkpoint_set(const P2AuthoredCaveSession& next,const P2CaveCacheBanks& banks){
+    if(!pc_randomizer_generated_cave()||!authoredCaveRoute.present||!originalCampaign.empty()
+        ||!treasureSource.empty()||netplay_session()||surfaceSession.present||!next.valid()||!banks.valid()
+        ||(next.present?!next.matches(authoredCaveRoute,banks):banks.inside))return false;
+    // Copy both prospective values before either replaces the current state.
+    auto stagedSession=next;auto stagedBanks=banks;
+    authoredCaveSession=std::move(stagedSession);generatedCaveCache=std::move(stagedBanks);return true;
+}
+bool pc_randomizer_authored_cave_session_set(const P2AuthoredCaveSession& next){
+    return pc_randomizer_authored_cave_checkpoint_set(next,generatedCaveCache);
+}
 void pc_randomizer_generated_cave_bud_input(std::uint64_t seed, const char* cave, int floor,
     const char* slot, const char* boundaryToken, unsigned used) {
     pc_randomizer_generated_cave_bud_used(seed, cave, floor, slot, boundaryToken);
@@ -2515,7 +2562,7 @@ bool write_campaign_checkpoint(const void* source, unsigned long long generation
         if (ec) return false;
     }
     std::ostringstream meta;
-    meta << (thelynk ? "THELYNK_CAMPAIGN_1 " : generatedCave ? "PIKMIN_CAMPAIGN_GENERATED_CAVE_2 " : whiteTreasureCampaign ? "PIKMIN_CAMPAIGN_WHITE_TREASURE_1 " : whiteCampaign ? "PIKMIN_CAMPAIGN_WHITE_1 " : purpleCampaign ? "PIKMIN_CAMPAIGN_PURPLE_1 " : prereleaseTraps ? "PIKMIN_CAMPAIGN_5 " : proggTraps ? "PIKMIN_CAMPAIGN_4 " : bombTraps ? "PIKMIN_CAMPAIGN_3 " : bombDeliveries ? "PIKMIN_CAMPAIGN_2 " : "PIKMIN_CAMPAIGN_1 ") << fingerprint << ' ' << generation;
+    meta << (thelynk ? "THELYNK_CAMPAIGN_1 " : generatedCave ? (authoredCaveRoute.present?"PIKMIN_CAMPAIGN_GENERATED_CAVE_3 ":"PIKMIN_CAMPAIGN_GENERATED_CAVE_2 ") : whiteTreasureCampaign ? "PIKMIN_CAMPAIGN_WHITE_TREASURE_1 " : whiteCampaign ? "PIKMIN_CAMPAIGN_WHITE_1 " : purpleCampaign ? "PIKMIN_CAMPAIGN_PURPLE_1 " : prereleaseTraps ? "PIKMIN_CAMPAIGN_5 " : proggTraps ? "PIKMIN_CAMPAIGN_4 " : bombTraps ? "PIKMIN_CAMPAIGN_3 " : bombDeliveries ? "PIKMIN_CAMPAIGN_2 " : "PIKMIN_CAMPAIGN_1 ") << fingerprint << ' ' << generation;
     for (int i = 0; i < (prereleaseTraps ? 7 : proggTraps ? 6 : bombTraps ? 5 : bombDeliveries ? 4 : 3); ++i) meta << ' ' << consumedBenefits[i];
     if (purpleCampaign) p2ship::stock.write(meta);
     if (whiteCampaign) p2whitecampaign::budget.write(meta);
@@ -2527,6 +2574,11 @@ bool write_campaign_checkpoint(const void* source, unsigned long long generation
     if (generatedCave) {
         generatedCaveBudget.write(meta);
         generatedCaveCache.write(meta);
+        if(authoredCaveRoute.present){
+            if(!authoredCaveSession.valid()||surfaceSession.present||(!authoredCaveSession.present&&generatedCaveCache.inside)
+                ||(authoredCaveSession.present&&!authoredCaveSession.matches(authoredCaveRoute,generatedCaveCache))){if(fatal)fail("invalid authored cave checkpoint");return false;}
+            authoredCaveRoute.write(meta);authoredCaveSession.write(meta);
+        }
     }
     if (thelynk) for (int i = 0; i < 18; ++i) meta << ' ' << thelynkUsed[i];
     if (!surfaceSession.valid()) {if(fatal)fail("invalid living surface session");return false;}
