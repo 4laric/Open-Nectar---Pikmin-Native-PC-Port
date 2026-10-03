@@ -8,6 +8,16 @@
 #include <fstream>
 #include <iostream>
 #include <iterator>
+#include <new>
+#include <cstdlib>
+// Pure-core allocation control only; never creates Scene/Stage authority.
+static bool failNextAllocation=false;
+void* operator new(std::size_t n){if(failNextAllocation){failNextAllocation=false;throw std::bad_alloc();}if(void* p=std::malloc(n?n:1))return p;throw std::bad_alloc();}
+void* operator new[](std::size_t n){return ::operator new(n);}
+void operator delete(void* p)noexcept{std::free(p);}
+void operator delete[](void* p)noexcept{std::free(p);}
+void operator delete(void* p,std::size_t)noexcept{std::free(p);}
+void operator delete[](void* p,std::size_t)noexcept{std::free(p);}
 using namespace p2original::pikiJPA;
 int main(int argc,char** argv){
  #ifdef _WIN32
@@ -56,5 +66,25 @@ int main(int argc,char** argv){
  assert(halo.sourceFrame([](Position,unsigned){return false;},e));assert(halo.particles().size()==1&&halo.particles()[0].position.x==4);
  auto before=halo.seed(1);assert(halo.sourceFrame([](Position,unsigned pid){assert(pid==0x16b);return true;},e));assert(halo.particles().empty());assert(halo.seed(1)==before*0x19660du+0x3c6ef35fu);
  assert(!halo.follow(B,{NAN,0,0},e));assert(halo.removeIdleHalo(B,e));assert(halo.sourceFrame([](Position,unsigned){return false;},e));assert(halo.prepare(bank,seeds,2,e));
+ // Selected halo-only budget: source manager has2000 particles. This does
+ // not admit other effects sharing the retail pool or claim whole-JPA support.
+ HaloEffects limit;assert(limit.prepare(bank,seeds,2000,e));
+ assert(!limit.prepare(bank,seeds,2001,e));assert(limit.seed(0)==seeds[0]);
+ std::array<int,2001> bodies{};
+ for(unsigned i=0;i<2000;++i)assert(limit.sharedIdleHalo({&bodies[i],i+1},i%6,haloId(i%6),{float(i),0,0},e));
+ assert(!limit.sharedIdleHalo({&bodies[2000],2001},0,haloId(0),{},e));assert(limit.owners()==2000);
+ assert(limit.sourceFrame([](Position,unsigned){return false;},e));assert(limit.particles().size()==2000);
+ // Force actual vector growth with one lifetime1 particle already retained.
+ HaloEffects fault;assert(fault.prepare(bank,seeds,2,e));int first=0,second=0;
+ assert(fault.sharedIdleHalo({&first,1},0,haloId(0),{11,12,13},e));
+ HaloEffects::Clipped visible=[](Position,unsigned){return false;};
+ assert(fault.sourceFrame(visible,e));assert(fault.particles().size()==1);
+ const auto particle=fault.particles()[0];std::array<std::uint32_t,6> prior{};
+ for(unsigned i=0;i<6;++i)prior[i]=fault.seed(i);
+ assert(fault.sharedIdleHalo({&second,2},1,haloId(1),{21,22,23},e));
+ failNextAllocation=true;assert(!fault.sourceFrame(visible,e));assert(!failNextAllocation);
+ assert(fault.owners()==2&&fault.particles().size()==1&&fault.particles()[0].position.x==particle.position.x&&fault.particles()[0].angle==particle.angle&&fault.particles()[0].scale==particle.scale);
+ for(unsigned i=0;i<6;++i)assert(fault.seed(i)==prior[i]);
+ assert(fault.sourceFrame(visible,e));assert(fault.particles().size()==2);
  std::cout<<"Piki JPA selected-bank + source-halo ownership policy PASS (engineering only)\n";
 }
