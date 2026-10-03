@@ -15,7 +15,7 @@ struct Resolver:LogicalResolver {
  bool identifyHandle(const char*,RefKind,u32,LogicalRef&,std::string&)override{return false;}
  bool resolveHandle(const char*,RefKind,const LogicalRef&,u32&,std::string&)override{return false;}
 };}
-int main(){Material materials[2];PVWTevInfo tev[2];PVWTextureData textures[2];
+int main(){Material materials[2];PVWTevInfo tev[3];PVWTextureData textures[2];
  for(auto& t:textures){t.mSourceAttrIndex=0;t.mTextureAttribute=nullptr;t.mAnimationFactor=255;t.mScaleX=t.mScaleY=1;t.mRotationZ=t.mTranslationX=t.mTranslationY=t.mPivotX=t.mPivotY=0;t.mTotalFrameCount=0;t.mAnimSpeed=0;}
  for(auto& t:tev){for(auto& c:t.mTevColRegs){c.mAnimatedColor.r=1;c.mAnimatedColor.g=2;c.mAnimatedColor.b=3;c.mAnimatedColor.a=4;c.mAnimFrameCount=0;c.mAnimSpeed=0;}for(auto& c:t.mKonstColors)c.set(1,2,3,4);}
  for(int i=0;i<2;++i){auto& m=materials[i];m.mFlags=MATFLAG_PVW;m.mTextureIndex=-1;m.mColourInfo.mSpeed=1;m.mTextureInfo.mTextureDataCount=2;m.mTextureInfo.mTextureData=textures;m.mTextureInfo.mScale.set(1,1,1);m.mTevInfo=&tev[i];}
@@ -37,6 +37,13 @@ int main(){Material materials[2];PVWTevInfo tev[2];PVWTextureData textures[2];
  materials[1].mTextureInfo.mTextureDataCount=1;check(!captureRenderGraph(7,src,{1,2,3,4},factory,out,e),"native alias count drift refused");materials[1].mTextureInfo.mTextureDataCount=2;
  auto missing=[](u64,u32)->LogicalResolver*{return nullptr;};check(!captureRenderGraph(7,src,{1,2,3,4},missing,out,e),"missing scene typed resolver refused");
  check(!captureRenderGraph(7,src,{1,2,3,4},{},out,e),"absent resolver factory refused");
+ materials[1].mTevInfo=&tev[2];resolver.pointers[&tev[0]]={0,2,0};resolver.pointers[&tev[1]]={0,2,1};resolver.pointers[&tev[2]]={0,2,2};
+ std::vector<RenderObservation> full{src[0],{2,202,RenderKind::Tev,3,reinterpret_cast<uintptr_t>(tev),sizeof(PVWTevInfo),true},src[3]};
+ check(captureRenderGraph(9,full,{1,2,4},factory,out,e)&&out.nodes[1].payloads.size()==3&&out.nodes[1].contentRoot,"real header complete array capture retains unused initialized TEV element");
+ check(out.links[0].tev==2&&out.links[0].tevSlot==0&&out.links[1].tev==2&&out.links[1].tevSlot==2,"real native aliases select exact elements within one original allocation");
+ check(decode_actor_fields(out.nodes[1].payloads[1],fields,e)&&fields.at("mTevColRegs.2.mAnimatedColor.a").bits==4,"unused initialized element has captured named payload");
+ resolver.badTevSlot=true;check(!captureRenderGraph(9,full,{1,2,4},factory,out,e)&&out.links[1].tevSlot==2,"wrong in-range logical TEV element refuses before graph publication");resolver.badTevSlot=false;
+ check(captureRenderGraph(9,full,{1,2,4},factory,out,e),"exact complete array still captures after alias refusal");
  materials[0].mFlags=MATFLAG_Opaque;materials[1].mFlags=MATFLAG_Opaque;
  std::vector<RenderObservation> simple{src[0]};check(captureRenderGraph(8,simple,{1},factory,out,e)&&out.links.size()==2&&!out.links[0].pvw&&out.nodes.size()==1,"non-PVW native material does not inspect stale PVW pointers");
  std::printf("%d checks, %d failures\n",checks,failed);return failed?1:0;

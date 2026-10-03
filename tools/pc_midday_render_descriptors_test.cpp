@@ -34,5 +34,16 @@ int main(){BaseShape model;Material materials[2];PVWTevInfo tevs[2];auto& tev=te
  model.mMaterialCount=-1;check(!index.validate(graph,e),"uninitialized source model refused");model.mMaterialCount=2;
  RenderDescriptorIndex bad;check(!bad.declare(0,RenderKind::Materials,model,{0},e),"zero factory refused");check(!bad.declare(1,RenderKind::Materials,model,{0,0},e),"duplicated selected source material refused");check(!bad.declare(1,RenderKind::Materials,model,{2},e),"foreign installed material slot refused");check(!bad.declare(1,RenderKind::Tev,model,{0,1},e),"TEV factory is singleton");check(!bad.declare(1,static_cast<RenderKind>(99),model,{0},e),"unknown descriptor kind refused");
  check(index.validate(graph,e),"correct original graph still validates after all refusal paths");
+ for(auto& t:tevs){t.mTevStageCount=0;for(auto& c:t.mTevColRegs){c.mColorAnimData.mInfo.mSize=0;c.mAlphaAnimData.mInfo.mSize=0;}}
+ RenderDescriptorIndex full;check(full.declare(201,RenderKind::Materials,model,{0,1},e)&&full.declareTevArray(202,model,e)&&full.declare(204,RenderKind::Textures,model,{0},e),"whole model TEV array factory declared");
+ RenderGraph array;array.generation=11;array.nodes={{11,201,RenderKind::Materials,2,{}},{12,202,RenderKind::Tev,2,{},true},{14,204,RenderKind::Textures,2,{}}};array.links={{11,0,true,12,14,2,0},{11,1,true,12,14,2,1}};
+ materials[1].mTevInfoIndex=1;materials[1].mTevInfo=&tevs[1];check(full.validate(array,e),"prototype links resolve distinct elements of exact original TEV array");
+ auto wrongArray=array;wrongArray.links[1].tevSlot=0;check(!full.validate(wrongArray,e),"in-range wrong original TEV element refused");
+ wrongArray=array;wrongArray.nodes[1].contentRoot=false;check(!full.validate(wrongArray,e),"caller cannot remove compiled prototype root provenance");
+ wrongArray=array;wrongArray.nodes[1].count=1;check(!full.validate(wrongArray,e),"partial original TEV allocation refused");
+ materials[1].mTevInfoIndex=0;materials[1].mTevInfo=&tevs[0];array.links[1].tevSlot=0;check(full.validate(array,e),"initialized unused second TEV entry retained by full factory");
+ tevs[1].mTevColRegs[2].mAlphaAnimData.mInfo.mSize=1;tevs[1].mTevColRegs[2].mAlphaAnimData.mInfo.mKeyframes=nullptr;check(!full.validate(array,e),"unused initialized array entry backing is still validated");tevs[1].mTevColRegs[2].mAlphaAnimData.mInfo.mSize=0;
+ check(full.validate(array,e),"whole array remains valid after refusals");
+ RenderDescriptorIndex clone;check(clone.declare(301,RenderKind::Tev,model,{0},e),"old clone factory declaration remains supported");RenderGraph forged;forged.generation=11;forged.nodes={{31,301,RenderKind::Tev,1,{},true}};check(!clone.validate(forged,e),"clone factory cannot authorize invented unreachable prototype root");
  std::printf("%d checks, %d failures\n",checks,failed);return failed?1:0;
 }

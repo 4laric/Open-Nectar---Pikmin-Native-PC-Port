@@ -13,7 +13,7 @@ bool bindRenderMutable(const RenderGraph& graph,IsolatedRenderAllocations& owner
   auto node=std::find_if(graph.nodes.begin(),graph.nodes.end(),[&](const RenderNode& x){return x.id==id;});if(node==graph.nodes.end()){error="mutable render allocation missing";return false;}
   if(node->kind!=RenderKind::Materials)return true;
   auto link=std::find_if(graph.links.begin(),graph.links.end(),[&](const RenderLink& x){return x.materials==id&&x.slot==slot;});if(link==graph.links.end()){error="mutable material source link missing";return false;}
-  if(link->pvw){out.emplace("tev",owner.allocation(link->tev));auto* textures=static_cast<PVWTextureData*>(owner.allocation(link->textures));for(u32 i=0;i<link->textureCount;++i)out.emplace("texture."+std::to_string(i),&textures[i]);}
+  if(link->pvw){out.emplace("tev",&static_cast<PVWTevInfo*>(owner.allocation(link->tev))[link->tevSlot]);auto* textures=static_cast<PVWTextureData*>(owner.allocation(link->textures));for(u32 i=0;i<link->textureCount;++i)out.emplace("texture."+std::to_string(i),&textures[i]);}
   return true;
  };
  std::vector<PlannedRenderState> plan;if(!planRenderMutable(graph,geometry,factory,addresses,plan,e))return false;
@@ -21,7 +21,7 @@ bool bindRenderMutable(const RenderGraph& graph,IsolatedRenderAllocations& owner
  // Any Apply failure invalidates the entire unpublished owner transaction.
  RenderBindAccess::begin(owner);
  for(auto& record:plan){FieldArchive ar(Mode::Apply,record.fields,record.pointers,e,0);bool ok=false;
-  switch(record.kind){case RenderKind::Materials:ok=world_material_fields(static_cast<Material*>(owner.allocation(record.id))[record.slot],ar);break;case RenderKind::Tev:ok=world_tev_fields(*static_cast<PVWTevInfo*>(owner.allocation(record.id)),ar);break;case RenderKind::Textures:ok=world_texture_data_fields(static_cast<PVWTextureData*>(owner.allocation(record.id))[record.slot],ar);break;}
+  switch(record.kind){case RenderKind::Materials:ok=world_material_fields(static_cast<Material*>(owner.allocation(record.id))[record.slot],ar);break;case RenderKind::Tev:ok=world_tev_fields(static_cast<PVWTevInfo*>(owner.allocation(record.id))[record.slot],ar);break;case RenderKind::Textures:ok=world_texture_data_fields(static_cast<PVWTextureData*>(owner.allocation(record.id))[record.slot],ar);break;}
   if(!ok||!ar.finish())return false;
  }
  RenderBindAccess::ready(owner);e.clear();return true;

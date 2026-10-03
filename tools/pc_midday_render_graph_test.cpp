@@ -16,7 +16,7 @@ int main(){
  bad=source;bad[3].address=1160;check(planRenderGraph(7,bad,links,{1,2,3,4},graph,e),"adjacent distinct allocation allowed");
  bad=source;bad[3].count=2;check(!planRenderGraph(7,bad,links,{1,2,3,4},graph,e),"shared array count mismatch refused");
  bad=source;bad[2].kind=RenderKind::Textures;check(!planRenderGraph(7,bad,links,{1,2,3,4},graph,e),"TEV target concrete kind mismatch refused");
- bad=source;bad[1].count=2;check(!planRenderGraph(7,bad,links,{1,2,3,4},graph,e),"TEV singleton allocation required");
+ bad=source;bad[1].count=2;check(planRenderGraph(7,bad,links,{1,2,3,4},graph,e),"TEV allocation captures all initialized array entries");
  bad=source;bad[3].count=257;check(!planRenderGraph(7,bad,links,{1,2,3,4},graph,e),"compiled maximum texture count enforced");
  bad=source;bad[0].count=0;check(!planRenderGraph(7,bad,links,{1,2,3,4},graph,e),"empty allocation has no canonical native identity");
  bad=source;bad[2].id=2;check(!planRenderGraph(7,bad,links,{1,2,3,4},graph,e),"duplicate canonical ID refused");
@@ -43,5 +43,15 @@ int main(){
  wrong=links;wrong[1].pvw=false;check(!planRenderGraph(7,source,wrong,{1,2,3,4},graph,e),"non-PVW storage is never inspected");
  check(planRenderGraph(8,{{1,101,RenderKind::Materials,1,1000,80}},{{1,0,false,0,0,0}},{1},graph,e)&&graph.generation==8,"non-PVW-only graph has no invented PVW nodes");
  check(planRenderGraph(9,{}, {}, {},graph,e)&&graph.nodes.empty(),"complete legitimately empty resource graph");
+ // The model owns one array; unused initialized elements remain in its payload.
+ auto array=source;array.erase(array.begin()+2);array[1].count=3;array[1].contentRoot=true;
+ auto arrayLinks=links;arrayLinks[1].tev=2;arrayLinks[1].tevSlot=2;
+ check(planRenderGraph(10,array,arrayLinks,{1,2,4},graph,e)&&graph.nodes[1].count==3&&graph.nodes[1].contentRoot&&graph.links[1].tevSlot==2,"whole TEV array and nonzero element link preserved");
+ auto arrayBad=arrayLinks;arrayBad[1].tevSlot=3;check(!planRenderGraph(10,array,arrayBad,{1,2,4},graph,e)&&graph.links[1].tevSlot==2,"one-past array slot refuses transactionally");
+ arrayBad=arrayLinks;arrayBad[0].tevSlot=1;check(planRenderGraph(10,array,arrayBad,{1,2,4},graph,e),"unused and shared TEV array elements are legal typed inventory");
+ auto rootOnly=array;rootOnly.erase(rootOnly.begin());rootOnly.pop_back();check(planRenderGraph(10,rootOnly,{}, {2},graph,e)&&graph.nodes[0].count==3,"registered prototype allocation remains captured without material consumer");
+ rootOnly[0].contentRoot=false;check(!planRenderGraph(10,rootOnly,{}, {2},graph,e),"unregistered unreachable array remains refused");
+ array[0].contentRoot=true;check(!planRenderGraph(10,array,arrayLinks,{1,2,4},graph,e),"material cannot forge full TEV content-root class");
+ arrayBad={{1,0,false,0,0,0,1}};check(!planRenderGraph(10,{{1,101,RenderKind::Materials,1,1000,80}},arrayBad,{1},graph,e),"non-PVW cannot carry latent TEV slot");
  std::printf("%d checks, %d failures\n",checks,failed);return failed?1:0;
 }
