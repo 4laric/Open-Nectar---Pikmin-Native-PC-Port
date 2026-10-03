@@ -534,13 +534,18 @@ bool pc_p2_elecbug_pressed(BTeki* teki, Creature* presser) {
         Piki* piki = (presser && presser->isPiki()) ? static_cast<Piki*>(presser) : nullptr;
         if (piki && piki->isAlive()) {
             const int species = pc_p2_species(piki);
+            const int stateBefore = piki->getState();
+            // Source pressCallBack dispatches even immune Pikmin. The actual
+            // InteractDenki receiver owns Yellow/Bulbmin rejection.
+            Vector3f dir(piki->getPosition().x - teki->getPosition().x, 0.0f,
+                         piki->getPosition().z - teki->getPosition().z);
+            const bool accepted = piki->stimulate(InteractDenki(teki, 1.0f, &dir));
             if (p2_species_immune(species, P2HazardElectric)) {
-                std::printf("P2_ELECBUG_PRESS_IMMUNE generator=%u source_id=28 pikmin=%s species=%d\n",
-                            genOf(teki), species == P2SpeciesBulbmin ? "bulbmin" : "yellow", species);
+                std::printf("P2_ELECBUG_PRESS_IMMUNE generator=%u source_id=28 pikmin=%s species=%d "
+                            "piki=%p accepted=%d state_before=%d target_state=%d alive=%d\n",
+                            genOf(teki), species == P2SpeciesBulbmin ? "bulbmin" : "yellow", species,
+                            static_cast<void*>(piki), int(accepted), stateBefore, piki->getState(), int(piki->isAlive()));
             } else {
-                Vector3f dir(piki->getPosition().x - teki->getPosition().x, 0.0f,
-                             piki->getPosition().z - teki->getPosition().z);
-                const bool accepted = piki->stimulate(InteractDenki(teki, 1.0f, &dir));
                 std::printf("P2_ELECBUG_PRESS_DENKI generator=%u source_id=28 pikmin=1 piki=%p target=%d accepted=%d "
                             "target_state=%d(%s)\n",
                             genOf(teki), static_cast<void*>(piki), species, int(accepted), piki->getState(),

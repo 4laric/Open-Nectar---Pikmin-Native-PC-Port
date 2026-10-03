@@ -26,6 +26,11 @@
 #include "Pom.h"
 #include "pc_p2_white.h"
 #include "pc_p2_species.h"
+#include "pc_p2_original_throw.h"
+#include "pc_p2_original_piki_physical.h"
+#include "pc_p2_original_piki_recruit.h"
+#include "pc_p2_original_progress.h"
+#include "pc_p2_original_source_uid.h"
 #include "Generator.h"
 #include "teki.h"
 #include "Collision.h"
@@ -44,7 +49,8 @@ SDL_Joystick* pad=nullptr;
 constexpr unsigned Target=346002, Partner=346010;
 const char* mode="landing";
 bool electric(){return std::strcmp(mode,"landing")!=0;}
-int desiredSpecies(){return !std::strcmp(mode,"white-electric")?P2SpeciesWhite:P2SpeciesRed;}
+int desiredSpecies(){return !std::strcmp(mode,"white-electric")?P2SpeciesWhite:
+    !std::strcmp(mode,"yellow-electric")?P2SpeciesYellow:P2SpeciesRed;}
 // Production SDL->PAD conversion divides by256; preserve intended PAD strength.
 constexpr int contact_sdl_axis(int padAxis) { return padAxis * 256; }
 void require(bool ok,const char* why){
@@ -85,6 +91,30 @@ class ContactApp:public PlugPikiApp {
     int acquisition=0,acquisitionTicks=0,whiteGather=0,ivoryThrowTicks=0;
     bool sawWhiteSprout=false,ivoryCaptured=false;
     Piki* acquiredWhite=nullptr;
+    Piki* stagedYellow=nullptr;
+    bool yellowRecovered() const {
+        if(!stagedYellow||!stagedYellow->isAlive()||!stagedYellow->isCreatureFlag(CF_IsOnGround))return false;
+        const int state=stagedYellow->getState();
+        return state!=PIKISTATE_Flying&&state!=PIKISTATE_Hanged&&state!=PIKISTATE_Dying
+            &&state!=PIKISTATE_Dead&&state!=PIKISTATE_Drown&&state!=PIKISTATE_DenkiDying;
+    }
+    void stageYellow(Navi* captain){
+        Iterator actors(pikiMgr);actors.first();auto* replace=static_cast<Piki*>(*actors);
+        require(replace&&replace->isAlive(),"owned baseline replacement exists");
+        replace->setEraseKill();replace->kill(false);
+        const std::string key="tutorial/initgen.txt#2";
+        const std::string fingerprint="b8a4fb5a39f8371a879eec4ece9025bee75977a4b4394111d5825e6ec79c0bbf";
+        const unsigned uid=p2original::originalSourceCatalogUid(key);
+        std::string error;
+        require(pc_p2_original_piki_origin_install(fingerprint,{{key,uid,20,2}},error),"Yellow fixture catalog");
+        require(p2original::originalProgress().initialize("yellow1263-electric-fixture",error),"Yellow fixture progress");
+        require(pc_p2_original_piki_recruit_bind("yellow1263-electric-fixture",fingerprint,error),"Yellow paired recruitment");
+        OriginalPikiBody body{{key,uid,0,1,fingerprint},{2,false,false}};
+        const auto& pos=captain->mSRT.t;
+        require(pc_p2_original_piki_physical_birth(body,{{pos.x+12,pos.y,pos.z}},stagedYellow,error)==p2original::PikiBirthResult::Born,"disclosed Yellow replacement");
+        require(pc_p2_original_rgb_throw_species(stagedYellow)==2,"canonical staged Yellow");
+        std::printf("P2_ELECBUG_YELLOW_STAGED piki=%p species=2 relocated_debug_member=1 acquisition=0 campaign=0\n",static_cast<void*>(stagedYellow));
+    }
     std::map<Piki*,int> observedSpecies;
     void guardCaptains(){
         const char* mask=std::getenv("P2_ELECBUG_GUARD_MASK");
@@ -191,6 +221,7 @@ public:
         if(!started){
             require(live==20&&red==20,"fresh20 nativeRed1 baseline");
             require(enemy->mCollInfo&&enemy->mCollInfo->hasInfo(),"initialized enemy geometry");
+            if(desiredSpecies()==P2SpeciesYellow)stageYellow(n);
             started=true;
             std::printf("P2_ELECBUG_CONTACT_READY live=%d red=%d captain_hp=%.3f source_id=28 generators=%u,%u\n",live,red,n->mHealth,Target,Partner);
             if(std::getenv("P2_ELECBUG_READY_ONLY")){
@@ -201,6 +232,11 @@ public:
         if(mask&&!std::strcmp(mask,"inactive"))require(false,"inactive guard mask unavailable: no initialized inactive captain");
         if(!acquireWhite(n))return result;
         ++age;
+        if(desiredSpecies()==P2SpeciesYellow){
+            require(live==20&&stagedYellow&&stagedYellow->isAlive(),"Yellow encounter preserves20 living Pikmin");
+            require(pc_p2_original_rgb_throw_species(stagedYellow)==2,"Yellow source identity retained");
+            require(stagedYellow->getState()!=PIKISTATE_DenkiDying,"Yellow must reject electric death");
+        }
         const char* state=pc_p2_elecbug_state_name(enemy);
         require(state,"registered state exists");
         if(!std::strcmp(state,"reverse"))reverseSeen=true;
@@ -264,11 +300,20 @@ public:
         }
         if(offContactSeen&&reverseSeen){
             for(const auto& entry:flight)if(entry.second==5&&(desiredSpecies()!=P2SpeciesWhite||entry.first==acquiredWhite)){
+                if(desiredSpecies()==P2SpeciesYellow){
+                    if(entry.first!=stagedYellow||!yellowRecovered())continue;
+                    std::printf("P2_ELECBUG_YELLOW_SURVIVED frame=%d piki=%p species=2 alive=1 grounded=1 live=%d state=%d\n",frame,static_cast<void*>(stagedYellow),live,stagedYellow->getState());
+                }
                 // Exit supplies a candidate only. The launcher must correlate
                 // production contact-dispatch evidence to this exact Pikmin.
                 std::printf("P2_ELECBUG_CONTACT_CANDIDATE frame=%d generator=%u piki=%p observed_reverse=1 mode=%s species=%d\n",frame,Target,static_cast<void*>(entry.first),mode,observedSpecies[entry.first]);
             }
-            std::fflush(nullptr);std::_Exit(0);
+            // Yellow waits for actual ground recovery after the dispatch.
+            if(desiredSpecies()!=P2SpeciesYellow ||
+                (flight.count(stagedYellow)&&flight[stagedYellow]==5
+                 &&yellowRecovered())){
+                std::fflush(nullptr);std::_Exit(0);
+            }
         }
         // Only virtual-pad input. Gather, approach, aim during A hold, release.
         if(age<90){input(KBBTN_B);return result;}
@@ -308,7 +353,7 @@ public:
 }
 int main(int argc,char** argv){
     if(const char* requested=std::getenv("P2_ELECBUG_MODE"))mode=requested;
-    require(!std::strcmp(mode,"landing")||!std::strcmp(mode,"red-electric")||!std::strcmp(mode,"white-electric"),"known mode");
+    require(!std::strcmp(mode,"landing")||!std::strcmp(mode,"red-electric")||!std::strcmp(mode,"white-electric")||!std::strcmp(mode,"yellow-electric"),"known mode");
     if(const char* mask=std::getenv("P2_ELECBUG_GUARD_MASK"))require(!std::strcmp(mask,"active")||!std::strcmp(mask,"inactive")||!std::strcmp(mask,"null-state")||!std::strcmp(mask,"missing-manager"),"known negative observation mask");
     std::printf("P2_ELECBUG_MODE mode=%s species=%d\n",mode,desiredSpecies());
     SDL_setenv("SDL_AUDIODRIVER","dummy",1);
