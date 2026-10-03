@@ -1609,7 +1609,7 @@ void GameCoreSection::initStage()
 	// for one past it and birth fails outright. 102 in the original, the field
 	// limit plus a small margin, so keep that relationship to the configured
 	// limit instead of the default.
-	pikiMgr->create(pc_settings_get_piki_limit() + 2);
+	pikiMgr->create((pc_randomizer_original_session() ? 100 : pc_settings_get_piki_limit()) + 2);
 #else
 	pikiMgr->create(MAX_PIKI_ON_FIELD + 2); // This has a capacity of 102 for some reason.
 #endif
@@ -2262,7 +2262,7 @@ GameCoreSection::GameCoreSection(Controller* controller, MapMgr* mgr, Camera& ca
 	// Every consumer reads the value through AICONST.mMaxPikisOnField(), so
 	// writing it once here covers the spawn gates in pikiMgr and itemMgr as
 	// well as the HUD counter.
-	AICONST.mMaxPikisOnField(pc_randomizer_expanded() ? pc_randomizer_field_capacity() : pc_settings_get_piki_limit());
+	AICONST.mMaxPikisOnField((pc_randomizer_original_session() || pc_randomizer_expanded()) ? pc_randomizer_field_capacity() : pc_settings_get_piki_limit());
 
 	// Day length. The menu shows minutes of play, and a day runs 7am to 7pm --
 	// half the 24-hour cycle this parameter describes -- so double it. The
@@ -4224,6 +4224,7 @@ void GameCoreSection::updateAI()
             }
         }
     }
+    if (pc_randomizer_original_session()) AICONST.mMaxPikisOnField(100);
     if (pc_randomizer_expanded()) {
         AICONST.mMaxPikisOnField(pc_randomizer_field_capacity());
         if (pc_coop_active() && mNavi && mNavi2) {

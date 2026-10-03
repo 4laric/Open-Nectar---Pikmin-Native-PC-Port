@@ -284,6 +284,10 @@ set(PC_PORT_SOURCES
     pc_port/pc_p2_original_chappy_native.cpp
     pc_port/pc_p2_original_group_engine.cpp
     pc_port/pc_p2_original_piki_init.cpp
+    pc_port/pc_p2_original_sprout_native.cpp
+    pc_port/pc_p2_original_sprout_reader.cpp
+    pc_port/pc_p2_original_onyon_lineage.cpp
+    pc_port/pc_p2_original_number_profile.cpp
     pc_port/pc_p2_original_piki_spawn.cpp
     pc_port/pc_p2_original_drop.cpp
     pc_port/pc_p2_original_drop_engine.cpp
@@ -3474,6 +3478,14 @@ add_executable(p2_original_piki_origin_test tools/pc_p2_original_piki_origin_tes
 target_include_directories(p2_original_piki_origin_test PRIVATE pc_port)
 target_compile_options(p2_original_piki_origin_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
 add_test(NAME p2_original_piki_origin COMMAND p2_original_piki_origin_test)
+
+add_executable(p2_original_onyon_lineage_test tools/p2_original_onyon_lineage_test.cpp pc_port/pc_p2_original_onyon_lineage.cpp)
+target_include_directories(p2_original_onyon_lineage_test PRIVATE pc_port)
+add_test(NAME p2_original_onyon_lineage COMMAND p2_original_onyon_lineage_test)
+
+add_executable(p2_original_number_profile_test tools/p2_original_number_profile_test.cpp pc_port/pc_p2_original_number_profile.cpp)
+target_include_directories(p2_original_number_profile_test PRIVATE pc_port)
+add_test(NAME p2_original_number_profile COMMAND p2_original_number_profile_test)
 
 pikmin_add_ci_fixture(surface_campaign_sdl tools/p2_surface_campaign_sdl_fixture.cpp)
 

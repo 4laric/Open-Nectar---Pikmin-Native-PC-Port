@@ -1,6 +1,8 @@
 #include "ItemMgr.h"
+#include "pc_p2_original_sprout_native.h"
 #if defined(PIKI_PC_PORT)
 #include "pc_coop.h"
+#include "pc_randomizer.h"
 #include "pc_p2_original_gate_native.h"
 #endif
 #if defined(PIKI_PC_PORT)
@@ -1432,7 +1434,7 @@ PikiHeadMgr::PikiHeadMgr(ItemMgr* mgr)
 	mPikiHeadAI    = new PikiHeadAI();
 #if defined(PIKI_PC_PORT)
 	// Buried sprouts have their own pool, sized from the same limit.
-	create(pc_settings_get_piki_limit());
+	create(pc_randomizer_original_session() ? 100 : pc_settings_get_piki_limit());
 #else
 	create(MAX_PIKI_ON_FIELD);
 #endif
@@ -1444,18 +1446,32 @@ PikiHeadMgr::PikiHeadMgr(ItemMgr* mgr)
  */
 Creature* PikiHeadMgr::birth()
 {
+	return birthWithFieldLimit(AICONST.mMaxPikisOnField(), buryMode);
+}
+#if defined(PIKI_PC_PORT)
+Creature* PikiHeadMgr::birthOriginalP2(GoalItem* owner)
+{
+	PcOriginalSproutOrigin origin;std::string error;
+	if(buryMode || !pc_p2_original_sprout_owner(owner,origin,error)) return nullptr;
+	return birthWithFieldLimit(100,false);
+}
+#endif
+Creature* PikiHeadMgr::birthWithFieldLimit(int limit,bool allowBuriedExtra)
+{
 	int totalPikis = GameStat::mapPikis;
 	totalPikis += mItemMgr->getContainerExitCount();
 
-	if (buryMode) {
-		if (totalPikis >= AICONST.mMaxPikisOnField() + 1) {
+	if (allowBuriedExtra) {
+		if (totalPikis >= limit + 1) {
 			return nullptr;
 		}
-	} else if (totalPikis >= AICONST.mMaxPikisOnField()) {
+	} else if (totalPikis >= limit) {
 		return nullptr;
 	}
 
-	return MonoObjectMgr::birth();
+	Creature* born=MonoObjectMgr::birth();
+	if(born) pc_p2_original_sprout_forget(static_cast<PikiHeadItem*>(born));
+	return born;
 }
 
 /**
