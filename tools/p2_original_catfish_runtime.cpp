@@ -27,6 +27,8 @@
 #include "pc_p2_original_catfish_native.h"
 #include "pc_p2_original_group_engine.h"
 #include "pc_p2_catfish.h"
+#include "pc_p2_catfish_mouth.h"
+#include "pc_p2_catfish_source.h"
 #include "settings/pc_settings.h"
 #include "settings/pc_settings_p2d.h"
 namespace {
@@ -43,6 +45,7 @@ CatalogRow retail(){
 class CatfishApp:public PlugPikiApp {
  std::unique_ptr<catfish::Native> native;std::unique_ptr<Generator> generator;
  bool captainObserved=false,parked=false;Vector3f parkPosition;
+ unsigned observationTick=0;int lastMouth=-1,lastLive=-1;float lastHealth=-1;
  GeneratorState state;Creature* actor=nullptr;unsigned token=0;int frame=0,age=0,entries=0,before=0;
  void enter(){
   struct Heap{int prior;Heap():prior(gsys->setHeap(SYSHEAP_App)){}~Heap(){gsys->setHeap(prior);}} heap;
@@ -91,8 +94,31 @@ public:
   }
   if(!native){if(n->getCurrState()->getID()!=NAVISTATE_Walk)return result;
    unsigned live=0;Iterator it(pikiMgr);CI_LOOP(it){auto* p=static_cast<Piki*>(*it);if(p->isAlive())++live;}
-   require(live==20,"20 live Pikmin fixture baseline");before=tekiMgr->getSize();enter();}
-  if(human)return result;
+   require(live==20,"20 live Pikmin fixture baseline");
+   // This diagnostic terrain has no enemy generators. Preload the provider's
+   // neutral chassis resources before it allocates the genuine source actor;
+   // never inject a P1 enemy merely to make its resource-usage scan notice us.
+   require(tekiMgr->getSize()==0,"empty enemy pool before fixture resource preload");
+   { struct Heap{int prior;Heap():prior(gsys->setHeap(SYSHEAP_App)){}~Heap(){gsys->setHeap(prior);}} heap;
+     tekiMgr->setUsingType(TEKI_Namazu,true);tekiMgr->startStage(); }
+   before=tekiMgr->getSize();enter();}
+  if(native->provider().lookup(actor)!=nullptr)
+   require(pc_p2_catfish_mouth_body_intact(static_cast<BTeki*>(actor)),"authored source body collider retained after actual update");
+  if(human){
+   auto* t=static_cast<BTeki*>(actor);P2CatfishSourceGate gate;
+   if(pc_p2_catfish_source_gate(t,gate)){
+    int mouth=0,stuck=0,live=0;
+    for(Creature* p=t->mStickListHead;p;p=p->mNextSticker)if(p->isPiki()){++stuck;if(p->isStickToMouth())++mouth;}
+    Iterator it(pikiMgr);CI_LOOP(it){auto* p=static_cast<Piki*>(*it);if(p->isAlive())++live;}
+    if(++observationTick%30==0||mouth!=lastMouth||live!=lastLive||t->mHealth!=lastHealth){
+     const auto np=n->getPosition(),tp=t->getPosition();
+     std::printf("P2_ORIGINAL_CATFISH_OBSERVE tick=%u token=%u state=%d anim=%d frame=%.3f health=%.3f mouth=%d stuck=%d live_pikmin=%d navi=%.3f,%.3f,%.3f actor=%.3f,%.3f,%.3f collider_intact=%d\n",observationTick,gate.token,gate.state,gate.animation,gate.sourceFrame,t->mHealth,mouth,stuck,live,np.x,np.y,np.z,tp.x,tp.y,tp.z,int(pc_p2_catfish_mouth_body_intact(t)));
+     std::fflush(stdout);
+    }
+    lastMouth=mouth;lastLive=live;lastHealth=t->mHealth;
+   }
+   return result;
+  }
   if(++age<180)return result;
   unsigned alive=0;require(pc_p2_original_groups().state(generator.get(),state,alive)&&alive==1,"original group retained live actor");
   std::string e;checked(pc_p2_original_course_unload(e),e);

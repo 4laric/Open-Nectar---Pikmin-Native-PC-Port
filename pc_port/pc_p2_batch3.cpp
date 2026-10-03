@@ -46,6 +46,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include "pc_p2_body_coll.h"
+#include "pc_p2_catfish_mouth.h"
 #include <fstream>
 #include <map>
 #include <set>
@@ -455,7 +456,8 @@ void pc_p2_batch3_update(BTeki* actor, float seconds) {
     if (!actor) return;
     auto boundKey = actors.find(actor);
     if (boundKey == actors.end()) return;
-    pc_p2_body_coll_assign(actor, boundKey->second);
+    if (!pc_p2_catfish_mouth_owns_body(actor))
+        pc_p2_body_coll_assign(actor, boundKey->second);
     const p2motion::Tunables& tune = p2motion::tunables();
     const float speed = actor->mVelocity.x * actor->mVelocity.x + actor->mVelocity.z * actor->mVelocity.z;
     gates[actor].update(speed, seconds, tune);
