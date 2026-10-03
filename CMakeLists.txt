@@ -3581,7 +3581,7 @@ add_test(NAME p2_surface_water_drain COMMAND pc_p2_surface_water_drain_test)
 add_executable(p2_original_progress_test tools/pc_p2_original_progress_test.cpp pc_port/pc_p2_original_progress.cpp)
 target_include_directories(p2_original_progress_test PRIVATE pc_port)
 target_compile_options(p2_original_progress_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
-add_test(NAME p2_original_progress COMMAND p2_original_progress_test)
+add_test(NAME p2_original_progress_foundation COMMAND p2_original_progress_test)
 add_executable(p2_campaign_checkpoint_state_test tools/pc_p2_campaign_checkpoint_state_test.cpp
     pc_port/pc_p2_original_progress.cpp pc_port/pc_p2_original_lifecycle.cpp)
 target_include_directories(p2_campaign_checkpoint_state_test PRIVATE pc_port)
@@ -3602,9 +3602,6 @@ add_executable(p2_original_checkpoint_graph_test tools/pc_p2_original_checkpoint
 target_include_directories(p2_original_checkpoint_graph_test PRIVATE pc_port)
 target_compile_options(p2_original_checkpoint_graph_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
 add_test(NAME p2_original_checkpoint_graph COMMAND p2_original_checkpoint_graph_test)
-add_executable(p2_campaign_treasure_test tools/test_p2_campaign_treasure.cpp)
-target_include_directories(p2_campaign_treasure_test PRIVATE pc_port)
-target_compile_options(p2_campaign_treasure_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
 add_test(NAME p2_campaign_treasure COMMAND p2_campaign_treasure_test)
 
 # Component probes have no native generator scene. Keep the original-session
