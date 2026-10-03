@@ -49,8 +49,8 @@ int main(int argc,char** argv){
  engine.partialFailure=false;assert(p.birth(c,&gen,0,pos,1.25f,actor,e));p.retired(actor);assert(!p.birth(c,&gen,0,pos,1.25f,actor,e)); // address retirement never authorizes ordinal reuse
  assert(!p.reserve(rows,e));assert(!p.birth(c,&gen,0,pos,1.25f,actor,e)); // repeated reservation cannot reopen attempts
 
- // Actual day-5 corpus shape: Hanachirashi24 rows29/30, Whanachirashi25 row31, ???? tail,
- // count1, birthType0, pellet5 min1/max2 p0.5. Admission does not discard drops.
+ // Representative authored number-drop profile remains unchanged by admission.
+ // This synthetic record exercises common fields, not a claim about source placement.
  auto original=a;original.enemy.count=1;original.enemy.deathCount=0;
  original.enemy.pelletSize=5;original.enemy.pelletMinimum=1;original.enemy.pelletMaximum=2;original.enemy.pelletProbability=0.5f;
  assert(hanachirashi::decode(original,e));assert(original.sourceKey=="tutorial/initgen.txt#29");
