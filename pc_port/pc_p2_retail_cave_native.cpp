@@ -15,11 +15,12 @@ bool refuse(std::string& error,const char* text){error=text;return false;}
 struct NativeFloor::Impl {
  FloorPlan plan;SceneOps& scene;std::map<unsigned,std::shared_ptr<FamilyOps>> families;
  std::set<std::shared_ptr<FamilyOps>> preparedFamilies;
- Snapshot context;bool prepared=false,scenePreparationOwned=false,begun=false,committed=false,cleaning=false;
+ Snapshot context;bool prepared=false,scenePreparationOwned=false,begun=false,committed=false,cleaning=false,releasing=false;
  struct Source {p2original::CatalogRow row;std::unique_ptr<Generator> generator;std::uint64_t handle=0;};
  struct Actor {Creature* actor=nullptr;unsigned source=0,token=0;std::uint64_t handle=0;
                BirthIdentity origin;bool registered=false;};
  std::vector<Source> sources;std::vector<Actor> actors;
+ std::vector<BirthIdentity> expectedBirths;
  Impl(FloorPlan value,SceneOps& owner):plan(std::move(value)),scene(owner){}
 };
 NativeFloor::NativeFloor(FloorPlan plan,SceneOps& scene):m(new Impl(std::move(plan),scene)){
@@ -91,6 +92,7 @@ bool NativeFloor::install(const CaveDescriptor& cave,const FloorDefinition& floo
   if(row.sourceForm!=p2original::SourceForm::CaveTekiInfo||!m->families.count(row.enemy.source))return refuse(e,"retail source registry family mismatch");
   return true;
  };
+ m->expectedBirths=expected;
  auto& registry=p2original::originalActors();
  if(!registry.install(m->plan.layoutSha256,rows,capability,error))return false;
  for(const auto& row:rows){
@@ -155,6 +157,47 @@ bool NativeFloor::verifyAbsent(const CaveDescriptor&,unsigned,const ContentRow& 
                               const BirthIdentity& expected,const LiveBinding& binding)const{
  return m->context.scene==identity&&binding.identity==expected&&m->scene.absent(row,expected,m->context,binding);
 }
+bool NativeFloor::installed(Snapshot& out,std::uint64_t& epoch,std::string& error)const{
+ if(!m->committed||!m->prepared||!m->begun||!m->scenePreparationOwned||m->cleaning||m->releasing||m->expectedBirths.empty())
+  return refuse(error,"retail physical floor is not committed/readable");
+ const auto selectedEpoch=m->expectedBirths.front().epoch;
+ if(!selectedEpoch)return refuse(error,"retail installed census has no floor epoch");
+ for(const auto& birth:m->expectedBirths)if(birth.epoch!=selectedEpoch)return refuse(error,"retail installed census has mixed floor epochs");
+ out=m->context;epoch=selectedEpoch;error.clear();return true;
+}
+bool NativeFloor::current(const SceneIdentity& scene,std::uint64_t epoch)const noexcept{
+ if(!m->committed||!m->prepared||!m->begun||!m->scenePreparationOwned||m->cleaning||m->releasing||
+    !(scene==m->context.scene)||!epoch||m->expectedBirths.empty())return false;
+ for(const auto& birth:m->expectedBirths)if(birth.epoch!=epoch)return false;
+ return true;
+}
+bool NativeFloor::expectedSourceBirth(const Creature* pointer,unsigned token,const p2original::InstanceIdentity& identity,
+                                     BirthIdentity& out,Snapshot& floor,std::string& error)const{
+ Snapshot selected;std::uint64_t epoch=0;
+ if(!installed(selected,epoch,error))return false;
+ unsigned source=0,actualToken=0;p2original::InstanceIdentity actual;
+ if(!pointer||!token||!p2original::originalActors().query(pointer,source,actualToken,&actual)||
+    token!=actualToken||!(identity==actual)||actual.catalog!=selected.scene.layoutSha256)
+  return refuse(error,"retail installed source registry differs");
+ for(const auto& actor:m->actors)if(actor.actor==pointer&&actor.registered&&actor.token==token&&actor.source==source){
+  if(actor.origin.epoch!=actual.epoch||actor.origin.activation!=actual.activation||actor.origin.ordinal!=actual.ordinal)
+   return refuse(error,"retail installed actor differs from issued census");
+  out=actor.origin;floor=std::move(selected);error.clear();return true;
+ }
+ return refuse(error,"retail source actor is outside owned installed census");
+}
+bool NativeFloor::knownSourceBirth(const p2original::InstanceIdentity& identity,BirthIdentity& out,Snapshot& floor,std::string& error)const{
+ Snapshot selected;std::uint64_t epoch=0;
+ if(!installed(selected,epoch,error))return false;
+ if(identity.catalog!=selected.scene.layoutSha256)return refuse(error,"retail parent belongs to another source layout");
+ for(const auto& source:m->sources)if(source.row.enemy.uid==identity.generator){
+  for(const auto& actor:m->actors)if(actor.token&&actor.origin.row==source.row.caveRow&&actor.origin.ordinal==identity.ordinal&&
+       actor.origin.epoch==identity.epoch&&actor.origin.activation==identity.activation){
+   out=actor.origin;floor=std::move(selected);error.clear();return true;
+  }
+ }
+ return refuse(error,"retail parent incarnation was never physically associated");
+}
 bool NativeFloor::placement(const SceneIdentity& identity,unsigned row,unsigned ordinal,Placement& out,std::string& error)const{
  if(!m->prepared||!(m->context.scene==identity))return refuse(error,"retail placement outside prepared selected scene");
  FloorPlan verified;
@@ -182,6 +225,7 @@ bool NativeFloor::retired(Creature* pointer,std::string& error){
  error.clear();return true;
 }
 bool NativeFloor::release(std::string& error){
+ m->releasing=true; // Read-only source authority revokes before any native teardown.
  // Cargo/Pod reject an observable incomplete suction transaction. No actor is
  // destroyed until that owner agrees the scene can release or roll back.
  if((m->scenePreparationOwned||m->begun)&&!m->scene.release(error))return false;
@@ -205,7 +249,7 @@ bool NativeFloor::release(std::string& error){
  m->sources.clear();
  for(const auto& family:m->preparedFamilies)if(!family->cancel(error))return false;
  m->preparedFamilies.clear();
- m->prepared=false;m->cleaning=false;error.clear();return true;
+ m->expectedBirths.clear();m->prepared=false;m->cleaning=false;m->releasing=false;error.clear();return true;
 }
 } // namespace p2retail
 bool pc_p2_retail_cave_native_retired(Creature* actor,std::string& error){
