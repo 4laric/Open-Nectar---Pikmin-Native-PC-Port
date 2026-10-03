@@ -11,6 +11,7 @@
 #include "Interactions.h"
 #include "pc_p2_receipt_host.h"
 #include "pc_p2_original_actor.h"
+#include "pc_p2_original_pelplant_blend.h"
 #include <fstream>
 #include <sstream>
 #include <algorithm>
@@ -37,6 +38,8 @@ struct Track {
  Matrix4f capture;
  u32 pelletFlags=0;
  bool nativeDying=false;
+ Shape* blendShape=nullptr;
+ p2pose::Pose blendLeft,blendRight,blendResult;
 };
 }
 struct Native::Impl final:Engine {
@@ -161,6 +164,12 @@ struct Native::Impl final:Engine {
   actor->clearTekiOption(BTeki::TEKI_OPTION_GRAVITATABLE);actor->setTekiOption(BTeki::TEKI_OPTION_VISIBLE);
   actor->setTekiOption(BTeki::TEKI_OPTION_ATARI);actor->setTekiOption(BTeki::TEKI_OPTION_ALIVE);
   actor->setTekiOption(BTeki::TEKI_OPTION_SHAPE_VISIBLE);
+  auto& blendTrack=*tracks.at(actor);const auto* base=banks[0].basePose();
+  const int oldHeap=gsys->setHeap(SYSHEAP_App);
+  blendTrack.blendShape=base?p2pose::privateShape(banks[0].basePath().c_str(),*banks[0].owner(),*base):nullptr;
+  gsys->setHeap(oldHeap);
+  if(!blendTrack.blendShape)return reject(e,"Pelplant private wither geometry allocation failed");
+  blendTrack.blendLeft=blendTrack.blendRight=blendTrack.blendResult=*base;
   if(!tracks.at(actor)->collision.bind(actor,spheres.data(),6))return reject(e,"Pelplant retail collider allocation failed");return true;
  }
  bool captureNumber(Host& h,unsigned amount,int c,Pellet*& out,std::string& e)override{
@@ -198,10 +207,19 @@ struct Native::Impl final:Engine {
   const bool dying=track->second->nativeDying;
   tracks.erase(track);if(!dying)h.creature->kill(false);return true;
  }
- Matrix4f sampled(Host& h,int joint){auto& t=*tracks.at(h.creature);auto& clip=variants[h.captured?amountIndex(h.initial.amount):0][t.motion];
-  const float frame=std::min(t.frame,float(clip.duration-1));std::size_t left=0;while(left+1<clip.samples.size()&&clip.samples[left+1].frame<=frame)++left;
+ Matrix4f localSample(const Clip& clip,float sourceFrame,int joint){
+  const float frame=std::min(sourceFrame,float(clip.duration-1));std::size_t left=0;while(left+1<clip.samples.size()&&clip.samples[left+1].frame<=frame)++left;
   std::size_t right=std::min(left+1,clip.samples.size()-1);float w=right==left?0:(frame-clip.samples[left].frame)/float(clip.samples[right].frame-clip.samples[left].frame);
   Matrix4f local;local.makeIdentity();for(int r=0;r<3;++r)for(int c=0;c<4;++c)local.mMtx[r][c]=clip.samples[left].joint[joint].mMtx[r][c]*(1-w)+clip.samples[right].joint[joint].mMtx[r][c]*w;
+  return local;
+ }
+ Matrix4f sampled(Host& h,int joint){auto& t=*tracks.at(h.creature);auto& clips=variants[h.captured?amountIndex(h.initial.amount):0];
+  Matrix4f local=localSample(clips[t.motion],t.frame,joint);
+  if(t.blend){Matrix4f end=localSample(clips[4],t.frame,joint);std::array<float,12> a,b,result;
+   for(int r=0;r<3;++r)for(int c=0;c<4;++c){a[r*4+c]=local.mMtx[r][c];b[r*4+c]=end.mMtx[r][c];}
+   if(!blendJoint(a,b,witherWeight(t.blendTime),result))fail("Pelplant wither joint blend invalid");
+   for(int r=0;r<3;++r)for(int c=0;c<4;++c)local.mMtx[r][c]=result[r*4+c];
+  }
   Matrix4f root,world;root.makeSRT(Vector3f(1,1,1),Vector3f(0,h.creature->mFaceDirection,0),h.creature->mSRT.t);root.multiplyTo(local,world);return world;
  }
  void follow(Host& h){auto& t=*tracks.at(h.creature);float scale=h.captured?headScale(h.initial.amount):1;
@@ -237,7 +255,14 @@ bool Native::tick(BTeki* actor,float dt,std::string& e){Host* h=m->provider.look
 }
 bool Native::draw(BTeki* actor,Graphics& gfx,const Matrix4f& view){Host* h=m->provider.lookup(actor);if(!h||!gfx.mCamera)return false;auto& t=*m->tracks.at(actor);auto& clip=m->variants[h->captured?amountIndex(h->initial.amount):0][t.motion];
  gfx.useMatrix(Matrix4f::ident,0);
- Shape* shape=m->presentation.draw(actor,m->banks[h->captured?amountIndex(h->initial.amount):0],names[t.motion],std::min(t.frame,float(clip.duration-1)),h->token);
+ auto& bank=m->banks[h->captured?amountIndex(h->initial.amount):0];Shape* shape=nullptr;
+ if(t.blend){const auto* start=bank.clip(names[t.motion]);const auto* end=bank.clip("wait1");
+  if(!start||!end||!samplePose(start->poses,start->frames,t.frame,t.blendLeft)
+    ||!samplePose(end->poses,end->frames,t.frame,t.blendRight)
+    ||!p2pose::blendInto(t.blendLeft,t.blendRight,witherWeight(t.blendTime),t.blendResult)
+    ||!p2pose::write(*t.blendShape,t.blendResult))fail("Pelplant wither visible geometry blend invalid");
+  shape=t.blendShape;
+ }else shape=m->presentation.draw(actor,bank,names[t.motion],std::min(t.frame,float(clip.duration-1)),h->token);
  if(!shape){std::size_t best=0;for(std::size_t i=1;i<clip.frames.size();++i)if(std::fabs(float(clip.frames[i])-t.frame)<std::fabs(float(clip.frames[best])-t.frame))best=i;shape=clip.shapes[best];}
  shape->updateAnim(gfx,view,nullptr,actor);shape->drawshape(gfx,*gfx.mCamera,nullptr);return true;
 }
