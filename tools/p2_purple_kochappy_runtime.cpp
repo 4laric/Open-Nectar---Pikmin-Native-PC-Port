@@ -509,6 +509,9 @@ class PurpleKochappyApp:public PlugPikiApp {
  PcKochappyRouteCatchup routeCatchup;
  PcKochappyPrefixProgress prefixProgress;
  PcKochappyPrefixContactGate prefixContact;
+ PcKochappyPrefixNeutralGate prefixNeutral;
+ bool prefixNeutralDone=false,prefixEdgeSent=false,prefixEdgeVerified=false;
+ int prefixEdgeAge=-1;
  int neutralEdgeGuide=-1,neutralEdgeAge=-1;
  bool neutralEdgeVerified=false;
  bool seenCaptain=false,wasActive=false,sawFit=false,sawPause=false,recovered=false,deathDuringStun=false;
@@ -562,6 +565,16 @@ class PurpleKochappyApp:public PlugPikiApp {
  }
  bool approachPrefix(Navi* n) {
   if(prefixProgress.guide==ReceiverPrefixCount)return false;
+  // Observe the edge at the very next native idle, before contact settling
+  // can publish neutral and erase the real controller-edge witness.
+  if(prefixEdgeSent&&!prefixEdgeVerified&&age>prefixEdgeAge){
+   require(n->mKontroller,"prefix edge current controller missing");
+   const float right=std::hypot(n->mKontroller->getSubStickX(),n->mKontroller->getSubStickY());
+   const float previous=n->mPrevCStick.length();
+   std::printf("P2_PURPLE_KOCHAPPY_PREFIX_EDGE_OBSERVED age=%d right=%.6f previous=%.6f locked=%d actor_writes=0\n",age,right,previous,int(n->mPlateDirLocked));
+   require(right>.05f&&previous>.05f&&!n->mPlateDirLocked,"prefix actual right-stick unlock not observed");
+   prefixEdgeVerified=true;
+  }
   receiverWallCache();
   bool present[20]={};Piki* current[20]={};int count=0;float width=0.f,lag=0.f;bool allContact=true;
   Iterator bodies(pikiMgr);CI_LOOP(bodies){Piki* p=static_cast<Piki*>(*bodies);
@@ -595,21 +608,39 @@ class PurpleKochappyApp:public PlugPikiApp {
   if(contact==PcKochappyPrefixContact::Wait){input();return true;}
   // All original grounded/dry/normal>.5 contacts are required before any
   // footprint/path admission or movement. A transient does not bypass them.
+  bool allSafeFormed=true;
   for(Piki* p:current){
    Vector3f target;PcKochappyCrowdObservation observation;
    require(CrowdObserver::target(*p,*n,target,observation),"prefix actual owned Crowd target missing/unsupported");
    const float targetSpan=distance(n->mSRT.t,target);
    require(std::isfinite(targetSpan)&&targetSpan<512.f,"prefix Crowd target outside verified span");width=std::max(width,targetSpan);
+   allSafeFormed=allSafeFormed&&observation.state==1&&!observation.tripping&&!observation.route;
    // Check every ACTUAL body and owned slot footprint against source walls;
    // this is refreshed native geometry, not a rigid future-party translation.
    const float r=p->mCollisionRadius;
    require(std::isfinite(r)&&r>0.f,"prefix invalid native body radius");
    const float offset=p->isCreatureFlag(CF_EnableGroundOffset)?p->mGroundOffset:0.f;
    receiverCheckSphere({p->mSRT.t.x,p->mSRT.t.y-offset+r,p->mSRT.t.z},r+.10,"prefix-current-body",int(p->mGenerator->_70),prefixProgress.guide);
+   if(!prefixNeutralDone)continue;
    auto* floor=mapMgr->getCurrTri(target.x,target.z,true);const float y=mapMgr->getMinY(target.x,target.z,true);
    require(floor&&std::isfinite(y)&&std::isfinite(floor->mTriangle.mNormal.y)&&floor->mTriangle.mNormal.y>.5f,
     "prefix slot source floor missing/unsafe");
    receiverCheckSphere({target.x,double(y)+r/floor->mTriangle.mNormal.y,target.z},r+.10,"prefix-owned-slot",int(p->mGenerator->_70),prefixProgress.guide);
+  }
+  if(!prefixNeutralDone){
+   require(n->mKontroller,"prefix actual controller missing");
+   const float right=n->mKontroller->getSubStickX(),up=n->mKontroller->getSubStickY();
+   const float rightLength=std::hypot(right,up),previous=n->mPrevCStick.length(),targetSpeed=n->mTargetVelocity.length();
+   const int edge=pc_kochappy_neutral_edge(prefixEdgeSent,n->mPlateDirLocked,n->mIsCStickNeutral,
+    roster&&allSafeFormed,n->mFormationBand,rightLength,previous,targetSpeed,pc_window_get_stick_dead_zone());
+   require(edge>=0,"prefix unsupported ordinary neutral inputs");
+   const bool ready=allSafeFormed&&!n->mPlateDirLocked&&n->mIsCStickNeutral&&rightLength<=.05f&&previous<=.05f&&targetSpeed<50.f;
+   const int setup=prefixNeutral.observe(ready);
+   std::printf("P2_PURPLE_KOCHAPPY_PREFIX_NEUTRAL age=%d observations=%d formed=%d locked=%d neutral=%d band=%d right=%.6f previous=%.6f target_speed=%.6f edge=%d edge_verified=%d ready=%d actor_writes=0\n",
+    age,prefixNeutral.observations,int(allSafeFormed),int(n->mPlateDirLocked),int(n->mIsCStickNeutral),n->mFormationBand,rightLength,previous,targetSpeed,edge,int(prefixEdgeVerified),int(ready));
+   require(setup>=0,"prefix bounded ordinary neutral setup exhausted");
+   if(edge>0){prefixEdgeSent=true;prefixEdgeAge=age;input(0,0,0,edge,0);}else input();
+   prefixNeutralDone=setup==1;return true;
   }
   const auto& w=ReceiverPrefix[prefixProgress.guide];const Vector3f goal(w.x,0.f,w.z);
   auto* floor=mapMgr->getCurrTri(w.x,w.z,true);const float y=mapMgr->getMinY(w.x,w.z,true);

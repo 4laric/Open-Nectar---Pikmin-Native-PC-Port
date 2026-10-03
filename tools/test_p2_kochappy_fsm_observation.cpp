@@ -185,4 +185,11 @@ int main(){
  CHECK(!pc_kochappy_overlay_preserved(paused,now));CHECK(!pc_kochappy_clock_resumed(paused,now));
  now=paused;now.available=false;CHECK(!pc_kochappy_clock_resumed(paused,now));
  std::puts("P2_KOCHAPPY_FSM_OBSERVATION_POLICY_PASS actual_FSM_runtime=unexecuted");
+ PcKochappyPrefixNeutralGate neutralSetup;
+ for(int i=0;i<89;++i)CHECK(neutralSetup.observe(false)==0);
+ CHECK(neutralSetup.observe(true)==1);
+ CHECK(neutralSetup.observe(true)==-1);
+ PcKochappyPrefixNeutralGate stalledSetup;
+ for(int i=0;i<90;++i)CHECK(stalledSetup.observe(false)==0);
+ CHECK(stalledSetup.observe(false)==-1);
 }

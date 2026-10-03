@@ -128,3 +128,10 @@ struct PcKochappyPrefixProgress {
         return I::Walk;
     }
 };
+
+// Prefix input setup cannot wait indefinitely for the real plate to unlock.
+class PcKochappyPrefixNeutralGate {
+public:
+ int observations=0;
+ int observe(bool ready){if(observations>=90)return -1;++observations;return ready?1:0;}
+};
