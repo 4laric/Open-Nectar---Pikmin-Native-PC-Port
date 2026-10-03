@@ -100,7 +100,7 @@ void run() {
  require(field()==20&&GameStat::mapPikis==20,"actual field and population baseline20");
  const int ordinaryLimit=AICONST.mMaxPikisOnField();
  std::printf("ORIGINAL_GENPIKI_CAPACITY map=%d ordinary_limit=%d queued=%d source_limit=100\n",
-     GameStat::mapPikis,ordinaryLimit,itemMgr?itemMgr->getContainerExitCount():0);
+     int(GameStat::mapPikis),ordinaryLimit,itemMgr?itemMgr->getContainerExitCount():0);
  require(ordinaryLimit==20,"actual starting Flarlic ordinary limit20");
  require(pikiMgr->birth()==nullptr,"ordinary birth retains cap20 before source allocation");
  std::vector<OriginalPikiSource> rows;
