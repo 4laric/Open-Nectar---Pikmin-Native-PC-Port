@@ -35,6 +35,13 @@ struct Owner::Impl {
  const LoadedScene* scene;std::uint64_t epoch;
  std::string campaign,fingerprint,catalog;std::array<Entry,2> entries{};
  unsigned operationDepth=0,flagEventDepth=0;bool managerChild=false;std::uint64_t mutationRevision=0;
+ struct RoomCall {Navi* actor;int room;const void* state;std::uint64_t birth,revision;};
+ const RoomCall* roomCall=nullptr;
+ struct RoomVisit {
+  Impl& owner;RoomCall call;const RoomCall* prior;
+  RoomVisit(Impl& o,Navi* n,int room):owner(o),call{n,room,n->getCurrState(),o.entry(n)->fields.initializationSerial,o.mutationRevision},prior(o.roomCall){o.roomCall=&call;}
+  ~RoomVisit(){owner.roomCall=prior;}
+ };
  struct Operation {
   Impl& owner;bool entered=false;
   Operation(Impl& o,std::string& e,bool childFlag=false):owner(o){
@@ -100,7 +107,7 @@ struct Owner::Impl {
    if(!call(n,e,[&]{return trace.map(*n,info,rate,e);}))return false;
    if(!finite(info.velocity)||!finite(info.sphere.center)||!finite(info.floorNormal)||!finite(info.wallNormal))return fail(e,"invalid actual map trace output");
    put(n->mVelocity,info.velocity);
-   if(info.roomIndex!=-1){a->fields.roomIndex=info.roomIndex;if(!call(n,e,[&]{return trace.room(*n,info.roomIndex,e);}))return false;}
+   if(info.roomIndex!=-1){a->fields.roomIndex=info.roomIndex;if(!call(n,e,[&]{RoomVisit visit(*this,n,info.roomIndex);return trace.room(*n,info.roomIndex,e);}))return false;}
   }else{info.sphere.center=add(info.sphere.center,scale(get(n->mVelocity),rate));info.floor={};}
   if(!a->fields.floor.triangle&&info.floor.triangle)if(!call(n,e,[&]{FlagEvent event(*this);return provider.bounce(*n,info.floor,e);},true))return false;
   a->fields.floor=info.floor;a->fields.floorNormal=info.floorNormal;
@@ -137,6 +144,15 @@ bool Owner::initializeAfterBodyReset(Navi* n,std::string& e){
  auto slot=n==m->scene->captainAt(0)?0:1;m->entries[slot].actor=n;m->entries[slot].fields=Fields{};m->entries[slot].fields.initializationSerial=++nextInitializationSerial;return true;
 }
 bool Owner::readFields(const Navi* n,Fields& out,std::string& e)const{auto* a=m->entry(n);if(!a||!m->auth(n,e,true))return false;out=a->fields;return true;}
+bool Owner::roomVisitCurrent(const Navi* n,const SourceSceneTrace& trace,int room,std::string& e)const{
+ const auto* call=m->roomCall;
+ if(!call||!m->operationDepth||call->actor!=n||call->room!=room||room<0||&m->trace!=&trace||!m->auth(n,e))
+  return fail(e,"source room visit is outside actual post-map body callback");
+ auto* a=m->entry(n);
+ return m->roomCall==call&&a&&a->fields.initializationSerial==call->birth&&a->fields.roomIndex==room
+  &&m->mutationRevision==call->revision&&const_cast<Navi*>(n)->getCurrState()==call->state?true:
+  fail(e,"source room visit callback lost actual body phase generation");
+}
 bool Owner::canRetire(std::string& e)const{if(m->operationDepth)return fail(e,"source body phase callbacks still retain owner");e.clear();return true;}
 void Owner::forget(Navi* n)noexcept{if(m->operationDepth){++m->mutationRevision;return;}auto* a=m->entry(n);if(a)*a=Impl::Entry{};}
 bool Owner::setMoveRotation(Navi* n,bool enabled,std::string& e){Impl::Operation operation(*m,e,true);if(!operation.entered)return false;auto* a=m->entry(n);if(!a||!m->auth(n,e,true)||!exactState(n))return fail(e,"source FP moveRotation event lacks current owned typed actor");if(enabled)a->fields.fpFlags&=~1u;else a->fields.fpFlags|=1;return true;}

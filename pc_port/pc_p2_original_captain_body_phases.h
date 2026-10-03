@@ -74,6 +74,9 @@ public:
  bool managerAnimation(std::string&);
  bool managerSimulation(float actualRate,std::string&);
  bool readFields(const Navi*,Fields&,std::string&)const;
+ // Read-only proof of the exact private post-map room callback. A body guard
+ // outside this simulation phase cannot authorize scene visit mutation.
+ bool roomVisitCurrent(const Navi*,const SourceSceneTrace&,int room,std::string&)const;
  bool setMoveRotation(Navi*,bool,std::string&);
  bool canRetire(std::string&)const; // actual in-flight callback ownership
  void forget(Navi*)noexcept;

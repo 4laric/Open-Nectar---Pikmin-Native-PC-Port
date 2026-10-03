@@ -5,12 +5,16 @@
 // Strong scene-owned original geometry/flags, not legacy MapMgr queries.
 const p2retail::SourceRoomGeometry* pc_p2_retail_scene_source_geometry(const p2retail::SceneContext&,std::uint64_t,std::uint64_t) noexcept;
 const p2retail::SourceFloorParameters* pc_p2_retail_scene_floor_parameters(const p2retail::SceneContext&,std::uint64_t,std::uint64_t) noexcept;
+bool pc_p2_retail_scene_visit_room(const p2retail::SceneContext&,std::uint64_t,std::uint64_t,Navi*,int,std::string&);
 namespace p2original {namespace captain {namespace bodyphases {
 namespace {
 namespace rt=p2originalnumber::roomTrace;
 bool fail(std::string& e,const char* message){e=message;return false;}
 rt::Vec3 numeric(Vec3 v){return {v.x,v.y,v.z};}
 Vec3 source(rt::Vec3 v){return {v.x,v.y,v.z};}
+class NativeTrace;
+struct RoomReceiver {const NativeTrace* trace;const BodyBorrowerGuard* guard;const Owner* owner;const Navi* actor;int room;};
+const RoomReceiver* roomReceiver=nullptr;
 class NativeTrace final:public SourceSceneTrace {
 public:
  const p2retail::SceneContext* context=nullptr;const LoadedScene* loaded=nullptr;
@@ -70,11 +74,22 @@ public:
   if(parameters->hasHiddenCollision)return fail(e,"actual original hidden bounds clamp producer unavailable");
   return guard.current(e);
  }
- bool room(Navi& n,int,std::string& e)override {
-  BodyBorrowerGuard guard;if(!current(e)||!BodyBorrowerGuard::capture(*context,&n,guard,e))return false;
-  return fail(e,"actual original Room visited/RouteMgr waypoint producer unavailable");
+ bool room(Navi& n,int room,std::string& e)override {
+  auto* owner=pc_p2_original_captain_body_phase_owner(&n);BodyBorrowerGuard guard;
+  if(roomReceiver||!owner||!current(e)||!owner->roomVisitCurrent(&n,*this,room,e)
+   ||!BodyBorrowerGuard::capture(*context,&n,guard,e))return fail(e,"source room visit lacks genuine trace/body phase");
+  RoomReceiver receiver{this,&guard,owner,&n,room};roomReceiver=&receiver;
+  struct End {~End(){roomReceiver=nullptr;}} end;
+  if(!pc_p2_retail_scene_visit_room(*context,serial,revision,&n,room,e))return false;
+  return current(e)&&guard.current(e)&&owner->roomVisitCurrent(&n,*this,room,e);
  }
 };
+}
+bool nativeRoomVisitCurrent(const p2retail::SceneContext& ctx,std::uint64_t serial,std::uint64_t revision,const Navi* n,int room,std::string& e){
+ const auto* call=roomReceiver;
+ if(!call||call->actor!=n||call->room!=room||call->trace->context!=&ctx||call->trace->serial!=serial||call->trace->revision!=revision
+  ||pc_p2_original_captain_body_phase_owner(n)!=call->owner)return fail(e,"source scene visit has no actual captain room receiver");
+ return call->trace->current(e)&&call->guard->current(e)&&call->owner->roomVisitCurrent(n,*call->trace,room,e)&&roomReceiver==call;
 }
 std::unique_ptr<SourceSceneTrace> createNativeTrace(const p2retail::SceneContext& ctx,std::string& e){
  auto* s=pc_p2_original_captain_loaded_scene();auto* w=pc_p2_original_captain_world();
@@ -92,3 +107,6 @@ std::unique_ptr<SourceSceneTrace> createNativeTrace(const p2retail::SceneContext
  return trace;
 }
 }}}
+bool pc_p2_original_captain_room_visit_current(const p2retail::SceneContext& ctx,std::uint64_t serial,std::uint64_t revision,const Navi* n,int room,std::string& e){
+ return p2original::captain::bodyphases::nativeRoomVisitCurrent(ctx,serial,revision,n,room,e);
+}
