@@ -17,6 +17,9 @@ actual captured Egg. Reserve five Eggs; never confuse row counts with actors.
 - Qurione GroupProvider lifecycle with literal fly/slide tail, actual engine
   birth/capture operations, source animation IDs, flying-only collision,
   KEYEVENT_2 release, endpoint repositioning, scale and visibility/death rules.
+- Concrete Qurione and Egg native carriers, owned sampled pose/collision,
+  stable authored water-matrix capture, source static-floor queries and typed
+  independent captured-Egg identities. Scene cleanup never informs a death.
 - Egg GroupProvider with literal source row admission, actual capture/drop
   operations, ground/bounce/contact rules and source retained invulnerability.
 - Gas linked-structure producer adapter and bounded versioned checkpoint codec;
@@ -25,13 +28,18 @@ actual captured Egg. Reserve five Eggs; never confuse row counts with actors.
 - Egg contents with exact source RNG order, live spray flags, typed actual
   manager births, source Mitite group failure fallback, stable child identities,
   idempotent failed/successful/consumed records and snapshot validation.
+- Concrete ItemHoney factory with private source geometry, joint0 collider,
+  source Fall/Bounce/Wait/Touch/Shrink clocks, actual Piki/Navi drink states and
+  authored nectar growth. SourceBank verifies private staged clip/rig/receiver
+  digests. P1 character motion is presentation only; retail keys drive mechanics.
+- Egg and Qurione physical snapshot/preflight/apply, bounded contents and stock
+  codecs, and Honey source animation validation before restore allocation.
 
 Core tests use fake Engine adapters and establish policy only. The Gas native
 bridge requires actual story-link Services. Source JPA/audio may be safely
 deferred as an explicit presentation limitation; this never changes emission,
 damage, immunity, death or source-item mechanics. Existing P1 attack effects/sound
-approximations are not used. Qurione,
-Egg and ItemHoney concrete native hosts, campaign checkpoint integration and
+approximations are not used. Source provider startup hooks, campaign checkpoint integration and
 ordinary gameplay acceptance remain outstanding. No provider is yet admitted.
 
 ## Build
@@ -41,8 +49,55 @@ Ninja and the maintained GCC toolchain. Build `pikmin_pc`,
 `p2_original_gas_policy`, `p2_original_wisp_policy`, and
 `p2_original_egg_contents_policy`, `p2_original_egg_policy`,
 `p2_original_gas_links_policy`, and `p2_original_gas_save_policy`.
+Additional targets are `p2_original_resource_state_policy`,
+`p2_original_resource_save_policy`, `p2_original_wisp_clock_policy`,
+`p2_original_egg_snapshot_policy`, `p2_original_wisp_snapshot_policy`,
+`p2_original_honey_policy`, `p2_original_honey_bank_policy`, and
+`p2_original_contents_save_policy` (14 policy targets total).
 Record exact source pin, output directory,
 executable SHA256, build log and a no-work Ninja dry run.
+
+## Startup and ownership contracts
+
+Preload the allocation-only TEKI_Palm shape/anim/strategy before stage start;
+never execute its inherited AI. Reserve the aggregate manager capacity for two
+Gas, two Wisps and five Eggs before any source birth. Provider-local checks do
+not replace the aggregate check. The original dispatch owner installs the
+early update, refresh, interaction and forget hooks from the native headers.
+Owned update returns before generic Creature update so movement occurs once.
+Suppress inherited chassis wall/AI callbacks for owned actors too. Qurione uses
+static MoveTrace radius15, source acceleration .1 and reflection .5.
+
+Qurione capture needs the prospective authoritative full source incarnation
+before registry bind. Egg caches its typed parent incarnation after detach;
+never derive it from a pointer or fabricate epoch/activation. Gas source Links
+require actual ordered Bridge/Gate registries and live state readers.
+
+ResourceState is installed explicitly from authoritative campaign state and
+shared with the consumables owner. Actual NaviAbsorb END completes a born
+source child/captain receipt; both captains can share the same shrinking drop.
+P2ORS1 resource-card decode checks the expected full campaign SHA and prospective
+born-child graph before returning unchanged-on-failure typed records. Physical
+graph adoption belongs to the checkpoint owner's transaction.
+
+Forward Honey Services animation methods, including validateAnimation, to the
+single SourceBank. Update/render/search the single Honey Manager and forget real
+Piki/Navi receivers before their native pool addresses are reused. Finish active
+absorption/growth before course snapshots; active receiver saves currently refuse.
+Honey restore requires a prepared empty course and prospective EggContents child
+validation by the checkpoint owner. It performs no birth/init RNG or past keys.
+Receiver clips are Piki MIZUNOMI[0], GROWUP1[1], GROWUP2[2], Navi MIZUNOMI[3].
+Navi's original archive/animation manager aliases the Piki source. Use the same
+authoritative ResourceState for spray production, absorption and use (#142).
+
+Private staging tools validate retail receipts before writing destination files:
+stage_original_egg_resources.py, stage_original_wisp_resources.py and
+stage_original_honey_resources.py. Retail assets remain private under output.
+Policy/native object logs for this producer are original-resources-1252-*-05/04.
+The runner's earlier 77bf5bd build linked and passed six policies, but its worker
+exited failed after looking for the executable at the wrong path. Metadata-only
+verification found build/bin/nectar; failure logs remain preserved. That binary
+does not validate this later factory pin or any gameplay.
 
 ## Short ordinary human acceptance script (pending native admission)
 

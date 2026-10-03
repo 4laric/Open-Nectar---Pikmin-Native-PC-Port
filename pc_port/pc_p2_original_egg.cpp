@@ -101,6 +101,9 @@ bool Provider::detach(Creature* actor,std::string& e){
 bool Provider::tick(Creature* actor,float dt,Event event,std::string& e){
  Host* h=lookup(actor);if(!h||(!h->dependent&&!h->token)||!std::isfinite(dt)||dt<0)return fail(e,"Egg update lacks source identity or valid delta");
  if(!mEngine.update(*h,dt,e))return false;
+ // Native out-of-world physics can retire the actual body synchronously.
+ // Such retirement is not Egg StateWait destruction or contents generation.
+ h=lookup(actor);if(!h){e.clear();return true;}
  if(h->health<=0){
   if(!h->contentsGenerated){if(!mEngine.contents(*h,e))return false;h->contentsGenerated=true;}
   if(!h->effectsEmitted){if(!mEngine.breakEffects(*h,e))return false;h->effectsEmitted=true;}

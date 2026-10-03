@@ -7,6 +7,7 @@ struct Fake:egg::Engine {
  bool drop=false,nullBirth=false,cleanupFail=false,contentsFail=false;
  std::string sequence;
  egg::Provider* retirement=nullptr;
+ bool retireInUpdate=false;
  bool resources(egg::Resources& r,std::string&)override{r.parameters.health=50;r.parametersLoaded=r.model=r.collider=r.motion=r.contents=r.breakEffects=r.capture=true;return true;}
  bool commonResources(const CatalogRow&,std::string&)override{return true;}
  bool reserve(unsigned n,std::string&)override{field=n;return true;}
@@ -18,7 +19,7 @@ struct Fake:egg::Engine {
  bool capturedIdentity(Creature* p,std::string& s,std::string&)override{s="source16:epoch3:ordinal"+std::to_string(std::uintptr_t(p))+":cargo0";return true;}
  bool startCapture(egg::Host&,Creature*,void*,std::string&)override{return true;}
  bool endCapture(egg::Host&,std::string&)override{return true;}
- bool update(egg::Host&,float,std::string&)override{++updates;return true;}
+ bool update(egg::Host& h,float,std::string& e)override{++updates;return retireInUpdate&&retirement?retirement->release(h.creature,h.token,e):true;}
  bool contents(egg::Host&,std::string& e)override{if(contentsFail){e="injected contents refusal";return false;}sequence+='C';return true;}
  bool breakEffects(egg::Host&,std::string&)override{sequence+='E';return true;}
  bool kill(egg::Host& h,std::string& e)override{sequence+='K';return retirement?retirement->release(h.creature,h.token,e):true;}
@@ -52,5 +53,7 @@ int main(){
  // Native kill can synchronously remove the provider Host. No read after kill.
  Fake synchronous;egg::Provider sp(synchronous);synchronous.retirement=&sp;assert(sp.preflight({r},e)&&sp.reserve({r},e));c=birth(sp,r,e);
  assert(sp.damage(c,100,0,e)&&sp.tick(c,0,egg::Event::None,e)&&sp.size()==0&&synchronous.sequence=="CEK");
+ Fake physics;egg::Provider pp(physics);physics.retirement=&pp;physics.retireInUpdate=true;assert(pp.preflight({r},e)&&pp.reserve({r},e));c=birth(pp,r,e);
+ assert(pp.tick(c,0.1f,egg::Event::None,e)&&pp.size()==0&&physics.sequence.empty());
  std::cout<<"Original Egg source lifecycle policy checks passed (fake engine; no gameplay claim)\n";
 }
