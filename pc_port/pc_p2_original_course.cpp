@@ -19,6 +19,8 @@
 #include "pc_p2_original_onyon_native.h"
 #include "pc_p2_original_gate_native.h"
 #include "pc_p2_original_bridge_native.h"
+#include "pc_p2_original_barrel_native.h"
+#include "pc_p2_original_cave_native.h"
 #include "pc_p2_original_manifest.h"
 #include "pc_p2_original_progress.h"
 #include "pc_p2_original_calendar_state.h"
@@ -59,6 +61,8 @@ struct Course {
  bool pikis=false;
  bool gates=false;
  bool bridges=false;
+ bool barrels=false;
+ bool caves=false;
  bool selectedSession=false;
  bool loaded=false;
  std::string course;
@@ -127,7 +131,7 @@ bool pc_p2_original_course_start(GeneratorList* list,std::string& e){
  std::vector<GroupBinding> bindings;std::map<unsigned,std::vector<Generator*>> inventory;
  std::vector<Generator*> onyonInventory;
  std::vector<Generator*> pikiInventory;
- std::vector<Generator*> gateInventory,bridgeInventory;
+ std::vector<Generator*> gateInventory,bridgeInventory,barrelInventory,caveInventory;
  // Validate the entire list before collect mutates compatibility observations.
  for(auto* node=list->mGenListHead->mChild;node;node=node->mNext){
   auto* g=static_cast<Generator*>(node);auto* object=dynamic_cast<GenObjectOriginalEnemy*>(g->mGenObject);
@@ -135,6 +139,8 @@ bool pc_p2_original_course_start(GeneratorList* list,std::string& e){
   if(dynamic_cast<GenObjectOriginalPiki*>(g->mGenObject))pikiInventory.push_back(g);
   if(dynamic_cast<GenObjectOriginalGate*>(g->mGenObject))gateInventory.push_back(g);
   if(dynamic_cast<GenObjectOriginalBridge*>(g->mGenObject))bridgeInventory.push_back(g);
+  if(dynamic_cast<GenObjectOriginalBarrel*>(g->mGenObject))barrelInventory.push_back(g);
+  if(dynamic_cast<GenObjectOriginalCave*>(g->mGenObject))caveInventory.push_back(g);
   if(!object)continue;
   auto found=current->literal.find(object->mState.uid);
   if(found==current->literal.end())return fail(e,"original native list has unknown source object");
@@ -189,6 +195,10 @@ bool pc_p2_original_course_start(GeneratorList* list,std::string& e){
  else if(!gateInventory.empty())return fail(e,"original source gates lack admitted typed manifest");
  if(current->bridges){if(!pc_p2_original_bridge_preflight(bridgeInventory,e))return false;}
  else if(!bridgeInventory.empty())return fail(e,"original source bridges lack admitted typed manifest");
+ if(current->barrels){if(!pc_p2_original_barrel_preflight(barrelInventory,e))return false;}
+ else if(!barrelInventory.empty())return fail(e,"original source Barrels lack admitted typed manifest");
+ if(current->caves){if(!pc_p2_original_cave_preflight(caveInventory,e))return false;}
+ else if(!caveInventory.empty())return fail(e,"original source Caves lack admitted typed manifest");
  // Shared Chappy bank is published once with the full source union; later
  // family preflights must not add a missing Fire/Hairy variant to live data.
  std::set<unsigned> chappySources;
@@ -208,6 +218,7 @@ bool pc_p2_original_course_finish(std::string& e){
  if(!pc_p2_campaign_treasure_held_unload(e))return false;
  if(!pc_p2_original_corpse_unload(e))return false;
  if(current->started&&!pc_p2_original_course_unload(e))return false;
+ if(current->barrels)pc_p2_original_barrel_before_teardown();
  if(current->pikis)pc_p2_original_piki_unload();
  current.reset();e.clear();return true;
 }
@@ -294,14 +305,17 @@ bool pc_p2_original_course_load(const char* directory,const char* course,std::fu
   }
  }
  std::vector<GateRecord> gates;std::vector<BridgeRecord> bridges;
+ std::vector<BarrelRecord> barrels;std::vector<CaveRecord> caves;
  const auto typedFile=[&](const char* suffix,std::string& path,bool& exists){
   path=std::string(directory)+"/"+selected+suffix;std::error_code status;
   exists=std::filesystem::exists(path,status);if(status)return fail(e,"original typed item manifest status failed");return true;
  };
- std::string gatePath,bridgePath;bool hasGates=false,hasBridges=false;
- if(!typedFile(".p2gt",gatePath,hasGates)||!typedFile(".p2br",bridgePath,hasBridges))return false;
+ std::string gatePath,bridgePath,barrelPath,cavePath;bool hasGates=false,hasBridges=false,hasBarrels=false,hasCaves=false;
+ if(!typedFile(".p2gt",gatePath,hasGates)||!typedFile(".p2br",bridgePath,hasBridges)||!typedFile(".p2ba",barrelPath,hasBarrels)||!typedFile(".p2cv",cavePath,hasCaves))return false;
  if(hasGates){if(selectedSession){std::string b;if(!loadBytes(gatePath,b)||!parseGates(b,gates,e))return false;}else if(!readGates(gatePath,gates,e))return false;}
  if(hasBridges){if(selectedSession){std::string b;if(!loadBytes(bridgePath,b)||!parseBridges(b,bridges,e))return false;}else if(!readBridges(bridgePath,bridges,e))return false;}
+ if(hasBarrels){if(selectedSession){std::string b;if(!loadBytes(barrelPath,b)||!parseBarrels(b,barrels,e))return false;}else if(!readBarrels(barrelPath,barrels,e))return false;}
+ if(hasCaves){if(selectedSession){std::string b;if(!loadBytes(cavePath,b)||!parseCaves(b,caves,e))return false;}else if(!readCaves(cavePath,caves,e))return false;}
  // The shared UID namespace covers every kind, including inactive Pikmin.
  std::set<unsigned> sourceUids;
  for(const auto& row:manifest.rows)sourceUids.insert(row.enemy.uid);
@@ -313,6 +327,8 @@ bool pc_p2_original_course_load(const char* directory,const char* course,std::fu
  for(const auto& row:onyons)if(!checkItem(row))return false;
  for(const auto& row:gates)if(!checkItem(row))return false;
  for(const auto& row:bridges)if(!checkItem(row))return false;
+ for(const auto& row:barrels)if(!checkItem(row))return false;
+ for(const auto& row:caves)if(!checkItem(row))return false;
  // Item manifests retain all-calendar source authority. Install only rows
  // whose exact UID/key/raw-member hash belongs to this selected calendar load.
  if(selectedSession){
@@ -332,13 +348,15 @@ bool pc_p2_original_course_load(const char* directory,const char* course,std::fu
    }
    return true;
   };
-  if(!selectItems(onyons)||!selectItems(gates)||!selectItems(bridges))return false;
+  if(!selectItems(onyons)||!selectItems(gates)||!selectItems(bridges)||!selectItems(barrels)||!selectItems(caves))return false;
  }
  if(!pc_p2_original_course_prepare(manifest.fingerprint,manifest.rows,manifest.literal,std::move(metColor),e))return false;
  const auto rollback=[&](){
   // No source body has been born during installation.
   if(current->gates)pc_p2_original_gate_unload();
   if(current->bridges)pc_p2_original_bridge_unload();
+  if(current->barrels)pc_p2_original_barrel_unload();
+  if(current->caves)pc_p2_original_cave_unload();
   if(current->pikis)pc_p2_original_piki_unload();
   if(current->onyons)pc_p2_original_onyon_unload();current.reset();
  };
@@ -347,6 +365,12 @@ bool pc_p2_original_course_load(const char* directory,const char* course,std::fu
  }
  if(hasBridges&&!bridges.empty()){
   if(!pc_p2_original_bridge_install(bridges,e)){rollback();return false;}current->bridges=true;
+ }
+ if(hasBarrels&&!barrels.empty()){
+  if(!pc_p2_original_barrel_install(barrels,e)){rollback();return false;}current->barrels=true;
+ }
+ if(hasCaves&&!caves.empty()){
+  if(!pc_p2_original_cave_install(caves,e)){rollback();return false;}current->caves=true;
  }
  if(hasPikis){
   if(!pc_p2_original_piki_install(pikiAtlas,pikiActive,e,pikiExpiry)){rollback();return false;}
@@ -370,6 +394,8 @@ bool pc_p2_original_course_load(const char* directory,const char* course,std::fu
  for(const auto& row:onyons)current->itemMetadata.emplace(row.uid,std::make_pair(unsigned(row.resurrectionDays),row.dayLimit));
  for(const auto& row:gates)current->itemMetadata.emplace(row.uid,std::make_pair(unsigned(row.resurrectionDays),row.dayLimit));
  for(const auto& row:bridges)current->itemMetadata.emplace(row.uid,std::make_pair(unsigned(row.resurrectionDays),row.dayLimit));
+ for(const auto& row:barrels)current->itemMetadata.emplace(row.uid,std::make_pair(unsigned(row.resurrectionDays),row.dayLimit));
+ for(const auto& row:caves)current->itemMetadata.emplace(row.uid,std::make_pair(unsigned(row.resurrectionDays),row.dayLimit));
  e.clear();return true;
 }
 bool pc_p2_original_course_use_models(std::string& e){
@@ -462,6 +488,8 @@ bool pc_p2_original_course_read_plan(bool& defaultLoaded,bool& dayLoaded,bool& i
    else if(auto* object=dynamic_cast<GenObjectOriginalOnyon*>(generator->mGenObject)){uid=object->uid;kind="item";}
    else if(auto* object=dynamic_cast<GenObjectOriginalGate*>(generator->mGenObject)){uid=object->uid;kind="item";}
    else if(auto* object=dynamic_cast<GenObjectOriginalBridge*>(generator->mGenObject)){uid=object->uid;kind="item";}
+   else if(auto* object=dynamic_cast<GenObjectOriginalBarrel*>(generator->mGenObject)){uid=object->uid;kind="item";}
+   else if(auto* object=dynamic_cast<GenObjectOriginalCave*>(generator->mGenObject)){uid=object->uid;kind="item";}
    if(!kind||uid!=source.uid||kind!=source.kind)return fail(e,"original native source kind lacks its actual typed provider");
    if(source.kind=="item"){
     auto metadata=current->itemMetadata.find(uid);if(metadata==current->itemMetadata.end())return fail(e,"original typed item immutable common metadata missing");

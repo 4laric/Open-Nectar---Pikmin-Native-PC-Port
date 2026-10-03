@@ -2,6 +2,7 @@
 #include "pc_p2_original_foliage_native.h"
 #include "pc_p2_ship.h"
 #include "pc_p2_original_course.h"
+#include "pc_p2_original_cave_native.h"
 #include "pc_p2_original_onyon_native.h"
 #include "pc_p2_white_poison.h"
 #include "pc_dev_console.h"
@@ -5605,6 +5606,7 @@ void GameCoreSection::draw(Graphics& gfx)
 	}
 	pc_p2_cave_draw_transition(gfx);
     pc_p2_surface_save_draw(gfx);
+    pc_p2_original_cave_draw(gfx);
 	pc_p2_breadbug_visual_draw(gfx);
 	pc_p2_breadbug_teki_draw_nests(gfx);
 	pc_p2_giant_breadbug_visual_draw(gfx);
