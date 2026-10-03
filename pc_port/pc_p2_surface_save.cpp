@@ -51,6 +51,7 @@ bool sameProof(){
 }
 bool held(const char* why){std::printf("P2_SURFACE_SAVE_HELD reason=%s\n",why);return false;}
 bool settled(){
+    if(pc_randomizer_original_session())return held("original_graph_restore_pending");
     if(!pc_randomizer_ready()||pc_randomizer_netplay_agreed_saves()||pc_randomizer_generated_cave()
         ||!playerState||playerState->isChallengeMode()||!flowCont.mCurrentStage
         ||gameflow.mPauseAll||gameflow.mIsUIOverlayActive||gameflow.mIsDayEndActive
