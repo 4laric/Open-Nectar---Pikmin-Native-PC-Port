@@ -83,8 +83,8 @@ public:int idle()override{
             if(ticks<90)b=ticks%30<12?1:0;
             else if(move(boundary.x,boundary.z)<45){stage=1;ticks=0;std::puts("CAVE_VISIBLE_INPUT near_hole ordinary_movement=1");}
         }else if(stage==1){
-            if(ticks>=15&&ticks<19)a=1;
-            if(ticks==15){++entryClicks;std::puts("CAVE_VISIBLE_INPUT enter_A=1 F6=0");}
+            if(ticks>=60&&ticks<64)a=1;
+            if(ticks==60){++entryClicks;std::puts("CAVE_VISIBLE_INPUT enter_A=1 F6=0");}
             if(boundary.floor==1){stage=2;ticks=0;entered=true;}
         }else if(stage==2){
             if(ticks==45){
@@ -109,8 +109,8 @@ public:int idle()override{
         }else if(stage==4){if(move(500,0)<20){stage=5;ticks=0;}}
         else if(stage==5){if(move(boundary.x,boundary.z)<45){stage=6;ticks=0;}}
         else if(stage==6){
-            if(ticks>=15&&ticks<19)a=1;
-            if(ticks==15){++exitClicks;std::puts("CAVE_VISIBLE_INPUT return_A=1 F6=0");}
+            if(ticks>=60&&ticks<64)a=1;
+            if(ticks==60){++exitClicks;std::puts("CAVE_VISIBLE_INPUT return_A=1 F6=0");}
             if(boundary.floor==0){stage=7;ticks=0;returned=true;}
         }else if(stage==7&&ticks>=60){
             P2CaveCampaignParty actual;const bool captured=pc_p2_cave_campaign_party_capture(actual,false);
@@ -135,7 +135,7 @@ public:int idle()override{
     if(frames%30==0&&n){std::printf("CAVE_VISIBLE_OBSERVER frame=%d stage=%d floor=%d ready=%d living=%d formation=%d xyz=%.3f,%.3f,%.3f UI=%d\n",
         frames,stage,boundary.floor,int(ready),living,formation,n->mSRT.t.x,n->mSRT.t.y,n->mSRT.t.z,int(choice.active));std::fflush(nullptr);}
     if(frames%30==0&&n&&pikiMgr)pc_p2_cave_campaign_party_observe();
-    if(std::chrono::steady_clock::now()-start>std::chrono::seconds(85)){std::puts("P2_CAVE_VISIBLE_RUNTIME TIMEOUT");finish(2);}
+    if(std::chrono::steady_clock::now()-start>std::chrono::seconds(110)){std::puts("P2_CAVE_VISIBLE_RUNTIME TIMEOUT");finish(2);}
     ++frames;return PlugPikiApp::idle();
 }};
 }

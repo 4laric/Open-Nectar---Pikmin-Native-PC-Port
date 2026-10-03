@@ -8,12 +8,17 @@
 #include "Controller.h"
 #include "Kontroller.h"
 #include "Font.h"
+#include "Texture.h"
+#include "ItemMgr.h"
+#include "UfoItem.h"
+#include "MapCode.h"
 #include "Graphics.h"
 #include "Camera.h"
 #include "MapMgr.h"
 #include "MoviePlayer.h"
 #include "gameflow.h"
 #include "system.h"
+#include <algorithm>
 #include <cstdio>
 
 // The qualified source line may ship before the optional cave provider. A
@@ -25,6 +30,7 @@ __attribute__((weak)) bool pc_netplay_session_active();
 namespace {
 P2CaveVisibleInput input;
 unsigned long drawnScene=0;
+unsigned long promptedScene=0;
 bool online(){return pc_netplay_session_active && pc_netplay_session_active();}
 bool snapshot(P2CaveBoundarySnapshot& source,P2CaveVisibleBoundary& actor){
     if(!mapMgr || online())return false;
@@ -81,6 +87,51 @@ void mesh(Graphics& gfx,const P2CaveVisibleBoundary& a){
         }
     }
 }
+void prompt(Graphics& gfx,const P2CaveVisibleBoundary& a,const char* label){
+    auto* font=gsys->mConsFont;
+    if(!font->mTexture||!font->mChars)return;
+    Vector3f eye(a.x,a.y+(a.returning?142:62),a.z);
+    eye.multMatrix(gfx.mCamera->mLookAtMtx);
+    if(eye.z>=0)return;
+    gfx.useMatrix(Matrix4f::ident,0);gfx.setDepth(false);
+    const float width=font->stringWidth(label),left=-width*.5f;
+    const Vector3f backing[]={Vector3f(eye.x+left-5,eye.y-4,eye.z),
+        Vector3f(eye.x-left+5,eye.y-4,eye.z),Vector3f(eye.x-left+5,eye.y+font->mCharHeight+4,eye.z),
+        Vector3f(eye.x+left-5,eye.y+font->mCharHeight+4,eye.z)};
+    const Vector2f empty[]={Vector2f(0,0),Vector2f(0,0),Vector2f(0,0),Vector2f(0,0)};
+    gfx.useTexture(nullptr,0);gfx.setColour(Colour(15,20,27,220),true);gfx.drawOneTri(backing,nullptr,empty,4);
+    gfx.useTexture(font->mTexture,0);gfx.setColour(Colour(255,255,230,255),true);
+    float x=left;
+    for(const unsigned char* c=reinterpret_cast<const unsigned char*>(label);*c;++c){
+        if(*c<32||*c>=128)continue;
+        const auto& glyph=font->mChars[*c-32];const auto& r=glyph.mTextureCoords;
+        const float lo=eye.x+x-glyph.mLeftOffset,hi=lo+glyph.mWidth;
+        const Vector3f v[]={Vector3f(lo,eye.y+glyph.mHeight,eye.z),Vector3f(hi,eye.y+glyph.mHeight,eye.z),
+            Vector3f(hi,eye.y,eye.z),Vector3f(lo,eye.y,eye.z)};
+        const float u=font->mTexture->mWidthFactor,t=font->mTexture->mHeightFactor;
+        const Vector2f uv[]={Vector2f(r.mMinX*u,r.mMinY*t),Vector2f(r.mMaxX*u,r.mMinY*t),
+            Vector2f(r.mMaxX*u,r.mMaxY*t),Vector2f(r.mMinX*u,r.mMaxY*t)};
+        // drawOneTri submits the complete PC GX fan; legacy drawRectangle does
+        // not submit each glyph before the next primitive replaces its stream.
+        gfx.drawOneTri(v,nullptr,uv,4);x+=glyph.mCharSpacing;
+    }
+}
+void probe(const P2CaveVisibleBoundary& a){
+    if(a.returning)return;
+    auto* ufo=itemMgr?itemMgr->getUfo():nullptr;
+    for(int dx:{-260,-130,0,130,260})for(int dz:{-260,-130,0,130,260}){
+        const float x=a.x+dx,z=a.z+dz;float height=0,low=1000000,high=-1000000;bool dry=true;
+        for(int ox:{-40,0,40})for(int oz:{-40,0,40}){
+            float y=0;auto* triangle=mapMgr->getStaticGroundBelow(x+ox,z+oz,1000000,y);
+            if(!triangle){dry=false;continue;}
+            const auto attribute=MapCode::getAttribute(triangle);
+            if(attribute==ATTR_Water||attribute==ATTR_Hole)dry=false;
+            if(!ox&&!oz)height=y;low=std::min(low,y);high=std::max(high,y);
+        }
+        std::printf("P2_CAVE_VISIBLE_SITE x=%.6f y=%.6f z=%.6f dry9=%d height_span=%.6f ufo_clearance=%.6f readonly=1\n",
+            x,height,z,int(dry),high-low,ufo?std::hypot(x-ufo->mSRT.t.x,z-ufo->mSRT.t.z):-1.f);
+    }
+}
 }
 bool pc_p2_cave_visible_interact(Navi* n){
     // Inactive/co-op captains must not reset the active captain's latch.
@@ -95,13 +146,13 @@ bool pc_p2_cave_visible_interact(Navi* n){
         actor.returning?"return":"enter",source.sceneGeneration);
     return true;
 }
-void pc_p2_cave_visible_reset(){input.reset();drawnScene=0;}
+void pc_p2_cave_visible_reset(){input.reset();drawnScene=0;promptedScene=0;}
 void pc_p2_cave_visible_draw(Graphics& gfx){
     P2CaveBoundarySnapshot source;P2CaveVisibleBoundary actor;
     if(!gfx.mCamera || !snapshot(source,actor))return;
     if(drawnScene!=source.sceneGeneration){drawnScene=source.sceneGeneration;
         std::printf("P2_CAVE_VISIBLE_DRAW kind=%s scene=%lu x=%.3f y=%.3f z=%.3f authored=1\n",
-            actor.returning?"geyser":"hole",drawnScene,actor.x,actor.y,actor.z);}
+            actor.returning?"geyser":"hole",drawnScene,actor.x,actor.y,actor.z);probe(actor);}
     const Colour color=gfx.mPrimaryColour,aux=gfx.mAuxiliaryColour;
     const int blend=gfx.setCBlending(BLEND_Alpha),cull=gfx.setCullFront(2);
     const bool depth=gfx.setDepth(true);
@@ -114,10 +165,11 @@ void pc_p2_cave_visible_draw(Graphics& gfx){
     if(safe(n) && actor.ready && input.prompt() && actor.near(n->mSRT.t.x,n->mSRT.t.y,n->mSRT.t.z)
         && gsys && gsys->mConsFont){
         const char* label=actor.returning?"A: Return to surface":"A: Enter cave";
-        gfx.setColour(Colour(255,255,230,255),true);
-        gfx.perspPrintf(gsys->mConsFont,Vector3f(actor.x,actor.y+(actor.returning?142:62),actor.z),
-            -gsys->mConsFont->stringWidth(const_cast<char*>(label))/2,0,"%s",label);
+        prompt(gfx,actor,label);
+        if(promptedScene!=source.sceneGeneration){promptedScene=source.sceneGeneration;
+            std::printf("P2_CAVE_VISIBLE_PROMPT kind=%s scene=%lu font_atlas_fans=1\n",actor.returning?"geyser":"hole",promptedScene);}
     }
+    gfx.useMatrix(gfx.mCamera->mLookAtMtx,0);
     gfx.setColour(color,true);gfx.mAuxiliaryColour=aux;gfx.setCBlending(blend);
     gfx.useTexture(texture,0);gfx.setLighting(light,nullptr);gfx.setDepth(depth);gfx.setCullFront(cull);
 }
