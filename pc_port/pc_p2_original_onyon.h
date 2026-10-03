@@ -16,4 +16,5 @@ bool onyonEligible(const OnyonRecord&,std::uint8_t discoveredContainers);
 std::string onyonDigest(const OnyonRecord&);
 bool parseOnyons(const std::string& bytes,std::vector<OnyonRecord>&,std::string&);
 bool readOnyons(const std::string& path,std::vector<OnyonRecord>&,std::string&);
+bool readOnyonsFromBytes(const std::string& bytes,std::vector<OnyonRecord>&,std::string&);
 }

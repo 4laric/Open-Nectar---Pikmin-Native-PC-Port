@@ -61,4 +61,3 @@ void pc_p2_original_native_retired(Creature* creature){
  }
  pc_p2_original_course_retired(creature);
 }
-

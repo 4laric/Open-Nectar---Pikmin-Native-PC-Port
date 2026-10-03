@@ -9,6 +9,7 @@
 #include "pc_p2_cave_campaign_cache.h"
 #include "pc_p2_campaign_checkpoint_state.h"
 #include "pc_p2_campaign_treasure_config.h"
+#include "pc_p2_original_treasure_input.h"
 #include "pc_p2_original_session.h"
 #if !defined(PC_RANDOMIZER_NO_ORIGINAL_ENGINE)
 #include "pc_p2_original_group_engine.h"
@@ -813,12 +814,14 @@ bool pc_randomizer_init(int argc, char** argv) {
         expect(input,"CAPTAINS");expect(input,"2");secondCaptain=true;
         std::string end;input>>end;
         if(end=="TREASURE_SOURCE"){
-            p2treasureplacements::Config config;
-            if(!(input>>treasureSource)||!hex64(treasureSource)||!p2treasureplacements::load_verified(verifiedTreasureCatalog,config)||config.source!=treasureSource||!p2treasurestate::state.bind(treasureSource))fail("original treasure source/assets invalid");input>>end;
+            if(!(input>>treasureSource)||!hex64(treasureSource))fail("original treasure source selection invalid");
+            input>>end;
         }
         std::string extra;if(end!="END"||(input>>extra))fail("original bootstrap has trailing or missing data");
         p2originalsession::Bundle bundle;std::string error;
         if(!p2originalsession::load(fingerprint,originalCampaign,bundle,error))fail("original immutable session inputs invalid");
+        if(!treasureSource.empty()&&(!p2originalsession::treasureInput(bundle,treasureSource,verifiedTreasureCatalog,error)
+            ||!p2treasurestate::state.bind(treasureSource)))fail("original selected treasure source/assets invalid");
         std::string calendarBytes,rawStages;
         if(!p2originalsession::input(bundle,"p2-original/calendar.p2sc",calendarBytes,error)||calendarBytes.size()>16*1024*1024
             ||!p2originalsession::input(bundle,"p2-original/stages.txt",rawStages,error)||rawStages.size()>1024*1024

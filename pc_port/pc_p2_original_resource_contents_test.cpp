@@ -140,5 +140,3 @@ int main() {
     }
     std::cout << "P2_ORIGINAL_EGG_CONTENTS_PASS\n";
 }
-
-
