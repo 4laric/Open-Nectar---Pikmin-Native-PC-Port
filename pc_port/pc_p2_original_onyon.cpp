@@ -22,7 +22,7 @@ bool validateOnyon(const OnyonRecord& r,std::string& e){
  // Retail factory consumes only angle.y; x/z are authored metadata, never discarded.
  e.clear();return true;
 }
-bool onyonEligible(const OnyonRecord& r,std::uint8_t booted){return r.index==4||bool(booted&(1u<<r.index))==bool(r.afterBoot);}
+bool onyonEligible(const OnyonRecord& r,std::uint8_t containers){return r.index==4||bool(containers&(1u<<r.index))==bool(r.afterBoot);}
 std::string onyonDigest(const OnyonRecord& r){
  std::string bytes=r.sourceSha+":"+r.sourceKey;
  auto word=[&](std::uint32_t v){for(unsigned i=0;i<4;++i)bytes.push_back(char(v>>(8*i)));};

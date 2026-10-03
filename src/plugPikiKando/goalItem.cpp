@@ -478,7 +478,7 @@ void GoalItem::exitPikis(int pikis, int requesterNaviId)
         if (pikis > available) pikis = available;
     }
 
-    if (!pc_bbft_color_access(mOnionColour) && !pc_p2_original_onyon_access(this)) return;
+    if (!pc_p2_original_onyon_color_access(this, pc_bbft_color_access(mOnionColour))) return;
 #if defined(PIKI_PC_PORT)
 	// Co-op only: with one captain the default captain is always the right one, so single-player is untouched.
 	if (requesterNaviId >= 0 && requesterNaviId < PC_COOP_CAPTAINS && naviMgr->getNaviCount() > 1) {
@@ -495,7 +495,7 @@ void GoalItem::exitPikis(int pikis, int requesterNaviId)
  */
 Piki* GoalItem::exitPiki()
 {
-    if (!pc_bbft_color_access(mOnionColour) && !pc_p2_original_onyon_access(this)) return nullptr;
+    if (!pc_p2_original_onyon_color_access(this, pc_bbft_color_access(mOnionColour))) return nullptr;
 	int leg = gsys->getRand(1.0f) * 3.0f;
 	if (leg >= 3) {
 		leg = 2;
@@ -839,7 +839,7 @@ void GoalItem::startBoot()
  */
 void GoalItem::emitPiki()
 {
-    if (!pc_bbft_color_access(mOnionColour) && !pc_p2_original_onyon_access(this)) return;
+    if (!pc_p2_original_onyon_color_access(this, pc_bbft_color_access(mOnionColour))) return;
 	C_SAI(this)->start(this, GoalAI::GOAL_Unk2);
 }
 

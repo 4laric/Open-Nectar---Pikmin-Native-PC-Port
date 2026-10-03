@@ -17,7 +17,7 @@ constexpr unsigned type=0x70326f6eu,version=0x4f4e3031u; // p2on / ON01
 std::map<unsigned,p2original::OnyonRecord> records;
 std::map<const Creature*,unsigned> actors;
 std::map<const Generator*,unsigned> generators;
-std::function<std::uint8_t()> booted;
+std::function<PcOriginalOnyonProgress()> progress;
 std::function<void(int)> notify;
 bool admitted=false;
 [[noreturn]] void fail(const char* s){std::fprintf(stderr,"P2_ORIGINAL_ONYON_FAIL %s\n",s);std::abort();}
@@ -35,13 +35,13 @@ void cache(GenObjectOriginalOnyon& object,RandomAccessStream& stream,bool write)
  const auto& r=row(uid);const auto expected=p2original::onyonDigest(r);if(std::memcmp(bytes+4,expected.data(),64))fail("original onyn cache typed source changed");object.uid=uid;
 }
 }
-bool pc_p2_original_onyon_install(const std::vector<p2original::OnyonRecord>& rows,std::function<std::uint8_t()> progress,std::function<void(int)> onBooted,std::string& e){
- if(!records.empty()||!actors.empty()||!generators.empty()||rows.empty()||rows.size()>4096||!progress||!onBooted){e="original onyn authority already installed or callbacks/envelope missing";return false;}
+bool pc_p2_original_onyon_install(const std::vector<p2original::OnyonRecord>& rows,std::function<PcOriginalOnyonProgress()> query,std::function<void(int)> onBooted,std::string& e){
+ if(!records.empty()||!actors.empty()||!generators.empty()||rows.empty()||rows.size()>4096||!query||!onBooted){e="original onyn authority already installed or callbacks/envelope missing";return false;}
  std::map<unsigned,p2original::OnyonRecord> next;
  for(const auto& r:rows){if(!p2original::validateOnyon(r,e))return false;if(!next.emplace(r.uid,r).second){e="duplicate original onyn UID";return false;}}
- records.swap(next);booted=std::move(progress);notify=std::move(onBooted);e.clear();return true;
+ records.swap(next);progress=std::move(query);notify=std::move(onBooted);e.clear();return true;
 }
-void pc_p2_original_onyon_unload(){admitted=false;actors.clear();generators.clear();records.clear();booted={};notify={};}
+void pc_p2_original_onyon_unload(){admitted=false;actors.clear();generators.clear();records.clear();progress={};notify={};}
 void pc_p2_original_onyon_register(){auto* f=GenObjectFactory::factory;if(!f)fail("native factory unavailable");for(int i=0;i<f->mSpawnerCount;++i)if(f->mSpawnerInfo[i].mID==type)return;if(f->mSpawnerCount>=f->mMaxSpawners)fail("native factory capacity exhausted");f->registerMember(type,make,"original P2 onyn",version);}
 GenObjectOriginalOnyon::GenObjectOriginalOnyon():GenObject(type,"original P2 onyn"){}
 void GenObjectOriginalOnyon::doRead(RandomAccessStream& stream){if(mVersion!=version)fail("onyn adapter version mismatch");if(Generator::ramMode)return;unsigned next=unsigned(stream.readInt());row(next);uid=next;}
@@ -51,8 +51,8 @@ void GenObjectOriginalOnyon::ramSaveParameters(RandomAccessStream& s){cache(*thi
 void GenObjectOriginalOnyon::updateUseList(Generator*,int){const auto& r=row(uid);if(!itemMgr)fail("item manager missing before onyn use-list");itemMgr->addUseList(r.index==4?OBJTYPE_Ufo:OBJTYPE_Goal);}
 bool pc_p2_original_onyon_preflight(const std::vector<Generator*>& inventory,std::string& e){
  auto reject=[&](const char* text){e=text;return false;};
- if(admitted||!booted||!notify||!itemMgr||!gsys||records.empty()||inventory.size()!=records.size())return reject("original onyn preflight requires complete installed inventory/managers");
- std::set<unsigned> seen;std::set<int> active;const auto mask=booted();if(mask&~7u)return reject("invalid original container boot mask");
+ if(admitted||!progress||!notify||!itemMgr||!gsys||records.empty()||inventory.size()!=records.size())return reject("original onyn preflight requires complete installed inventory/managers");
+ std::set<unsigned> seen;std::set<int> active;const auto state=progress();const auto mask=state.containers;if((mask|state.boot)&~7u)return reject("invalid original container/boot progress");
  std::map<const Generator*,unsigned> bindings;
  for(auto* gen:inventory){auto* object=gen?dynamic_cast<GenObjectOriginalOnyon*>(gen->mGenObject):nullptr;
   if(!object||!records.count(object->uid)||!seen.insert(object->uid).second)return reject("wrong, duplicate or unknown original onyn generator");
@@ -70,11 +70,11 @@ bool pc_p2_original_onyon_preflight(const std::vector<Generator*>& inventory,std
 }
 Creature* GenObjectOriginalOnyon::birth(BirthInfo& info){
  const auto& r=row(uid);
- if(!admitted||!info.mGenerator||info.mGenerator->mGenObject!=this||!itemMgr||!booted||!notify)fail("onyn birth lacks whole-inventory admission/owner/managers/progress");
+ if(!admitted||!info.mGenerator||info.mGenerator->mGenObject!=this||!itemMgr||!progress||!notify)fail("onyn birth lacks whole-inventory admission/owner/managers/progress");
  auto g=generators.find(info.mGenerator);if(g==generators.end()||g->second!=uid)fail("onyn generator lacks admitted identity binding");
  for(const auto& a:actors)if(a.second==uid)fail("onyn generator attempted duplicate live birth");
  for(const auto& binding:generators)if(binding.first!=info.mGenerator&&binding.second==uid)fail("duplicate onyn source generator");
- const auto mask=booted();if(mask&~7u)fail("invalid original P2 container mask");
+ const auto state=progress();const auto mask=state.containers;if((mask|state.boot)&~7u)fail("invalid original P2 container/boot progress");
  generators[info.mGenerator]=uid;
  info.mGenerator->_70=uid;info.mGenerator->mCarryOverFlags=r.reserved;info.mGenerator->mRespawnInterval=r.resurrectionDays;info.mGenerator->mDayLimit=r.dayLimit;
  if(!p2original::onyonEligible(r,mask))return nullptr;
@@ -97,6 +97,7 @@ bool pc_p2_original_onyon_generator_init(Generator* gen,bool& handled,std::strin
  if(actor){gen->mLatestSpawnCreature=actor;gen->mAliveCount=1;}e.clear();return true;
 }
 bool pc_p2_original_onyon_identity(const Creature* actor,std::string& out){auto i=actors.find(actor);if(i==actors.end())return false;const auto& r=row(i->second);out=r.sourceSha+":"+r.sourceKey;return true;}
-bool pc_p2_original_onyon_booted(const Creature* actor,bool& out){auto i=actors.find(actor);if(i==actors.end())return false;const auto& r=row(i->second);if(r.index==4)return false;out=bool(booted()&(1u<<r.index));return true;}
+bool pc_p2_original_onyon_booted(const Creature* actor,bool& out){auto i=actors.find(actor);if(i==actors.end())return false;const auto& r=row(i->second);if(r.index==4)return false;out=bool(progress().boot&(1u<<r.index));return true;}
 bool pc_p2_original_onyon_access(const Creature* actor){bool state=false;return pc_p2_original_onyon_booted(actor,state)&&state;}
-bool pc_p2_original_onyon_boot(Creature* actor){auto i=actors.find(actor);if(i==actors.end())return false;const auto& r=row(i->second);if(r.index==4)return false;notify(r.index);if(!(booted()&(1u<<r.index)))fail("original boot authority rejected native Onion boot");return true;}
+bool pc_p2_original_onyon_color_access(const Creature* actor,bool apAllowed){bool state=false;return pc_p2_original_onyon_booted(actor,state)?state:apAllowed;}
+bool pc_p2_original_onyon_boot(Creature* actor){auto i=actors.find(actor);if(i==actors.end())return false;const auto& r=row(i->second);if(r.index==4)return false;notify(r.index);if(!(progress().boot&(1u<<r.index)))fail("original boot authority rejected native Onion boot");return true;}
