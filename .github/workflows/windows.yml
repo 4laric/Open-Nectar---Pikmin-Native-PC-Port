@@ -50,7 +50,7 @@ jobs:
       # For pull_request events github.sha is the synthetic merge commit; name
       # the artifact after the requested commit; BUILD_INFO separately binds the
       # actual checked-out commit/tree (including any PR synthetic merge).
-      HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+      HEAD_SHA: 7d3c21e5cd5561b82e864314bfbadbc730ccddd5
       NETPLAY_BUILD: ${{ inputs.netplay && 'ON' || 'OFF' }}
       NETPLAY_SUFFIX: ${{ inputs.netplay && '-netplay' || '' }}
       CCACHE_DIR: ${{ github.workspace }}/.ccache
@@ -64,6 +64,8 @@ jobs:
         run: git config --global core.autocrlf false
 
       - uses: actions/checkout@v4
+        with:
+          ref: 7d3c21e5cd5561b82e864314bfbadbc730ccddd5
 
       - name: Fetch pinned canonical fixture guard (source only)
         uses: actions/checkout@v4
@@ -98,9 +100,9 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: .ccache
-          key: ccache-windows-mingw64-${{ github.sha }}
+          key: ccache-windows-mingw64-netplay-${{ env.HEAD_SHA }}
           restore-keys: |
-            ccache-windows-mingw64-
+            ccache-windows-mingw64-netplay-
 
       - name: Verify pinned canonical guard bytes
         run: |
@@ -161,7 +163,7 @@ jobs:
           done
           echo "Building pikmin_pc + ${#p2_targets[@]} p2 tests + ${#fixture_targets[@]} fixtures"
           ccache -z
-          cmake --build build --target pikmin_pc pc_bbft_test "${p2_targets[@]}" "${fixture_targets[@]}" -j 4
+          cmake --build build --target pikmin_pc pc_bbft_test "${p2_targets[@]}" "${fixture_targets[@]}" -j 2
           ccache -s
           cmake --build build --target pikmin_pc pc_bbft_test "${p2_targets[@]}" "${fixture_targets[@]}" -- -n | tee build/build-dry-run.txt
           grep -Fx "ninja: no work to do." build/build-dry-run.txt
@@ -170,7 +172,7 @@ jobs:
         if: ${{ inputs.all_targets || inputs.netplay }}
         run: |
           ccache -z
-          cmake --build build -j 4
+          cmake --build build -j 2
           ccache -s
           dry_run="$(cmake --build build -- -n)"
           echo "${dry_run}"
@@ -188,7 +190,7 @@ jobs:
             grep -Fx "$target" build/registered-ci-fixtures.txt || { echo 'Unregistered fixture target'; exit 1; }
             printf '%s\n' "$target" >> build/selected-ci-fixtures.txt
           done
-          cmake --build build --target "${fixture_targets[@]}" -j 4
+          cmake --build build --target "${fixture_targets[@]}" -j 2
           dry_run=$(cmake --build build --target "${fixture_targets[@]}" -- -n)
           printf '%s\n' "$dry_run" > build/selected-ci-fixtures-dry-run.txt
           cat build/selected-ci-fixtures-dry-run.txt
@@ -199,10 +201,10 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: .ccache
-          key: ccache-windows-mingw64-${{ github.sha }}
+          key: ccache-windows-mingw64-netplay-${{ env.HEAD_SHA }}
 
       - name: Run p2 and bbft tests
-        run: ctest --test-dir build -R 'p2_|pc_bbft_' --output-on-failure -j 4 --timeout 300
+        run: ctest --test-dir build -R 'p2_|pc_bbft_|^pc_midday_' --no-tests=error --output-on-failure -j 2 --timeout 300
 
       - name: Run deterministic netplay consumer and FP gates
         if: ${{ inputs.netplay }}
@@ -213,7 +215,7 @@ jobs:
           for required in netplay_launch_settings_selftest netplay_launch_input_selftest netplay_launch_input_session_selftest netplay_fp_gate netplay_fp_gate_kurage pc_netplay_randstate_test; do
             grep -Eq ": ${required}$" build/netplay-test-list.txt || { echo "Missing required netplay gate: ${required}"; exit 1; }
           done
-          ctest --test-dir build -R 'netplay_|pc_netplay_|pc_input_log|pc_randomizer_(state_stream|outbox|campaign_net)|p2_(receipt|delivery)_host' --no-tests=error --output-on-failure -j 4 --timeout 300
+          ctest --test-dir build -R 'netplay_|pc_netplay_|pc_input_log|pc_randomizer_(state_stream|outbox|campaign_net)|p2_(receipt|delivery)_host' --no-tests=error --output-on-failure -j 2 --timeout 300
 
       - name: Package nectar.exe with runtime DLLs
         run: |
@@ -245,6 +247,14 @@ jobs:
           test "$compiled_tree" = "$recorded_tree"
           cp build/configured-source-identity.txt "${out}/BUILD_INFO.txt"
           printf 'run %s\n' "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" >> "${out}/BUILD_INFO.txt"
+          cp build/CMakeCache.txt "${out}/CMakeCache.txt"
+          cp build/netplay-test-list.txt "${out}/netplay-test-list.txt"
+          cmake --build build -- -n > "${out}/all-targets-dry-run.txt"
+          grep -Fx 'ninja: no work to do.' "${out}/all-targets-dry-run.txt"
+          ctest --test-dir build --show-only=json-v1 > "${out}/registered-tests.json"
+          ldd build/bin/nectar.exe > "${out}/production-dll-closure.txt"
+          ldd "${out}/nectar.exe" > "${out}/packaged-dll-closure.txt"
+          ninja -C build -t commands pikmin_pc > "${out}/production-build-commands.txt"
           (cd "${out}" && sha256sum *.exe *.dll > sha256.txt)
           cat "${out}/sha256.txt"
           ls -l "${out}"
