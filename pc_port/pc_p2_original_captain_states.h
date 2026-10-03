@@ -62,3 +62,9 @@ void pc_p2_original_captain_before_transition(Navi*);
 bool pc_p2_original_captain_animation_key(Navi*,int,std::string&);
 
 bool pc_p2_original_captain_actor_animation_key(Navi*,int,std::string&);
+// Concrete stage owner invokes only after body_reset_loaded, both source bank
+// bindings and their actual control resets. Installs literal initial Walk
+// directly after body reset; never cleans up a P1 state as a source action.
+bool pc_p2_original_captain_bootstrap_roster(std::string&);
+bool pc_p2_original_captain_bootstrap_complete(const p2original::captain::LoadedScene&,std::string&);
+bool pc_p2_original_captain_continuation_valid(const p2original::captain::LoadedScene&,std::string&);

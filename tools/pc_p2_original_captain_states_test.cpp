@@ -101,6 +101,7 @@ bool SourceBank::start(Navi* n,Motion m,std::string&){order.push_back("motion"+s
 bool SourceBank::advance(Navi*,float,const std::function<bool(int)>& emit,std::string&){++bankAdvances;if(emitEnd){emitEnd=false;return emit(1000);}return true;}
 namespace nativecontrol {
 std::optional<float> sceneAnimationTimer(const Navi*){if(!timerAvailable)return {};return 0;}
+std::optional<float> animationSpeed(const Navi*){if(!timerAvailable)return {};return 30;}
 bool control(Navi*,std::string& e){++controls;order.push_back("control");if(!controlAvailable)e="test control provider unavailable";return controlAvailable;}
 }
 }}
@@ -157,5 +158,19 @@ int main(int argc,char** argv){try{
  check(pc_p2_original_captain_transit(&a,StateId::Damaged,error),error);auto* damageCurrent=a.current;check(pc_p2_original_captain_animation_key(&a,17,error)&&a.current==damageCurrent&&error.empty(),"actual Damaged nonEND key permits remaining current generation");
  const int advancesBeforeEnd=bankAdvances,cleanupBeforeEnd=cleanupEvents;check(!pc_p2_original_captain_animation_key(&a,1000,error)&&error.empty()&&dynamic_cast<State*>(a.current)->sourceStateId()==StateId::Walk,"actual Damaged END restores Walk and signals successful statechange with false plus empty error");check(cleanupEvents==cleanupBeforeEnd+1&&frames[0]==60&&bankAdvances==advancesBeforeEnd,"direct END dispatch performs genuine cleanup without duplicate clock advance");
  clearCounts();alive[0]=true;check(pc_p2_original_captain_transit(&a,StateId::Dead,error),error);check(downBegins==1&&deadEvents==1&&order.size()>=3&&order[1]=="begin-down-alive1"&&order[2]=="clear-source-alive","actual Dead init beginsDown BEFORE sourceCFalive clear");check(a.current->invincible(&a),"actual Dead sourceState invincible");a.mTargetVelocity.set(1,2,3);a.mVelocity.set(4,5,6);a.current->exec(&a);check(a.mTargetVelocity.x==0&&a.mTargetVelocity.y==0&&a.mTargetVelocity.z==0&&a.mVelocity.x==0&&a.mVelocity.y==0&&a.mVelocity.z==0,"actual Dead zeroes both real velocity fields");
+ // Bootstrap controls execute the actual Walk factory/init and readonly gate.
+ check(!pc_p2_original_captain_bootstrap_roster(error),"initial bootstrap cannot run in Active");
+ world.game=Phase::Loading;alive[0]=alive[1]=true;observed=ordinary();
+ check(!pc_p2_original_captain_bootstrap_roster(error),"two roster actors cannot share one stateful Walk FSM");
+ NaviStateMachine partnerFSM;registerCoreStates(partnerFSM);b.mStateMachine=&partnerFSM;
+ timerAvailable=false;check(!pc_p2_original_captain_bootstrap_roster(error),"missing actual control reset refuses before installing Walk");timerAvailable=true;
+ envProvider=nullptr;check(!pc_p2_original_captain_bootstrap_roster(error),"missing actual Walk environment refuses bootstrap");envProvider=&env;
+ env.executionAvailable=false;check(!pc_p2_original_captain_bootstrap_roster(error),"failed actual Walk init remains incomplete");check(!pc_p2_original_captain_bootstrap_complete(scene,error),"current typed Walk alone does not attest initialization");env.executionAvailable=true;
+ const int priorCleanup=cleanupEvents;check(pc_p2_original_captain_bootstrap_roster(error),error);check(cleanupEvents==priorCleanup,"post-reset initial install never invokes old P1/source cleanup");
+ check(a.current!=b.current&&pc_p2_original_captain_bootstrap_complete(scene,error),"both separate actual Walk init instances complete bootstrap");
+ const auto commandsAfterBootstrap=order.size();check(pc_p2_original_captain_bootstrap_roster(error)&&order.size()==commandsAfterBootstrap,"duplicate bootstrap leaves initialized Walk state untouched");
+ check(pc_p2_original_captain_continuation_valid(scene,error),"actual registered typed Walk and control banks validate continuation");
+ auto* partnerWalk=b.current;NaviState unrelated(91);b.current=&unrelated;check(!pc_p2_original_captain_continuation_valid(scene,error),"P1 continuation state refuses");b.current=partnerWalk;
+ ++scene.epoch;++world.epoch;check(!pc_p2_original_captain_bootstrap_complete(scene,error),"reused actor/state pointers cannot preserve old bootstrap incarnation");
  std::cout<<"P2_ORIGINAL_CORE_STATES_ACTUAL_TU_CONTROLS_PASS checks="<<checks<<" gameplay=UNTESTED providers=DOUBLES\n";return 0;
 }catch(const std::exception& e){std::cerr<<"FAIL "<<e.what()<<'\n';return 1;}}

@@ -5,6 +5,7 @@
 #include "pc_p2_original_captain_throw.h"
 #include <cstdio>
 #include <map>
+#include <array>
 
 extern p2original::captain::SourceBank* pc_p2_original_captain_source_bank() __attribute__((weak));
 extern p2original::captain::WalkEnvironment* pc_p2_original_captain_walk_environment(const Navi*) __attribute__((weak));
@@ -26,11 +27,13 @@ bool actor(Navi* n,std::string& e){
   ||(scene->captainAt(0)!=n&&scene->captainAt(1)!=n)){e="missing canonical source captain actor";return false;}return true;
 }
 SourceBank* bankFor(Navi* n,std::string& e){
- if(!actor(n,e))return nullptr;auto* bank=pc_p2_original_captain_source_bank?pc_p2_original_captain_source_bank():nullptr;
+ if(!actor(n,e))return nullptr;
+ auto* bank=pc_p2_original_captain_source_bank?pc_p2_original_captain_source_bank():nullptr;
  MotionState state;if(!bank||!bank->ready()||!bank->state(n,state,e)){e="missing actual source captain motion binding";return nullptr;}return bank;
 }
 WalkEnvironment* environment(Navi* n,std::string& e){
- if(!actor(n,e))return nullptr;auto* env=pc_p2_original_captain_walk_environment?pc_p2_original_captain_walk_environment(n):nullptr;
+ if(!actor(n,e))return nullptr;
+ auto* env=pc_p2_original_captain_walk_environment?pc_p2_original_captain_walk_environment(n):nullptr;
  if(!env||&env->scene()!=pc_p2_original_captain_loaded_scene()){e="missing actual source Walk environment";return nullptr;}return env;
 }
 bool registered(Navi* n,StateId id){
@@ -53,6 +56,7 @@ public:
 };
 class WalkState final:public CoreState {
  walk::State walkState;
+ const LoadedScene* initializedScene=nullptr;std::uint64_t initializedEpoch=0;Navi* initializedActor=nullptr;
 public:
  WalkState():CoreState(StateId::Walk){}
  bool sourceInvincible()const override{return false;}
@@ -74,9 +78,13 @@ public:
   return true;
  }
  void init(Navi* n)override{
+  initializedScene=nullptr;initializedEpoch=0;initializedActor=nullptr;
   std::string e;auto* env=environment(n,e);walk::Frame frame;walk::Output out;
-  if(!env||!env->capture(*n,frame,e)||!frame.actor||!walk::init(*frame.actor,walkState,out,e)||!apply(n,*env,out,e))report(e);
+  if(!env||!env->capture(*n,frame,e)||!frame.actor||!walk::init(*frame.actor,walkState,out,e)||!apply(n,*env,out,e)){report(e);return;}
+  if(!actor(n,e)||n->getCurrState()!=this){report("source Walk initialization changed actor/state ownership");return;}
+  initializedScene=pc_p2_original_captain_loaded_scene();initializedEpoch=initializedScene->incarnation();initializedActor=n;previousError.clear();
  }
+ bool initialized(const Navi* n,const LoadedScene& scene)const{return initializedActor==n&&initializedScene==&scene&&initializedEpoch==scene.incarnation();}
  void exec(Navi* n)override{
   std::string e;auto* env=environment(n,e);auto* bank=bankFor(n,e);if(!env||!bank){report(e);return;}
   // Control precedes the source >9 idle decision. Never apply it again when
@@ -154,6 +162,38 @@ bool pc_p2_original_captain_core_preflight(Navi* n,StateId id,std::string& e){
 }
 bool pc_p2_original_captain_can_enter_dead(const Navi* n){std::string e;return pc_p2_original_captain_core_preflight(const_cast<Navi*>(n),StateId::Dead,e);}
 bool pc_p2_original_captain_enter_dead(Navi* n){std::string e;return pc_p2_original_captain_transit(n,StateId::Dead,e);}
+bool pc_p2_original_captain_continuation_valid(const LoadedScene& scene,std::string& e){
+ e.clear();if(pc_p2_original_captain_loaded_scene()!=&scene||!scene.incarnation()){e="source bootstrap scene is not canonical";return false;}
+ for(unsigned slot=0;slot<2;++slot){auto* n=scene.captainAt(slot);if(!actor(n,e))return false;
+  auto* native=n->getCurrState();auto* typed=dynamic_cast<State*>(native);auto* bank=bankFor(n,e);MotionState motion;
+  if(!typed||typed->nativeState()!=native||!n->mStateMachine||!bank||!bank->state(n,motion,e)||!nativecontrol::sceneAnimationTimer(n)||!nativecontrol::animationSpeed(n)){e="source continuation lacks current typed state/bank/control owner";return false;}
+  bool found=false;for(int i=0;i<n->mStateMachine->mStateCount;++i)if(n->mStateMachine->mStates[i]==native){found=true;break;}
+  if(!found){e="source current state is not owned by actual actor FSM";return false;}
+ }
+ return pc_p2_original_captain_loaded_scene()==&scene;
+}
+bool pc_p2_original_captain_bootstrap_complete(const LoadedScene& scene,std::string& e){
+ if(!pc_p2_original_captain_continuation_valid(scene,e))return false;
+ for(unsigned slot=0;slot<2;++slot){auto* n=scene.captainAt(slot);auto* state=dynamic_cast<WalkState*>(n->getCurrState());
+  if(!state||!state->initialized(n,scene)){e="both actual source initial Walk states have not initialized";return false;}}
+ return true;
+}
+bool pc_p2_original_captain_bootstrap_roster(std::string& e){
+ e.clear();auto* scene=pc_p2_original_captain_loaded_scene();auto* world=pc_p2_original_captain_world();
+ if(!scene||!world||world->phase()!=Phase::Loading){e="source initial Walk bootstrap requires concrete loaded body reset";return false;}
+ std::array<WalkState*,2> states{};
+ for(unsigned slot=0;slot<2;++slot){auto* n=scene->captainAt(slot);if(!actor(n,e)||!bankFor(n,e)||!nativecontrol::sceneAnimationTimer(n)||!registered(n,StateId::Walk)){e="source initial Walk lacks actual body/bank/control/FSM";return false;}
+  for(int i=0;i<n->mStateMachine->mStateCount;++i)if(auto* state=dynamic_cast<WalkState*>(n->mStateMachine->mStates[i]))states[slot]=state;
+  auto* env=environment(n,e);walk::Frame frame;walk::State trial;walk::Output out;
+  if(!states[slot]||!env||!env->capture(*n,frame,e)||!frame.actor||!walk::init(*frame.actor,trial,out,e)||!env->preflight(*n,out.commands,e))return false;
+ }
+ if(states[0]==states[1]){e="source initial Walk requires separate actor-owned FSM instances";return false;}
+ if(pc_p2_original_captain_loaded_scene()!=scene||pc_p2_original_captain_world()!=world||world->phase()!=Phase::Loading){e="source bootstrap ownership changed during preflight";return false;}
+ for(unsigned slot=0;slot<2;++slot){auto* n=scene->captainAt(slot);if(states[slot]->initialized(n,*scene)&&n->getCurrState()==states[slot])continue;
+  n->setCurrState(states[slot]);states[slot]->init(n);
+  if(pc_p2_original_captain_loaded_scene()!=scene||!actor(n,e)||pc_p2_original_captain_world()!=world||world->phase()!=Phase::Loading||n->getCurrState()!=states[slot]||!states[slot]->initialized(n,*scene)){e="source initial Walk refused after actual body reset";return false;}}
+ return pc_p2_original_captain_bootstrap_complete(*scene,e);
+}
 bool pc_p2_original_captain_transit(Navi* n,StateId id,std::string& e){
  if(!pc_p2_original_captain_core_preflight(n,id,e))return false;
  pc_p2_original_captain_before_transition(n);
