@@ -414,6 +414,8 @@ set(PC_PORT_SOURCES
     pc_port/pc_p2_original_throw.cpp
     pc_port/pc_p2_cave_campaign_party_engine.cpp
     pc_port/pc_p2_surface_save.cpp
+    pc_port/pc_p2_authored_cave_route.cpp
+    pc_port/pc_p2_authored_cave_campaign.cpp
     pc_port/pc_p2_original_piki_physical.cpp
     pc_port/pc_p2_original_piki_recruit.cpp
     pc_port/pc_p2_bud_conversion_origin.cpp
@@ -884,7 +886,8 @@ else()
     endif()
 endif()
 target_compile_options(${NECTAR_GAME} PRIVATE ${NATIVE_COMPILE_OPTIONS})
-target_compile_definitions(${NECTAR_GAME} PRIVATE PIKMIN_P2_ORIGINAL_COURSE_PROVIDER=1)
+target_compile_definitions(${NECTAR_GAME} PRIVATE PIKMIN_P2_ORIGINAL_COURSE_PROVIDER=1
+    PIKMIN_P2_AUTHORED_CAVE_PROVIDER=1 PIKMIN_P2_CAVE_CAMPAIGN_PROVIDER=1)
 target_link_libraries(${NECTAR_GAME} PRIVATE ${NECTAR_LEGACY})
 # P2 fork targets (desktop only; the Android build is a shared library).
 if (NOT ANDROID)

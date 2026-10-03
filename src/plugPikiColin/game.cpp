@@ -1,3 +1,6 @@
+#if defined(PIKI_PC_PORT)
+#include "pc_p2_authored_cave_campaign.h"
+#endif
 #include "OnePlayerSection.h"
 
 #include "CardSelectSection.h"
@@ -410,6 +413,9 @@ void OnePlayerSection::init()
 		}
 		case ONEPLAYER_NewPikiGame:
 		{
+#if defined(PIKI_PC_PORT)
+            pc_p2_cave_campaign_select_stage();
+#endif
 			// gameplay!
 
 			// The exact position of this DLL-exclusive code is unclear because some of the following code is DOL-exclusive.

@@ -1,3 +1,6 @@
+#if defined(PIKI_PC_PORT)
+#include "pc_p2_authored_cave_campaign.h"
+#endif
 #include "pc_p2_source_body.h"
 #include "pc_p2_surface_save.h"
 #include "pc_p2_original_foliage_native.h"
@@ -695,6 +698,7 @@ void GameCoreSection::enterFreePikmins()
 void GameCoreSection::cleanupDayEnd()
 {
 #if defined(PIKI_PC_PORT)
+    pc_p2_cave_campaign_before_day_cleanup();
     pc_p2_surface_save_before_day_cleanup();
 #endif
 #if defined(PIKI_PC_PORT)
@@ -1038,6 +1042,7 @@ void GameCoreSection::exitStage()
  if(!pc_p2_original_course_finish(originalError)) {
   std::fprintf(stderr,"P2_ORIGINAL_COURSE_EXIT_FAIL %s\n",originalError.c_str());std::abort();
  }
+    pc_p2_cave_campaign_scene_exit();
     pc_p2_surface_save_scene_exit();
     pc_p2_source_body_scene_exit_external();
     pc_p2_original_piki_recruit_unbind();
@@ -1564,6 +1569,7 @@ void GameCoreSection::initStage()
 #else
 		flowCont.mCurrentStage->mStageIndex;
 #endif
+	pc_p2_cave_campaign_before_preload();
 	const bool hasAuthoritativeStageCache = generatorCache->preload(genCacheStage);
 #if defined(PIKMIN_RANDOMIZER_TEST_HOOKS)
 	if (pc_pikipelago_room_preview() && std::getenv("PIKMIN_P2_CACHE_RESUME")) {
@@ -1652,7 +1658,8 @@ void GameCoreSection::initStage()
 	const bool resumeRoomCache = false;
 
 #endif
-	const bool livingSurfaceCache = pc_p2_surface_save_living_scene();
+	const bool livingSurfaceCache = pc_p2_surface_save_living_scene()
+        || (pc_p2_cave_campaign_owns_heads() && !pc_randomizer_authored_cave_session().party.landing);
 	if(livingSurfaceCache&&!hasAuthoritativeStageCache){
         std::fprintf(stderr,"Living surface checkpoint lost its authoritative stage cache\n");std::abort();
     }
@@ -1929,7 +1936,7 @@ void GameCoreSection::initStage()
 		BaseInf* a = (BaseInf*)inf->mBPikiInfMgr.mActiveList.mChild;
 		while (a) {
 #if defined(PIKI_PC_PORT)
-            if(pc_p2_surface_save_owns_heads()){
+            if(pc_p2_cave_campaign_owns_heads() || pc_p2_surface_save_owns_heads()){
                 BaseInf* retired=a;a=static_cast<BaseInf*>(a->mNext);
                 inf->mBPikiInfMgr.delInf(retired);continue;
             }
@@ -2020,7 +2027,7 @@ void GameCoreSection::finalSetup()
 	PRINT("********* BONUS PIKI CHECK\n");
 	GameStat::dump();
 
-	if (!pc_p2_surface_save_living_scene() && playerState->mHasExtinctionDemoPlayed == false && !playerState->isTutorial() PC_NOT_VS
+	if (!pc_p2_cave_campaign_owns_heads() && !pc_p2_surface_save_living_scene() && playerState->mHasExtinctionDemoPlayed == false && !playerState->isTutorial() PC_NOT_VS
 	    && ((GameStat::allPikis[Blue] == 0 && playerState->hasContainer(Blue))
 	        || (GameStat::allPikis[Red] == 0 && playerState->hasContainer(Red))
 	        || (GameStat::allPikis[Yellow] == 0 && playerState->hasContainer(Yellow)))) {
@@ -2143,6 +2150,7 @@ void GameCoreSection::finalSetup()
     }
 	pc_p2_snow_campaign_setup();
     pc_p2_surface_save_scene_setup();
+    pc_p2_cave_campaign_scene_setup();
 	// Actor-lifetime (#397): mark the new scene ready for lifecycle fixtures.
 	pc_p2_scene_begin();
 	PRINT("====================== FINAL SETUP DONE ======================\n");
@@ -4210,6 +4218,7 @@ void GameCoreSection::updateAI()
 {
     pelletBonusTestTick();
     pc_p2_cave_tick();
+    pc_p2_cave_campaign_tick();
     pc_p2_giant_breadbug_actor_tick();
     pc_p2_breadbug_actor_tick();
     Navi* shipNavi = naviMgr ? naviMgr->getActiveNavi() : nullptr;
@@ -4333,7 +4342,7 @@ void GameCoreSection::updateAI()
     }
     static bool bbftRedsQueued = false, bbftRedsReady = false;
     static int bbftInitialField = 20;
-    if (pc_bbft_skip_tutorial() && !pc_randomizer_resumed() && !gameflow.mMoviePlayer->mIsActive
+    if (pc_bbft_skip_tutorial() && !pc_randomizer_resumed() && !pc_p2_cave_campaign_restored_party() && !gameflow.mMoviePlayer->mIsActive
         && !gameflow.mPauseAll && !gameflow.mIsUIOverlayActive && itemMgr) {
         GoalItem* redOnion = itemMgr->getContainer(initialColor);
         // Real play keeps the 20 starting Pikmin in the Onion, as vanilla does:
@@ -5612,6 +5621,7 @@ void GameCoreSection::draw(Graphics& gfx)
 	}
 	pc_p2_cave_draw_transition(gfx);
     pc_p2_surface_save_draw(gfx);
+    pc_p2_cave_campaign_draw_save_choice(gfx);
     pc_p2_original_cave_draw(gfx);
 	pc_p2_cave_visible_draw(gfx);
 	pc_p2_breadbug_visual_draw(gfx);
