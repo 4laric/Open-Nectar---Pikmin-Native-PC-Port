@@ -57,6 +57,8 @@
 #include "pc_p2_snakejoint.h"
 #include "pc_p2_original_actor.h"
 #include "pc_p2_original_snagret_bank.h"
+#include "pc_p2_original_snagret_death.h"
+#include "pc_p2_original_drop_engine.h"
 #include "pc_p2_original_bulblax_snagret_native.h"
 #include "pc_p2_captor_host.h"
 #include "MapMgr.h"
@@ -188,6 +190,7 @@ struct Snake {
     unsigned rng = 1;
     bool deadLogged = false;
     bool original = false;
+    p2original::bulblax_snagret::DeathItems deathItems;
     bool escaped = false;
     float logTimer = 0.0f;
     // Slice-2 vulnerability gate: EB_Invulnerable only while buried (Stay).
@@ -828,6 +831,7 @@ void pc_p2_snakejoint_update(BTeki* actor) {
         setState(actor, s, SNAKE_DEAD, "dead");
     }
 
+    const float previousStateTime=s.stateTime;
     s.stateTime += dt;
     switch (s.state) {
     case SNAKE_STAY: {
@@ -984,6 +988,16 @@ void pc_p2_snakejoint_update(BTeki* actor) {
     }
     case SNAKE_DEAD:
         stop(actor);
+        // Retail StateDead KEYEVENT_3 (frame131) throws source items before
+        // END kills. Never route original drops through an AP/P1 personality.
+        if(s.deathItems.advance(s.original,previousStateTime,s.stateTime)){
+            if(!pc_p2_original_spawn_items(actor)){
+                std::fputs("P2_ORIGINAL_SNAKECROW death event lost original registry\n",stderr);
+                std::abort();
+            }
+            std::printf("P2_ORIGINAL_SNAKECROW_DROP generator=%u frame=131 before_end=1\n",generator);
+            std::fflush(stdout);
+        }
         // dieSoon() only runs inside the P1 doAI block, which is suppressed
         // for registered snagrets; pcEscapeNow() finalizes the corpse outside
         // doAI, fired exactly once when the dead clip completes. Mirrors frog.
@@ -1057,7 +1071,7 @@ bool pc_p2_snakejoint_bind_original(BTeki* actor,unsigned token,std::string& err
  Snake state;state.original=true;state.parms=&SNAKE_CROW;
  state.home=actor->getPosition();state.heading=actor->getDirection();state.moveTarget=state.home;
  state.rng=(token*2654435761u)|1u;state.burrowPos=state.home;
- enter(state,SNAKE_STAY,"appear1");actor->mHealth=SNAKE_CROW.life;
+ enter(state,SNAKE_STAY,"appear1");actor->mHealth=actor->mMaxHealth=SNAKE_CROW.life;
  auto inserted=actors.emplace(static_cast<PelletView*>(actor),std::move(state));
  applyBurrowVisibility(actor,inserted.first->second,token);
  error.clear();return true;

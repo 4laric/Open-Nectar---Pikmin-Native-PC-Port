@@ -75,3 +75,12 @@ exit86, P2_FIXTURE_CAPTAIN_DOWN and no PASS. The standalone guard test checks
 the same truth table. Diagnostic mode parks the captain on actual course
 terrain at least700XZ units from the literal encounter; it does not modify
 health. --manual-encounter bypasses diagnostic parking for ordinary controls.
+
+
+Original SnakeCrow death throws its literal source drops at dead KEYEVENT3,
+authored frame131, exactly once; END165 separately finalizes the natural corpse
+and retires the generator. AP/P1 death paths are unaffected. The provider test
+checks no early drop, exact131, crossed timestep delivery, no repeated emission
+throughEND and AP exclusion. A natural combat death run must observe the new
+P2_ORIGINAL_SNAKECROW_DROP marker and actual number pellets before accepting
+runtime death/drop timing; the controlled policy test alone is not that evidence.
