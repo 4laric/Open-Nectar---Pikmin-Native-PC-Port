@@ -2,6 +2,7 @@
 #include "pc_p2_original_sprout_native.h"
 #if defined(PIKI_PC_PORT)
 #include "pc_coop.h"
+#include "pc_randomizer.h"
 #include "pc_p2_original_gate_native.h"
 #endif
 #if defined(PIKI_PC_PORT)
@@ -1433,7 +1434,7 @@ PikiHeadMgr::PikiHeadMgr(ItemMgr* mgr)
 	mPikiHeadAI    = new PikiHeadAI();
 #if defined(PIKI_PC_PORT)
 	// Buried sprouts have their own pool, sized from the same limit.
-	create(pc_settings_get_piki_limit());
+	create(pc_randomizer_original_session() ? 100 : pc_settings_get_piki_limit());
 #else
 	create(MAX_PIKI_ON_FIELD);
 #endif
