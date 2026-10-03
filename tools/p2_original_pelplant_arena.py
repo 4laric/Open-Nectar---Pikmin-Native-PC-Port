@@ -55,7 +55,7 @@ receipt={'legal_assets':str(legal),'source_baseline_sha256':hashlib.sha256(raw).
  'retail_stage_list_preserved':True,'native_stage_ids':[0,1,2,3,4],
  'stages_ini_sha256':hashlib.sha256(stage_list).hexdigest(),
  'stage_geometry':'legal P1 forest, engineering fixture only',
- 'fixture_placements':{'one':[-460,2155],'five':[-600,2155],'ten':[-700,2155]},
+ 'fixture_placements':{'one':[-460,2155],'five':[-600,2155],'ten':[-500,2155]},
  'ordinary_Onion':True,'Pod':False,
  'launch_arguments':['--experimental-pikmin2-surface','tutorial'],
  'environment':{'PIKMIN_RANDOMIZER_MANUAL_START':'1','PIKMIN_P2_ROOM_WINDOW':'960x540'},
