@@ -25,6 +25,7 @@ public:
  MoviePlayer* player;
  std::unique_ptr<SourceBank> bank;
  bool published=false;
+ bool actionRevoked=false;
  CaptainScene(const p2retail::SceneContext& scene,std::unique_ptr<SourceBank> source)
   :context(&scene),manager(naviMgr),actors{naviMgr->getNavi(0),naviMgr->getNavi(1)},
    serial(scene.nativeSerial()),revision(scene.selectionRevision()),
@@ -44,7 +45,7 @@ public:
   // Test the owner's canonical pointer before dereferencing its borrowed data.
   const auto* scene=pc_p2_retail_scene_prepared();
   return published&&scene==context&&scene&&scene->nativeSerial()==serial&&
-   scene->selectionRevision()==revision&&scene->phase()!=p2retail::ScenePhase::Releasing&&
+   scene->selectionRevision()==revision&&
    rosterCurrent()&&bank->ready()&&gameflow.mMoviePlayer==player;
  }
  bool owns(const p2retail::SceneContext& scene)const noexcept {
@@ -97,7 +98,7 @@ bool pc_p2_original_captain_scene_reset(std::string& error){
  return pc_p2_original_captain_body_reset_loaded(error);
 }
 bool pc_p2_original_captain_scene_activate(std::string& error){
- if(!owner||!owner->current())return fail(error,"source captain activation lacks current bound scene");
+ if(!owner||!owner->current()||owner->actionRevoked)return fail(error,"source captain activation lacks current actionable bound scene");
  // A real committed physical floor is required separately from bank readiness.
  if(pc_p2_retail_scene_committed()!=owner->context)
   return fail(error,"source captain activation requires committed physical retail floor");
@@ -118,16 +119,23 @@ bool pc_p2_original_captain_scene_can_retire(const p2retail::SceneContext& scene
 bool pc_p2_original_captain_scene_revoke(const p2retail::SceneContext& scene,std::string& error){
  if(!pc_p2_original_captain_scene_can_retire(scene,error))return false;
  if(!owner)return true;
- pc_p2_original_captain_main_game_left();
- owner->published=false;
- // Force the actual lifecycle owner to observe canonical revocation now.
- (void)pc_p2_original_captain_world();
+ // Keep canonical descriptor/roster and bank live for exact inactive cleanup.
+ // The actual lifecycle latch prevents subsequent reset/activation of this
+ // incarnation, independently of whether native controls have been forgotten.
+ owner->actionRevoked=true;
+ pc_p2_original_captain_begin_retirement();
  for(auto* actor:owner->actors)nativecontrol::forget(actor);
  error.clear();return true;
 }
 bool pc_p2_original_captain_scene_retire(const p2retail::SceneContext& scene,std::string& error){
  if(!pc_p2_original_captain_scene_revoke(scene,error))return false;
  if(!owner)return true;
+ owner->published=false;
+ (void)pc_p2_original_captain_world();
  for(auto* actor:owner->actors)owner->bank->forget(actor);
  delete owner;owner=nullptr;error.clear();return true;
+}
+
+bool pc_p2_original_captain_scene_body_owned(const Navi* actor)noexcept{
+ return owner&&actor&&owner->rosterCurrent()&&(actor==owner->actors[0]||actor==owner->actors[1]);
 }

@@ -84,6 +84,9 @@ const p2original::captain::LoadedScene* pc_p2_original_captain_loaded_scene();
 // An absent/wrong selected LoadedScene refuses activation and actor writes.
 void pc_p2_original_captain_main_game_entered();
 void pc_p2_original_captain_main_game_left();
+// Terminal for this exact retained incarnation. Keep canonical inactive World
+// readable until consumers retire; repeated reset/activation cannot resume it.
+void pc_p2_original_captain_begin_retirement();
 void pc_p2_original_captain_movie_started(MoviePlayer*);
 void pc_p2_original_captain_movie_ended(MoviePlayer*);
 void pc_p2_original_captain_actor_update(Navi*);
