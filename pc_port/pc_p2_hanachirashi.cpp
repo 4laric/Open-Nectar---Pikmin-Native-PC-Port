@@ -38,6 +38,7 @@
 // No other lane's module is modified; every hook is a no-op for unregistered actors.
 #include "pc_p2_hanachirashi.h"
 #include "pc_p2_original_actor.h"
+#include "pc_p2_original_drop_engine.h"
 #include "pc_p2_original_hanachirashi_native.h"
 #include "pc_p2_original_hanachirashi_bank.h"
 #include "settings/pc_settings.h"
@@ -624,7 +625,16 @@ void pc_p2_hanachirashi_update(BTeki* actor) {
     }
     case HANA_DEAD:
         stopFlying(actor, s, dt);
-        if (s.stateTime >= clipDuration("dead")) actor->pcEscapeNow();
+        if (s.stateTime >= clipDuration("dead")) {
+            if(s.original) {
+                // StateDead::exec END throws authored items and kills. Retail
+                // onInit disables EB_LeaveCarcass; do not run Mar dieSoon.
+                pc_p2_original_spawn_items(actor);
+                actor->die();actor->kill(false);
+                return; // The native forget funnel erased this Hana state.
+            }
+            actor->pcEscapeNow();
+        }
         break;
     default:
         break;
