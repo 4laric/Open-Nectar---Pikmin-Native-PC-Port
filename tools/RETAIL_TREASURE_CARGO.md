@@ -32,6 +32,13 @@ and actual native receiver absence afterward, then retires cargo. The selected
 prepared-context provider must survive through this operation; a revoked live
 FloorSession snapshot cannot provide teardown authority.
 
+Before revoking floor readers, SceneOps.canRelease calls the read-only
+`pc_p2_retail_treasure_cargo_can_release_collected` predicate. It checks the
+selected context, every owned canonical receipt, and the matching committed
+Pod's actual unfinished cargo and transaction state. Refusal leaves the floor
+active. The mutating release repeats these checks; readiness is not a token or
+permission to retain unfinished actors.
+
 The authenticated bank retains the original Pod archive, pot.bmd, collision and
 text sources. Its qualified receiver model uses the distinct
 `assets/dataDir/courses/pikmin2retailpod/pod.mod` role. The historical held Pod
