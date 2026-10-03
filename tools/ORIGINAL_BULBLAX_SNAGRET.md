@@ -52,3 +52,16 @@ never substitute an AP slot or generated proxy encounter.
 Record native commit/executable SHA256/no-work build result and fresh logs.
 Stop captain-down/lockout observations; kill only processes owned by this test.
 Build and synthetic tests cannot satisfy this human mechanic acceptance.
+
+
+The real-engine fixture pikmin_ci_fixture_original_snagret uses ONLY the literal
+nonloop/5-29.txt#2 SnakeCrow row (UID1389661387), checks real family birth/health,
+20-Pikmin and960x540 startup, then observes180 engine updates and cleans/reenters
+with a fresh activation. It is partial source admission, never whole-course or
+natural attack/save acceptance. Use canonical bounded run_pikmin2_fixture.py
+with --experimental-pikmin2-surface tutorial arguments, a fresh staged private
+run directory and PASS P2_ORIGINAL_SNAGRET_RUNTIME marker. --manual-encounter
+leaves that unmodified literal Snagret running for ordinary human controls.
+Actual source33 initgen.txt#17 carries treasure841 and remains explicitly
+refused until genuine original treasure resource/birth/delivery/persistence
+integration exists. Never remove that treasure to manufacture an accepted row.
