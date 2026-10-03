@@ -3242,3 +3242,4 @@ target_include_directories(pc_p2_original_piki_init_test PRIVATE "${PROJECT_SOUR
 find_package(Threads REQUIRED)
 target_link_libraries(pc_p2_original_piki_init_test PRIVATE Threads::Threads)
 add_test(NAME p2_original_piki_init COMMAND pc_p2_original_piki_init_test)
+pikmin_add_ci_fixture(original_piki_init tools/p2_original_piki_init_runtime.cpp)

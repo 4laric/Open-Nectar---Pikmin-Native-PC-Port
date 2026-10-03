@@ -29,3 +29,6 @@ bool pc_p2_original_piki_bore_init_consume(Piki* body) noexcept {
     activeScope->mBoreConsumed = true;
     return true;
 }
+bool pc_p2_original_piki_init_held(const Piki* body) noexcept {
+    return body && activeScope && activeScope->mActive && activeScope->mConsumed && activeScope->mBody == body;
+}
