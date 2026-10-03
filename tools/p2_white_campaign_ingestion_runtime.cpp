@@ -62,6 +62,7 @@
 static void require(bool ok,const char*why){if(!ok){std::printf("P2_WHITE_ADULT_FAIL %s\n",why);std::fflush(nullptr);std::_Exit(1);}}
 static constexpr unsigned PredatorUID=436207616u;
 static int phase=0,tick=0,frame=0,sequence=0,lastStock=15,ackTick=0,consumed=0;
+static int grabRetries=0;
 static bool initialized=false;static SDL_Joystick* virtualPad=nullptr;
 static Vector3f goal;static Teki* originalPredator=nullptr;static Piki* held=nullptr;
 static std::set<Piki*> restored,captured,lost;static std::set<Pellet*> baselinePellets;
@@ -70,6 +71,9 @@ static int whiteStock(){const auto&c=p2ship::stock.counts[1];return c[0]+c[1]+c[
 static bool settled(int state){return state==NAVISTATE_Walk||state==NAVISTATE_Idle;}
 static void next(int value){phase=value;tick=0;}
 static void request(const char*key){std::printf("P2_WHITE_NATIVE_KEY_REQUEST seq=%d key=%s actual_SDL_keyboard_required=1\n",++sequence,key);std::fflush(nullptr);}
+static bool retryBody(Piki*p,Navi*n){
+ return p&&p->isAlive()&&restored.count(p)&&!captured.count(p)&&pc_p2_is_white(p)&&p->mNavi==n&&p->mMode==PikiMode::FormationMode&&p->getState()==PIKISTATE_Normal&&p->isCreatureFlag(CF_IsOnGround)&&!p->isHolding()&&!p->isStickTo()&&p->getStickObject()==nullptr;
+}
 class Input:public Kontroller{
 public:Input():Kontroller(1){}
  void update()override{
@@ -179,6 +183,18 @@ public:int idle()override{
   }
   require((!grab->mHeldThrowPiki||grab->mHeldThrowPiki==held)&&(!grab->mPendingThrowPiki||grab->mPendingThrowPiki==held),"actual native throw pointer swapped");
   if(held&&grab->mHeldThrowPiki==held&&grab->mIsHoldingThrowPiki&&held->getState()==PIKISTATE_Hanged){next(7);return result;}
+ }
+ if(phase==6&&settled(n->getCurrState()->getID())&&tick>=5){
+  bool eligible=!live.empty()&&white+consumed==2;
+  for(auto*p:live){eligible=eligible&&retryBody(p,n);
+   if(frame%30==0)std::printf("P2_WHITE_ADULT_GRAB_SETTLE frame=%d body=%p state=%d mode=%d owned=%d grounded=%d holding=%d sticking=%d captured=%d x=%.3f y=%.3f z=%.3f retries=%d\n",frame,(void*)p,p->getState(),p->mMode,int(p->mNavi==n),int(p->isCreatureFlag(CF_IsOnGround)),int(p->isHolding()),int(p->isStickTo()||p->getStickObject()!=nullptr),int(captured.count(p)!=0),p->mSRT.t.x,p->mSRT.t.y,p->mSRT.t.z,grabRetries);
+  }
+  if(held)eligible=eligible&&live.count(held)&&retryBody(held,n);
+  if(eligible){require(++grabRetries<=8,"bounded ordinary grab retries exhausted");std::printf("P2_WHITE_ADULT_GRAB_RETRY frame=%d attempt=%d released_actual_A=1 no_actor_state_writes=1\n",frame,grabRetries);held=nullptr;next(10);return result;}
+ }
+ if(phase==10&&tick>=5&&settled(n->getCurrState()->getID())){
+  bool eligible=!live.empty();for(auto*p:live)eligible=eligible&&retryBody(p,n);
+  if(eligible){goal=predator->mSRT.t;next(5);return result;}
  }
  if(phase==7&&held&&live.count(held)&&held->getState()==PIKISTATE_Flying){std::printf("P2_WHITE_ADULT_THROW frame=%d victim=%p ordinary_flight=1\n",frame,(void*)held);next(8);return result;}
  if(phase==8&&held&&lost.count(held)){held=nullptr;if(consumed==1){next(5);return result;}next(9);return result;}
