@@ -17,6 +17,7 @@
 #include "Camera.h"
 #include "Piki.h"
 #include "PikiMgr.h"
+#include "PikiState.h"
 #include "PikiHeadItem.h"
 #include "ItemMgr.h"
 #include "GoalItem.h"
