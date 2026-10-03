@@ -650,6 +650,12 @@ endif()
 if (PIKMIN_TOUCH)
     list(APPEND PC_PORT_SOURCES pc_port/touch/pc_touch.cpp)
 endif()
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/pc_port/pc_p2_retail_cave_native.h"
+   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/pc_port/pc_p2_original_session.h")
+    # Real reader requires NativeFloor 3e2 and OriginalSession c482 composition.
+    # Historical source trees keep pure provenance without inventing a reader.
+    list(APPEND PC_PORT_SOURCES pc_port/pc_p2_bud_retail_live.cpp)
+endif()
 
 include_directories(
     ${SDL2_INCLUDE_DIRS}

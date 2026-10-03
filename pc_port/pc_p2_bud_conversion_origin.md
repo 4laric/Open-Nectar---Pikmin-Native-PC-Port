@@ -70,3 +70,37 @@ The current tests use explicit mock proof and opaque pointer identities. Actual
 source6 native conversion, head-to-body plucking, across-frame collision to
 Formation, full floor inventory and selected SAVE/fresh process roundtrip remain
 unqualified. This module does not enable full-world Save & Quit.
+
+## Fresh creation and ordinary RAM travel
+
+`bindLive` uses a separate Creation record from the native owner, not a card
+generation/hash. Installing permits callback registration after real family
+binding; emission requires Committed and actual native gameplay activity.
+Committed stopped capture remains allowed for the first SAVE. The native
+OriginalSession adapter rechecks the actual selected campaign, immutable session
+fingerprint/input and c482 monotonic selection revision. The final callback
+checks that revision and the native floor serial without allocating.
+
+RetailLiveFloorReader consumes NativeFloor 3e2 read APIs and originalActors'
+actual source6 association/compiled floor row. NativeFloor revokes these APIs
+before release. It reads original GameFlow movie/pause/UI/day-end activity;
+actual frame behavior still needs the composed native test. The reader and
+Authority belong to the FLOOR lifetime, never a single bud's lifetime. Terminal
+parents use the retained actual native birth census. A different floor/epoch
+requires the actual transition owner's retained graph, not a guessed parent.
+
+Carry is an opaque one-use live transaction, separate from a cold checkpoint.
+The source owner must approve its complete census/dispositions. Old pointers
+are forgotten and the source cannot reopen while escrow is outstanding. An
+empty actual new-serial destination validates every replacement body before
+publishing the same complete history, without emission/pluck/activation. Failure
+leaves the ticket available for recovery. Omitted bodies/heads may be retired
+only when the actual transition owner confirms retirement; living old-floor
+graph storage must go through that full graph owner, not this party-only path.
+
+Cold restore and successful selected SAVE adoption still require full native
+card proof. NativeLiveAuthority has no fake/default card reader. First real SAVE
+adoption switches the live registry to selected-proof mode only after unchanged
+family bytes and actual generation/SHA validation. Link the concrete retail
+reader only with actual NativeFloor 3e2 and OriginalSession c482 dependencies;
+the historical base does not supply those producers and keeps them disabled.

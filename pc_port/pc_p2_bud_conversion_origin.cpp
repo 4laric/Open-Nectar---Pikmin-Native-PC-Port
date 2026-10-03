@@ -1,9 +1,12 @@
 #include "pc_p2_bud_conversion_origin.h"
+#include "pc_p2_bud_live_floor.h"
 #include <sstream>
 #include <tuple>
 #include <thread>
 #include <limits>
 namespace p2budorigin {
+bool Creation::valid()const noexcept{return p2originalcheckpoint::digest(campaign)&&p2originalcheckpoint::digest(session)&&p2originalcheckpoint::digest(sourceSha)&&p2originalcheckpoint::digest(catalogSha)&&p2originalcheckpoint::digest(layoutSha)&&!cave.empty()&&!visit.empty()&&floor>0&&floor<=105&&epoch&&nativeSerial&&sessionRevision&&(phase==CreationPhase::Installing||phase==CreationPhase::Committed);}
+bool Creation::operator==(const Creation& b)const noexcept{return campaign==b.campaign&&session==b.session&&cave==b.cave&&visit==b.visit&&sourceSha==b.sourceSha&&catalogSha==b.catalogSha&&layoutSha==b.layoutSha&&floor==b.floor&&epoch==b.epoch&&nativeSerial==b.nativeSerial&&sessionRevision==b.sessionRevision;}
 namespace {
 auto key(const FloorIdentity& f){return std::tie(f.campaign,f.session,f.cave,f.visit,f.sourceSha,f.catalogSha,f.layoutSha,f.instance,f.floor,f.row,f.ordinal,f.epoch,f.activation);}
 bool token(const std::string& s){if(s.empty()||s.size()>1024)return false;for(unsigned char c:s)if(c<=32||c>=127)return false;return true;}
@@ -66,27 +69,72 @@ bool decodeSnapshot(const std::string& bytes,Snapshot& out,std::string& e){
 struct Registry::State {
  std::string campaign,session;
  const Authority* authority=nullptr;p2originalcheckpoint::Proof proof;std::thread::id owner;
+ Creation creation;bool live=false;
+ bool escrow=false;
  std::uint64_t revision=0;
  std::map<Identity,Entry> history;std::map<Identity,unsigned> last;
  std::set<Donor> consumed;
  std::map<const PikiHeadItem*,Identity> heads;std::map<const Piki*,Identity> bodies;
- bool current()const noexcept{return authority&&owner==std::this_thread::get_id()&&proof.valid()&&authority->stillCurrent(proof);}
+ bool current()const noexcept{if(!authority||owner!=std::this_thread::get_id())return false;if(live){const auto* actual=authority->liveCreation();return actual&&creation==*actual&&actual->phase==CreationPhase::Committed;}return proof.valid()&&authority->stillCurrent(proof);}
+ bool emitting()const noexcept{if(!current())return false;const auto* actual=authority->liveCreation();return !actual||actual->gameActive;}
 };
 struct PendingEmission::Impl {std::shared_ptr<Registry::State> old,next;std::uint64_t revision=0;Identity identity;bool body=false;};
+struct Carry::Impl {std::shared_ptr<Registry::State> source;Snapshot snapshot;Creation creation;std::set<Identity> carried;};
+Carry::Carry()=default;Carry::~Carry()=default;Carry::Carry(Carry&&)noexcept=default;Carry&Carry::operator=(Carry&&)noexcept=default;
+bool Carry::ready()const noexcept{return bool(impl);}
 PendingEmission::PendingEmission()=default;PendingEmission::~PendingEmission()=default;
 PendingEmission::PendingEmission(PendingEmission&&)noexcept=default;PendingEmission&PendingEmission::operator=(PendingEmission&&)noexcept=default;
 bool PendingEmission::ready()const noexcept{return bool(impl);}
 unsigned PendingEmission::ordinal()const noexcept{return impl?impl->identity.emission:0;}
 Registry::Registry():state(std::make_shared<State>()){}Registry::~Registry()=default;
 bool Registry::bind(const Authority& a,const p2originalcheckpoint::Proof& p,std::string& e){
- if(!p.valid()||!state->heads.empty()||!state->bodies.empty())return fail(e,"bud registry bind requires selected proof and empty native scene");
+ if(state->escrow||!p.valid()||!state->heads.empty()||!state->bodies.empty())return fail(e,"bud registry bind requires selected proof and empty native scene");
  p2originalcheckpoint::Proof selected;if(!a.selected(selected,e)||!(selected==p)||!a.stillCurrent(p))return fail(e,"bud selected card changed");
  std::string campaign,session;if(!a.context(campaign,session,e)||!p2originalcheckpoint::digest(campaign)||!p2originalcheckpoint::digest(session))return fail(e,"bud selected source context refused");
  if(!state->history.empty()&&(state->campaign!=campaign||state->session!=session))return fail(e,"bud history requires separate campaign registry");
- auto next=std::make_shared<State>(*state);next->campaign=campaign;next->session=session;next->authority=&a;next->proof=p;next->owner=std::this_thread::get_id();++next->revision;state.swap(next);e.clear();return true;
+ auto next=std::make_shared<State>(*state);next->campaign=campaign;next->session=session;next->authority=&a;next->proof=p;next->live=false;next->owner=std::this_thread::get_id();++next->revision;state.swap(next);e.clear();return true;
+}
+bool Registry::bindLive(const Authority& a,std::string& e){
+ if(state->escrow||!state->heads.empty()||!state->bodies.empty())return fail(e,"live bud bind requires empty native scene");
+ Creation created;std::string campaign,session;
+ if(!a.creation(created,e)||!created.valid()||!a.context(campaign,session,e)||campaign!=created.campaign||session!=created.session)return fail(e,"actual native session/floor creation refused");
+ if(!state->history.empty()&&(state->campaign!=campaign||state->session!=session))return fail(e,"bud history requires separate campaign registry");
+ const auto* actual=a.liveCreation();if(!actual||!(*actual==created))return fail(e,"native floor changed before live binding");
+ auto next=std::make_shared<State>(*state);next->campaign=campaign;next->session=session;next->authority=&a;next->proof={};next->creation=std::move(created);next->live=true;next->owner=std::this_thread::get_id();++next->revision;
+ actual=a.liveCreation();if(!actual||!(*actual==next->creation))return fail(e,"live native session/floor changed during binding");
+ state.swap(next);e.clear();return true;
+}
+bool Registry::detachCarry(const std::vector<BodyBinding>& bodies,Carry& out,std::string& e){
+ if(out.ready()||state->escrow||!state->current())return fail(e,"bud carried transition unavailable");
+ const auto* creation=state->authority->liveCreation();if(!creation||!creation->valid()||creation->phase!=CreationPhase::Committed)return fail(e,"actual committed native source floor missing");
+ Snapshot snap;if(!snapshot(snap,e)||!state->authority->carried(snap,bodies,e))return fail(e,"actual complete native carry disposition refused");
+ auto ticket=std::make_unique<Carry::Impl>();ticket->creation=*creation;std::set<const Piki*> pointers;
+ for(const auto& body:bodies){auto found=state->bodies.find(body.body);if(!body.body||found==state->bodies.end()||!(found->second==body.identity)||!pointers.insert(body.body).second||!ticket->carried.insert(body.identity).second)return fail(e,"carried body is not an exact unique live source member");}
+ ticket->snapshot=snap;
+ for(auto& entry:ticket->snapshot.emissions)if(!ticket->carried.count(entry.record.identity))entry.lifecycle=Lifecycle::Retired;
+ auto next=std::make_shared<State>(*state);
+ for(auto& entry:next->history)if(!ticket->carried.count(entry.first))entry.second.lifecycle=Lifecycle::Retired;
+ next->heads.clear();next->bodies.clear();next->authority=nullptr;next->escrow=true;++next->revision;
+ if(!state->current())return fail(e,"native source changed during carry reservation");
+ ticket->source=next;state.swap(next);out.impl=std::move(ticket);e.clear();return true;
+}
+bool Registry::receiveCarry(const Authority& a,Carry& ticket,const std::vector<BodyBinding>& bodies,std::string& e){
+ if(!ticket.impl||!ticket.impl->source->escrow||!state->history.empty()||!state->heads.empty()||!state->bodies.empty())return fail(e,"carry requires unclaimed complete ticket and empty destination");
+ Creation created;std::string campaign,session;
+ if(!a.creation(created,e)||!created.valid()||created.nativeSerial==ticket.impl->creation.nativeSerial||!a.context(campaign,session,e)||campaign!=ticket.impl->snapshot.campaign||session!=ticket.impl->snapshot.session||created.campaign!=campaign||created.session!=session||!a.receive(ticket.impl->snapshot,bodies,e))return fail(e,"actual new native destination carry authority refused");
+ const auto* actual=a.liveCreation();if(!actual||!(*actual==created))return fail(e,"native destination changed");
+ auto next=std::make_shared<State>();next->campaign=campaign;next->session=session;next->creation=created;next->live=true;next->authority=&a;next->owner=std::this_thread::get_id();next->revision=state->revision+1;
+ for(const auto& entry:ticket.impl->snapshot.emissions){next->history.emplace(entry.record.identity,entry);next->consumed.insert(entry.record.donor);next->last[budKey(entry.record.identity)]=entry.record.identity.emission;}
+ std::set<Identity> seen;
+ for(const auto& body:bodies){if(!body.body||!ticket.impl->carried.count(body.identity)||!seen.insert(body.identity).second||!next->bodies.emplace(body.body,body.identity).second)return fail(e,"carry destination mapping is missing/duplicate/foreign");}
+ if(seen!=ticket.impl->carried)return fail(e,"carry destination requires every live carried body");
+ actual=a.liveCreation();if(!actual||!(*actual==created))return fail(e,"destination changed before carry adoption");
+ // Publication is allocation-free after ALL destination validation/preparation.
+ for(auto& entry:ticket.impl->source->history)entry.second.lifecycle=Lifecycle::Retired;
+ ticket.impl->source->escrow=false;state.swap(next);ticket.impl.reset();e.clear();return true;
 }
 bool Registry::prepare(const Pom* pom,unsigned tokenValue,const p2original::InstanceIdentity& bud,const Piki* donor,unsigned species,bool refund,PendingEmission& out,std::string& e){
- if(out.ready()||!pom||!tokenValue||!donor||species!=3||!state->current()||state->history.size()>=20000)return fail(e,"bud output preparation unavailable");
+ if(out.ready()||!pom||!tokenValue||!donor||species!=3||!state->emitting()||state->history.size()>=20000)return fail(e,"bud output preparation unavailable");
  FloorIdentity floor;Donor d;if(!state->authority->bud(pom,tokenValue,bud,floor,e)||!valid(floor)||floor.campaign!=state->campaign||floor.session!=state->session||!state->authority->donor(donor,d,e)||!valid(d)||d.campaign!=floor.campaign||refund!=(d.species==3)||state->consumed.count(d))return fail(e,"bud source6 floor or live donor authority refused");
  Identity id{floor,bud,1};auto keyId=budKey(id);auto old=state->last.find(keyId);if(old!=state->last.end()){if(old->second==std::numeric_limits<unsigned>::max())return fail(e,"bud emission ordinal exhausted");id.emission=old->second+1;}
  if(!valid(id)||state->history.count(id))return fail(e,"bud emission identity reused");
@@ -97,12 +145,12 @@ bool Registry::prepare(const Pom* pom,unsigned tokenValue,const p2original::Inst
  }
  if(state->heads.size()+state->bodies.size()-(converted!=state->bodies.end()?1:0)>=100)return fail(e,"bud live member capacity");
  pending->next->history.emplace(id,Entry{Record{id,d,species,refund},Lifecycle::Head});pending->next->consumed.insert(d);pending->next->last[keyId]=id.emission;pending->next->heads.emplace(nullptr,id);
- if(!state->current())return fail(e,"bud proof changed during output reservation");
+ if(!state->emitting())return fail(e,"bud proof changed during output reservation");
  out.impl=std::move(pending);e.clear();return true;
 }
 bool Registry::adopt(PendingEmission&& p,PikiHeadItem* head,unsigned ordinal,unsigned actualSpecies,bool actualRefund,const char*& reason)noexcept{
  reason=nullptr;
- if(!p.impl||p.impl->body||!head||p.impl->old!=state||state->revision!=p.impl->revision||!state->current()||ordinal!=p.impl->identity.emission||actualSpecies!=3||actualRefund!=p.impl->next->history.find(p.impl->identity)->second.record.refunded||state->heads.count(head)||rootAlias(state->bodies,head)){reason="bud emitted head reservation/authority mismatch";return false;}
+ if(!p.impl||p.impl->body||!head||p.impl->old!=state||state->revision!=p.impl->revision||!state->emitting()||ordinal!=p.impl->identity.emission||actualSpecies!=3||actualRefund!=p.impl->next->history.find(p.impl->identity)->second.record.refunded||state->heads.count(head)||rootAlias(state->bodies,head)){reason="bud emitted head reservation/authority mismatch";return false;}
  auto node=p.impl->next->heads.extract(nullptr);if(node.empty()){reason="missing reserved head node";return false;}node.key()=head;p.impl->next->heads.insert(std::move(node));++p.impl->next->revision;state.swap(p.impl->next);p.impl.reset();return true;
 }
 bool Registry::head(const PikiHeadItem* p,Record& out)const{auto i=state->heads.find(p);if(i==state->heads.end())return false;Record next=state->history.at(i->second).record;out=std::move(next);return true;}
@@ -142,7 +190,7 @@ bool Registry::adoptSelected(const Authority& authority,const Snapshot& expected
  std::string actualBytes,savedBytes;if(!encodeSnapshot(live,actualBytes,e)||!encodeSnapshot(expected,savedBytes,e)||actualBytes!=savedBytes)return fail(e,"bud selected SAVE changed live graph");
  p2originalcheckpoint::Proof current;std::string campaign,session;
  if(!authority.selected(current,e)||!(current==proof)||!authority.context(campaign,session,e)||campaign!=live.campaign||session!=live.session||!authority.saved(expected,proof,e)||!authority.stillCurrent(proof))return fail(e,"bud actual selected SAVE proof refused");
- auto next=std::make_shared<State>(*state);next->authority=&authority;next->proof=proof;++next->revision;
+ auto next=std::make_shared<State>(*state);next->authority=&authority;next->proof=proof;next->live=false;++next->revision;
  if(!authority.stillCurrent(proof))return fail(e,"bud selected SAVE changed before adoption");
  state.swap(next);e.clear();return true;
 }

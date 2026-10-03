@@ -1,5 +1,7 @@
 #include "pc_p2_bud_conversion_origin.h"
 #include "pc_p2_bud_conversion_producer.h"
+#include "pc_p2_bud_live_floor.h"
+#include "pc_p2_bud_native_live.h"
 #include "pc_p2_source_body.h"
 #include "pc_p2_original_piki_recruit.h"
 #include "pc_p2_original_progress.h"
@@ -12,6 +14,14 @@ class Pom {}; class Piki {}; class PikiHeadItem {};
 bool pc_p2_cave_campaign_party_associate_birth(Piki*,const char*,std::uint32_t,std::uint32_t,std::uint64_t,const char*){return true;}
 bool pc_p2_cave_campaign_survivor_permit(const std::string&,std::uint32_t,std::uint32_t,std::uint64_t,const std::string&,std::uint64_t*,std::uint8_t[32]){return false;}
 bool pc_p2_cave_campaign_survivor_body(const std::string&,std::uint32_t,std::uint32_t,std::uint64_t,const std::string&,OriginalPikiBodyState&,std::uint64_t*,std::uint8_t[32]){return false;}
+// Explicit mock native session producer for wrapper sequencing only.
+static bool nativeSelected=true,inputValid=true;static std::uint64_t nativeRevision=12;
+static std::string nativeCampaign(64,'a'),nativeSession(64,'b');
+bool pc_randomizer_original_session(){return nativeSelected;}
+std::string pc_randomizer_original_campaign(){return nativeCampaign;}
+std::string pc_randomizer_session_fingerprint(){return nativeSession;}
+bool pc_randomizer_original_input(const std::string& role,std::string& out,std::string&){if(role!="p2-original/calendar.p2sc"||!inputValid)return false;out="mock immutable selected input";return true;}
+std::uint64_t pc_randomizer_original_selection_revision()noexcept{return nativeRevision;}
 static bool denyAllocation=false;
 void* operator new(std::size_t n){if(denyAllocation)throw std::bad_alloc();if(void* p=std::malloc(n?n:1))return p;throw std::bad_alloc();}
 void operator delete(void* p)noexcept{std::free(p);}
@@ -24,7 +34,7 @@ static unsigned headColour(const PikiHeadItem*)noexcept{return 3;}
 static unsigned failures=0;
 static void fatal(const char*)noexcept{++failures;}
 struct MockAuthority final:Authority {
- p2originalcheckpoint::Proof proof;bool current=true,allow=true;mutable unsigned recordReads=0;unsigned donorSpecies=1;std::string donorKey="party:1";
+ p2originalcheckpoint::Proof proof;bool current=true,allow=true;mutable unsigned recordReads=0;unsigned donorSpecies=1;std::string donorKey="party:1";Creation live;bool liveActive=false;
  MockAuthority(){proof.generation=1;proof.sha[0]=42;}
  bool selected(p2originalcheckpoint::Proof& out,std::string&)const override{out=proof;return current;}
  bool context(std::string& c,std::string& s,std::string&)const override{c=hash('a');s=hash('b');return allow;}
@@ -33,6 +43,19 @@ struct MockAuthority final:Authority {
  bool record(const Record&,std::string&)const override{++recordReads;return allow;}
  bool stillCurrent(const p2originalcheckpoint::Proof& p)const noexcept override{return current&&p==proof;}
  bool saved(const Snapshot&,const p2originalcheckpoint::Proof& p,std::string&)const override{return allow&&p==proof;}
+ bool creation(Creation& out,std::string&)const override{if(!liveActive)return false;out=live;return true;}
+ const Creation* liveCreation()const noexcept override{return liveActive?&live:nullptr;}
+ bool carried(const Snapshot&,const std::vector<BodyBinding>&,std::string&)const override{return allow;}
+ bool receive(const Snapshot&,const std::vector<BodyBinding>&,std::string&)const override{return allow;}
+};
+struct MockFloor final:LiveFloorReader,NativeDonorReader {
+ MockAuthority& a;explicit MockFloor(MockAuthority& owner):a(owner){}
+ const Creation* current()const noexcept override{return a.liveCreation();}
+ bool expectedBud(const Pom* p,unsigned t,const p2original::InstanceIdentity& i,FloorIdentity& f,std::string& e)const override{return a.bud(p,t,i,f,e);}
+ bool emitted(const Record& r,std::string& e)const override{return a.record(r,e);}
+ bool carried(const Snapshot& s,const std::vector<BodyBinding>& b,std::string& e)const override{return a.carried(s,b,e);}
+ bool receive(const Snapshot& s,const std::vector<BodyBinding>& b,std::string& e)const override{return a.receive(s,b,e);}
+ bool query(const Piki* p,Donor& d,std::string& e)const override{return a.donor(p,d,e);}
 };
 int main(){
  MockAuthority a;Registry r;std::string e;Pom pom;Piki donor,body;PikiHeadItem head,head2;
@@ -121,5 +144,48 @@ int main(){
  a.current=false;check(pc_p2_source_body_query(&body,typed)==PcP2SourceBodyKind::BudConversion&&!pc_p2_original_piki_recruit_allowed(&body,1,false,true,e),"expired converted proof remains labelled but refuses native event");a.current=true;
  check(!pc_p2_source_body_admitted(typed,hash('c'),genCatalog,e),"foreign campaign refused independently of GenPiki catalog");
  registry().sceneExit();check(pc_p2_source_body_query(&body,typed)==PcP2SourceBodyKind::None,"common scene teardown forgets old pool address");
+ Registry fresh;a.live={hash('a'),hash('b'),"forest_1","visit:1",hash('c'),hash('d'),hash('e'),1,1,100,12};a.liveActive=true;
+ const auto oldProof=a.proof;a.proof={};check(!fresh.bind(a,a.proof,e),"newgame has no fabricated selected card");
+ check(fresh.bindLive(a,e),"live installed-floor authority binds before first SAVE");
+ a.donorKey="party:fresh";a.donorSpecies=1;PendingEmission premature;check(!fresh.prepare(&pom,1,bud,&donor,3,false,premature,e),"Installing permits registration but cannot emit");
+ a.live.phase=CreationPhase::Committed;check(!fresh.prepare(&pom,1,bud,&donor,3,false,premature,e),"Committed floor waits actual game-active before emission");a.live.gameActive=true;
+ a.donorKey="party:fresh";a.donorSpecies=1;PendingEmission liveEmission;check(fresh.prepare(&pom,1,bud,&donor,3,false,liveEmission,e),"fresh live source6 reservation without card");
+ denyAllocation=true;bool newHead=fresh.adopt(std::move(liveEmission),&head,1,3,false,reason);denyAllocation=false;check(newHead,"fresh live callback remains nonallocating");
+ check(fresh.snapshot(live,e),"fresh live family can be captured for FIRST SAVE");
+ a.live.gameActive=false;check(fresh.snapshot(unchanged,e),"paused committed floor may capture first SAVE without emission");a.live.gameActive=true;
+ ++a.live.nativeSerial;check(!fresh.admitted(live.emissions[0].record,e),"recycled floor serial refuses old authority");--a.live.nativeSerial;
+ ++a.live.sessionRevision;check(!fresh.snapshot(unchanged,e),"new native selection lifetime refuses old live binding");--a.live.sessionRevision;
+ Registry noProof;check(!noProof.restore(a,live,a.proof,{{live.emissions[0].record.identity,&head}}, {},e),"fresh live authority never substitutes for cold proof");
+ a.proof=oldProof;a.proof.generation=3;check(fresh.adoptSelected(a,live,a.proof,e),"actual first successful SAVE transitions live authority to selected card");
+ a.liveActive=false;check(fresh.snapshot(unchanged,e),"selected proof mode no longer requires live-creation stamp");
+ a.liveActive=true;PendingEmission travelPluck;check(fresh.prepareTransfer(&head,3,travelPluck,e)&&fresh.adoptBody(std::move(travelPluck),&body,reason),"real-pluck-only body before RAM travel");
+ Carry carry;const auto carriedId=live.emissions[0].record.identity;
+ const std::vector<BodyBinding> departing{{carriedId,&body}};
+ a.allow=false;check(!fresh.detachCarry(departing,carry,e)&&!carry.ready()&&fresh.body(&body,savedBody),"refused actual transition keeps old body associations");a.allow=true;
+ check(fresh.detachCarry(departing,carry,e)&&carry.ready()&&!fresh.body(&body,savedBody),"actual carry escrow forgets old pointer without losing logical identity");
+ fresh.sceneExit();check(!fresh.bindLive(a,e),"old source cannot reopen outstanding carried identities");
+ Registry destination;Piki arrived;const std::vector<BodyBinding> arriving{{carriedId,&arrived}};check(!destination.receiveCarry(a,carry,arriving,e)&&carry.ready(),"same native serial cannot masquerade as fresh destination");
+ ++a.live.nativeSerial;check(!destination.receiveCarry(a,carry,{},e)&&carry.ready(),"partial carried mapping leaves ticket recoverable");
+ auto foreignId=carriedId;++foreignId.emission;check(!destination.receiveCarry(a,carry,{{foreignId,&arrived}},e),"foreign mapped source identity refused");
+ check(destination.receiveCarry(a,carry,arriving,e)&&!carry.ready()&&destination.body(&arrived,savedBody)&&savedBody.identity==carriedId,"new physical body adopts SAME conversion identity without emission or cold proof");
+ check(destination.snapshot(live,e)&&live.emissions.size()==1&&live.emissions[0].lifecycle==Lifecycle::Body,"whole donor/terminal ledger survives RAM travel");
+ check(!destination.receiveCarry(a,carry,{{carriedId,&body}},e),"consumed travel ticket cannot replay");
+ check(fresh.bindLive(a,e),"retired source registry may reopen only after destination consumes escrow");
+ MockFloor floorReader(a);NativeLiveAuthority native(floorReader,floorReader);Registry strongSession;
+ nativeSelected=false;check(!strongSession.bindLive(native,e),"native adapter refuses unauthenticated session");nativeSelected=true;
+ nativeCampaign=hash('c');check(!strongSession.bindLive(native,e),"native adapter rejects actual campaign mismatch");nativeCampaign=hash('a');
+ nativeSession=hash('c');check(!strongSession.bindLive(native,e),"native adapter rejects immutable session SHA mismatch");nativeSession=hash('b');
+ inputValid=false;check(!strongSession.bindLive(native,e),"changed selected immutable input refuses before registration");inputValid=true;
+ ++nativeRevision;check(!strongSession.bindLive(native,e),"actual selected session revision differs from floor owner");--nativeRevision;
+ check(strongSession.bindLive(native,e),"concrete adapter uses native selection and owned creation instead of mock card");
+ p2originalcheckpoint::Proof cannotFake;check(!native.selected(cannotFake,e)&&!cannotFake.valid(),"native live adapter does not issue fake selected proof");
+ a.donorKey="party:native-adapter";PendingEmission nativePending;check(strongSession.prepare(&pom,1,bud,&donor,3,false,nativePending,e),"native adapter source6/donor pairing");
+ ++nativeRevision;denyAllocation=true;bool rejected=!strongSession.adopt(std::move(nativePending),&head,1,3,false,reason);denyAllocation=false;check(rejected,"nonallocating native selection revision guard rejects final callback");--nativeRevision;
+ Registry neverSaved;a.proof={};a.donorKey="party:unsaved-carry";check(neverSaved.bindLive(a,e),"RAM source may exist without selected card");
+ PendingEmission unsaved,pluckUnsaved;check(neverSaved.prepare(&pom,1,bud,&donor,3,false,unsaved,e)&&neverSaved.adopt(std::move(unsaved),&head,1,3,false,reason)&&neverSaved.prepareTransfer(&head,3,pluckUnsaved,e)&&neverSaved.adoptBody(std::move(pluckUnsaved),&body,reason),"live original conversion and pluck before first SAVE");
+ Record unsavedRecord;check(neverSaved.body(&body,unsavedRecord),"unsaved actual typed body");
+ Carry ram;const std::vector<BodyBinding> from{{unsavedRecord.identity,&body}},to{{unsavedRecord.identity,&arrived}};
+ check(neverSaved.detachCarry(from,ram,e),"actual committed RAM owner can escrow before first saved-card proof");++a.live.nativeSerial;
+ Registry ramDestination;check(ramDestination.receiveCarry(a,ram,to,e)&&ramDestination.body(&arrived,savedBody)&&savedBody.identity==unsavedRecord.identity,"RAM destination retains exact unsaved origin; no fake card/activation/emission");
  std::printf("BUD_ORIGIN_CONTROLS PASS %d (mock proof/opaque actors only)\n",checks);return 0;
 }

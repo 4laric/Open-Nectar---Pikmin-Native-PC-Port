@@ -6,6 +6,7 @@
 #include <set>
 class Pom;class Piki;class PikiHeadItem;
 namespace p2budorigin {
+struct Creation;
 // Floor owner supplies the actual selected source6 incarnation. This is NOT a
 // GenPiki record, and the native Pom UID is not replaced by a generated hash.
 struct FloorIdentity {
@@ -44,6 +45,12 @@ bool decodeSnapshot(const std::string&,Snapshot&,std::string&);
 // this authority until sceneExit, and no authority pointer enters saved bytes.
 class Authority:public p2originalcheckpoint::ProofSource {
 public:
+ // Fresh/RAM native creation is separate from selected saved-card proof.
+ // Defaults refuse so old/cold-only implementations cannot silently authorize.
+ virtual bool creation(Creation&,std::string&)const{return false;}
+ virtual const Creation* liveCreation()const noexcept{return nullptr;}
+ virtual bool carried(const Snapshot&,const std::vector<BodyBinding>&,std::string&)const{return false;}
+ virtual bool receive(const Snapshot&,const std::vector<BodyBinding>&,std::string&)const{return false;}
  virtual bool context(std::string& campaign,std::string& session,std::string&)const=0;
  virtual bool bud(const Pom*,unsigned token,const p2original::InstanceIdentity&,
                   FloorIdentity&,std::string&)const=0;
@@ -59,6 +66,13 @@ public:
  virtual bool saved(const Snapshot&,const p2originalcheckpoint::Proof&,std::string&)const=0;
 };
 class Registry;
+class Carry {
+ struct Impl;std::unique_ptr<Impl> impl;friend class Registry;
+public:
+ Carry();~Carry();Carry(Carry&&)noexcept;Carry&operator=(Carry&&)noexcept;
+ Carry(const Carry&)=delete;Carry&operator=(const Carry&)=delete;
+ bool ready()const noexcept;
+};
 // Allocate all provenance bookkeeping BEFORE native donor consumption. Pending
 // output is reversible; it commits neither donor tombstone nor output identity.
 class PendingEmission {
@@ -72,10 +86,20 @@ public:
 };
 class Registry {
  friend class PendingEmission;
+ friend class Carry;
  struct State;std::shared_ptr<State> state;
 public:
  Registry();~Registry();Registry(const Registry&)=delete;Registry&operator=(const Registry&)=delete;
  bool bind(const Authority&,const p2originalcheckpoint::Proof&,std::string&);
+ bool bindLive(const Authority&,std::string&);
+ // Actual committed RAM transition only. Owner must confirm the COMPLETE live
+ // converted census/dispositions; bodies omitted from carried must actually
+ // retire, not merely unload into another saved floor graph. Such retained
+ // floors require their separate full graph owner, not this party-only path.
+ bool detachCarry(const std::vector<BodyBinding>&,Carry&,std::string&);
+ // Empty destination registry, actual new native owner/serial and complete
+ // carried mapping. No emission/pluck/source activation or cold-card proof.
+ bool receiveCarry(const Authority&,Carry&,const std::vector<BodyBinding>&,std::string&);
  bool prepare(const Pom*,unsigned token,const p2original::InstanceIdentity&,const Piki* donor,
               unsigned species,bool refunded,PendingEmission&,std::string&);
  // Only the producer calls this AFTER successful real head init and actual
