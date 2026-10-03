@@ -32,7 +32,12 @@ bool Native::resources(const std::set<unsigned>& sources,std::string& e){
    ||!tekiMgr->getTekiParameters(spec->host)||!tekiMgr->getStrategy(spec->host))return fail(e,"original Chappy chassis use-list/shape/animation/parameters unavailable");
   // The ordinary corpse remains a real PelletView, not a synthetic receipt.
   const unsigned id=TekiMgr::getTypeId(spec->host);
-  if(!pelletMgr->getConfig(id)||!pelletMgr->pcEnsureShape(id))return fail(e,"original Chappy ordinary corpse config/shape unavailable");
+  // A real enemy corpse is a PelletView: initPellet(view, config) deliberately
+  // has no standalone PelletShapeObject. Its physical dead bank is checked by
+  // prepare_original below; only ordinary number drops use pcEnsureShape.
+  if(!pelletMgr->getConfig(id)
+   ||tekiMgr->getTekiParameters(spec->host)->getI(TPI_CorpseType)!=TEKICORPSE_LeaveCorpse)
+   return fail(e,"original Chappy ordinary PelletView corpse config unavailable");
  }
  return pc_p2_chappy_prepare_original(sources,e);
 }
