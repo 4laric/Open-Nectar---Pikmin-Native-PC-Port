@@ -1665,14 +1665,25 @@ class PurpleCombatApp : public PlugPikiApp {
             ordinaryInput();if(!follower)return nullptr;
             GameStat::update();require(alive==20 && red==19 && purple==1 && int(GameStat::mapPikis)==20,"SDL conversion population");
             require(sdlThrowObserved && pc_throw_selection_class(follower)==4 && pc_piki_carry_strength(follower)==10,"SDL native throw and Purple capabilities");
-            if(birthLedgerMode())require(birthPopulation.closes(birthCensus("acquired"),pc_goal_birth_ledger,false),"actual earned birth/replacement acquisition closure refused");
+            if(birthLedgerMode()){
+                const auto census=birthCensus("acquired");
+                require(birthPopulation.closes(census,pc_goal_birth_ledger,false),"actual earned birth/replacement acquisition closure refused");
+                int field=0,stock=0,heads=0,censusRed=0,censusPurple=0;
+                for(int species=0;species<6;++species)for(int maturity=0;maturity<3;++maturity){
+                    field+=census.field[species][maturity];stock+=census.stock[species][maturity];heads+=census.heads[species][maturity];
+                    if(species==1)censusRed+=census.field[species][maturity];
+                    if(species==3)censusPurple+=census.field[species][maturity];
+                }
+                require(field==alive&&censusRed==red&&censusPurple==purple,"acquisition field/census identity closure refused");
+                std::printf("P2_PURPLE_ACQUISITION_CENSUS field=%d red=%d purple=%d stock=%d heads=%d whole=%d baseline=20 successful_births_only=1 read_only=1\n",field,censusRed,censusPurple,stock,heads,field+stock+heads);
+            }
             milestone("SDL_acquisition_verified",ticks);
             if(mode("sdl_dayend")) {
                 const double now=std::chrono::duration<double>(std::chrono::steady_clock::now()-fixtureStarted).count();
                 require(ordinarySaveBudget.acquired(now,true),"ordinary save acquisition deadline or duplicate transition");
                 std::printf("P2_PURPLE_SAVE_BUDGET_TRANSITION acquisition_seconds=%.6f acquisition_limit=%.0f save_limit=60 whole_limit=%.0f verified_acquisition=1 monotonic=1\n",now,ordinarySaveBudget.acquisitionLimit(),ordinarySaveBudget.wholeLimit());
             }
-            std::puts("P2_PURPLE_SDL_ACQUISITION_PASS scripted_throw=0 direct_throw_api=0 actor_state_writes=0 native_throw_state_observed=1 SDL_pluck=1 field=20 red=19 purple=1 selection=4 strength=10");
+            std::printf("P2_PURPLE_SDL_ACQUISITION_PASS scripted_throw=0 direct_throw_api=0 actor_state_writes=0 native_throw_state_observed=1 SDL_pluck=1 field=%d red=%d purple=%d selection=4 strength=10\n",alive,red,purple);
             return follower;
         }
         Iterator heads(itemMgr->getPikiHeadMgr());CI_LOOP(heads) {
