@@ -60,10 +60,7 @@ void enter(BTeki* a,Actor& s,State next,int flickNext=-1){
  s.previous=s.state;s.state=next;s.next=next;s.flickNext=flickNext;
  int anim=WaitAnim;s.speed=30;
  switch(next){
- case Wait:s.target=nullptr;stop(a);
-  // Source Wait init consumes rand*firstKeyFrame on every entry. Its first
-  // indexed key is frame0, so the authored starting timer remains zero.
-  (void)gsys->getRand(1.0f);break;
+ case Wait:s.target=nullptr;stop(a);break;
  case Turn:anim=TurnAnim;stop(a);break;
  case Walk:anim=MoveAnim;s.speed=40*(60.0f/50);break;
  case Attack:anim=AttackAnim;stop(a);break;
@@ -103,7 +100,8 @@ bool pc_p2_catfish_source_birth(BTeki* a,unsigned uid,unsigned ordinal,std::stri
  if(!a||a->mTekiType!=TEKI_Namazu||!uid||!ready||!receiver||actors.count(a))return refuse(error,"invalid or reused original Catfish source actor");
  if(!pc_p2_catfish_mouth_birth(a,error))return false;
  Actor s;s.uid=uid;s.ordinal=ordinal;s.home=vec(a->getPosition());s.heading=a->getDirection();s.motion.start(WaitAnim);
- // Retail Wait's first indexed key is frame0: rand*getFirstKeyFrame is zero.
+ // Birth passes WaitArg 'rand'; later Wait transitions pass nullptr and
+ // consume no draw. The first indexed key is0, so rand*firstKeyFrame is0.
  (void)gsys->getRand(1.0f);
  a->mHealth=a->mMaxHealth=200;a->mDamageCount=0;a->mStoredDamage=0;a->setTekiOption(TEKIOPT_DamageCountable);
  a->clearTekiOption(TEKIOPT_Invincible);actors.emplace(a,s);stop(a);error.clear();return true;
