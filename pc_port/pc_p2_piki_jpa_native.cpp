@@ -1,4 +1,5 @@
 #include "pc_p2_piki_jpa_native.h"
+#include "pc_p2_piki_jpa_owner_guard.h"
 #include "Graphics.h"
 #include "Camera.h"
 #include "Dolphin/gx.h"
@@ -17,7 +18,7 @@ float f32(const std::vector<unsigned char>& b,unsigned i){std::uint32_t bits=(st
 bool reject(std::string& e,const char* reason){e=reason;return false;}
 }
 struct NativeEffects::Impl {
- Scene& scene;HaloEffects halo;GXTexObj texture{};bool attached=false;
+ Scene& scene;HaloEffects halo;GXTexObj texture{};bool attached=false;std::string lastCleanupRefusal;
  struct Owner {PcP2SourceBody body;unsigned species;};std::list<Owner> owners;
  explicit Impl(Scene& s):scene(s){}
  bool current(std::string& e)const{return scene.selectedCurrent(halo.bank().selected(),e);}
@@ -29,7 +30,10 @@ struct NativeEffects::Impl {
  }
 };
 NativeEffects::NativeEffects(Scene& s):m(std::make_unique<Impl>(s)){}
-NativeEffects::~NativeEffects(){if(m->attached)pc_gfx_release_texture(&m->texture);}
+NativeEffects::~NativeEffects(){
+ detail::requireRetiredOwners(m->owners.size(),m->halo.owners(),m->lastCleanupRefusal.c_str());
+ if(m->attached)pc_gfx_release_texture(&m->texture);
+}
 bool NativeEffects::prepare(const Bank& b,const std::array<std::uint32_t,6>& seeds,std::size_t capacity,std::string& e){
  if(!m->owners.empty())return reject(e,"Piki JPA prepare with retained native contexts");
  if(!m->scene.selectedCurrent(b.selected(),e)||!m->halo.prepare(b,seeds,capacity,e))return false;
@@ -57,8 +61,8 @@ bool NativeEffects::canRemoveIdleHalo(const PcP2SourceBody& body,std::string& e)
  return reject(e,"Piki JPA removal requires actual retained context lifetime");
 }
 bool NativeEffects::removeIdleHalo(const PcP2SourceBody& body,std::string& e){
- if(!canRemoveIdleHalo(body,e))return false;
- if(!m->halo.removeIdleHalo(id(body),e))return false;
+ if(!canRemoveIdleHalo(body,e)){m->lastCleanupRefusal=e;return false;}
+ if(!m->halo.removeIdleHalo(id(body),e)){m->lastCleanupRefusal=e;return false;}
  for(auto i=m->owners.begin();i!=m->owners.end();++i)if(same(i->body,body)){m->owners.erase(i);break;}
  e.clear();return true;
 }
@@ -80,6 +84,9 @@ bool NativeEffects::draw(Graphics& g,std::string& e){
  if(!m->current(e))return false;
  for(const auto& o:m->owners){Position p;if(!m->resolve(o.body,p,e))return false;}
  if(m->halo.particles().empty()){e.clear();return true;}
+ // Snapshot exact transport state before Graphics helpers overwrite it.
+ const auto pipeline=pc_gfx_get_pipeline_state();
+ if(!m->scene.beginHaloDraw(g,e))return false;
  bool light=g.setLighting(false,nullptr);int blend=g.setCBlending(BLEND_Alpha);int cull=g.mCullMode;g.setCullFront(2);bool depth=g.setDepth(false);
  g.useMatrix(g.mCamera->mLookAtMtx,0);g.useTexture(nullptr,0);GXLoadTexObj(&m->texture,GX_TEXMAP0);
  GXSetNumTevStages(1);GXSetNumTexGens(1);GXSetTexCoordGen2(GX_TEXCOORD0,GX_TG_MTX2X4,GX_TG_TEX0,GX_IDENTITY,GX_FALSE,GX_PTIDENTITY);
@@ -106,7 +113,11 @@ bool NativeEffects::draw(Graphics& g,std::string& e){
    GXTexCoord2f32((i==0||i==3)?0:1,i<2?0:1);
   }GXEnd();
  }
- g.useTexture(nullptr,0);g.setCullFront(cull);g.setCBlending(blend);g.setDepth(depth);g.setLighting(light,nullptr);e.clear();return true;
+ g.useTexture(nullptr,0);g.setCullFront(cull);g.setCBlending(blend);g.setDepth(depth);g.setLighting(light,nullptr);pc_gfx_set_pipeline_state(pipeline);
+ // The renderer-owner boundary is required to restore fields outside the
+ // exposed transport snapshot; a refused end keeps every body owner intact.
+ if(!m->scene.endHaloDraw(g,e))return false;
+ e.clear();return true;
 }
 bool NativeEffects::sharedNageKira(const PcP2SourceBody&,std::string& e){return reject(e,"P2_PIKI_NAGEKIRA_UNSUPPORTED: source sphere dynamics/ESP and shared fade backend required");}
 bool NativeEffects::perbodyNageBlur(const PcP2SourceBody&,unsigned,Matrix4f&,std::string& e){return reject(e,"P2_PIKI_NAGEBLUR_UNSUPPORTED: source stripe-X/ETX1 secondary texture pipeline required");}

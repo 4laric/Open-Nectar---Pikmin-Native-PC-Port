@@ -17,6 +17,13 @@ public:
  virtual bool active()const noexcept=0;
  virtual bool position(const PcP2SourceBody& retained,Position&,std::string&)const=0;
  virtual bool clipped(Position,unsigned actualJPAId,bool& result,std::string&)const=0;
+ // Mandatory actual render-owner scope. begin refuses atomically before GX
+ // mutations if a full state capture/phase barrier cannot be established.
+ // end restores complete custom TEV/alpha/texgen/texture/matrix/vertex state;
+ // failure retains its cleanup proof and must stop the caller's draw sequence.
+ // No default success implementation and no ambient next-draw assumption.
+ virtual bool beginHaloDraw(Graphics&,std::string&)=0;
+ virtual bool endHaloDraw(Graphics&,std::string&)=0;
 };
 class NativeEffects {
 public:
@@ -28,6 +35,9 @@ public:
  bool removeIdleHalo(const PcP2SourceBody&,std::string&);
  // Called once for each actual selected JPA source frame, only while Active.
  bool sourceFrame(std::string&);
+ // Requires the mandatory actual Scene begin/end boundary. Native restores
+ // exact Z/blend/cull and Graphics caches before invoking end; the actual
+ // renderer owner restores the remaining full state/phase scope.
  bool draw(Graphics&,std::string&);
  // Explicit prerequisites; refused operations create no owner or fake handle.
  bool sharedNageKira(const PcP2SourceBody&,std::string&);

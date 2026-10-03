@@ -1,4 +1,8 @@
 #include "pc_p2_piki_halo.h"
+#include "pc_p2_piki_jpa_owner_guard.h"
+#ifdef _WIN32
+#include <windows.h>
+#endif
 #include <cassert>
 #include <cmath>
 #include <fstream>
@@ -6,6 +10,11 @@
 #include <iterator>
 using namespace p2original::pikiJPA;
 int main(int argc,char** argv){
+ #ifdef _WIN32
+ SetErrorMode(SEM_FAILCRITICALERRORS|SEM_NOGPFAULTERRORBOX);
+#endif
+ if(argc==2&&std::string(argv[1])=="--guard-retired"){detail::requireRetiredOwners(0,0,"selected revoked");std::cout<<"Retired owner destructor guard PASS\n";return 0;}
+ if(argc==2&&std::string(argv[1])=="--guard-live"){detail::requireRetiredOwners(1,1,"selected revoked; exact owner retained");return 99;}
  assert(argc==2);std::size_t count;auto roles=resourceRoles(count);assert(count==16);
  std::vector<SelectedBytes> inputs;
  for(std::size_t i=0;i<count;++i){const auto& r=roles[i];std::ifstream in(std::string(argv[1])+"/"+r.role,std::ios::binary);assert(in);
@@ -21,6 +30,12 @@ int main(int argc,char** argv){
  auto wrong=selected;wrong.campaignSHA="short";assert(!bank.load(wrong,inputs,e));
  assert(haloId(1)==0x16b&&blurId(1)==0x174&&haloId(9)==0&&blurId(5)==0);
  std::array<std::uint32_t,6> seeds{{10,20,30,40,50,60}};HaloEffects halo;
+ assert(halo.prepare(bank,seeds,2,e));
+ // Actual immortal shared emitter with maxFrame0 continues dynamics with no
+ // contexts: rate draws occur, while StopEmitting prevents ordinary births.
+ assert(halo.sourceFrame([](Position,unsigned){assert(false);return false;},e));
+ assert(halo.particles().empty());
+ for(unsigned species=0;species<6;++species)assert(halo.seed(species)==seeds[species]*0x19660du+0x3c6ef35fu);
  assert(halo.prepare(bank,seeds,2,e));int a=0,b=0,c=0;ContextId A{&a,1},B{&b,2};
  assert(halo.sharedIdleHalo(A,1,0x16b,{1,2,3},e));
  assert(!halo.sharedIdleHalo({&a,7},1,0x16b,{1,2,3},e));assert(halo.owners()==1);
