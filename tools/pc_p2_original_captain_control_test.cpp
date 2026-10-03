@@ -43,5 +43,3 @@ int main(int argc,char** argv){
  require(animation.motion==Motion::Step&&animation.playbackSpeed==60,"source stationary turning step");
  std::cout<<"PASS verified GPVE01 parameter hash, duplicate IDs, retail stick/camera/cursor and displacement animation controls\n";
 }
-
-

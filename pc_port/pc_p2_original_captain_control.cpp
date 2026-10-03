@@ -95,4 +95,3 @@ bool updateWalkAnimation(const Params& p,Vec2 displacement,float dt,float face,f
  state.bound=other;state.playbackSpeed=speed;out={other,speed,change,preserve,listener};return true;
 }
 }}}
-
