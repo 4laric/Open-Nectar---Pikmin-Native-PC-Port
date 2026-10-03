@@ -98,6 +98,9 @@ void pc_p2_cave_campaign_party_forget(Piki* body){provenance.erase(body);birthOr
 void pc_p2_cave_campaign_party_scene_exit(){provenance.clear();birthOrigins.clear();}
 bool pc_p2_cave_campaign_party_associate_birth(Piki* body,const char* sourceKey,
     std::uint32_t recordUid,std::uint32_t attempt,std::uint64_t activation,const char* catalogFingerprint){
+    // Original source births also notify this optional consumer in ordinary
+    // courses. An inactive cave consumer accepts without retaining identity.
+    if(!pc_randomizer_generated_cave())return true;
     if(!body||!sourceKey||!sourceKey[0])return false;
     P2CavePartyBody origin;origin.sourceKey=sourceKey;origin.sourceRecord=recordUid;
     if(catalogFingerprint)origin.catalogFingerprint=catalogFingerprint;
