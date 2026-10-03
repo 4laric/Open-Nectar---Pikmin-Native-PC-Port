@@ -45,3 +45,39 @@ and layout semantics, native MOD/INI admission, actual MapMgr ground queries,
 StageInfo installation, independent birth census, captain rig binding and the
 canonical SourceWorld lifecycle remain required before physical commitment or
 activity. No selection or parser result grants gameplay authority.
+
+## Physical owner and startup ordering
+
+The actual scene owner reserves births independently after selected map installation.
+Each fresh process contributes a random incarnation nonce to the development visit;
+this identifies a fresh visit and grants no selected-input, SAVE or World authority.
+The serial remains local to the process. Cold restore requires the genuine SAVE
+ledger and is not implemented by the fresh development path.
+
+GameCore must own the real source party/captain bodies before calling
+`pc_p2_retail_scene_boot(error)`. The concrete scene owns NativeFloor, FloorSession,
+Pod lifecycle and selected exit. It authenticates the selected treasury catalogue,
+binds cargo placement to NativeFloor and uses the actual treasury receipt state for
+consumed cargo. Floor commit requires the physical content/receiver/exit census.
+Floor 1 currently has the Snow provider; unsupported later physical families refuse.
+The exit presentation is sparse authored geometry, not a converted retail exit model.
+
+Boot precedes common LoadedScene/active World publication. The activity query
+requires the committed NativeFloor, exact actual source World/LoadedScene session,
+incarnation and registry catalogue, both actual Navi roster slots, source demo
+inactivity, and actual pause/result/day-end exclusions. Commit alone grants no World.
+
+Before any scene revoke, call `pc_p2_retail_scene_can_release(error)`. Unfinished or
+uncollected cargo refuses. `pc_p2_retail_scene_release(error)` couples the receiver
+and cargo teardown once, releases the exit, invokes the strong actual source body
+retirement owner and lets NativeFloor retire its enemy/generator resources. Only
+when the physical floor and baseline body/path consumers are retired does the
+private owner return to Prepared. A failed release retains the prepared context and
+Releasing phase for cleanup retry. `pc_p2_retail_scene_release_map(error)` additionally
+checks actual body ownership/retirement and refuses before any map/route mutation.
+Both heap-reset callers must run this guard before any heap/section mutation.
+
+`pc_p2_retail_scene_bodies.h` declares strong real GameCore lifetime queries and
+retirement operations. There is no accepting fallback. Until that actual producer
+and startup dispatch are composed, the scene object can compile but this graph is
+not a complete linked or runtime-qualified retail-floor build.

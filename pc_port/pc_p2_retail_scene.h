@@ -81,3 +81,11 @@ const p2retail::FloorIdentityAuthority* pc_p2_retail_scene_births() noexcept;
 // Before App heap or map reuse, after actual floor/Pod/body/World teardown.
 // Resource-only refusal leaves the owned context intact for cleanup retry.
 bool pc_p2_retail_scene_release_map(std::string& error);
+
+// Actual GameCore dispatch: source body ownership must already exist. Floor
+// commit precedes LoadedScene/World publication and grants no active gameplay.
+bool pc_p2_retail_scene_boot(std::string& error);
+// Readiness refuses unfinished cargo/receiver/body graphs before any revoke.
+bool pc_p2_retail_scene_can_release(std::string& error);
+// Retains the prepared map/stage through partial physical and body retirement.
+bool pc_p2_retail_scene_release(std::string& error);

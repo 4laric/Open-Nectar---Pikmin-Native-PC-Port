@@ -4,6 +4,17 @@
 #include "pc_randomizer.h"
 #include "pc_p2_original_pod.h"
 #include "pc_p2_retail_cave_native.h"
+#include "pc_p2_retail_scene_bodies.h"
+#include "pc_p2_retail_exit.h"
+#include "pc_p2_original_pod_floor.h"
+#include "pc_p2_retail_treasure_cargo.h"
+#include "pc_p2_retail_treasure_policy.h"
+#include "pc_p2_campaign_treasure_config.h"
+#include "pc_p2_original_captain_damage.h"
+#include "pc_campaign_ui_observer.h"
+#include "NaviMgr.h"
+#include "gameflow.h"
+#include "zen/ogResult.h"
 #include "pc_p2_surface_water.h"
 #include "pc_p2_surface_topology.h"
 #include "OnePlayerSection.h"
@@ -73,7 +84,7 @@ bool dryGround(MapMgr& map,float x,float z,float ceiling,float& y){
 }
 // Actual owner of the selected scene's stage/map/route resources. The separate
 // NativeFloor transaction must complete before any committed/activity lookup.
-class SceneRuntime final:public FloorIdentityAuthority {
+class SceneRuntime final:public FloorIdentityAuthority,public SceneOps {
  SceneContext context;
  SelectedSceneInputs selected;
  SourceStart start;
@@ -84,7 +95,27 @@ class SceneRuntime final:public FloorIdentityAuthority {
  MapMgr* ownedMap=nullptr;
  RouteMgr* ownedRoutes=nullptr;
  bool installed=false;
- std::vector<BirthIdentity> issuedBirths;
+ std::vector<BirthIdentity> issuedBirths,retiredBirths;
+ std::unique_ptr<NativeFloor> floorOwner;
+ FloorSession floorSession;
+ p2originalpod::FloorLifecycle pod;
+ p2treasure::Catalog treasureCatalog;
+ bool bootAttempted=false,exitPrepared=false,cargoPrepared=false,podCommitted=false;
+ bool consumersClaimed=false;
+ bool fail(std::string& error,const char* message)const{error=message;return false;}
+ bool same(const Snapshot& floor)const{return p2originalpod::sameFloor(floor,context.mSnapshot);}
+ bool origin(const ContentRow& row,const BirthIdentity& birth,const Snapshot& floor,std::string& error)const{
+  const auto* cave=descriptor(context.mSnapshot.cave);const auto* definitionRow=cave?definition(*cave,floor.floor):nullptr;
+  BirthIdentity expected;
+  if(!same(floor)||!definitionRow||birth.row>=definitionRow->rows.size()||
+     &row!=&definitionRow->rows[birth.row]||!expectedBirth(*cave,floor.floor,floor.scene,birth.row,birth.ordinal,expected,error)||!(birth==expected))
+   return fail(error,"retail scene literal independent birth differs");
+  return true;
+ }
+ p2originalpod::ContextProvider provider(){return [this](const SceneIdentity& identity,Snapshot& out){
+  if(!owns(identity))return false;
+  out=context.mSnapshot;return true;
+ };}
 public:
  SceneRuntime(SelectedSceneInputs input,SourceStart source):selected(std::move(input)),start(std::move(source)){}
  bool install(MapMgr* map,std::string& error){
@@ -193,10 +224,141 @@ public:
   error="retail scene birth absent from reserved source census";return false;
  }
  const FloorIdentityAuthority* births()const noexcept{return prepared()?this:nullptr;}
+ bool owns(const SceneIdentity& identity)const noexcept override{return prepared()&&identity==context.mSnapshot.scene;}
+ bool mode(const SceneIdentity& identity,bool& story,bool& inCave,std::string& error)const override{
+  if(!owns(identity))return fail(error,"retail scene actual story mode unavailable");
+  story=context.mSnapshot.story;inCave=context.mSnapshot.inCave;error.clear();return true;
+ }
+ bool preflight(const FloorPlan& plan,const Snapshot& snapshot,std::string& error)override{
+  if(!prepared()||context.mPhase!=ScenePhase::Prepared||!same(snapshot)||plan.authenticatedBytes!=context.mPlan.authenticatedBytes||
+     !context.mStartsGrounded||!pc_p2_retail_scene_bodies_owned(context))return fail(error,"retail scene physical preflight ownership");
+  consumersClaimed=true;
+  std::string catalogBytes;
+  if(!pc_randomizer_original_input("p2-treasure-catalog.txt",catalogBytes,error)||catalogBytes.size()>32768||
+     p2treasureplacements::hash(catalogBytes)!=p2treasure::RetailDigest||!selectedCurrent())return fail(error,"retail scene selected treasury catalog");
+  std::istringstream catalogText(catalogBytes);
+  if(!treasureCatalog.read(catalogText)||!p2treasurestate::catalog_valid(treasureCatalog))return fail(error,"retail scene treasury catalog structure");
+  if(!pc_p2_retail_exit_preflight(context,error))return false;
+  exitPrepared=true;
+  p2originalpod::Resources resources;resources.input=pc_randomizer_original_input;
+  if(!pod.prepare(context.mPlan,context.mSnapshot,*this,provider(),resources,error))return false;
+  p2retailcargo::Config cargo;cargo.floor=context.mSnapshot;cargo.context=provider();cargo.births=this;
+  cargo.placement=[this](const SceneIdentity& identity,unsigned row,unsigned ordinal,Vector3f& out,float& yaw,std::string& e){
+   Placement actual;if(!floorOwner||!floorOwner->placement(identity,row,ordinal,actual,e))return false;
+   out.set(actual.x,actual.y,actual.z);yaw=actual.yawDegrees*0.01745329251994329577f;return true;
+  };
+  if(!pc_p2_retail_treasure_cargo_preflight(cargo,error))return false;
+  cargoPrepared=true;error.clear();return true;
+ }
+ bool begin(const FloorPlan& plan,const Snapshot& snapshot,std::string& error)override{
+  if(!prepared()||context.mPhase!=ScenePhase::Prepared||!same(snapshot)||plan.authenticatedBytes!=context.mPlan.authenticatedBytes||
+     !pod.prepared()||!exitPrepared||!cargoPrepared)return fail(error,"retail scene physical begin order");
+  context.mPhase=ScenePhase::Installing;
+  return pod.birth(error)&&pc_p2_retail_exit_birth(context,error);
+ }
+ bool prior(const ContentRow& row,const BirthIdentity& birth,const Snapshot& snapshot,LiveBinding&,bool& absent,std::string& error)override{
+  if(context.mPhase!=ScenePhase::Installing||!origin(row,birth,snapshot,error))return false;
+  for(const auto& terminal:retiredBirths)if(terminal==birth)return fail(error,"retail fresh scene cannot rebirth a retired native instance");
+  // Only this newly minted development visit is admitted. Cold SAVE disposition
+  // requires its separate authenticated ledger, never a fabricated live receipt.
+  absent=false;error.clear();return true;
+ }
+ bool cargo(const Placement& placement,const ContentRow& row,const BirthIdentity& birth,const Snapshot& snapshot,LiveBinding& out,std::string& error)override{
+  if(context.mPhase!=ScenePhase::Installing||!origin(row,birth,snapshot,error)||placement.instance!=birth.instance||row.kind!="loose_treasure")return false;
+  const auto* entry=treasureCatalog.find(row.catalogId);
+  if(!entry)return fail(error,"retail scene literal treasure catalog entry absent");
+  LiveBinding next;next.identity=birth;
+  if(p2treasurestate::state.seen(treasureCatalog,entry->id)){
+   if(!pc_p2_retail_treasure_cargo_absent(birth,entry->id,error))return false;
+   next.state=BindingState::ConsumedTreasure;next.receipt=entry->id;
+  }else{
+   Pellet* actor=nullptr;if(!pc_p2_retail_treasure_cargo_birth(birth,actor,error)||!actor)return false;
+   next.actor=actor;
+  }
+  out=std::move(next);error.clear();return true;
+ }
+ bool suppressed(const ContentRow&,const BirthIdentity&,const Snapshot&,LiveBinding&,std::string& error)override{
+  return fail(error,"retail source population suppression requires actual source body owner");
+ }
+ bool absent(const ContentRow& row,const BirthIdentity& birth,const Snapshot& snapshot,const LiveBinding& binding)const override{
+  std::string error;
+  return origin(row,birth,snapshot,error)&&binding.identity==birth&&!binding.actor&&binding.state==BindingState::ConsumedTreasure&&
+   row.kind=="loose_treasure"&&binding.receipt==row.catalogId&&pc_p2_retail_treasure_cargo_absent(birth,binding.receipt,error);
+ }
+ bool commit(const Snapshot& snapshot,std::string& error)override{
+  if(context.mPhase!=ScenePhase::Installing||!same(snapshot)||!owns(snapshot.scene)||!pc_p2_retail_exit_owned(context)||
+     !pc_p2_retail_scene_bodies_owned(context))return fail(error,"retail scene commit actual census owner differs");
+  // Exit commit remains safely releasable if the receiver refuses its commit.
+  if(!pc_p2_retail_exit_commit(context,error)||!pod.commit(snapshot,error))return false;
+  podCommitted=true;context.mPhase=ScenePhase::Committed;error.clear();return true;
+ }
+ bool canRelease(std::string& error)const override{
+  if(!prepared())return fail(error,"retail scene cleanup lost actual map owner");
+  if(context.mPhase!=ScenePhase::Releasing){
+   if(cargoPrepared&&podCommitted&&!pc_p2_retail_treasure_cargo_can_release_collected(error))return false;
+   if(!podCommitted&&pc_p2_original_pod_owned()&&!pc_p2_original_pod_can_abort_prepared(context.mSnapshot.scene))return fail(error,"retail scene prepared receiver rollback unavailable");
+   if(exitPrepared&&!pc_p2_retail_exit_can_release(context,error))return false;
+   if(consumersClaimed&&!pc_p2_retail_scene_bodies_can_retire(context,error))return false;
+  }
+  error.clear();return true;
+ }
+ bool release(std::string& error)override{
+  if(!canRelease(error))return false;
+  context.mPhase=ScenePhase::Releasing;
+  if(cargoPrepared){
+   auto teardown=[this](std::string& e){return pod.release(e);};
+   const bool released=podCommitted?pc_p2_retail_treasure_cargo_release_collected(teardown,error):pc_p2_retail_treasure_cargo_abort_prepared(teardown,error);
+   if(!released)return false;
+   cargoPrepared=false;podCommitted=false;
+  }else if(pod.prepared()){
+   if(!pod.release(error))return false;
+  }else if(pc_p2_original_pod_owned()){
+   if(!pc_p2_original_pod_abort_prepared(context.mSnapshot.scene,error))return false;
+  }
+  if(exitPrepared){if(!pc_p2_retail_exit_release(context,error))return false;exitPrepared=false;}
+  if(consumersClaimed&&!pc_p2_retail_scene_bodies_retired(context)){
+   if(!pc_p2_retail_scene_bodies_retire(context,error))return false;
+   if(!pc_p2_retail_scene_bodies_retired(context))return fail(error,"retail scene source body retirement incomplete");
+  }
+  // Keep Releasing until NativeFloor has also retired every enemy/generator.
+  error.clear();return true;
+ }
+ bool retired(const BirthIdentity& birth,const Snapshot& snapshot,std::string& error)override{
+  if(!same(snapshot)||context.mPhase!=ScenePhase::Committed||!owns(snapshot.scene))return fail(error,"retail scene native retirement outside actual live floor");
+  for(const auto& issued:issuedBirths)if(issued==birth){
+   for(const auto& prior:retiredBirths)if(prior==birth){error.clear();return true;}
+   retiredBirths.push_back(birth);error.clear();return true;
+  }
+  return fail(error,"retail scene native retirement missing issued birth");
+ }
+ bool boot(std::string& error){
+  if(bootAttempted||!prepared()||context.mPhase!=ScenePhase::Prepared||!pc_p2_retail_scene_bodies_owned(context))return fail(error,"retail scene boot requires actual fresh source bodies");
+  bootAttempted=true;consumersClaimed=true;
+  floorOwner=std::make_unique<NativeFloor>(context.mPlan,*this);
+  if(!floorSession.activate(context.mSnapshot.cave,context.mSnapshot.floor,context.mSnapshot.scene,true,*this,*floorOwner,error))return false;
+  if(!committed())return fail(error,"retail scene whole physical commit unreadable");
+  std::printf("P2_RETAIL_FLOOR_COMMITTED cave=%s floor=%u native_serial=%llu source_births=%u world_active=0\n",context.mSnapshot.cave.c_str(),context.mSnapshot.floor,(unsigned long long)context.nativeSerial(),unsigned(issuedBirths.size()));
+  error.clear();return true;
+ }
+ const SceneContext* committed()const noexcept{
+  return prepared()&&context.mPhase==ScenePhase::Committed&&floorOwner&&floorOwner->current(context.mSnapshot.scene,context.nativeSerial())?&context:nullptr;
+ }
+ bool releaseFloor(std::string& error){
+  if(!prepared())return fail(error,"retail scene floor release requires retained actual context");
+  if(floorOwner){if(!floorSession.unload(error))return false;}
+  // Unsupported/preflight-refused floors can own baseline bodies without the
+  // NativeFloor ever reaching SceneOps::preflight. Retire those real consumers
+  // through their strong owner even when FloorSession already rolled back.
+  if((pod.prepared()||exitPrepared||cargoPrepared||(consumersClaimed&&!pc_p2_retail_scene_bodies_retired(context)))&&!release(error))return false;
+  if(pc_p2_retail_cave_native_scene_owned(context.mSnapshot.scene)||pc_p2_original_pod_owned()||
+     (consumersClaimed&&!pc_p2_retail_scene_bodies_retired(context)))return fail(error,"retail scene physical/body consumers remain owned");
+  context.mPhase=ScenePhase::Prepared;error.clear();return true;
+ }
  bool releaseMap(std::string& error){
   // Physical transaction release will return to Prepared only after every
   // actual consumer retires. A committed/installing owner cannot be discarded.
-  if(context.mPhase!=ScenePhase::Prepared||pc_p2_original_pod_owned()||
+  if(context.mPhase!=ScenePhase::Prepared||pc_p2_original_pod_owned()||exitPrepared||
+     pc_p2_retail_scene_bodies_owned(context)||(consumersClaimed&&!pc_p2_retail_scene_bodies_retired(context))||
      pc_p2_retail_cave_native_scene_owned(context.mSnapshot.scene)){
    error="retail map teardown requires retired physical floor/Pod consumers";return false;
   }
@@ -214,6 +376,10 @@ public:
 namespace {std::unique_ptr<SceneRuntime> runtime;}
 const SceneContext* preparedScene()noexcept{return runtime?runtime->prepared():nullptr;}
 const FloorIdentityAuthority* sceneBirths()noexcept{return runtime?runtime->births():nullptr;}
+const SceneContext* committedScene()noexcept{return runtime?runtime->committed():nullptr;}
+bool bootScene(std::string& error){if(!runtime){error="retail scene boot without actual map owner";return false;}return runtime->boot(error);}
+bool canReleaseScene(std::string& error){if(!runtime){error.clear();return true;}return runtime->canRelease(error);}
+bool releaseScene(std::string& error){if(!runtime){error.clear();return true;}return runtime->releaseFloor(error);}
 bool releaseSceneMap(std::string& error){if(!runtime){error.clear();return true;}if(!runtime->releaseMap(error))return false;runtime.reset();return true;}
 bool installSceneMap(MapMgr* map,bool& handled,std::string& error){
  if(runtime){error="retail scene previous map owner remains installed";return false;}
@@ -233,3 +399,27 @@ const p2retail::SceneContext* pc_p2_retail_scene_prepared()noexcept{return p2ret
 bool pc_p2_retail_scene_install_map(MapMgr* map,bool& handled,std::string& error){return p2retail::installSceneMap(map,handled,error);}
 const p2retail::FloorIdentityAuthority* pc_p2_retail_scene_births()noexcept{return p2retail::sceneBirths();}
 bool pc_p2_retail_scene_release_map(std::string& error){return p2retail::releaseSceneMap(error);}
+
+const p2retail::SceneContext* pc_p2_retail_scene_committed()noexcept{return p2retail::committedScene();}
+bool pc_p2_retail_scene_boot(std::string& error){return p2retail::bootScene(error);}
+bool pc_p2_retail_scene_can_release(std::string& error){return p2retail::canReleaseScene(error);}
+bool pc_p2_retail_scene_release(std::string& error){return p2retail::releaseScene(error);}
+bool pc_p2_retail_scene_current_activity(const p2retail::SceneIdentity& identity,std::uint64_t serial,std::uint64_t revision)noexcept{
+ const auto* scene=pc_p2_retail_scene_committed();
+ const auto* world=pc_p2_original_captain_world();const auto* loaded=pc_p2_original_captain_loaded_scene();
+ if(!scene||!(scene->snapshot().scene==identity)||scene->nativeSerial()!=serial||scene->selectionRevision()!=revision||
+    !pc_p2_retail_scene_bodies_owned(*scene)||!world||!loaded||!naviMgr||naviMgr->getNaviCount()!=2||
+    world->phase()!=p2original::captain::Phase::GameWorldActive||world->incarnation()!=serial||loaded->incarnation()!=serial||
+    world->selectedCampaign()!=scene->campaignSha256()||loaded->selectedCampaign()!=scene->campaignSha256()||
+    world->selectedFingerprint()!=scene->sessionSha256()||loaded->selectedFingerprint()!=scene->sessionSha256()||
+    world->sourceCatalog()!=identity.layoutSha256||loaded->sourceCatalog()!=identity.layoutSha256||
+    (world->demo()!=p2original::captain::Demo::Absent&&world->demo()!=p2original::captain::Demo::Inactive))return false;
+ for(unsigned i=0;i<2;++i)if(!world->captainAt(i)||world->captainAt(i)!=loaded->captainAt(i)||world->captainAt(i)!=naviMgr->getNavi(int(i)))return false;
+ if(world->captainAt(0)==world->captainAt(1)||gameflow.mPauseAll||gameflow.mIsDayEndActive||gameflow.mIsDayEndTriggered||flowCont.mIsDayEndSeqStarted)return false;
+ const auto pause=pc_pause_observe();const auto ui=pc_save_ui_observe();
+ return !pause.available&&ui.available&&ui.resultState==zen::ogScrResultMgr::Status_NULL;
+}
+bool pc_p2_retail_scene_game_active()noexcept{
+ const auto* scene=pc_p2_retail_scene_committed();
+ return scene&&pc_p2_retail_scene_current_activity(scene->snapshot().scene,scene->nativeSerial(),scene->selectionRevision());
+}
