@@ -1,5 +1,6 @@
 #pragma once
 #include "pc_p2_original_pod.h"
+#include <cstddef>
 struct Vector3f;
 namespace p2retailcargo {
 // Both providers must resolve the independently authenticated prepared floor,
@@ -15,7 +16,13 @@ struct Config {
 // Synchronous operation supplied by the actual receiver lifecycle owner.
 // Success must mean it released its Pod; this is not a retention/receipt token.
 using PodTeardown=std::function<bool(std::string&)>;
+// Actual ownership accounting only; no scene, receipt or retention authority.
+struct ResourceUsage {
+    std::size_t retainedModels=0,completeModels=0,registryNodes=0;
+    std::size_t cargoRecords=0,liveCargo=0,nativeBorrowers=0;
+};
 }
+void pc_p2_retail_treasure_cargo_resource_usage(p2retailcargo::ResourceUsage&);
 bool pc_p2_retail_treasure_cargo_preflight(const p2retailcargo::Config&,std::string&);
 // Direct native PelletMgr allocation with private original-profile PelletView;
 // never a numbered pellet, P1 generator, Onion or preview treasure actor.

@@ -46,6 +46,41 @@ Pod's actual unfinished cargo and transaction state. Refusal leaves the floor
 active. The mutating release repeats these checks; readiness is not a token or
 permission to retain unfinished actors.
 
+Native PC `operator new` uses the C heap; App-heap reset does not reclaim the
+parsed model graph. Cargo retains one bounded model bank for the actual System
+lifetime, keyed by the full authenticated master and model hashes. All nested
+graphics registration occurs under SYSHEAP_Sys. Models, partial owners and
+their registry nodes remain owned across floor release; every preflight still
+authenticates selected bytes, and reuse refuses a changed System/bank/hash or
+missing registry/texture ownership. An incomplete parsed entry is retained and
+refused rather than repeatedly allocating another graph. Changing this bank or
+resetting its System registry requires a fresh process; no root-only Shape
+delete is used.
+
+PelletConfig and View live inside stable cargo records. Native kill revokes the
+live view association; record disposal after kill detaches a matching dead
+pellet's borrowed profile, while preserving a recycled slot's replacement.
+The native pool must remain alive until this disposal finishes. Exhausted pool
+births erase the provisional record. PC Parm initialization directly constructs
+its values, avoiding overwritten default String allocations on repeated births.
+The read-only resource_usage API reports retained/complete models, registry
+nodes, records, live actors and remaining native profile borrowers.
+
+Before repeated-entry gameplay admission, the actual runner composition must
+record these counts and native allocator statistics across failed preparation,
+pool-exhaustion retries, kill/reuse and repeated floor release. The model count
+must plateau at the selected bank's bound; completed release must leave zero
+cargo records, live actors and native borrowers. Pure ownership controls and
+syntax checks do not replace that native lifecycle run.
+
+Constructor allocation control: 1,000 real Parm<String> constructions with the
+previous WIN32 header made 4,000 overwritten default-buffer allocations; the
+PC initializer fix makes zero. The non-WIN32 PC branch also makes zero. Test
+link seams cover unused serialization/editor methods only. Shared storage and
+borrow controls exercise bounded partial ownership, repeated reuse, changed
+hash/System/bank refusal, killed-profile detachment and recycled-slot safety;
+they allocate no native actor and issue no source or gameplay authority.
+
 The authenticated bank retains the original Pod archive, pot.bmd, collision and
 text sources. Its qualified receiver model uses the distinct
 `assets/dataDir/courses/pikmin2retailpod/pod.mod` role. The historical held Pod
