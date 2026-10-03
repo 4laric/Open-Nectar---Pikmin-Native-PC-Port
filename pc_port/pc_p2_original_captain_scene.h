@@ -22,3 +22,9 @@ bool pc_p2_original_captain_scene_retire(const p2retail::SceneContext&,std::stri
 // Exact physical owner tag through selection expiry and inactive retirement;
 // refusal classification only, never action/lifetime/alive authorization.
 bool pc_p2_original_captain_scene_body_owned(const Navi*) noexcept;
+
+namespace p2original {namespace pikiJPA {class Bank;struct SelectedIdentity;}}
+// Actual selected17 resources, retained by this canonical scene through body
+// and effect cleanup. This getter grants no effect installation or activity.
+const p2original::pikiJPA::Bank* pc_p2_original_captain_piki_jpa_bank(std::string& error);
+bool pc_p2_original_captain_piki_jpa_current(const p2original::pikiJPA::SelectedIdentity&,std::string& error);

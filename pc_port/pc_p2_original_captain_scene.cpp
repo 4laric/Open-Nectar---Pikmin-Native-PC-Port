@@ -5,6 +5,7 @@
 #include "pc_p2_original_captain_states.h"
 #include "pc_p2_retail_scene.h"
 #include "pc_p2_retail_start.h"
+#include "pc_p2_piki_jpa_selected.h"
 #include "pc_randomizer.h"
 #include "Navi.h"
 #include "NaviMgr.h"
@@ -24,13 +25,16 @@ public:
  std::string campaign,session,catalog;
  MoviePlayer* player;
  std::unique_ptr<SourceBank> bank;
+ std::unique_ptr<p2original::pikiJPA::Bank> pikiJPA;
+ std::string jpaProvenance;
  bool published=false;
  bool actionRevoked=false;
- CaptainScene(const p2retail::SceneContext& scene,std::unique_ptr<SourceBank> source)
+ CaptainScene(const p2retail::SceneContext& scene,std::unique_ptr<SourceBank> source,
+              std::unique_ptr<p2original::pikiJPA::Bank> jpa,std::string provenance)
   :context(&scene),manager(naviMgr),actors{naviMgr->getNavi(0),naviMgr->getNavi(1)},
    serial(scene.nativeSerial()),revision(scene.selectionRevision()),
    campaign(scene.campaignSha256()),session(scene.sessionSha256()),
-   catalog(scene.plan().layoutSha256),player(gameflow.mMoviePlayer),bank(std::move(source)){}
+   catalog(scene.plan().layoutSha256),player(gameflow.mMoviePlayer),bank(std::move(source)),pikiJPA(std::move(jpa)),jpaProvenance(std::move(provenance)){}
  const std::string& selectedCampaign()const override{return campaign;}
  const std::string& selectedFingerprint()const override{return session;}
  const std::string& sourceCatalog()const override{return catalog;}
@@ -78,7 +82,9 @@ bool pc_p2_original_captain_scene_reset(std::string& error){
  auto bank=std::make_unique<SourceBank>();
  if(!bank->prepare(error)||!bank->prepareNativeModels(error))return false;
  if(pc_p2_retail_scene_prepared()!=scene)return fail(error,"source stage changed during captain resource preparation");
- auto next=std::make_unique<CaptainScene>(*scene,std::move(bank));
+ auto jpa=std::make_unique<p2original::pikiJPA::Bank>();std::string provenance;
+ if(!p2original::pikiJPA::selectedBank(*scene,*jpa,provenance,error))return false;
+ auto next=std::make_unique<CaptainScene>(*scene,std::move(bank),std::move(jpa),std::move(provenance));
  // Retain ownership before the first fallible native reset/bind. Refusal leaves
  // a cleanup owner and can never be retried as another fresh reset.
  owner=next.release();
@@ -138,4 +144,17 @@ bool pc_p2_original_captain_scene_retire(const p2retail::SceneContext& scene,std
 
 bool pc_p2_original_captain_scene_body_owned(const Navi* actor)noexcept{
  return owner&&actor&&owner->rosterCurrent()&&(actor==owner->actors[0]||actor==owner->actors[1]);
+}
+
+const p2original::pikiJPA::Bank* pc_p2_original_captain_piki_jpa_bank(std::string& error){
+ if(!owner||!owner->current()||!owner->pikiJPA){fail(error,"source Piki JPA selected resource owner unavailable");return nullptr;}
+ if(!p2original::pikiJPA::currentIdentity(*owner->context,*owner,owner->pikiJPA->selected(),error))return nullptr;
+ return owner->pikiJPA.get();
+}
+bool pc_p2_original_captain_piki_jpa_current(const p2original::pikiJPA::SelectedIdentity& identity,std::string& error){
+ if(!owner||!owner->current()||!owner->pikiJPA)return fail(error,"source Piki JPA selected resource owner unavailable");
+ const auto& selected=owner->pikiJPA->selected();
+ if(selected.campaignSHA!=identity.campaignSHA||selected.packetSHA!=identity.packetSHA||selected.session!=identity.session)
+  return fail(error,"source Piki JPA bank identity differs");
+ return p2original::pikiJPA::currentIdentity(*owner->context,*owner,identity,error);
 }
