@@ -308,6 +308,9 @@ set(PC_PORT_SOURCES
     pc_port/pc_p2_original_number_rigid.cpp
     pc_port/pc_p2_original_number_five_motion.cpp
     pc_port/pc_p2_original_room_trace.cpp
+    pc_port/pc_p2_original_number_double.cpp
+    pc_port/pc_p2_original_number_trig.cpp
+    pc_port/pc_p2_original_number_yaw.cpp
     pc_port/pc_p2_original_egg_number_journal.cpp
     pc_port/pc_p2_original_piki_spawn.cpp
     pc_port/pc_p2_original_drop.cpp
@@ -3673,9 +3676,27 @@ add_executable(p2_original_room_trace_test tools/p2_original_room_trace_test.cpp
 target_include_directories(p2_original_room_trace_test PRIVATE pc_port)
 target_compile_options(p2_original_room_trace_test PRIVATE -Wall -Wextra -Werror -UNDEBUG -ffp-contract=off)
 add_test(NAME p2_original_room_trace COMMAND p2_original_room_trace_test)
+add_executable(p2_original_number_double_test tools/p2_original_number_double_test.cpp
+    pc_port/pc_p2_original_number_double.cpp pc_port/pc_p2_original_number_triangle.cpp)
+target_include_directories(p2_original_number_double_test PRIVATE pc_port)
+target_compile_options(p2_original_number_double_test PRIVATE -Wall -Wextra -Werror -UNDEBUG -ffp-contract=off)
+add_test(NAME p2_original_number_double COMMAND p2_original_number_double_test)
+add_executable(p2_original_number_trig_test tools/p2_original_number_trig_test.cpp
+    pc_port/pc_p2_original_number_trig.cpp pc_port/pc_p2_original_number_double.cpp
+    pc_port/pc_p2_original_number_triangle.cpp)
+target_include_directories(p2_original_number_trig_test PRIVATE pc_port)
+target_compile_options(p2_original_number_trig_test PRIVATE -Wall -Wextra -Werror -UNDEBUG -ffp-contract=off)
+add_test(NAME p2_original_number_trig COMMAND p2_original_number_trig_test)
+add_executable(p2_original_number_yaw_test tools/p2_original_number_yaw_test.cpp
+    pc_port/pc_p2_original_number_yaw.cpp pc_port/pc_p2_original_number_trig.cpp
+    pc_port/pc_p2_original_number_double.cpp pc_port/pc_p2_original_number_room.cpp
+    pc_port/pc_p2_original_number_triangle.cpp)
+target_include_directories(p2_original_number_yaw_test PRIVATE pc_port)
+target_compile_options(p2_original_number_yaw_test PRIVATE -Wall -Wextra -Werror -UNDEBUG -ffp-contract=off)
+add_test(NAME p2_original_number_yaw COMMAND p2_original_number_yaw_test)
 
 # Explicit f32 operation boundaries and finite admission checks survive optional
-# target optimization; only written std::fma operations may fuse in these ports.
+# target optimization; only explicit fused primitives may fuse in these ports.
 set_source_files_properties(
     pc_port/pc_p2_original_number_motion.cpp
     pc_port/pc_p2_original_number_rigid.cpp
@@ -3685,6 +3706,9 @@ set_source_files_properties(
     pc_port/pc_p2_original_number_triangle.cpp
     pc_port/pc_p2_original_number_five_motion.cpp
     pc_port/pc_p2_original_room_trace.cpp
+    pc_port/pc_p2_original_number_double.cpp
+    pc_port/pc_p2_original_number_trig.cpp
+    pc_port/pc_p2_original_number_yaw.cpp
     PROPERTIES COMPILE_OPTIONS "-ffp-contract=off;-fno-fast-math")
 
 
