@@ -292,6 +292,7 @@ set(PC_PORT_SOURCES
     pc_port/pc_p2_original_number_animation.cpp
     pc_port/pc_p2_original_number_ledger.cpp
     pc_port/pc_p2_original_number_native.cpp
+    pc_port/pc_p2_original_egg_number_journal.cpp
     pc_port/pc_p2_original_resource_contents.cpp
     pc_port/pc_p2_original_piki_spawn.cpp
     pc_port/pc_p2_original_drop.cpp
@@ -3495,6 +3496,10 @@ add_executable(p2_original_resource_contents_test pc_port/pc_p2_original_resourc
 target_include_directories(p2_original_resource_contents_test PRIVATE pc_port)
 target_compile_options(p2_original_resource_contents_test PRIVATE -Wall -Wextra -Werror -UNDEBUG)
 add_test(NAME p2_original_resource_contents COMMAND p2_original_resource_contents_test)
+add_executable(p2_original_egg_number_authority_test tools/p2_original_egg_number_authority_test.cpp pc_port/pc_p2_original_egg_number_journal.cpp pc_port/pc_p2_original_resource_contents.cpp)
+target_include_directories(p2_original_egg_number_authority_test PRIVATE pc_port)
+target_compile_options(p2_original_egg_number_authority_test PRIVATE -Wall -Wextra -Werror -UNDEBUG)
+add_test(NAME p2_original_egg_number_authority COMMAND p2_original_egg_number_authority_test)
 add_executable(p2_original_number_ledger_test tools/p2_original_number_ledger_test.cpp pc_port/pc_p2_original_number_ledger.cpp pc_port/pc_p2_original_resource_contents.cpp)
 target_include_directories(p2_original_number_ledger_test PRIVATE pc_port)
 target_compile_options(p2_original_number_ledger_test PRIVATE -Wall -Wextra -Werror -UNDEBUG)

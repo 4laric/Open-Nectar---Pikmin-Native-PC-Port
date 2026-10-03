@@ -15,6 +15,14 @@ prove a physical Egg birth, carry, source Onyon delivery or campaign SAVE.
 
 ## Producer integration contract
 
+This branch includes the exact reviewed `NumberJournalAuthority` policy from
+resource owner commit 724af776e, plus the actual journal's read-only `find` API
+from 1c4ecddff. The pure callback policy verifies bit-exact float payloads,
+preadmitted outcome closure, and completed/consumed rows from that same journal.
+Its tests establish no physical Host or scene admission. The concrete
+`EggNumberAuthority` remains with its real Egg provider and must be integrated
+there; this branch contains no copied provider substitute.
+
 The actual scene Services owner implements `PcOriginalNumberAuthority` against
 the same `Native.contents()` journal. `pending` is valid only during the real
 fresh `beginContents`/`endContents` scope. It reads the actual incomplete journal

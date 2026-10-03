@@ -11,12 +11,18 @@ struct Fake : Engine {
     bool failFirstHoney = false, checkedPending = false;
     unsigned honeyAttempts = 0;
     EggContents* reentrant = nullptr;
+    EggContents* scoped = nullptr;
     std::vector<ChildOutcome> births;
     float randFloat() noexcept override { calls += "F"; return roll; }
     int randInt(int count) noexcept override { assert(count == 3); calls += "I"; return 2; }
     bool sprayMade(HoneyKind) noexcept override { calls += "S"; return spray; }
     bool mititeManagerAvailable() noexcept override { calls += "M"; return manager; }
-    bool birthPellet(const ChildOutcome& c) noexcept override { calls += "P"; births.push_back(c); return pellet; }
+    bool birthPellet(const ChildOutcome& c) noexcept override {
+        calls += "P"; births.push_back(c);
+        if(scoped){const auto* row=scoped->find(c.identity.source);assert(row&&!row->complete&&row->children.size()==1);
+            const auto& pending=row->children.front();assert(pending.identity==c.identity&&pending.kind==c.kind&&pending.pelletColor==c.pelletColor&&pending.attempted&&!pending.born&&!pending.consumed);checkedPending=true;}
+        return pellet;
+    }
     bool birthHoney(HoneyKind, const ChildOutcome& c) noexcept override {
         calls += "H"; births.push_back(c);
         if (reentrant) {
@@ -163,6 +169,10 @@ int main() {
     const ChildIdentity mitite9{next,0,{{EmitterKind::EggMitite,0,9}}};
     assert(validChildIdentity(mitite9)&&!(mitite9==ordinary)&&!(mitite9==spectralid4));
     badChild=mitite9;badChild.ancestry[0].member=10;assert(!validChildIdentity(badChild));
+    SourceIdentity numberId=next;numberId.ordinal=120;cfg=P2EggConfig{};cfg.forcedDropType=1;e=Fake{};e.scoped=&resumed;
+    assert(!resumed.find(numberId));assert(resumed.generate(numberId,cfg,{2,3,4},e,r,error)&&e.checkedPending&&e.calls=="FIP");
+    const auto* numberRow=resumed.find(numberId);assert(numberRow&&numberRow->complete&&numberRow->children[0].born);
+    const auto callsBefore=e.calls;assert(resumed.generate(numberId,cfg,{},e,r,error)&&e.calls==callsBefore);
     std::cout << "P2_ORIGINAL_EGG_CONTENTS_PASS\n";
 }
 

@@ -152,6 +152,9 @@ bool EggContents::generate(const SourceIdentity& id, const P2EggConfig& c,
     }
     record.complete = true; out = record; return true;
 }
+const ContentsRecord* EggContents::find(const SourceIdentity& id) const {
+    auto record=mRecords.find(id);return record==mRecords.end()?nullptr:&record->second;
+}
 std::vector<ContentsRecord> EggContents::snapshot() const {
     std::vector<ContentsRecord> result; for (const auto& row : mRecords) result.push_back(row.second); return result;
 }
