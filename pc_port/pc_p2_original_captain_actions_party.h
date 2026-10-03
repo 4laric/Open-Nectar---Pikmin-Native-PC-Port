@@ -22,6 +22,16 @@ struct Member {
  bool alive=false,releasable=false;
 };
 struct Group { unsigned count=0; Vec3 center; float radius=0; };
+struct FollowFrame {
+ Vec3 leaderPosition,leaderVelocity,leaderTargetVelocity;
+ float leaderFace=0,plateRadius=0,sourceMoveSpeed=0;
+ StateId leaderState=StateId::Walk;
+ bool leaderStuck=false,frozen=false;
+};
+bool followVelocity(Vec3 self,const FollowFrame&,float actualEquipmentSpeed,Vec3&,bool& tooFar,std::string&);
+struct EnemyHandle { Creature* actor=nullptr;std::uint64_t lifetime=0; };
+struct EnemyFrame {Vec3 center;float radius=0;bool alive=false,flying=false,underground=false;};
+enum class FollowFeedback { Alert,Land,Jump,Yawn,Chat,Look };
 // Retail Navi::releasePikis: full 3D mean and four sequential separation
 // passes, including each of the eight source kinds. Not a position teleport.
 bool dismissGroups(const std::vector<Member>&,Vec3 captain,Vec3 other,
@@ -38,19 +48,26 @@ public:
  virtual bool members(const Navi&,std::vector<Member>&,std::string&)const=0;
  virtual bool togglePlayer(Navi&,Navi&,std::string&)=0;
  virtual bool changeVoice(Navi&,std::string&)=0;
- virtual bool follow(Navi&,bool newToParty,std::string&)=0;
  virtual bool whistleMember(Navi& caller,actions::PikiHandle,bool combine,
   bool newToParty,std::string&)=0;
  virtual bool dismissSound(Navi&,std::string&)=0;
  virtual bool freeMember(Navi&,actions::PikiHandle,float radius,Vec3 center,
   bool sourceDismiss,std::string&)=0;
  virtual bool disbandTimer(Navi&,unsigned,std::string&)=0;
+ virtual bool followFrame(const Navi&,FollowFrame&,std::string&)const=0;
+ virtual bool moveRotation(Navi&,bool,std::string&)=0;
+ virtual bool randomChoice(float&,std::string&)=0; // one actual source RNG draw
+ virtual bool followFeedback(Navi&,FollowFeedback,std::string&)=0;
+ virtual bool enemy(EnemyHandle,EnemyFrame&,std::string&)const=0;
+ virtual bool followPunch(Navi&,EnemyHandle,Vec3 target,std::string&)=0;
 };
 // Actual source native bridge: rechecks roster/world on every operation.
 bool whistleCaptain(Navi* recipient,Navi* caller,bool combine,bool newToParty,std::string&);
 bool dismissCaptain(Navi*,std::string&);
 bool releasePikis(Navi*,bool& released,std::string&);
 bool switchCaptain(Navi*,std::string&);
+bool enterFollow(Navi*,bool newToParty,std::string&);
+bool assistPunch(Navi*,EnemyHandle);
 } // party
 void registerPartyStates(NaviStateMachine&);
 // SourceBank owner delivers actual authored keys; this consumes only Change.

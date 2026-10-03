@@ -22,6 +22,14 @@ int main(){
  c.controller=false;c.state=StateId::Follow;check(!p::whistleAllowed(w,c),"Follow not callable");
  c.state=StateId::Pellet;check(p::whistleAllowed(w,c),"Pellet callable");
  check(p::needsChange(StateId::Follow)&&p::needsChange(StateId::Walk)&&!p::needsChange(StateId::Gather),"source change capability");
+ p::FollowFrame f;f.leaderPosition={30,0,0};f.leaderTargetVelocity={20,0,0};
+ p::Vec3 velocity;bool tooFar=false;std::string followError;
+ check(p::followVelocity({0,0,0},f,160,velocity,tooFar,followError)&&velocity.x==90&&!tooFar,"30 boundary retains movement then average");
+ f.leaderPosition={29,0,0};check(p::followVelocity({0,0,0},f,160,velocity,tooFar,followError)&&velocity.x==10,"below30 source leader average");
+ f.leaderPosition={60,0,0};check(p::followVelocity({0,0,0},f,160,velocity,tooFar,followError)&&velocity.x==160,"60 boundary no average");
+ f.leaderPosition={430,0,0};check(p::followVelocity({0,0,0},f,160,velocity,tooFar,followError)&&!tooFar,"430 remains follow");
+ f.leaderPosition={431,0,0};check(p::followVelocity({0,0,0},f,160,velocity,tooFar,followError)&&tooFar,"431 leaves follow");
+ f.leaderPosition={0,0,100};f.leaderState=StateId::Throw;check(p::followVelocity({0,0,0},f,160,velocity,tooFar,followError)&&velocity.x>0,"authored81degree throw offset");
  std::vector<p::Member> members;
  for(unsigned i=0;i<100;++i){p::Member m;m.handle={reinterpret_cast<Piki*>(std::uintptr_t(i+1)),1};m.position={100,float(i%2)*10,0};m.kind=i%8;m.alive=true;m.releasable=true;members.push_back(m);}
  std::array<p::Group,8> groups{};std::string error;

@@ -40,11 +40,26 @@ bool dismissGroups(const std::vector<Member>& members,Vec3 captain,Vec3 other,bo
  }
  output=groups;return true;
 }
+bool followVelocity(Vec3 self,const FollowFrame& f,float speed,Vec3& out,bool& tooFar,std::string& error){
+ if(!finite(self)||!finite(f.leaderPosition)||!finite(f.leaderVelocity)||!finite(f.leaderTargetVelocity)
+  ||!std::isfinite(speed)||speed<0||!std::isfinite(f.leaderFace)||!std::isfinite(f.plateRadius)||f.plateRadius<0){error="invalid actual Follow frame";return false;}
+ auto target=f.leaderPosition;auto velocity=f.leaderVelocity;
+ float leaderSpeed=std::sqrt(velocity.x*velocity.x+velocity.y*velocity.y+velocity.z*velocity.z);
+ if(leaderSpeed<=20&&(f.leaderState==StateId::Throw||f.leaderState==StateId::ThrowWait)){
+  target.x+=std::sin(f.leaderFace+1.4137167f)*30;target.z+=std::cos(f.leaderFace+1.4137167f)*30;
+ }else if(f.leaderState==StateId::Punch){target.x-=std::sin(f.leaderFace)*f.plateRadius;target.z-=std::cos(f.leaderFace)*f.plateRadius;}
+ auto diff=difference(target,self);float dist=normalize(diff);
+ if(dist<30)speed=0;
+ Vec3 next{diff.x*speed,diff.y*speed,diff.z*speed};
+ if(dist<60){next.x=(next.x+f.leaderTargetVelocity.x)*.5f;next.y=(next.y+f.leaderTargetVelocity.y)*.5f;next.z=(next.z+f.leaderTargetVelocity.z)*.5f;}
+ tooFar=dist>430;out=next;return true;
+}
 } } }
 #if defined(PIKI_PC_PORT)
 #include "pc_p2_original_captain_states.h"
 #include "pc_p2_original_captain_motion.h"
 #include "Navi.h"
+#include "pc_p2_equipment.h"
 namespace p2original { namespace captain { namespace party {
 namespace {
 bool fail(std::string& e,const char* s){e=s;return false;}
@@ -64,7 +79,7 @@ bool whistleCaptain(Navi* n,Navi* caller,bool combine,bool newToParty,std::strin
  if(!p->world(w,e)||!p->captain(*n,c,position,e))return false;
  // Already-Follow is NOT callable in retail; do not invent a no-op success.
  if(!whistleAllowed(w,c))return fail(e,"source captain whistle not admitted");
- if(!p->follow(*n,newToParty,e))return false;
+ if(!enterFollow(n,newToParty,e))return false;
  std::vector<Member> members;if(!p->members(*n,members,e))return false;
  // Snapshot BEFORE stimuli mutate the CPlate, exactly as source actNavi.
  for(const auto& m:members)if(!p->whistleMember(*caller,m.handle,true,true,e))return false;
@@ -110,6 +125,65 @@ bool switchCaptain(Navi* n,std::string& e){
 }
 } // party
 namespace {
+enum class FollowMode {Alert,Normal,Idle,Punch};
+class Follow final:public NativeState {
+ FollowMode mode_=FollowMode::Normal;unsigned idle_=0,seek_=0,idleMotion_=31;
+ Navi* entering_=nullptr;bool newToParty_=false;
+ party::EnemyHandle enemy_;
+ bool motion(Navi* n,unsigned id){std::string e;auto* b=pc_p2_original_captain_source_bank();return b&&b->start(n,static_cast<Motion>(id),e);}
+public:
+ Follow():NativeState(StateId::Follow){}
+ bool sourceInvincible()const final{return false;}
+ void arm(Navi* n,bool isNew){entering_=n;newToParty_=isNew;}
+ void disarm(){entering_=nullptr;newToParty_=false;}
+ void init(Navi* n)override{
+  bool isNew=entering_==n&&newToParty_;disarm();
+  mode_=isNew?FollowMode::Alert:FollowMode::Normal;idle_=0;seek_=0;enemy_={};
+  motion(n,isNew?32:30);std::string e;auto* p=pc_p2_original_captain_party_source(n);
+  if(p){auto* source=const_cast<party::PartySource*>(p);if(isNew)source->followFeedback(*n,party::FollowFeedback::Alert,e);source->moveRotation(*n,true,e);}
+ }
+ bool assist(party::EnemyHandle enemy){if(mode_!=FollowMode::Normal&&mode_!=FollowMode::Idle)return false;enemy_=enemy;mode_=FollowMode::Punch;seek_=idle_=0;return true;}
+ void sourceKey(Navi* n,int key){
+  std::string e;auto* p=pc_p2_original_captain_party_source(n);party::FollowFrame f;
+  if(key==1000){if(mode_==FollowMode::Alert){mode_=FollowMode::Normal;motion(n,30);}else if(mode_==FollowMode::Idle){idle_=0;mode_=FollowMode::Normal;motion(n,31);}}
+  auto* bank=pc_p2_original_captain_source_bank();MotionState state;
+  if(p&&p->followFrame(*n,f,e)&&!f.frozen&&key==200&&bank&&bank->state(n,state,e)&&unsigned(state.motion)==50)
+   const_cast<party::PartySource*>(p)->followFeedback(*n,party::FollowFeedback::Land,e);
+ }
+ void exec(Navi* n)override{
+  std::string e;auto* raw=pc_p2_original_captain_party_source(n);
+  auto* action=pc_p2_original_captain_action_source(n);auto* bank=pc_p2_original_captain_source_bank();
+  if(!raw||!action||!bank)return;
+  auto* p=const_cast<party::PartySource*>(raw);auto* a=const_cast<actions::ActionSource*>(action);
+  party::CaptainFacts c;actions::Vec3 pos;party::WorldFacts w;party::FollowFrame f;MotionState motionState;
+  if(!p->world(w,e)||!p->captain(*n,c,pos,e)||!p->followFrame(*n,f,e)||!bank->state(n,motionState,e))return;
+  if(!w.demoInactive)return;
+  if(c.controller){pc_p2_original_captain_transit(n,StateId::Walk,e);return;}
+  if(mode_==FollowMode::Alert){if(unsigned(motionState.motion)!=32){mode_=FollowMode::Normal;motion(n,30);}n->mTargetVelocity.set(0,0,0);return;}
+  if(f.leaderStuck){pc_p2_original_captain_transit(n,StateId::Walk,e);return;}
+  if(mode_==FollowMode::Punch){
+   party::EnemyFrame target;
+   if(!enemy_.actor||!p->enemy(enemy_,target,e)||!target.alive||target.flying||target.underground){mode_=FollowMode::Normal;enemy_={};motion(n,30);return;}
+   auto diff=party::difference(target.center,pos);float distance=party::normalize(diff);
+   if(distance-target.radius<8){p->followPunch(*n,enemy_,target.center,e);return;}
+   if(++seek_>=60){mode_=FollowMode::Normal;enemy_={};motion(n,30);return;}
+   if(a->control(*n,e))n->mTargetVelocity.set(diff.x*f.sourceMoveSpeed*.5f,diff.y*f.sourceMoveSpeed*.5f,diff.z*f.sourceMoveSpeed*.5f);
+   return;
+  }
+  auto lv=f.leaderVelocity;float speed=std::sqrt(lv.x*lv.x+lv.y*lv.y+lv.z*lv.z);bool moving=speed>20;
+  if(mode_==FollowMode::Idle){if(moving){motion(n,32);mode_=FollowMode::Alert;}else{n->mTargetVelocity.set(0,0,0);if(unsigned(motionState.motion)!=idleMotion_){mode_=FollowMode::Normal;motion(n,30);}}return;}
+  if(moving)idle_=0;else if(idle_<90)++idle_;else{
+   float choice;if(!p->randomChoice(choice,e)||!std::isfinite(choice)||choice<0||choice>1)return;
+   const unsigned clips[]={50,0,3,54};unsigned index=choice<.25f?0:choice<.5f?1:choice<.75f?2:3;
+   idleMotion_=clips[index];if(!motion(n,idleMotion_))return;mode_=FollowMode::Idle;
+   if(!f.frozen){const party::FollowFeedback sounds[]={party::FollowFeedback::Jump,party::FollowFeedback::Yawn,party::FollowFeedback::Chat,party::FollowFeedback::Look};p->followFeedback(*n,sounds[index],e);}
+  }
+  actions::Vec3 velocity;bool tooFar;
+  if(!party::followVelocity(pos,f,pc_p2_equipment_speed(f.sourceMoveSpeed),velocity,tooFar,e))return;
+  if(tooFar){pc_p2_original_captain_transit(n,StateId::Walk,e);return;}
+  if(a->control(*n,e))n->mTargetVelocity.set(velocity.x,velocity.y,velocity.z);
+ }
+};
 class Change final:public NativeState {
  bool finished_=false;
 public:
@@ -131,12 +205,25 @@ public:
  void sourceKey(Navi* n,int key){if(key==1000){finished_=true;std::string e;auto* b=pc_p2_original_captain_source_bank();if(b)b->start(n,Motion::Walk,e);}}
 };
 }
-void registerPartyStates(NaviStateMachine& fsm){fsm.registerState(new Change);}
+namespace party {
+bool enterFollow(Navi* n,bool isNew,std::string& e){
+ if(!n||!n->mStateMachine){e="missing source Follow FSM";return false;}
+ auto* fsm=n->mStateMachine;Follow* state=nullptr;
+ for(int i=0;i<fsm->mStateCount;++i)if(fsm->mStates[i]->getID()==nativeId(StateId::Follow)){state=dynamic_cast<Follow*>(fsm->mStates[i]);break;}
+ if(!state){e="missing actual source Follow state";return false;}
+ state->arm(n,isNew);
+ bool result=pc_p2_original_captain_transit(n,StateId::Follow,e);
+ state->disarm();return result;
+}
+bool assistPunch(Navi* n,EnemyHandle enemy){auto* state=n?dynamic_cast<Follow*>(n->getCurrState()):nullptr;return state&&state->assist(enemy);}
+}
+void registerPartyStates(NaviStateMachine& fsm){fsm.registerState(new Change);fsm.registerState(new Follow);}
 bool partyKey(Navi* n,int key){
  if(!n)return false;
  auto* change=dynamic_cast<Change*>(n->getCurrState());
- if(!change)return false;
- change->sourceKey(n,key);return true;
+ if(change){change->sourceKey(n,key);return true;}
+ auto* follow=dynamic_cast<Follow*>(n->getCurrState());if(!follow)return false;
+ follow->sourceKey(n,key);return true;
 }
 } }
 #endif

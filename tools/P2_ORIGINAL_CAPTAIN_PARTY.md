@@ -25,8 +25,17 @@ Kaisan comes first, sound follows the actual eligible member snapshot, then
 each member receives Free and the source disband timer becomes 60.
 
 Validated here: strict C++17 policy controls and actual native TU syntax.
+The native source Follow is implemented in this leaf: real authored alert/idle
+keys, partner control/movie guards, 90-update idle selection using one actual
+RNG draw, >20 moving threshold, strict 30/60/430 distance boundaries, source
+throw/Punch offsets and assist-Punch timeout 60. It consumes canonical source
+ActionSource control and source-owned enemy lifetime/bounds queries. Source
+motion clips 0/3/30/31/32/50/54 and actual jump key 200 must be imported. The
+Punch owner invokes `assistPunch` for real source enemy hit notification and
+implements `followPunch` with exact (following=true,next=Follow) args.
+
 Production link and gameplay remain unqualified until the concrete source
-owner, source Follow, KIZUKU resource and animation-key routing are integrated.
+party/body owner, required resources and animation-key routing are integrated.
 
 Short acceptance script once composed: launch centered 960x540 with 20 starting
 Pikmin and two genuine source captains; ordinary B whistles the idle partner
