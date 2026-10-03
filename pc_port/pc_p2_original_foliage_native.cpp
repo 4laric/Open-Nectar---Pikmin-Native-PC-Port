@@ -170,8 +170,11 @@ struct Native::Impl final:Engine {
   actor->mTekiAnimator->init(&actor->mTekiShape->mAnimContext,actor->mTekiShape->mAnimMgr,tekiMgr->mMotionTable);
   actor->mDeadState=actor->mStateID=actor->mDamageCount=0;actor->_3A4=0;actor->mStoredDamage=0;actor->mPellet=nullptr;
   for(int i=0;i<4;++i)actor->mParticleGenerators[i]=nullptr;
+  // Surface owns a native generator; genuine cave births deliberately carry
+  // no P1 generator. Cave registry associations remain with the floor caller.
   actor->mGenerator=h.generator;actor->mSRT.t.set(p.x,p.y,p.z);actor->mFaceDirection=facing;actor->mSRT.r.set(0,facing,0);actor->mSRT.s.set(1,1,1);
   actor->mHealth=actor->mMaxHealth=b.health;actor->mVelocity.set(0,0,0);actor->mCollisionRadius=b.spheres[0].radius;actor->mSize=b.spheres[0].radius;
+  actor->mVolatileVelocity.set(0,0,0);actor->mTargetVelocity.set(0,0,0);
   actor->setCreatureFlag(CF_DisableMovement);actor->setCreatureFlag(CF_IsAiDisabled);
   for(unsigned option:{BTeki::TEKI_OPTION_VISIBLE,BTeki::TEKI_OPTION_ATARI,BTeki::TEKI_OPTION_ALIVE,BTeki::TEKI_OPTION_SHAPE_VISIBLE,BTeki::TEKI_OPTION_INVINCIBLE})actor->setTekiOption(option);
   actor->clearTekiOption(BTeki::TEKI_OPTION_ORGANIC);actor->clearTekiOption(BTeki::TEKI_OPTION_GRAVITATABLE);
@@ -214,6 +217,7 @@ bool Native::tick(BTeki* actor,float dt,std::string& e){
  m->simulationVisibility(actor,t);
  if(!m->provider.tick(actor,dt,t.visible,e))return false;
  actor->mVelocity.set(0,0,0);actor->mStoredDamage=0;actor->mHealth=t.bank->health;
+ actor->mVolatileVelocity.set(0,0,0);actor->mTargetVelocity.set(0,0,0);
  actor->mSRT.t.set(h->position.x,h->position.y,h->position.z);actor->mGrid.updateGrid(actor->mSRT.t);actor->mGrid.updateAIGrid(actor->mSRT.t,false);
  t.presented.advance(dt);m->follow(actor,t);return true;
 }
