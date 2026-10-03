@@ -3,6 +3,8 @@
 #include "pc_p2_original_pod.h"
 #include "pc_p2_retail_treasure_cargo.h"
 #include "pc_p2_original_corpse_native.h"
+#include "pc_p2_original_number_native.h"
+#include "pc_p2_original_number_geometry.h"
 #include "pc_p2_purple.h"
 #include "pc_p2_cargo_ground.h"
 #include "pc_randomizer.h"
@@ -305,6 +307,8 @@ bool Pellet::ignoreAtari(Creature* creature)
 	if (creature->getStickObject() == this) {
 		return true;
 	}
+	// A numeric view is not a BTeki and owns no separate source creature.
+	if (pc_p2_original_number_tag(this)) return false;
 
 	// The following C-style cast is illegal, as `Creature` does not inherit from `PelletView`.
 	if (mPelletView && creature == TERNARY_BUGFIX(static_cast<BTeki*>, (Creature*))(mPelletView)) {
@@ -746,6 +750,15 @@ int Pellet::getRandomFreeSlotIndex()
  */
 Vector3f Pellet::getSlotLocalPos(int slotID, f32 offset)
 {
+	if (const auto* p = pc_p2_original_number_profile(this)) {
+		std::array<float, 3> position;
+		if (!p2originalnumber::carrierSlot(p->size, slotID, mStuckAngle, offset,
+		                                mPickOffset != 0.0f, !isFrontFace(), position)) {
+			std::fprintf(stderr, "P2_ORIGINAL_NUMBER_FAIL invalid carrier slot\n");
+			std::abort();
+		}
+		return Vector3f(position[0], position[1], position[2]);
+	}
 	f32 carryRadius = getBottomRadius();
 #if defined(PIKI_PC_PORT) && PIKI_PC_PORT
     pc_p2_retail_treasure_cargo_carry_radius(this, carryRadius);
@@ -1202,6 +1215,8 @@ static u32 bounceSounds[] = {
  */
 void Pellet::update()
 {
+	if (pc_p2_original_number_update(this)) return;
+	pc_p2_original_number_collision(this);
 	pc_p2_original_corpse_collision(this);
 #if defined(PIKI_PC_PORT) && PIKI_PC_PORT
     if (pc_p2_original_pelplant_capture_update(this)) return;
@@ -1382,6 +1397,7 @@ void Pellet::update()
 	mStateMachine->exec(this);
 	ASSERT_POSITION_NOTNAN("pellet nan before dual!");
 	DualCreature::update();
+	pc_p2_original_number_collision(this);
 	pc_p2_original_corpse_collision(this);
 	ASSERT_POSITION_NOTNAN("pellet nan after dual!");
 
