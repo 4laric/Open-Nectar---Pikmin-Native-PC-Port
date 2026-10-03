@@ -43,7 +43,7 @@ void captainGuard(bool dead,bool deadState,float hp,int tick) {
 struct Baseline { Piki* p; float attack,speed; int maturity; };
 class SpicyApp : public PlugPikiApp {
     int ticks=0,phase=0,pauseTicks=0;
-    bool sawCaptain=false;
+    bool sawCaptain=false,whistled=false;
     std::vector<Baseline> squad;
     p2originalresource::ResourceState stock;
     p2originalresource::EggContents contents;
@@ -82,6 +82,16 @@ public:
             setupTime+=gsys->getFrameTime();
             Iterator pikis(pikiMgr);int alive=0;CI_LOOP(pikis) { auto* p=static_cast<Piki*>(*pikis);if(p&&p->isAlive()) ++alive; }
             require(alive==20,"fresh fixture must have exactly20 live Pikmin");
+            // Preview releases its authored starting squad to FreeMode. Use
+            // the actual whistle receiver with injected aim, never set party
+            // slots/modes or move/heal actors to manufacture a formation.
+            if(!whistled) {
+                Iterator gather(pikiMgr);CI_LOOP(gather) { auto* p=static_cast<Piki*>(*gather);if(p&&p->isAlive()) {
+                    Vector3f previous=n->mCursorWorldPos;n->mCursorWorldPos=p->getPosition();
+                    n->callPikis(200.0f);n->mCursorWorldPos=previous;break;
+                } }
+                whistled=true;std::puts("P2_SPICY_SETUP whistle_receiver=actual aim=injected");return result;
+            }
             squad.clear();
             Iterator party(n->mPlateMgr);CI_LOOP(party) { auto* p=static_cast<Piki*>(*party);if(p&&p->isAlive()&&p->getState()==PIKISTATE_Normal) squad.push_back({p,p->getAttackPower(),p->getSpeed(.25f),p->mHappa}); }
             if(squad.empty()) {
