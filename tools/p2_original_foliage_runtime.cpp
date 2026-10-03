@@ -43,10 +43,10 @@
 namespace {
 using namespace p2original;
 using namespace p2original::foliage;
-bool human=false,refusal=false,naturalWalk=false,forestBatch=false;
-unsigned firstSource(){return forestBatch?47:91;}
-unsigned secondSource(){return forestBatch?49:88;}
-const char* batchSources(){return forestBatch?"47,49":"91,88";}
+bool human=false,refusal=false,naturalWalk=false,forestBatch=false,brownLargeBatch=false;
+unsigned firstSource(){return brownLargeBatch?92:forestBatch?47:91;}
+unsigned secondSource(){return brownLargeBatch?91:forestBatch?49:88;}
+const char* batchSources(){return brownLargeBatch?"92,91":forestBatch?"47,49":"91,88";}
 SDL_Joystick* pad=nullptr;
 void require(bool ok,const char* message){if(!ok){std::printf("FAIL ORIGINAL_FOLIAGE %s\n",message);std::fflush(nullptr);std::_Exit(1);}}
 void checked(bool ok,const std::string& e){if(!ok)std::fprintf(stderr,"ORIGINAL_FOLIAGE_ERROR %s\n",e.c_str());require(ok,"native foliage operation");}
@@ -71,13 +71,14 @@ class FoliageApp final:public PlugPikiApp {
  std::array<Creature*,2> actors{};
  std::array<InstanceIdentity,2> firstIdentity;
  std::array<Vector3f,2> collisionCentre;
+ std::array<Vector3f,2> brownLargeChildCentre;
  std::array<float,2> health{};
  int ready=0,phase=0,age=0,pelletBaseline=0,rewardBaseline=0,tekiBaseline=0;
  bool captainSeen=false;
  unsigned walked=0;std::array<bool,2> naturalTouch{};
  const std::string fingerprint=std::string(64,'f');
- CatalogRow literal(unsigned source,unsigned index,unsigned uid,const Position& at,float facing){
-  CatalogRow r;r.course=forestBatch?"forest":"tutorial";r.member="plantsgen.txt";r.index=index;r.sourceKey=r.course+"/plantsgen.txt#"+std::to_string(index);
+ CatalogRow literal(unsigned source,unsigned index,unsigned uid,const Position& at,float facing,const char* course=nullptr){
+  CatalogRow r;r.course=course?course:forestBatch?"forest":"tutorial";r.member="plantsgen.txt";r.index=index;r.sourceKey=r.course+"/plantsgen.txt#"+std::to_string(index);
   r.enemy.source=source;r.enemy.uid=uid;r.enemy.count=1;r.enemy.position=at;r.enemy.directionDegrees=facing;return r;
  }
  int rewards(){int total=heads();for(int color=0;color<3;++color){auto* onion=itemMgr->getContainer(color);if(onion)total+=onion->getTotalStorePikis();}return total;}
@@ -104,6 +105,8 @@ class FoliageApp final:public PlugPikiApp {
    if(reentry)require(identity.activation==firstIdentity[i].activation+1&&identity.epoch==firstIdentity[i].epoch+1,"disc cache reentry advances epoch and activation");else firstIdentity[i]=identity;
    require(actor->mCollInfo&&actor->mCollInfo->getBoundingSphere(),"actual source static collider");
    collisionCentre[i]=actor->mCollInfo->getBoundingSphere()->mCentre;health[i]=actor->mHealth;
+   if(source==92){auto* root=actor->mCollInfo->getSphere(0x66303030u);auto* child=actor->mCollInfo->getSphere(0x66303031u);
+    require(root&&child&&root->getChildCount()==1&&root->mRadius==50&&child->mRadius==35,"brown large literal static root50 child35");brownLargeChildCentre[i]=child->mCentre;}
    std::printf("ORIGINAL_FOLIAGE_BIRTH source=%u uid=%u ordinal=%u epoch=%llu activation=%llu reentry=%d\n",source,identity.generator,identity.ordinal,(unsigned long long)identity.epoch,(unsigned long long)identity.activation,int(reentry));
   }
   require(actors[0]&&actors[1],"both literal variants physically admitted");checkEconomy();
@@ -116,7 +119,12 @@ class FoliageApp final:public PlugPikiApp {
   // plants on the east approach used by the successfully surveyed walk.
   Position a{n->mSRT.t.x+90,0,n->mSRT.t.z},b{n->mSRT.t.x+90,0,n->mSRT.t.z+70};
   a.y=mapMgr->getMinY(a.x,a.z,true);b.y=mapMgr->getMinY(b.x,b.z,true);require(std::isfinite(a.y)&&std::isfinite(b.y),"actual native arena floor");
-  if(forestBatch){
+  if(brownLargeBatch){
+   // Literal Last #0 uses source object0004's constructor birthType0 default.
+   // Startup now decodes this version explicitly. Only positions are moved;
+   // these controls establish neither Last-course nor cave placement.
+   rows={literal(92,0,1390080862u,a,0,"last"),literal(91,0,1390538979u,b,0,"tutorial")};
+  }else if(forestBatch){
    // Actual forest/plantsgen.txt literals #23 (Clover47) and #0 (Ooinu_s49),
    // decoded in forest47-49-source-records.json. Only positions are relocated
    // to the same surveyed tutorial arena; this is not forest-course admission.
@@ -125,7 +133,7 @@ class FoliageApp final:public PlugPikiApp {
   auto zero=literal(firstSource(),0,originalGeneratorUid("fixture/foliage-zero#0"),a,0);zero.course="fixture";zero.member="foliage-zero";zero.sourceKey="fixture/foliage-zero#0";zero.enemy.count=0;rows.push_back(zero);
   native=std::make_unique<Native>();tekiBaseline=tekiMgr->getSize();pelletBaseline=pelletMgr->getSize();rewardBaseline=rewards();
   bool physical=native->provider().preflight(rows,e);
-  if(refusal){require(!physical&&native->provider().size()==0&&tekiMgr->getSize()==tekiBaseline&&pelletMgr->getSize()==pelletBaseline,"physical resource refusal before allocation");std::puts(forestBatch?"PASS ORIGINAL_FOLIAGE_RESOURCE_REFUSAL sources=47,49 births=0 direct_control=1 gameplay=0":"PASS ORIGINAL_FOLIAGE_RESOURCE_REFUSAL births=0 direct_control=1 gameplay=0");std::fflush(nullptr);std::_Exit(0);}
+  if(refusal){require(!physical&&native->provider().size()==0&&tekiMgr->getSize()==tekiBaseline&&pelletMgr->getSize()==pelletBaseline,"physical resource refusal before allocation");if(brownLargeBatch||forestBatch)std::printf("PASS ORIGINAL_FOLIAGE_RESOURCE_REFUSAL sources=%s births=0 direct_control=1 gameplay=0\n",batchSources());else std::puts("PASS ORIGINAL_FOLIAGE_RESOURCE_REFUSAL births=0 direct_control=1 gameplay=0");std::fflush(nullptr);std::_Exit(0);}
   checked(physical,e);checked(native->geometryOwnershipControl(e),e);
   checked(originalActors().install(fingerprint,rows,[](const CatalogRow& r,std::string& err){return decode(r,err);},e),e);install(false);
   std::printf("ORIGINAL_FOLIAGE_READY sources=%s zero_count=1 baseline=20 window=960x540 initialized_placement=1 original_positions=0 naturalinput=%d callbackcontrol=%d gameplay=0\n",batchSources(),int(naturalWalk),int(!naturalWalk&&!human));std::fflush(nullptr);
@@ -145,6 +153,7 @@ class FoliageApp final:public PlugPikiApp {
  }
  void checkStatic(){for(unsigned i=0;i<2;++i){auto* actor=actors[i];const auto* h=native->provider().lookup(actor);require(h&&actor->mHealth==health[i]&&actor->isAlive(),"native foliage remains invulnerable");
    const auto& centre=actor->mCollInfo->getBoundingSphere()->mCentre;const auto& before=collisionCentre[i];require(std::fabs(centre.x-before.x)<.01f&&std::fabs(centre.y-before.y)<.01f&&std::fabs(centre.z-before.z)<.01f,"animated pose does not move static source collider");
+   if(h->row.enemy.source==92){const auto* child=actor->mCollInfo->getSphere(0x66303031u);require(child&&child->mRadius==35,"brown large child retained");const auto& old=brownLargeChildCentre[i];require(std::fabs(child->mCentre.x-old.x)<.01f&&std::fabs(child->mCentre.y-old.y)<.01f&&std::fabs(child->mCentre.z-old.z)<.01f,"brown large child remains static through touch");}
    require(actor->mVelocity.x==0&&actor->mVelocity.y==0&&actor->mVelocity.z==0,"native scenery remains constrained");}
   checkEconomy();
  }
@@ -193,6 +202,7 @@ public:
 int main(int argc,char** argv){
  human=std::getenv("P2_ORIGINAL_FOLIAGE_HUMAN")!=nullptr;refusal=std::getenv("P2_ORIGINAL_FOLIAGE_REFUSE_RESOURCES")!=nullptr;naturalWalk=!human&&std::getenv("P2_ORIGINAL_FOLIAGE_WALK")!=nullptr;
  forestBatch=std::getenv("P2_ORIGINAL_FOLIAGE_FOREST")!=nullptr;
+ if(const char* batch=std::getenv("P2_ORIGINAL_FOLIAGE_BATCH")){require(!std::strcmp(batch,"tutorial")||!std::strcmp(batch,"forest")||!std::strcmp(batch,"brown-large"),"known explicit foliage batch");forestBatch=!std::strcmp(batch,"forest");brownLargeBatch=!std::strcmp(batch,"brown-large");}
  SDL_setenv("PIKMIN_RANDOMIZER_TEST_BACKGROUND","1",1);SDL_setenv("SDL_AUDIODRIVER","dummy",1);SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS,"1");SDL_SetMainReady();
  pc_sim_rng_note_main_thread();std::string e;checked(pc_sim_rng_begin_offline(0x9188,0x8891,e),e);pc_gpu_preference_apply();pc_bbft_init(argc,argv);
  require(!pc_randomizer_enabled()&&pc_pikipelago_surface_course()&&!std::strcmp(pc_pikipelago_surface_course(),"tutorial")&&!pc_pikipelago_room_preview(),"real tutorial course assets required");
