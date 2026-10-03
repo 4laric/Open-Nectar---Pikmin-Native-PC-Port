@@ -11,7 +11,7 @@ using namespace p2original::captain;
 using namespace p2original::captain::actions;
 class Piki{};
 namespace {
-Navi navis[2];Piki pikis[2];std::string raw;std::vector<int> keys;unsigned flying=0,throws=0,calls=0,stops=0,automaticUpdates=0;bool provider=true;
+Navi navis[2];Piki pikis[2];std::string raw;std::vector<int> keys;unsigned advances=0;unsigned flying=0,throws=0,calls=0,stops=0,automaticUpdates=0;bool provider=true;
 struct Scene:LoadedScene,World {
  std::string campaign="source-campaign",fingerprint="selected-source-session",catalog="source-catalog";std::uint64_t epoch=1;
  const std::string& selectedCampaign()const override{return campaign;}const std::string& selectedFingerprint()const override{return fingerprint;}const std::string& sourceCatalog()const override{return catalog;}
@@ -48,7 +48,7 @@ struct SourceBank::Impl {std::unordered_map<const Navi*,MotionState> states;};
 SourceBank::SourceBank():m(new Impl){}SourceBank::~SourceBank()=default;
 bool SourceBank::start(Navi* n,Motion motion,std::string&){auto& s=m->states[n];s.motion=motion;++s.generation;return true;}
 bool SourceBank::state(const Navi* n,MotionState& state,std::string&)const{auto it=m->states.find(n);if(it==m->states.end())return false;state=it->second;return true;}
-bool SourceBank::advance(Navi* n,float,const std::function<bool(int)>& emit,std::string&){auto generation=m->states[n].generation;auto pendingKeys=keys;keys.clear();for(int key:pendingKeys){if(!emit(key)||m->states[n].generation!=generation)break;}return true;}
+bool SourceBank::advance(Navi* n,float,const std::function<bool(int)>& emit,std::string&){++advances;auto generation=m->states[n].generation;auto pendingKeys=keys;keys.clear();for(int key:pendingKeys){if(!emit(key)||m->states[n].generation!=generation)break;}return true;}
 bool NativeState::sourceAlive(const Navi&)const{return true;}std::optional<std::uint8_t> NativeState::actorInvincibleFrames(const Navi&)const{return 0;}
 bool NativeState::canEnterSourceDead(const Navi&)const{return true;}void NativeState::enterSourceDead(Navi&){}void NativeState::sourceDamageFeedback(Navi&){}
 bool NativeState::canEnterSourceDamaged(const Navi&)const{return true;}void NativeState::enterSourceDamaged(Navi&,float){}
@@ -74,12 +74,15 @@ int main(int argc,char** argv){
  assert(pc_p2_original_captain_transit(&navis[0],StateId::Gather,e));navis[0].current->exec(&navis[0]);assert(calls==1);
  source.frames[0].releasedB=true;navis[0].current->exec(&navis[0]);assert(stops==1&&fsms[0].last==nativeId(StateId::Walk));source.frames[0].releasedB=false;
  for(unsigned i=0;i<2;++i){assert(pc_p2_original_captain_transit(&navis[i],StateId::ThrowWait,e));assert(source.ps[i].state==PikiState::Hanged);assert(pc_p2_original_captain_throw_after_animation(&navis[i],e));assert(source.ps[i].position.y==0);}
- keys={1,1,1,1};assert(pc_p2_original_captain_throw_advance_animation(&navis[0],30,e));
+ auto* waitState=dynamic_cast<NativeState*>(navis[0].current);assert(waitState);unsigned previousAdvances=advances;
+ for(unsigned i=0;i<4;++i){assert(waitState->sourceAnimationKey(&navis[0],1,e));}assert(advances==previousAdvances);
  source.frames[0].heldA=false;navis[0].current->exec(&navis[0]);assert(fsms[0].last==nativeId(StateId::Throw)&&source.ps[1].state==PikiState::Hanged);
  assert(source.holdTimes[0]==2.5f); // loop charge caps at three
  assert(!pc_p2_original_captain_throw_preflight(&navis[1],StateId::Throw,e));
  keys={2};assert(pc_p2_original_captain_throw_advance_animation(&navis[0],1,e));assert(throws==1&&flying==1&&source.ps[0].state==PikiState::Flying);
- keys={1000,2};assert(pc_p2_original_captain_throw_advance_animation(&navis[0],1,e));assert(fsms[0].last==nativeId(StateId::Walk)&&throws==1);
+ auto* throwState=dynamic_cast<NativeState*>(navis[0].current);assert(throwState);previousAdvances=advances;
+ assert(!throwState->sourceAnimationKey(&navis[0],1000,e)&&e.empty());assert(advances==previousAdvances&&fsms[0].last==nativeId(StateId::Walk)&&throws==1);
+ assert(!throwState->sourceAnimationKey(&navis[0],2,e)&&!e.empty()&&throws==1);
  // Stale lifetime is refused: actual provider never substitutes another Piki.
  ++source.ps[1].handle.lifetime;auto pos=source.ps[1].position;
  assert(!pc_p2_original_captain_throw_after_animation(&navis[1],e));assert(source.ps[1].position.y==pos.y);

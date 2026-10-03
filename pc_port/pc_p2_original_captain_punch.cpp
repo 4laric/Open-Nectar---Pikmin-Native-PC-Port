@@ -114,6 +114,13 @@ class PunchState final:public NativeState {
  }
 public:
  PunchState():NativeState(StateId::Punch){}
+ bool sourceAnimationKey(Navi* n,int event,std::string& e)override{
+  if(!live(n)){e=error_.empty()?"source Punch key actor/state is not current":error_;return false;}
+  error_.clear();bool result=key(n,event);
+  if(n->getCurrState()!=static_cast<NaviState*>(this)){e.clear();return false;}
+  if(!result||!enabled_||!live(n)){e=error_.empty()?"source Punch key operation refused":error_;return false;}
+  e.clear();return true;
+ }
  bool sourceInvincible()const override{return false;}
  void init(Navi* n)override{
   enabled_=false;following_=false;next_=StateId::Walk;combo_=idle_=0;nextReady_=false;

@@ -73,6 +73,13 @@ protected:
  }
  virtual void onKey(Navi*,int){}
 public:
+ bool sourceAnimationKey(Navi* n,int key,std::string& error)override{
+  if(!live(n)){error=error_.empty()?"source action key actor/state is not current":error_;return false;}
+  error_.clear();onKey(n,key);
+  if(n->getCurrState()!=static_cast<NaviState*>(this)){error.clear();return false;}
+  if(!enabled_||!live(n)){error=error_.empty()?"source action key operation refused":error_;return false;}
+  error.clear();return true;
+ }
  bool sourceInvincible()const final{return false;} // literal inherited retail NaviState
  bool advanceSourceAnimation(Navi* n,float frames,std::string& error){bool result=animate(n,frames);error=error_;return result;}
 };

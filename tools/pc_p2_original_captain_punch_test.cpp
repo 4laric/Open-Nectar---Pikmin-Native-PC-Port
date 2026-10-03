@@ -13,7 +13,7 @@ using namespace p2original::captain;
 using namespace p2original::captain::actions;
 class Piki{};
 namespace {
-Navi navis[2];std::string raw;std::vector<int> keys;unsigned flying=0,throws=0,calls=0,stops=0,automaticUpdates=0;bool provider=true,knuckles=true,motionAvailable=true;unsigned assists=0;
+Navi navis[2];std::string raw;std::vector<int> keys;unsigned advances=0;unsigned flying=0,throws=0,calls=0,stops=0,automaticUpdates=0;bool provider=true,knuckles=true,motionAvailable=true;unsigned assists=0;
 struct Scene:LoadedScene,World {
  std::string campaign="source-campaign",fingerprint="selected-source-session",catalog="source-catalog";std::uint64_t epoch=1;
  const std::string& selectedCampaign()const override{return campaign;}const std::string& selectedFingerprint()const override{return fingerprint;}const std::string& sourceCatalog()const override{return catalog;}
@@ -50,7 +50,7 @@ struct SourceBank::Impl {std::unordered_map<const Navi*,MotionState> states;};
 SourceBank::SourceBank():m(new Impl){}SourceBank::~SourceBank()=default;
 bool SourceBank::start(Navi* n,Motion motion,std::string&){auto& s=m->states[n];s.motion=motion;++s.generation;return true;}
 bool SourceBank::state(const Navi* n,MotionState& state,std::string&)const{auto it=m->states.find(n);if(it==m->states.end())return false;state=it->second;return true;}
-bool SourceBank::advance(Navi* n,float,const std::function<bool(int)>& emit,std::string&){auto generation=m->states[n].generation;auto pendingKeys=keys;keys.clear();for(int key:pendingKeys){if(!emit(key)||m->states[n].generation!=generation)break;}return true;}
+bool SourceBank::advance(Navi* n,float,const std::function<bool(int)>& emit,std::string&){++advances;auto generation=m->states[n].generation;auto pendingKeys=keys;keys.clear();for(int key:pendingKeys){if(!emit(key)||m->states[n].generation!=generation)break;}return true;}
 bool NativeState::sourceAlive(const Navi&)const{return true;}std::optional<std::uint8_t> NativeState::actorInvincibleFrames(const Navi&)const{return 0;}
 bool NativeState::canEnterSourceDead(const Navi&)const{return true;}void NativeState::enterSourceDead(Navi&){}void NativeState::sourceDamageFeedback(Navi&){}
 bool NativeState::canEnterSourceDamaged(const Navi&)const{return true;}void NativeState::enterSourceDamaged(Navi&,float){}
@@ -102,7 +102,8 @@ int main(){
  punchProvider.flag=punch::RedPikminFlag::Met;motionAvailable=false;assert(!pc_p2_original_captain_punch_preflight(&navis[0],e));motionAvailable=true;
  assert(!punch::begin(&navis[0],false,StateId::Dead,e));
  enter();assert(motion()==Motion::Punch);assert(!navis[0].current->invincible(&navis[0]));
- punchProvider.flag=punch::RedPikminFlag::NotMet;animate({2});assert(punchProvider.attacks==0);
+ punchProvider.flag=punch::RedPikminFlag::NotMet;auto* punchState=dynamic_cast<NativeState*>(navis[0].current);assert(punchState);unsigned before=advances;
+ assert(punchState->sourceAnimationKey(&navis[0],2,e)&&e.empty());assert(advances==before&&punchProvider.attacks==0);
  punchProvider.flag=punch::RedPikminFlag::Met;punchProvider.accepted=false;animate({2});assert(punchProvider.attacks==1&&punchProvider.hits==0&&assists==0);
  punchProvider.accepted=true;animate({2});assert(punchProvider.attacks==2&&punchProvider.damage==7.5f&&punchProvider.hits==1&&assists==1);
  assert(punchProvider.sphere.center.x==0&&punchProvider.sphere.center.y==20&&punchProvider.sphere.center.z==15&&punchProvider.sphere.radius==20);

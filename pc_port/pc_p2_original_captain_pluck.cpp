@@ -58,6 +58,13 @@ protected:
  bool exit(Navi* n,bool notNew){return require(following?owner.p->follow(*n,notNew,error):pc_p2_original_captain_transit(n,StateId::Walk,error));}
 public:
  explicit PluckState(StateId id):NativeState(id){}bool sourceInvincible()const override{return false;}
+ bool sourceAnimationKey(Navi* n,int event,std::string& e)override{
+  if(!live(n)){e=error.empty()?"source pluck key actor/state is not current":error;return false;}
+  error.clear();bool result=key(n,event);
+  if(n->getCurrState()!=static_cast<NaviState*>(this)){e.clear();return false;}
+  if(!result||!enabled||!live(n)){e=error.empty()?"source pluck key operation refused":error;return false;}
+  e.clear();return true;
+ }
  virtual bool key(Navi*,int){return true;}
  bool advance(Navi* n,float frames,std::string& e){
   if(!live(n)){e=error;return false;}

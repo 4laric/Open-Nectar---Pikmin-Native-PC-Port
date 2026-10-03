@@ -14,7 +14,7 @@ using namespace p2original::captain;
 using namespace p2original::captain::actions;
 class Piki{};
 namespace {
-Navi navis[2];Piki pikis[2];std::string raw;std::vector<int> keys,boundKeys;unsigned boundAdvances=0;unsigned flying=0,throws=0,calls=0,stops=0,automaticUpdates=0;bool provider=true,motionAvailable=true;
+Navi navis[2];Piki pikis[2];std::string raw;std::vector<int> keys,boundKeys;unsigned boundAdvances=0,allAdvances=0;unsigned flying=0,throws=0,calls=0,stops=0,automaticUpdates=0;bool provider=true,motionAvailable=true;
 struct Scene:LoadedScene,World {
  std::string campaign="source-campaign",fingerprint="selected-source-session",catalog="source-catalog";std::uint64_t epoch=1;
  const std::string& selectedCampaign()const override{return campaign;}const std::string& selectedFingerprint()const override{return fingerprint;}const std::string& sourceCatalog()const override{return catalog;}
@@ -52,7 +52,7 @@ SourceBank::SourceBank():m(new Impl){}SourceBank::~SourceBank()=default;
 bool SourceBank::start(Navi* n,Motion motion,std::string&){for(unsigned c=0;c<2;++c){auto& s=m->states[n].state[c];s.motion=motion;++s.generation;m->states[n].listener[c]=c?Listener::None:Listener::SourceActor;}return true;}
 bool SourceBank::state(const Navi* n,MotionState& out,std::string& e)const{return stateAnimator(n,Animator::Self,out,e);}
 bool SourceBank::stateAnimator(const Navi* n,Animator channel,MotionState& out,std::string&)const{auto it=m->states.find(n);if(it==m->states.end())return false;out=it->second.state[unsigned(channel)];return true;}
-bool SourceBank::advanceAnimator(Navi* n,Animator channel,float,const std::function<bool(int)>& emit,std::string&){unsigned c=unsigned(channel);if(c)++boundAdvances;auto generation=m->states[n].state[c].generation;auto pendingKeys=c?boundKeys:keys;(c?boundKeys:keys).clear();for(int key:pendingKeys){bool keep=m->states[n].listener[c]==Listener::None||emit(key);if(!keep||m->states[n].state[c].generation!=generation)break;}return true;}
+bool SourceBank::advanceAnimator(Navi* n,Animator channel,float,const std::function<bool(int)>& emit,std::string&){unsigned c=unsigned(channel);++allAdvances;if(c)++boundAdvances;auto generation=m->states[n].state[c].generation;auto pendingKeys=c?boundKeys:keys;(c?boundKeys:keys).clear();for(int key:pendingKeys){bool keep=m->states[n].listener[c]==Listener::None||emit(key);if(!keep||m->states[n].state[c].generation!=generation)break;}return true;}
 bool NativeState::sourceAlive(const Navi&)const{return true;}std::optional<std::uint8_t> NativeState::actorInvincibleFrames(const Navi&)const{return 0;}
 bool NativeState::canEnterSourceDead(const Navi&)const{return true;}void NativeState::enterSourceDead(Navi&){}void NativeState::sourceDamageFeedback(Navi&){}
 bool NativeState::canEnterSourceDamaged(const Navi&)const{return true;}void NativeState::enterSourceDamaged(Navi&,float){}
@@ -113,10 +113,12 @@ int main(int argc,char** argv){
  assert(!pluck::beginAdjust(&navis[0],{},false,e));
  auto stale=pluckProvider.hf[0].handle;++stale.lifetime;assert(!pluck::beginAdjust(&navis[0],stale,false,e));
  adjust();unsigned previousBound=boundAdvances;boundKeys={2,1000};animate({2});assert(boundAdvances==previousBound+1);assert(pluckProvider.mass[0]==0&&!pluckProvider.rotation[0]);navis[0].current->exec(&navis[0]);assert(pluckProvider.births==1&&pluckProvider.kills==1&&pluckProvider.nukares==1&&!pluckProvider.already);assert(fsms[0].last==nativeId(StateId::Nuku)&&motion()==Motion::Nuku&&pluckProvider.rotation[0]&&navis[0].current->invincible(&navis[0]));
- animate({2});assert(pluckProvider.pullout==0); // exact source p042=0 wraps u16 to 65535
+ auto* nukuState=dynamic_cast<NativeState*>(navis[0].current);assert(nukuState);unsigned before=allAdvances;
+ assert(nukuState->sourceAnimationKey(&navis[0],2,e)&&e.empty());assert(allAdvances==before&&pluckProvider.pullout==0); // exact source p042=0 wraps u16 to 65535
  source.frames[0].heldA=true;navis[0].current->exec(&navis[0]);source.frames[0].heldA=false;navis[0].current->exec(&navis[0]);assert(pluckProvider.bodies[0].pluckingCounter==1);
  navis[0].current->exec(&navis[0]);assert(pluckProvider.bodies[0].pluckingCounter==2); // literal source increments on every released-A exec
- previousBound=boundAdvances;animate({1000});assert(boundAdvances==previousBound);assert(fsms[0].last==nativeId(StateId::Walk)&&pluckProvider.mass[0]==1&&pluckProvider.disable==1&&pluckProvider.bodies[0].pluckingCounter==0);
+ previousBound=boundAdvances;assert(!nukuState->sourceAnimationKey(&navis[0],1000,e)&&e.empty());assert(boundAdvances==previousBound);
+ assert(!nukuState->sourceAnimationKey(&navis[0],2,e)&&!e.empty());assert(fsms[0].last==nativeId(StateId::Walk)&&pluckProvider.mass[0]==1&&pluckProvider.disable==1&&pluckProvider.bodies[0].pluckingCounter==0);
  pluckProvider.bodies[0].pluckingCounter=1;nuku();assert(motion()==Motion::Nuku3);animate({1000});assert(pluckProvider.bodies[0].pluckingCounter==0);
  nuku(0,true);source.frames[0].heldA=true;navis[0].current->exec(&navis[0]);assert(pluckProvider.bodies[0].pluckingCounter==0);animate({1000});assert(fsms[0].last==nativeId(StateId::Follow)&&pluckProvider.notNew);
  pluckProvider.hf[0].alive=true;source.frames[0].heldA=false;pluckProvider.capacity=false;adjust();navis[0].current->exec(&navis[0]);assert(fsms[0].last==nativeId(StateId::Walk)&&pluckProvider.kills==1);pluckProvider.capacity=true;
