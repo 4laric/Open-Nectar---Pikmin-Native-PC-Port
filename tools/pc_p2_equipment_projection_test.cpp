@@ -13,9 +13,11 @@ int main() {
     // Asset/fixture/AP receipts cannot turn on original campaign equipment.
     accepted={"map01","map02","key","suit_powerup","dashboots","fue_wide"};
     assert(!pc_p2_equipment_has(SphericalAtlas));
+    assert(pc_p2_equipment_courses()==0);
     assert(pc_p2_equipment_damage(12)==12&&pc_p2_equipment_speed(160)==160&&pc_p2_equipment_whistle(100)==100);
     pc_p2_equipment_reconcile_courses();assert(gameflow.mPlayState.opened==1);
     original=true;
+    assert(pc_p2_equipment_courses()==7);
     pc_p2_equipment_reconcile_courses();assert(gameflow.mPlayState.opened==7);
     pc_p2_equipment_reconcile_courses();assert(gameflow.mPlayState.opened==7);
     assert(!pc_p2_equipment_has(TheKey));
@@ -23,9 +25,11 @@ int main() {
     // Actual selected-card restore replaces receipt authority. Queries must
     // immediately reflect rollback; no cached acquired bits or event replay.
     accepted.clear();gameflow.mPlayState.opened=1;
+    assert(pc_p2_equipment_courses()==1);
     pc_p2_equipment_reconcile_courses();assert(gameflow.mPlayState.opened==1);
     assert(!pc_p2_equipment_has(JusticeAlloy)&&pc_p2_equipment_damage(12)==12);
     accepted={"map02","fue_b","suit_fire","fue_pullout"};
+    assert(pc_p2_equipment_courses()==5);
     assert(pc_p2_equipment_has(DreamMaterial)&&pc_p2_equipment_has(ForgedCourage)&&pc_p2_equipment_has(ProfessionalNoisemaker));
     pc_p2_equipment_reconcile_courses();assert(gameflow.mPlayState.opened==5);
 }
