@@ -12,6 +12,7 @@
 #include "GameStat.h"
 #include "AIConstant.h"
 #include "ItemMgr.h"
+#include "Generator.h"
 #include "pc_p2_original_piki_init.h"
 #include "pc_p2_original_piki_native.h"
 #include "pc_p2_original_progress.h"
@@ -56,6 +57,12 @@ void run(){
  require(p2original::readPikiActive(readFile(root+"/tutorial.p2pa"),atlas,"tutorial",5,active,e)&&active.size()==6,"actual six selected Piki sources");
  require(field()==20&&GameStat::mapPikis==20,"native baseline20");auto* ordinary=pikiMgr->birth();require(!ordinary,"ordinary Flarliccap20 retained");
  pc_p2_original_piki_register();
+ auto* factory=GenObjectFactory::factory;
+ require(factory&&factory->mMaxSpawners>=15&&factory->mSpawnerCount<=factory->mMaxSpawners,"initialized factory capacity includes all legacy and typed kinds");
+ for(u32 kind:{0x70696b69u,0x61637472u,0x6974656du,0x6d706172u,0x6e617669u,0x70656c74u,0x706c6e74u,0x776f726bu,0x74656b69u,0x626f7373u,0x6d6f626au,0x64656267u,0x70326f67u,0x70326f6eu,0x70327069u}){
+  unsigned matches=0;for(int i=0;i<factory->mSpawnerCount;++i)if(factory->mSpawnerInfo[i].mID==kind)++matches;
+  require(matches==1,"every legacy and typed generator kind registered exactly once");
+ }
  for(unsigned visit=0;visit<2;++visit){
   require(pc_p2_original_piki_install(atlas,active,e),"install immutable atlas and paired recruitment before native read");
   std::vector<std::unique_ptr<Generator>> owned;std::vector<Generator*> inventory;
