@@ -10,3 +10,6 @@ bool pc_p2_hanachirashi_flick_navi(BTeki*, Navi*);
 // on the Koke END event. Angle below -10 uses the receiver facing.
 bool pc_p2_source_flick_piki(BTeki*, Piki*, float knockback, float angle);
 bool pc_p2_source_flick_navi(BTeki*, Navi*, float knockback, float damage, float angle);
+// Retail InteractFlick rejects Flick/Panic but permits the Blow state that
+// its previous acceptance entered. Keep native state IDs outside this policy.
+constexpr bool pc_p2_source_flick_reaction_blocked(int current,int flick,int panic){return current==flick||current==panic;}

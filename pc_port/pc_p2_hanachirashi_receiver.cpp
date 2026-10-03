@@ -90,8 +90,9 @@ struct WindInteraction : Interaction {
         if(!p->isAlive()||p->isStickToMouth())return false;
         const int id=p->getState();
         if(id==PIKISTATE_Pressed||id==PIKISTATE_Swallowed||id==PIKISTATE_Dying||id==PIKISTATE_Dead)return false;
-        if(!wither&&(id==PIKISTATE_Flick||id==PIKISTATE_Panic))return false;
-        if(!wither&&id==PIKISTATE_HanachirashiBlow&&!static_cast<WindPikiState*>(p->getCurrState())->wither)return false;
+        // The shared custom state represents retail Blow, not Flick. A second
+        // sticker/nearby-pass acceptance must consume its own source RNG.
+        if(!wither&&pc_p2_source_flick_reaction_blocked(id,PIKISTATE_Flick,PIKISTATE_Panic))return false;
         if(wither&&p->mP2Purple){p->mHappa=Leaf;p->setFlower(Leaf);return false;}
         pikiPending[p]={generated?flickDirection(knockback,angle< -10?p->mFaceDirection:angle):direction,mOwner,wither,0};p->mFSM->transit(p,PIKISTATE_HanachirashiBlow);return true;
     }
