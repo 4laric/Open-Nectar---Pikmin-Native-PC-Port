@@ -53,7 +53,9 @@ Additional targets are `p2_original_resource_state_policy`,
 `p2_original_resource_save_policy`, `p2_original_wisp_clock_policy`,
 `p2_original_egg_snapshot_policy`, `p2_original_wisp_snapshot_policy`,
 `p2_original_honey_policy`, `p2_original_honey_bank_policy`, and
-`p2_original_contents_save_policy` (14 policy targets total).
+`p2_original_contents_save_policy`, `p2_original_egg_save_policy`,
+`p2_original_wisp_save_policy`, and `p2_original_honey_save_policy`
+(17 policy targets total).
 Record exact source pin, output directory,
 executable SHA256, build log and a no-work Ninja dry run.
 
@@ -90,10 +92,23 @@ Receiver clips are Piki MIZUNOMI[0], GROWUP1[1], GROWUP2[2], Navi MIZUNOMI[3].
 Navi's original archive/animation manager aliases the Piki source. Use the same
 authoritative ResourceState for spray production, absorption and use (#142).
 
+Pure Egg P2OE1 and Wisp P2OW1 codecs bind their envelope to the actual campaign
+SHA while retaining each source catalog fingerprint independently. Native
+preflight still validates the actual incarnation, bank and captured-body graph.
+Honey P2OHONEY1 list encoding requires complete coverage of the explicitly
+course-local EggContents born-Honey journal, matching type/consumption, plus the
+actual SourceBank fingerprint and seven clocks returned by sourceClocks. Restore
+accepts neither missing live bodies nor fabricated terminal receipts. The SAVE
+owner embeds these bytes in its selected-card generation and adopts the whole
+physical graph transaction; these producers never write their own save files.
+
 Private staging tools validate retail receipts before writing destination files:
 stage_original_egg_resources.py, stage_original_wisp_resources.py and
 stage_original_honey_resources.py. Retail assets remain private under output.
-Policy/native object logs for this producer are original-resources-1252-*-05/04.
+Policy/native object logs for the latest codec producer are
+original-resources-1252-policy-build08.log, policy-ctest08.log and
+native-object08.log. The initial harness link failed for a missing test helper
+dependency (build07); the log is preserved and the dependency is corrected.
 The runner's earlier 77bf5bd build linked and passed six policies, but its worker
 exited failed after looking for the executable at the wrong path. Metadata-only
 verification found build/bin/nectar; failure logs remain preserved. That binary
