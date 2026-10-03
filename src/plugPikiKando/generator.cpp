@@ -1,4 +1,5 @@
 #include "pc_p2_surface_save.h"
+#include "pc_p2_authored_cave_campaign.h"
 #include "Generator.h"
 #include "Age.h"
 #include "DebugLog.h"
@@ -673,7 +674,7 @@ void Generator::init()
 	}
 
 #if defined(PIKI_PC_PORT) && PIKI_PC_PORT
-    if (ramMode && pc_p2_surface_save_living_scene() && (mCarryOverFlags & GENCARRY_SaveCreature)) {
+    if (ramMode && (pc_p2_surface_save_living_scene()||pc_p2_cave_campaign_owns_heads()) && (mCarryOverFlags & GENCARRY_SaveCreature)) {
         // The authenticated living card's creature record is the sole birth
         // authority. loadCreature increments this count after restoring it;
         // count-based births here would duplicate the exact saved actor.
@@ -683,7 +684,7 @@ void Generator::init()
 #endif
 
 	if (ramMode && (mCarryOverFlags & GENCARRY_SaveSpawnCount)) {
-		if (!pc_p2_surface_save_living_scene() && gameflow.mWorldClock.mCurrentDay >= mLatestSpawnDay + mRespawnInterval) {
+        if (!pc_p2_surface_save_living_scene() && !pc_p2_cave_campaign_owns_heads() && gameflow.mWorldClock.mCurrentDay >= mLatestSpawnDay + mRespawnInterval) {
 			// we're due to respawn afresh.
 			PRINT("****** RESET DAY (curr=%d / save=%d interval=%d)\n", gameflow.mWorldClock.mCurrentDay, mLatestSpawnDay,
 			      mRespawnInterval);
@@ -905,6 +906,13 @@ void Generator::read(RandomAccessStream& input)
 	STACK_PAD_TERNARY(this, 5);
 	STACK_PAD_INLINE(3);
 #if defined(PIKI_PC_PORT)
+    if(ramMode&&pc_randomizer_authored_piki_cache_active()&&mGenObject&&mGenObject->mID=='piki'){
+        if(input.getPending()<12||input.readInt()!=0x41504731)pc_randomizer_bad_spawn_cache();
+        const auto stableUid=static_cast<unsigned>(input.readInt());
+        const auto sourceUid=static_cast<unsigned>(input.readInt());
+        if(!pc_randomizer_authored_piki_restore_generator(this,stableUid,sourceUid))pc_randomizer_bad_spawn_cache();
+        _70=sourceUid;
+    }
     if (ramMode && (pc_randomizer_spawn_slots() || pc_randomizer_p2_bridge()) && mGenObject && (mGenObject->mID == 'teki' || mGenObject->mID == 'boss')) {
         if (input.getPending() < 12 || input.readInt() != 0x534c5431) pc_randomizer_bad_spawn_cache();
         pc_randomizer_set_generator_id(this, static_cast<unsigned>(input.readInt()));
@@ -990,6 +998,11 @@ void Generator::write(RandomAccessStream& output)
 		output.writeInt(0);
 	}
 #if defined(PIKI_PC_PORT)
+    if(ramMode&&pc_randomizer_authored_piki_cache_active()&&mGenObject&&mGenObject->mID=='piki'){
+        const auto stableUid=pc_randomizer_generator_id(this);
+        if(!pc_randomizer_authored_piki_restore_generator(this,stableUid,_70))pc_randomizer_bad_spawn_cache();
+        output.writeInt(0x41504731);output.writeInt(static_cast<int>(stableUid));output.writeInt(static_cast<int>(_70));
+    }
     if (ramMode && (pc_randomizer_spawn_slots() || pc_randomizer_p2_bridge()) && mGenObject && (mGenObject->mID == 'teki' || mGenObject->mID == 'boss')) {
         output.writeInt(0x534c5431);
         output.writeInt(static_cast<int>(pc_randomizer_generator_id(this)));
@@ -1081,7 +1094,7 @@ void GeneratorMgr::render(Graphics& gfx)
 /**
  * @todo: Documentation
  */
-void GeneratorMgr::read(RandomAccessStream& input, bool p2)
+void GeneratorMgr::read(RandomAccessStream& input, bool p2, bool onlyNonpersistent)
 {
 	if (mGenListHead) {
 		delete mGenListHead;
@@ -1141,33 +1154,35 @@ void GeneratorMgr::read(RandomAccessStream& input, bool p2)
         else std::snprintf(sourceFile, sizeof(sourceFile), "%s", mName);
     }
 #endif
-	for (int i = 0; i < mGenCount; i++) {
+    const int sourceCount = mGenCount;
+    mGenCount = 0;
+    Generator* tail = nullptr;
+    for (int i = 0; i < sourceCount; i++) {
         const int sourceOffset = input.getPosition();
-		if (!mGenListHead) {
-			mGenListHead = new Generator();
-			mGenListHead->read(input);
+        Generator* gen = new Generator();
+        gen->read(input);
+        // Cached generators remain the sole authority for persistent actors.
+        // Read the complete literal record before filtering, retaining its
+        // original source offset for every admitted nonpersistent generator.
+        if (onlyNonpersistent && (gen->mCarryOverFlags & GENCARRY_SaveGenerator)) {
+            delete gen;
+            continue;
+        }
 #if defined(PIKI_PC_PORT)
-            if (!Generator::ramMode && flowCont.mCurrentStage) pc_randomizer_bind_generator(mGenListHead, flowCont.mCurrentStage->mStageID, sourceFile, sourceOffset, mGenListHead->_70);
+        if (!Generator::ramMode && flowCont.mCurrentStage)
+            pc_randomizer_bind_generator(gen, flowCont.mCurrentStage->mStageID, sourceFile, sourceOffset, gen->_70);
 #endif
-			mGenListHead->mMgr = this;
-			generatorList->mGenListHead->add(mGenListHead);
-		} else {
-			Generator* newGen = new Generator();
-			newGen->mMgr      = this;
-			newGen->read(input);
-#if defined(PIKI_PC_PORT)
-            if (!Generator::ramMode && flowCont.mCurrentStage) pc_randomizer_bind_generator(newGen, flowCont.mCurrentStage->mStageID, sourceFile, sourceOffset, newGen->_70);
-#endif
-
-			Generator* endList = mGenListHead;
-			for (endList; endList->mNextGenerator; endList = endList->mNextGenerator) {
-				;
-			}
-			endList->mNextGenerator = newGen;
-			newGen->mPrevGenerator  = endList;
-			generatorList->mGenListHead->add(newGen);
-		}
-	}
+        gen->mMgr = this;
+        if (tail) {
+            tail->mNextGenerator = gen;
+            gen->mPrevGenerator = tail;
+        } else {
+            mGenListHead = gen;
+        }
+        tail = gen;
+        generatorList->mGenListHead->add(gen);
+        ++mGenCount;
+    }
 
 #if defined(PIKI_PC_PORT)
 	int recognised = 0;
@@ -1290,7 +1305,10 @@ Creature* GenObjectPiki::birth(BirthInfo& info)
 	}
 	}
 
-	return piki;
+#if defined(PIKI_PC_PORT)
+    if(piki&&(mSpawnState()==1||mSpawnState()==2))pc_p2_authored_piki_birth(static_cast<Piki*>(piki),info.mGenerator);
+#endif
+    return piki;
 }
 
 /**

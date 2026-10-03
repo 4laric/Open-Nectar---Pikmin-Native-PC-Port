@@ -1,5 +1,6 @@
 #pragma once
 #include "pc_p2_surface_session.h"
+#include "pc_p2_authored_cave_session.h"
 #include "pc_p2_original_calendar.h"
 
 #include "netplay/pc_netplay_randstate.h"
@@ -8,6 +9,11 @@
 struct P2CaveCacheBanks;
 const P2CaveCacheBanks& pc_randomizer_generated_cave_cache();
 void pc_randomizer_generated_cave_cache_set(const P2CaveCacheBanks& banks);
+// Explicit bootstrap-selected authored route; no retail context admission.
+const P2AuthoredCaveRoute& pc_randomizer_authored_cave_route();
+const P2AuthoredCaveSession& pc_randomizer_authored_cave_session();
+bool pc_randomizer_authored_cave_session_set(const P2AuthoredCaveSession&);
+bool pc_randomizer_authored_cave_checkpoint_set(const P2AuthoredCaveSession&,const P2CaveCacheBanks&);
 
 // Seed-owned generated cave transport; absent for every historical seed.
 bool pc_randomizer_generated_cave();
@@ -133,6 +139,8 @@ bool pc_randomizer_p2_bound(unsigned source_id);
 // uid, not Generator::_70.
 unsigned pc_randomizer_p2_source_for_id(unsigned long generator_id);
 unsigned pc_randomizer_generator_id(const void* generator);
+bool pc_randomizer_authored_piki_cache_active();
+bool pc_randomizer_authored_piki_restore_generator(const void*,unsigned uid,unsigned sourceUid);
 void pc_randomizer_set_generator_id(const void* generator, unsigned uid);
 // Dev console (#942): register a runtime generator under a synthetic dev
 // target uid that is not in the spawn-slot catalogue. Only the dev console

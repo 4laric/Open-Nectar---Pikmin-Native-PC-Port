@@ -1,4 +1,5 @@
 #include "pc_p2_cave.h"
+#include "pc_p2_authored_cave_campaign.h"
 #include "pc_p2_cave_visible.h"
 #include "pc_p2_cave_generate.h"
 #include "pc_p2_cave_nav_diagnostics.h"
@@ -327,7 +328,7 @@ bool writeTransfer(const std::string& text){
     return ok && std::rename("p2-cave-transfer.tmp","p2-cave-transfer.txt")==0;
 }
 }
-int pc_p2_cave_floor(){return floorId;}
+int pc_p2_cave_floor(){return pc_randomizer_authored_cave_route().present?pc_p2_cave_campaign_floor():floorId;}
 bool pc_p2_cave_surface_route_active(){return surfaceRouteLoaded && tutorialSurfaceStage() && pc_p2_scene_generation()==surfaceContextScene;}
 bool pc_p2_cave_route_species_requested(int species){
     if(completed || online() || !tutorialSurfaceStage()
@@ -347,7 +348,7 @@ bool pc_p2_cave_body_profile_context(unsigned long long seed,const std::string& 
         && pc_p2_purples_enabled() && pc_p2_whites_enabled();
 }
 bool pc_p2_cave_is_beasts(){return beasts;}
-std::string pc_p2_cave_boundary_token(){return token;}
+std::string pc_p2_cave_boundary_token(){return pc_randomizer_authored_cave_route().present?pc_p2_cave_campaign_token():token;}
 std::string pc_p2_cave_receipt_prefix(){return floorId?"floor"+std::to_string(floorId)+":":"";}
 // Non-aborting entry-header validator (external linkage for the fixture;
 // defined at file scope outside the anonymous namespace). C stdio only
@@ -376,6 +377,7 @@ bool pc_p2_tutorial2_entry_check(const char* path, int* floorOut){
     return ok!=0;
 }
 void pc_p2_cave_setup(){
+    if(pc_randomizer_authored_cave_route().present)return;
     bodyContextReady=false;bodyContextScene=0;
     resetRouteSpecies();surfaceContextScene=pc_p2_scene_generation();
     surfaceRoute=P2CaveSurfaceRoute{};surfaceRouteLoaded=false;surfaceWfgDestination=false;
@@ -636,6 +638,7 @@ bool pc_p2_cave_exit_after_checkpoint(){
     std::fflush(nullptr);std::_Exit(42);
 }
 void pc_p2_cave_tick(){
+    if(pc_randomizer_authored_cave_route().present)return;
     loadSurfaceRoute();
     if(surfaceRouteLoaded){
         const bool attempt=requested;requested=false;

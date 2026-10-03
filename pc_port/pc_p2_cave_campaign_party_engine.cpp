@@ -1,4 +1,6 @@
 #include "pc_p2_cave_campaign_party_engine.h"
+#include "pc_p2_authored_cave_campaign.h"
+#include "pc_p2_authored_piki_catalog.h"
 #include "pc_p2_species.h"
 #include "pc_p2_original_piki_origin.h"
 #include "pc_p2_original_number_native.h"
@@ -6,6 +8,10 @@
 #if __has_include("pc_p2_original_sprout_native.h")
 #include "pc_p2_original_sprout_native.h"
 #define PC_P2_PARTY_SOURCE_SPROUT_PROVIDER 1
+#endif
+#if __has_include("pc_p2_sprays.h")
+#include "pc_p2_sprays.h"
+#define PC_P2_PARTY_SPICY_PROVIDER 1
 #endif
 #include "pc_p2_purple.h"
 #include "pc_p2_white.h"
@@ -68,6 +74,13 @@ bool pc_p2_cave_campaign_party_capture(P2CaveCampaignParty& party,bool inside){
             return held("invalid_captain_fields");}}
     Iterator bodies(pikiMgr);CI_LOOP(bodies){Piki* p=static_cast<Piki*>(*bodies);
         if(!p->isAlive())continue;
+#if defined(PC_P2_PARTY_SPICY_PROVIDER)
+        float spicyRemaining;bool pendingDope;
+        if(!pc_p2_spicy_save_observation(p,spicyRemaining,pendingDope))return held("invalid_spicy_snapshot");
+        if(pendingDope)return held("spicy_pending_dope");
+        // Party3 has neither the effect timer nor the pending receiver codec.
+        if(spicyRemaining>0)return held("spicy_remaining_requires_graph");
+#endif
         PcP2SourceBody typed;
         const auto kind=pc_p2_source_body_query(p,typed);
         // Party3 cannot represent conversion/Onyon ancestry or an expired
@@ -85,7 +98,14 @@ bool pc_p2_cave_campaign_party_capture(P2CaveCampaignParty& party,bool inside){
                 b.sourceKey=association->second.sourceKey;b.sourceRecord=association->second.sourceRecord;
                 b.catalogFingerprint=association->second.catalogFingerprint;
                 b.sourceAttempt=association->second.sourceAttempt;b.sourceActivation=association->second.sourceActivation;}
-            if(p->mGenerator){b.originGenerator=pc_randomizer_generator_id(p->mGenerator);
+            if(p->mGenerator){
+                std::uint32_t authoredUid=0;P2CavePartyPoint birthPoint;
+                b.originGenerator=pc_randomizer_generator_id(p->mGenerator);
+                if(pc_p2_authored_piki_catalog_contains(pc_randomizer_authored_cave_route(),b.originGenerator)){
+                    if(!pc_p2_authored_piki_origin(p,authoredUid,birthPoint)||authoredUid!=b.originGenerator)
+                        return held("unresolved_authored_birth");
+                    b.originPosition=birthPoint;
+                }
                 if(!b.originGenerator)return held("unresolved_generator_id");}}
         b.species=pc_p2_species(p);b.growth=p->mHappa;
         OriginalPikiBody canonical;
@@ -128,7 +148,7 @@ bool pc_p2_cave_campaign_party_capture(P2CaveCampaignParty& party,bool inside){
     if(!captured.valid())return held("invalid_party_relationships");
     party=std::move(captured);provenance=std::move(nextProvenance);return true;
 }
-void pc_p2_cave_campaign_party_forget(Piki* body){provenance.erase(body);birthOrigins.erase(body);pc_p2_original_piki_origin_forget(body);}
+void pc_p2_cave_campaign_party_forget(Piki* body){provenance.erase(body);birthOrigins.erase(body);pc_p2_authored_piki_forget(body);pc_p2_original_piki_origin_forget(body);}
 void pc_p2_cave_campaign_party_scene_exit(){for(const auto& entry:provenance)pc_p2_original_piki_origin_forget(entry.first);
     for(const auto& entry:birthOrigins)pc_p2_original_piki_origin_forget(entry.first);
     provenance.clear();birthOrigins.clear();}
@@ -161,7 +181,9 @@ void pc_p2_cave_campaign_party_restore(const P2CaveCampaignParty& party){
             const auto& matchPosition=b.generator?b.originPosition:b.position;
             const auto source=birthOrigins.find(p);
             const bool identity=!b.sourceKey.empty()?b.originRealm==int(party.inside)
-                &&source!=birthOrigins.end()&&sameSource(b,source->second):uid==b.generator&&near(p->mSRT.t,matchPosition);
+                &&source!=birthOrigins.end()&&sameSource(b,source->second):
+                pc_p2_authored_piki_catalog_contains(pc_randomizer_authored_cave_route(),b.originGenerator)
+                    ?pc_p2_authored_piki_matches(p,b):(uid==b.generator&&near(p->mSRT.t,matchPosition));
             if(!used.count(p)&&identity){
                 if(matched[i])invalid("ambiguous cache body identity");matched[i]=p;}}
         if(matched[i])used.insert(matched[i]);}
@@ -171,7 +193,8 @@ void pc_p2_cave_campaign_party_restore(const P2CaveCampaignParty& party){
         const P2CavePartyBody* origin=nullptr;
         for(const auto& candidate:party.origins)if(candidate.originRealm==int(party.inside)
             &&(!candidate.sourceKey.empty()?source!=birthOrigins.end()&&sameSource(candidate,source->second):
-                candidate.originGenerator==uid&&near(p->mSRT.t,candidate.originPosition))){
+                pc_p2_authored_piki_catalog_contains(pc_randomizer_authored_cave_route(),candidate.originGenerator)
+                    ?pc_p2_authored_piki_matches(p,candidate):(candidate.originGenerator==uid&&near(p->mSRT.t,candidate.originPosition)))){
                 if(origin)invalid("ambiguous lost source member");origin=&candidate;}
         if(!origin)invalid("foreign cache body");
         for(const auto& survivor:party.bodies)if(survivor.key==origin->key)invalid("live member absent from source cache");

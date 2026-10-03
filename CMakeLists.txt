@@ -438,6 +438,9 @@ set(PC_PORT_SOURCES
     pc_port/pc_p2_original_throw.cpp
     pc_port/pc_p2_cave_campaign_party_engine.cpp
     pc_port/pc_p2_surface_save.cpp
+    pc_port/pc_p2_authored_cave_route.cpp
+    pc_port/pc_p2_authored_piki_catalog.cpp
+    pc_port/pc_p2_authored_cave_campaign.cpp
     pc_port/pc_p2_original_piki_physical.cpp
     pc_port/pc_p2_original_piki_recruit.cpp
     pc_port/pc_p2_bud_conversion_origin.cpp
@@ -941,7 +944,8 @@ else()
     endif()
 endif()
 target_compile_options(${NECTAR_GAME} PRIVATE ${NATIVE_COMPILE_OPTIONS})
-target_compile_definitions(${NECTAR_GAME} PRIVATE PIKMIN_P2_ORIGINAL_COURSE_PROVIDER=1)
+target_compile_definitions(${NECTAR_GAME} PRIVATE PIKMIN_P2_ORIGINAL_COURSE_PROVIDER=1
+    PIKMIN_P2_AUTHORED_CAVE_PROVIDER=1 PIKMIN_P2_CAVE_CAMPAIGN_PROVIDER=1)
 target_link_libraries(${NECTAR_GAME} PRIVATE ${NECTAR_LEGACY})
 # P2 fork targets (desktop only; the Android build is a shared library).
 if (NOT ANDROID)
@@ -1387,6 +1391,13 @@ elseif (WIN32)
     # stays windowed: it talks through native dialogs.
     target_link_options(${NECTAR_GAME} PRIVATE -mconsole)
     target_link_options(p2_kurage_runtime PRIVATE -mconsole)
+    if(MINGW)
+        # PE DLL-internal delete does not use the executable's sysNew override.
+        # Keep C++ allocation/deallocation in the same link unit so std::string
+        # growth cannot free a BootBlockHeader payload through the CRT heap.
+        target_link_options(${NECTAR_GAME} PRIVATE -static-libstdc++)
+        target_link_options(p2_kurage_runtime PRIVATE -static-libstdc++)
+    endif()
 endif()
 
 # Set output name
@@ -2685,6 +2696,15 @@ endif()
 # Include the P2 ordinary delivery ledger because pc_randomizer.cpp always links
 # against its host entry points; this only changes probe linkage, not behavior.
 add_executable(pc_randomizer_probe pc_port/pc_randomizer_probe.cpp pc_port/pc_randomizer.cpp pc_port/netplay/pc_netplay_randstate.cpp pc_port/pc_randomizer_outbox.cpp pc_port/pc_p2_delivery_host.cpp pc_port/pc_p2_proxy.cpp pc_port/pc_p2_original_progress.cpp pc_port/pc_p2_original_lifecycle.cpp)
+add_executable(p2_authored_cave_session_test tools/p2_authored_cave_session_test.cpp)
+target_include_directories(p2_authored_cave_session_test PRIVATE pc_port)
+target_compile_options(p2_authored_cave_session_test PRIVATE -UNDEBUG)
+add_test(NAME p2_authored_cave_session_test COMMAND p2_authored_cave_session_test)
+add_executable(p2_authored_checkpoint_test tools/p2_authored_checkpoint_test.cpp pc_port/pc_p2_authored_cave_route.cpp pc_port/pc_p2_authored_piki_catalog.cpp pc_port/netplay/pc_netplay_randstate.cpp pc_port/pc_randomizer_outbox.cpp pc_port/pc_p2_delivery_host.cpp pc_port/pc_p2_proxy.cpp pc_port/pc_p2_original_progress.cpp pc_port/pc_p2_original_lifecycle.cpp)
+target_include_directories(p2_authored_checkpoint_test PRIVATE pc_port)
+target_compile_options(p2_authored_checkpoint_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+target_link_libraries(p2_authored_checkpoint_test PRIVATE p2_retail_cave_catalog)
+add_test(NAME p2_authored_checkpoint_test COMMAND p2_authored_checkpoint_test "${CMAKE_CURRENT_BINARY_DIR}/authored-checkpoint-test-$<CONFIG>")
 target_compile_definitions(pc_randomizer_probe PRIVATE PC_RANDOMIZER_NO_ORIGINAL_ENGINE=1)
 # Same engine-header preinclude as pc_bbft_test above (pc_p2_proxy.cpp needs it).
 target_compile_options(pc_randomizer_probe PRIVATE ${NATIVE_COMPILE_OPTIONS})
@@ -3236,6 +3256,10 @@ pikmin_add_ci_fixture(captain_switch tools/p2_captain_switch_runtime.cpp)
 
 # #1154/#1161 ordinary natural WFG acquisition and cave party route; build only.
 pikmin_add_ci_fixture(cave_route tools/p2_cave_route_runtime.cpp)
+if(P2_CHALLENGE_GUARD_FOUND)
+    pikmin_add_ci_fixture(authored_cave tools/p2_authored_cave_runtime.cpp)
+    target_include_directories(pikmin_ci_fixture_authored_cave PRIVATE ${P2_CHALLENGE_GUARD_INCLUDE_DIR})
+endif()
 if(TARGET pikmin_ci_fixture_cave_route)
     target_include_directories(pikmin_ci_fixture_cave_route PRIVATE ${P2_CHALLENGE_GUARD_INCLUDE_DIR})
 endif()
