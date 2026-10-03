@@ -141,7 +141,7 @@ bool Native::prepare(std::string& e){if(!m->tracks.empty())return fail(e,"source
 bool Native::touched(Creature* plant,unsigned source,const Position& position,float height,std::string& e){unsigned actualSource=0,token=0;InstanceIdentity id;if(!m->registry.query(plant,actualSource,token,&id)||actualSource!=source||!token)return fail(e,"source77 touch lacks actual plant registry binding");Group result;if(!m->groups.touch(id,source,position,height,*m,result,e))return false;Identity leader{id,0,0};if(auto* t=m->member(leader))t->state.groupCount=int(result.sourceGroupCount);return true;}
 bool Native::owns(const Creature* actor)const{return m->tracks.count(const_cast<Creature*>(actor))!=0;}
 bool Native::captureGenPikiAttachments(Creature* actor,const AttachmentAuthority& authority,GenPikiStickerCapture& out,std::string& e)const{
-#if !defined(PIKMIN_ORIGINAL_SENTINEL_ATTACHMENTS)
+#if !defined(PIKMIN_ORIGINAL_SENTINEL_ATTACHMENTS) || !PIKMIN_ORIGINAL_SENTINEL_ATTACHMENTS
  (void)actor;(void)authority;(void)out;
  return fail(e,"source77 attachment consumer is not linked with actual party SDK owner");
 #else
