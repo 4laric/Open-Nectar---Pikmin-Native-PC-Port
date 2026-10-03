@@ -30,6 +30,9 @@ int main(){
  f.leaderPosition={430,0,0};check(p::followVelocity({0,0,0},f,160,velocity,tooFar,followError)&&!tooFar,"430 remains follow");
  f.leaderPosition={431,0,0};check(p::followVelocity({0,0,0},f,160,velocity,tooFar,followError)&&tooFar,"431 leaves follow");
  f.leaderPosition={0,0,100};f.leaderState=StateId::Throw;check(p::followVelocity({0,0,0},f,160,velocity,tooFar,followError)&&velocity.x>0,"authored81degree throw offset");
+ auto previous=velocity;f.leaderPosition.y=std::numeric_limits<float>::quiet_NaN();
+ check(!p::followVelocity({0,0,0},f,160,velocity,tooFar,followError)&&velocity.x==previous.x,"malformed live frame preserves output");
+ f.leaderPosition={0,0,100};f.plateRadius=-1;check(!p::followVelocity({0,0,0},f,160,velocity,tooFar,followError),"invalid actual plate observation");
  std::vector<p::Member> members;
  for(unsigned i=0;i<100;++i){p::Member m;m.handle={reinterpret_cast<Piki*>(std::uintptr_t(i+1)),1};m.position={100,float(i%2)*10,0};m.kind=i%8;m.alive=true;m.releasable=true;members.push_back(m);}
  std::array<p::Group,8> groups{};std::string error;

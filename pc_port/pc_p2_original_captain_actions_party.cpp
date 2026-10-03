@@ -60,6 +60,7 @@ bool followVelocity(Vec3 self,const FollowFrame& f,float speed,Vec3& out,bool& t
 #include "pc_p2_original_captain_motion.h"
 #include "Navi.h"
 #include "pc_p2_equipment.h"
+extern bool pc_p2_original_captain_motion_preflight(Navi*,unsigned,std::string&) __attribute__((weak));
 namespace p2original { namespace captain { namespace party {
 namespace {
 bool fail(std::string& e,const char* s){e=s;return false;}
@@ -67,7 +68,12 @@ PartySource* source(Navi* n,std::string& error){
  auto* p=pc_p2_original_captain_party_source(n);auto* scene=pc_p2_original_captain_loaded_scene();
  auto* world=pc_p2_original_captain_world();
  if(!n||!p||!scene||&p->scene()!=scene||!world||world->phase()!=Phase::GameWorldActive
-  ||world->incarnation()!=scene->incarnation()||(n!=scene->captainAt(0)&&n!=scene->captainAt(1))){fail(error,"missing actual source party scene/roster");return nullptr;}
+  ||!scene->incarnation()||scene->selectedCampaign().empty()||scene->selectedFingerprint().empty()||scene->sourceCatalog().empty()
+  ||world->incarnation()!=scene->incarnation()
+  ||world->selectedCampaign()!=scene->selectedCampaign()||world->selectedFingerprint()!=scene->selectedFingerprint()
+  ||world->sourceCatalog()!=scene->sourceCatalog()
+  ||!scene->captainAt(0)||!scene->captainAt(1)||scene->captainAt(0)==scene->captainAt(1)
+  ||(n!=scene->captainAt(0)&&n!=scene->captainAt(1))){fail(error,"missing actual source party scene/roster");return nullptr;}
  return const_cast<PartySource*>(p);
 }
 Navi* other(const PartySource& p,Navi* n){return p.scene().captainAt(p.scene().captainAt(0)==n?1:0);}
@@ -143,12 +149,13 @@ public:
   if(p){auto* source=const_cast<party::PartySource*>(p);if(isNew)source->followFeedback(*n,party::FollowFeedback::Alert,e);source->moveRotation(*n,true,e);}
  }
  bool assist(party::EnemyHandle enemy){if(mode_!=FollowMode::Normal&&mode_!=FollowMode::Idle)return false;enemy_=enemy;mode_=FollowMode::Punch;seek_=idle_=0;return true;}
- void sourceKey(Navi* n,int key){
-  std::string e;auto* p=pc_p2_original_captain_party_source(n);party::FollowFrame f;
-  if(key==1000){if(mode_==FollowMode::Alert){mode_=FollowMode::Normal;motion(n,30);}else if(mode_==FollowMode::Idle){idle_=0;mode_=FollowMode::Normal;motion(n,31);}}
+ bool sourceKey(Navi* n,int key,std::string& e){
+  auto* p=pc_p2_original_captain_party_source(n);party::FollowFrame f;
+  if(key==1000){if(mode_==FollowMode::Alert){mode_=FollowMode::Normal;if(!motion(n,30))return false;}else if(mode_==FollowMode::Idle){idle_=0;mode_=FollowMode::Normal;if(!motion(n,31))return false;}}
   auto* bank=pc_p2_original_captain_source_bank();MotionState state;
   if(p&&p->followFrame(*n,f,e)&&!f.frozen&&key==200&&bank&&bank->state(n,state,e)&&unsigned(state.motion)==50)
-   const_cast<party::PartySource*>(p)->followFeedback(*n,party::FollowFeedback::Land,e);
+   return const_cast<party::PartySource*>(p)->followFeedback(*n,party::FollowFeedback::Land,e);
+  return true;
  }
  void exec(Navi* n)override{
   std::string e;auto* raw=pc_p2_original_captain_party_source(n);
@@ -202,7 +209,7 @@ public:
   n->mTargetVelocity.set(0,0,0);
   if(finished_)pc_p2_original_captain_transit(n,StateId::Walk,e);
  }
- void sourceKey(Navi* n,int key){if(key==1000){finished_=true;std::string e;auto* b=pc_p2_original_captain_source_bank();if(b)b->start(n,Motion::Walk,e);}}
+ bool sourceKey(Navi* n,int key,std::string& e){if(key==1000){finished_=true;auto* b=pc_p2_original_captain_source_bank();return b&&b->start(n,Motion::Walk,e);}return true;}
 };
 }
 namespace party {
@@ -219,11 +226,60 @@ bool assistPunch(Navi* n,EnemyHandle enemy){auto* state=n?dynamic_cast<Follow*>(
 }
 void registerPartyStates(NaviStateMachine& fsm){fsm.registerState(new Change);fsm.registerState(new Follow);}
 bool partyKey(Navi* n,int key){
+ std::string e;return partyKey(n,key,e);
+}
+bool partyKey(Navi* n,int key,std::string& e){
  if(!n)return false;
  auto* change=dynamic_cast<Change*>(n->getCurrState());
- if(change){change->sourceKey(n,key);return true;}
+ if(change)return change->sourceKey(n,key,e);
  auto* follow=dynamic_cast<Follow*>(n->getCurrState());if(!follow)return false;
- follow->sourceKey(n,key);return true;
+ return follow->sourceKey(n,key,e);
 }
 } }
+bool pc_p2_original_captain_party_preflight(Navi* n,p2original::captain::StateId id,std::string& e){
+ using namespace p2original::captain;
+ if(id!=StateId::Follow&&id!=StateId::Change){e="not a source party state";return false;}
+ auto* p=party::source(n,e);if(!p)return false;
+ auto* bank=pc_p2_original_captain_source_bank();MotionState bound;
+ if(!bank||!bank->ready()||!bank->state(n,bound,e)){e="missing actual source party bank/roster binding";return false;}
+ bool registered=false;auto* machine=n->mStateMachine;
+ if(machine)for(int i=0;i<machine->mStateCount;++i){auto* s=machine->mStates[i];auto* typed=dynamic_cast<NativeState*>(s);if(s->getID()==nativeId(id)&&typed&&typed->sourceStateId()==id&&typed->nativeState()==s){registered=true;break;}}
+ if(!registered){e="missing registered native source party state";return false;}
+ party::WorldFacts w;party::CaptainFacts self,partner;actions::Vec3 pos,otherPos;
+ auto* other=party::other(*p,n);
+ if(!p->world(w,e)||!p->captain(*n,self,pos,e)||!other||!p->captain(*other,partner,otherPos,e)
+  ||!w.active||!self.alive||!party::finite(pos)||!party::finite(otherPos)){e="invalid source party actor/world observations";return false;}
+ bool selfAlive=false,partnerAlive=false;
+ if(!pc_p2_original_captain_actor_lifetime(n,selfAlive)||!pc_p2_original_captain_actor_lifetime(other,partnerAlive)
+  ||self.alive!=selfAlive||partner.alive!=partnerAlive){e="party observation differs from actual source actor lifetime";return false;}
+ if(!pc_p2_original_captain_motion_preflight){e="selected authored party motion query unavailable";return false;}
+ const unsigned clips[]={30,31,32,50,0,3,54};
+ unsigned count=id==StateId::Change?3:7;
+ for(unsigned i=0;i<count;++i)if(!pc_p2_original_captain_motion_preflight(n,clips[i],e))return false;
+ if(id==StateId::Follow){
+  auto* action=pc_p2_original_captain_action_source(n);party::FollowFrame f;actions::ActorFrame frame;
+  if(!action||&action->scene()!=&p->scene()||!action->frame(*n,frame,e)||!p->followFrame(*n,f,e)
+   ||!std::isfinite(f.sourceMoveSpeed)||f.sourceMoveSpeed<=0){e="missing actual source Follow control/body observation";return false;}
+  actions::Vec3 velocity;bool far;
+  if(!party::followVelocity(pos,f,f.sourceMoveSpeed,velocity,far,e))return false;
+ }
+ if(party::source(n,e)!=p||pc_p2_original_captain_source_bank()!=bank){e="party scene changed during preflight";return false;}
+ return true;
+}
+bool pc_p2_original_captain_party_advance_animation(Navi* n,float frames,std::string& e){
+ using namespace p2original::captain;
+ if(!n||!std::isfinite(frames)||frames<0){e="invalid source party animation advance";return false;}
+ auto* state=dynamic_cast<State*>(n->getCurrState());
+ if(!state||state->nativeState()!=n->getCurrState()
+  ||(state->sourceStateId()!=StateId::Follow&&state->sourceStateId()!=StateId::Change)){e="source party state is not current";return false;}
+ if(!pc_p2_original_captain_party_preflight(n,state->sourceStateId(),e))return false;
+ auto* bank=pc_p2_original_captain_source_bank();auto* exact=n->getCurrState();
+ return bank->advance(n,frames,[&](int key){
+  // Authored callbacks may transit; SourceBank generation rules terminate the
+  // old delivery. Never deliver another old-state key to a new native state.
+  if(n->getCurrState()!=exact)return true;
+  if(!party::source(n,e))return false;
+  return partyKey(n,key,e);
+ },e);
+}
 #endif
