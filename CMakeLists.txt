@@ -408,6 +408,8 @@ set(PC_PORT_SOURCES
     pc_port/pc_p2_original_foliage.cpp
     pc_port/pc_p2_original_foliage_native.cpp
     pc_port/pc_p2_original_shijimi_group.cpp
+    pc_port/pc_p2_watage_effect.cpp
+    pc_port/pc_p2_watage_native.cpp
     pc_port/pc_p2_receipt_host.cpp
     pc_port/pc_p2_delivery_host.cpp
     pc_port/pc_p2_pom.cpp
@@ -3396,7 +3398,7 @@ add_test(NAME p2_equipment_projection_test COMMAND p2_equipment_projection_test)
 # Original decorative source91/88 (#1251); no asset payloads are committed.
 pikmin_add_ci_fixture(original_foliage tools/p2_original_foliage_runtime.cpp)
 add_executable(pc_p2_original_foliage_test tools/test_p2_original_foliage.cpp
-    pc_port/pc_p2_original_foliage.cpp pc_port/pc_p2_original_spawn_plan.cpp)
+    pc_port/pc_p2_original_foliage.cpp pc_port/pc_p2_original_spawn_plan.cpp pc_port/pc_p2_original_catalog.cpp pc_port/pc_p2_original_actor.cpp)
 target_include_directories(pc_p2_original_foliage_test PRIVATE pc_port)
 target_compile_options(pc_p2_original_foliage_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
 add_test(NAME pc_p2_original_foliage_test COMMAND pc_p2_original_foliage_test)
@@ -3407,3 +3409,7 @@ add_executable(pc_p2_original_shijimi_group_test tools/test_p2_original_shijimi_
 target_include_directories(pc_p2_original_shijimi_group_test PRIVATE pc_port)
 target_compile_options(pc_p2_original_shijimi_group_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
 add_test(NAME pc_p2_original_shijimi_group_test COMMAND pc_p2_original_shijimi_group_test)
+add_executable(pc_p2_watage_test tools/test_p2_watage.cpp pc_port/pc_p2_watage_effect.cpp)
+target_include_directories(pc_p2_watage_test PRIVATE pc_port)
+target_compile_options(pc_p2_watage_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME pc_p2_watage_test COMMAND pc_p2_watage_test)

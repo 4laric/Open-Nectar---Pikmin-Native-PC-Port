@@ -98,3 +98,34 @@ Known presentation differences:12sampled poses with vertex interpolation,
 accepted diffuse TEV approximation, equivalent native touch-leaf cue, and a
 conservative sphere enclosing Foxtail's retail LOD cylinder. Source radius,
 orientation, root, post-shadow drawing and static collision remain literal.
+
+Typed cave leaf control (issue1279 extended scope):
+`P2_ORIGINAL_FOLIAGE_BATCH=cave`, or supervisor `--batch cave --mode diagnostic`,
+selects the genuine tutorial_1 floor2 TekiInfo rows91/92/47 and their exact
+minimum counts6/4/2. Other floor families are skipped. The descriptor source SHA,
+floor, vector row, source key and UID authenticate each association. `CAVE` is
+an association transport marker on `SourceForm::CaveTekiInfo`; it is not a retail
+GenEnemy version. Surface decode refuses these rows. No fabricated GenEnemy,
+`????` surface envelope, floor layout or full FloorSession is used.
+
+All twelve native leaves are born on the initialized tutorial arena's surveyed
+east approach. This bounded placement is disclosed in each run; it establishes
+neither cave layout nor cave entry/save/resume acceptance. The direct collision
+control exercises real engine dispatch, normal animation completion, source92
+END59, invulnerability, unchanged static colliders and no rewards. Leaf actors
+and Hosts carry null native generators. Caller-owned real association generators
+retain sentinel alive/day bookkeeping through release, then the caller explicitly
+retires every actor and generator registry association. Thirty normal updates
+allow deferred native pool recycling before a new epoch/activation births all
+twelve again; the final release repeats this cleanup gate. No cave walking or
+human mode is qualified by this diagnostic. `--mode refusal` verifies absent
+banks before any native leaf allocation. The supervisor remains bounded60seconds
+and requires a cave-specific marker and successful process exit; an interrupted
+run cannot qualify.
+
+Pure controls retain all existing surface cases and add authenticated cave
+provenance/envelope tampering, missing resources, exact whole reservation12,
+foreign-family skip, surface/cave route separation, ordinal and retired-token
+reuse refusal while unused slots remain, caller registry identity/retirement,
+null native generator ownership and allocation/cleanup failure recovery. These
+are controlled tests and do not claim native gameplay.

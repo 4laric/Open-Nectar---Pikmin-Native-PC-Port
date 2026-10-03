@@ -23,7 +23,7 @@ def main():
     parser.add_argument('--source', type=Path, required=True)
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--pose-limit', type=int, default=12)
-    parser.add_argument('--sources', type=int, nargs='+', choices=(46, 47, 49, 50, 51, 52, 80, 81, 87, 88, 90, 91),
+    parser.add_argument('--sources', type=int, nargs='+', choices=(46, 47, 49, 50, 51, 52, 80, 81, 87, 88, 90, 91, 92),
                         default=[91, 88],
                         help='Literal source IDs to convert; default preserves original 91/88 bank')
     args = parser.parse_args()
@@ -58,6 +58,7 @@ def main():
                80: ('Tukushi', 'tukushi', 'normal', 2),
                81: ('Watage', 'watage', 'postshadow', 0),
                87: ('Magaret', 'magaret', 'normal', 0),
+               92: ('KareOoinu_l', 'karaooinu_l', 'normal', 0),
                90: ('Zenmai', 'zenmai', 'normal', 0)}
     species = [(source_id, *catalog[source_id]) for source_id in args.sources]
     index = disc_files(args.iso)
