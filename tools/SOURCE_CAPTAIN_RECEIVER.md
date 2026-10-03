@@ -16,6 +16,15 @@ canonical actor/world/incarnation, exact typed state and actual SourceBank Self
 generation. It does not advance either animator or broadcast P1 animation keys.
 The common animator owns both generation guards and clock advancement once.
 
+The source stimulus fence may call pc_p2_source_navi_interaction_dispatch before
+legacy actCommon. This TU recognizes only its private final WindInteraction;
+recognized instances call guarded actNavi directly, including refusal, while
+unknown interaction types remain unhandled. It does not grant source admission.
+Component controls use an observable source-fence double and verify that unknown
+HP-mutating interactions never execute and legacy actCommon is never called.
+The actual Navi stimulus fence and its integration remain the captain owner's
+responsibility.
+
 Source END1000: Hit enters Fling with JKOKE both listeners None; Fling END is
 ignored. Koke enters Timer before addDamage; GetUp restores the genuine saved
 source Walk/Follow through captain recover_reaction. JHIT, Koke JKOKE and GETUP

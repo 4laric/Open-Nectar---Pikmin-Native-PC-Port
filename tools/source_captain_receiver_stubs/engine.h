@@ -6,7 +6,7 @@
 constexpr float PI=3.14159265358979323846f;
 inline float roundAng(float x){return x;}
 struct Vector3f {float x=0,y=0,z=0;Vector3f()=default;Vector3f(float a,float b,float c):x(a),y(b),z(c){}void set(float a,float b,float c){x=a;y=b;z=c;}};
-struct FakeSystem {int draws=0;float random=.5f;float dt=.1f;float getRand(float scale){++draws;return random*scale;}float getFrameTime(){return dt;}};
+struct FakeSystem {int draws=0,commonCalls=0,sourceDispatches=0;float random=.5f;float dt=.1f;float getRand(float scale){++draws;return random*scale;}float getFrameTime(){return dt;}};
 extern FakeSystem* gsys;
 class Creature {public: virtual ~Creature()=default;};
 class BTeki:public Creature{};
@@ -29,8 +29,12 @@ class Piki:public Creature {public:AState<Piki>* current=nullptr;Machine<Piki>* 
 };
 class Navi:public Creature {public:AState<Navi>* current=nullptr;Machine<Navi>* mStateMachine=nullptr;Vector3f mVelocity,mTargetVelocity;float mHealth=100,mFaceDirection=0;Gauge mLifeGauge;int motion=-1;bool isAlive(){return mHealth>0;}AState<Navi>* getCurrState(){return current;}void startMotion(PaniMotionInfo a,PaniMotionInfo){motion=a.motion;}bool stimulate(const Interaction&);};
 template<class T>void AState<T>::transit(T* t,int i){if constexpr(std::is_same<T,Piki>::value)t->mFSM->transit(t,i);else t->mStateMachine->transit(t,i);}
-class Interaction {public:Creature* mOwner;Interaction(Creature* p):mOwner(p){}virtual ~Interaction()=default;virtual bool actPiki(Piki*)const{return true;}virtual bool actNavi(Navi*)const{return true;}};
-inline bool Piki::stimulate(const Interaction& i){return i.actPiki(this);}inline bool Navi::stimulate(const Interaction& i){return i.actNavi(this);}
+class Interaction {public:Creature* mOwner;Interaction(Creature* p):mOwner(p){}virtual ~Interaction()=default;virtual bool actCommon(Creature*)const{++gsys->commonCalls;return true;}virtual bool actPiki(Piki*)const{return true;}virtual bool actNavi(Navi*)const{return true;}};
+bool pc_p2_source_navi_interaction_dispatch(const Interaction&,Navi*,bool&);
+inline bool Piki::stimulate(const Interaction& i){return i.actPiki(this);}
+// Observable source-fence control. Unknown interactions cannot fall through
+// to legacy actCommon or actNavi; actual production fencing is owned by #1289.
+inline bool Navi::stimulate(const Interaction& i){bool handled=false;const bool accepted=pc_p2_source_navi_interaction_dispatch(i,this,handled);if(handled)++gsys->sourceDispatches;return handled&&accepted;}
 #define FLICK_BACKWARDS_ANGLE (-1000.f)
 #define C_NAVI_PARM(n,p) (100.f)
 

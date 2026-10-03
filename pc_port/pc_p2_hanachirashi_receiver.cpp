@@ -136,7 +136,7 @@ Vector3f flickDirection(float knockback,float angle){
     float magnitude=knockback*(1+.1f*gsys->getRand(1.f));
     return Vector3f(-std::sin(angle)*magnitude,100+50*gsys->getRand(1.f),-std::cos(angle)*magnitude);
 }
-struct WindInteraction : Interaction {
+struct WindInteraction final : Interaction {
     Vector3f direction;bool wither;bool generated=false;float knockback=0,damage=0,angle=0;
     WindInteraction(BTeki* a,const Vector3f& d,bool w=true):Interaction(a),direction(d),wither(w){}
     WindInteraction(BTeki* a,float k,float d,float h):Interaction(a),wither(false),generated(true),knockback(k),damage(d),angle(h){}
@@ -165,6 +165,13 @@ struct WindInteraction : Interaction {
 }
 PikiState* pc_p2_hanachirashi_piki_state_create(){return new WindPikiState;}
 NaviState* pc_p2_hanachirashi_navi_state_create(){return new WindNaviState;}
+bool pc_p2_source_navi_interaction_dispatch(const Interaction& interaction,Navi* n,bool& handled){
+    handled=false;
+    const auto* owned=dynamic_cast<const WindInteraction*>(&interaction);
+    if(!owned)return false;
+    handled=true;
+    return owned->actNavi(n);
+}
 bool pc_p2_hanachirashi_wind_piki(BTeki* a,Piki* p,const Vector3f& d){return p&&p->stimulate(WindInteraction(a,d));}
 bool pc_p2_hanachirashi_wind_navi(BTeki* a,Navi* n,const Vector3f& d){return n&&n->stimulate(WindInteraction(a,d));}
 
