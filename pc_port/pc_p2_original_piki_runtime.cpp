@@ -258,27 +258,38 @@ static bool applyGravityImpl(Handle h,float dt,std::string& e){
  return std::isfinite(h.body->mVelocity.y);
 }
 static bool positionImpl(Handle h,const Vector3f& v,std::string& e){auto* x=current(h,e);if(!x||!finite(v))return false;h.body->mSRT.t=v;return true;}
-static bool whistleImpl(Handle h,Navi* n,std::string& e){
- auto* x=current(h,e);if(!x||x->runtime.state!=State::Walk)return fail(e,"SourcePiki whistle requires source Walk");
- CaptainFrame f;if(!services->captainFrame(n,f,e)||!f.alive||!f.formationable)return false;
+static bool whistleResultImpl(Handle h,Navi* n,bool combine,bool newToParty,bool& accepted,std::string& e){
+ (void)newToParty; // Retail InteractFue::actPiki does not read this Navi flag.
+ auto* x=current(h,e);if(!x)return false;
+ CaptainFrame f;if(!services->captainFrame(n,f,e))return false;
  unsigned captain=services->scene().captainAt(0)==n?0:services->scene().captainAt(1)==n?1:2;
  if(captain>1)return fail(e,"whistle source captain outside canonical roster");
- if(x->runtime.brain.action==Action::Formation)return false; // InteractFue(false,true), no party combining.
  auto* world=pc_p2_original_captain_world();
  if(world->demo()==captain::Demo::Unknown||world->demo()==captain::Demo::Absent)return fail(e,"source whistle movie authority absent");
  bool movie=world->demo()==captain::Demo::Playing;
+ PcP2SourceBody source;if(!body(h.body,source,e)||!current(h,e))return false;
+ const auto reject=[&](){accepted=false;e.clear();return true;};
+ // Genuine retail eligibility rejection is an authenticated result. Source
+ // invocations may continue through their ordered roster without string tests.
+ if(!f.alive||!f.formationable||!originalProgress().captainAllowed(captain,source.state.wasWild)
+   ||(source.state.wild&&(movie||source.state.species>2)))return reject();
+ // Of the five owned states, only Walk and GoHang are retail callable.
+ if(x->runtime.state!=State::Walk&&x->runtime.state!=State::GoHang)return reject();
+ if(x->runtime.brain.action==Action::Formation&&(!combine||h.body->mNavi==n))return reject();
  // All eligibility comes from this exact source lifetime + actual Walk state;
  // the legacy callback's nativeEligible argument is not exposed to callers.
  // It owns source day-0/reunion partition and transactional wild/progress write.
  if(!pc_p2_original_piki_recruit_allowed(h.body,captain,movie,true,e)||!services->supports(h,Motion::Notice,e))return false;
  if(!pc_p2_original_piki_recruit_accepted(h.body,captain,movie,true,e))return false;
- if(!brainCleanup(h,x->runtime,*services,e))return false;
+ if(!brainCleanup(h,x->runtime,*services,e)||!cleanup(*x,e))return false;
  x->runtime.brain.action=Action::None;
  h.body->mNavi=n;
  float random=0;if(!services->random(random,e)||!std::isfinite(random)||random<0||random>1)return false;
  x->runtime.state=State::LookAt;x->runtime.lookSubState=0;x->runtime.lookWaitTime=0.3f*random;
- return services->calledSound(h,e);
+ if(!services->calledSound(h,e)||!current(h,e))return false;
+ accepted=true;return true;
 }
+static bool whistleImpl(Handle h,Navi* n,std::string& e){bool accepted=false;return whistleResultImpl(h,n,false,true,accepted,e)&&accepted;}
 static bool gatherImpl(Handle h,const Vector3f& goal,float radius,std::string& e){
  auto* x=current(h,e);if(!x||x->runtime.state!=State::Walk)return fail(e,"source Gather requires actual Walk");
  return brainGather(h,x->runtime,*services,goal,radius,e);
@@ -541,6 +552,11 @@ bool moveVelocity(Handle h,float dt,std::string& e){OwnerOperation op(e);return 
 bool applyGravity(Handle h,float dt,std::string& e){OwnerOperation op(e);return op.admitted()&&op.complete(applyGravityImpl(h,dt,e),e);}
 bool position(Handle h,const Vector3f& v,std::string& e){OwnerOperation op(e);return op.admitted()&&op.complete(positionImpl(h,v,e),e);}
 bool whistle(Handle h,Navi* n,std::string& e){OwnerOperation op(e);return op.admitted()&&op.complete(whistleImpl(h,n,e),e);}
+bool whistle(Handle h,Navi* n,bool combine,bool newToParty,bool& accepted,std::string& e){
+ OwnerOperation op(e);bool next=false;
+ if(!op.admitted()||!op.complete(whistleResultImpl(h,n,combine,newToParty,next,e),e))return false;
+ accepted=next;return true;
+}
 bool gather(Handle h,const Vector3f& goal,float radius,std::string& e){OwnerOperation op(e);return op.admitted()&&op.complete(gatherImpl(h,goal,radius,e),e);}
 bool launch(Handle h,Navi* n,const Vector3f& v,std::string& e){OwnerOperation op(e);return op.admitted()&&op.complete(launchImpl(h,n,v,e),e);}
 bool bounce(Handle h,std::string& e){OwnerOperation op(e);return op.admitted()&&op.complete(bounceImpl(h,e),e);}
