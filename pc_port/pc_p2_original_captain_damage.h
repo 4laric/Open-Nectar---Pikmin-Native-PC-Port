@@ -26,6 +26,10 @@ public:
  // cannot supply this fact. Source actor lifetime owner supplies it.
  virtual bool sourceAlive(const Navi&) const=0;
  virtual bool sourceInvincible() const=0;
+ // Literal Game::NaviState base defaults; concrete source states override the
+ // retail exclusions. These are behavior flags, not lifecycle authority.
+ virtual bool sourcePressable() const{return true;}
+ virtual bool sourceVsUsableY() const{return true;}
  // Actor-owned source mInvincibleTimer, never a P1 hurt/flick timer.
  virtual std::optional<std::uint8_t> actorInvincibleFrames(const Navi&) const=0;
  // Must preflight a genuine source Dead transition BEFORE HP mutation.
@@ -74,6 +78,10 @@ struct DamageResult {
  Refusal refusal=Refusal::MissingWorld;
  float applied=0;
  bool knockedOut=false;
+ // InteractAttack's accepted interaction is distinct from startDamage's
+ // mutation result: known CF-dead bodies can accept an admitted no-op. Missing
+ // genuine providers/transitions never count as an accepted interaction.
+ bool interactionAccepted=false;
  explicit operator bool() const { return refusal==Refusal::None; }
 };
 // Requeries world/session/FSM/timer on each call. Raw damage is reduced once

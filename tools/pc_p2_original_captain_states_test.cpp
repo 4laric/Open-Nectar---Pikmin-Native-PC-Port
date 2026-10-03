@@ -110,7 +110,10 @@ int main(int argc,char** argv){try{
  check(argc==2,"private verified parameter argument");std::ifstream file(argv[1],std::ios::binary);resourceBytes=std::string((std::istreambuf_iterator<char>(file)),{});control::Params params;check(control::parseParameters(resourceBytes,params,error),error);
  observed=ordinary();SourceBank bank;bankProvider=&bank;envProvider=&env;NaviStateMachine fsm;a.mStateMachine=&fsm;b.mStateMachine=&fsm;
  registerCoreStates(fsm);check(fsm.mStateCount==3,"actual factory registers ONLY3core states");check(fsm.mStates[0]->getID()==48&&fsm.mStates[1]->getID()==61&&fsm.mStates[2]->getID()==67,"actual typed Walk/Damaged/Dead native48/61/67");
- for(int i=0;i<3;++i){auto* state=dynamic_cast<State*>(fsm.mStates[i]);check(state&&state->nativeState()==fsm.mStates[i],"registered source State exact pointer");check(state->sourceInvincible()==(i==2),"source Walk/Damaged false and Dead true invincibility");}
+ for(int i=0;i<3;++i){auto* state=dynamic_cast<State*>(fsm.mStates[i]);check(state&&state->nativeState()==fsm.mStates[i],"registered source State exact pointer");check(state->sourceInvincible()==(i!=0),"retail Walk noninvincible; Damaged and Dead invincible");}
+ check(dynamic_cast<State*>(fsm.mStates[0])->sourcePressable()&&dynamic_cast<State*>(fsm.mStates[0])->sourceVsUsableY(),"retail Walk inherits source press and Y admission");
+ check(dynamic_cast<State*>(fsm.mStates[1])->sourcePressable()&&!dynamic_cast<State*>(fsm.mStates[1])->sourceVsUsableY(),"retail Damaged blocks Y while retaining source pressable default");
+ check(!dynamic_cast<State*>(fsm.mStates[2])->sourcePressable()&&!dynamic_cast<State*>(fsm.mStates[2])->sourceVsUsableY(),"retail Dead blocks source press and Y");
  int mapped=777;loaded=nullptr;check(pc_p2_original_captain_route_transition(&a,1,mapped)==PcOriginalCaptainRoute::NonSource&&mapped==777,"nonSource route preserves output");check(!pc_p2_original_captain_transit(&a,StateId::Damaged,error)&&transitions==0&&a.mHealth==50,"missing scene refuses before transit/HP");loaded=&scene;
  active=nullptr;check(!pc_p2_original_captain_core_preflight(&a,StateId::Walk,error),"missing world refuses");active=&world;
  check(!pc_p2_original_captain_core_preflight(&outsider,StateId::Damaged,error),"outsider is not actual source captain slot");
@@ -175,6 +178,9 @@ int main(int argc,char** argv){try{
  env.executionAvailable=false;check(!pc_p2_original_captain_bootstrap_roster(error),"failed actual Walk init remains incomplete");check(!pc_p2_original_captain_bootstrap_complete(scene,error),"current typed Walk alone does not attest initialization");env.executionAvailable=true;
  const int priorCleanup=cleanupEvents;check(pc_p2_original_captain_bootstrap_roster(error),error);check(cleanupEvents==priorCleanup,"post-reset initial install never invokes old P1/source cleanup");
  check(a.current!=b.current&&pc_p2_original_captain_bootstrap_complete(scene,error),"both separate actual Walk init instances complete bootstrap");
+ walk::State actualWalk;check(pc_p2_original_captain_read_walk_state(&a,actualWalk,error)&&actualWalk.ai==walk::AI::Control&&actualWalk.idleTimer==3,"readonly view captures real initialized source Walk fields");
+ walk::State freshWalk;check(pc_p2_original_captain_read_walk_state(&b,freshWalk,error)&&!freshWalk.dismissTimer&&!freshWalk.animation&&!freshWalk.escapeCCW&&!freshWalk.escapeTimer,"fresh retail untouched optional Walk fields remain absent rather than invented values");
+ auto* currentWalk=a.current;a.current=fsm.mStates[2];actualWalk.idleTimer=123;check(!pc_p2_original_captain_read_walk_state(&a,actualWalk,error)&&actualWalk.idleTimer==123,"missing actual Walk refuses readonly view without output mutation");a.current=currentWalk;
  const auto commandsAfterBootstrap=order.size();check(pc_p2_original_captain_bootstrap_roster(error)&&order.size()==commandsAfterBootstrap,"duplicate bootstrap leaves initialized Walk state untouched");
  check(pc_p2_original_captain_continuation_valid(scene,error),"actual registered typed Walk and control banks validate continuation");
  auto* partnerWalk=b.current;NaviState unrelated(91);b.current=&unrelated;check(!pc_p2_original_captain_continuation_valid(scene,error),"P1 continuation state refuses");b.current=partnerWalk;

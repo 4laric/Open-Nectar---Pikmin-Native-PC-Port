@@ -14,6 +14,7 @@ extern bool pc_p2_original_captain_pluck_preflight(Navi*,p2original::captain::St
 extern bool pc_p2_original_captain_punch_preflight(Navi*,std::string&) __attribute__((weak));
 extern bool pc_p2_original_captain_party_preflight(Navi*,p2original::captain::StateId,std::string&) __attribute__((weak));
 extern bool pc_p2_original_captain_dope_preflight(Navi*,std::string&) __attribute__((weak));
+extern bool pc_p2_original_captain_container_absorb_preflight(Navi*,p2original::captain::StateId,std::string&) __attribute__((weak));
 extern bool pc_p2_source_navi_reaction_animation_key(Navi*,const NaviState*,std::uint64_t,int,std::string&) __attribute__((weak));
 using namespace p2original::captain;
 namespace {
@@ -85,6 +86,7 @@ public:
   initializedScene=pc_p2_original_captain_loaded_scene();initializedEpoch=initializedScene->incarnation();initializedActor=n;previousError.clear();
  }
  bool initialized(const Navi* n,const LoadedScene& scene)const{return initializedActor==n&&initializedScene==&scene&&initializedEpoch==scene.incarnation();}
+ const walk::State& fields()const{return walkState;}
  void exec(Navi* n)override{
   std::string e;auto* env=environment(n,e);auto* bank=bankFor(n,e);if(!env||!bank){report(e);return;}
   // Control precedes the source >9 idle decision. Never apply it again when
@@ -117,7 +119,8 @@ public:
 class DamagedState final:public CoreState {
 public:
  DamagedState():CoreState(StateId::Damaged){}
- bool sourceInvincible()const override{return false;}
+ bool sourceInvincible()const override{return true;}
+ bool sourceVsUsableY()const override{return false;}
  void init(Navi* n)override{std::string e;auto* bank=bankFor(n,e);if(!bank||(!bank->start(n,Motion::Damage,e)||!bank->enableMotionBlend(n,e)))report(e);}
  void exec(Navi* n)override{std::string e;auto* bank=bankFor(n,e);MotionState motion;
   if(!bank||!bank->state(n,motion,e)){report(e);return;}if(motion.motion!=Motion::Damage)recover(n);}
@@ -129,6 +132,8 @@ class DeadState final:public CoreState {
 public:
  DeadState():CoreState(StateId::Dead){}
  bool sourceInvincible()const override{return true;}
+ bool sourcePressable()const override{return false;}
+ bool sourceVsUsableY()const override{return false;}
  void init(Navi* n)override{std::string e;
   // Literal source order: section gmOrimaDown first, then clear CF_IsAlive.
   if(!pc_p2_original_captain_down_begin(n,e)){report(e);return;}
@@ -156,6 +161,7 @@ bool pc_p2_original_captain_core_preflight(Navi* n,StateId id,std::string& e){
  if(id==StateId::Nuku||id==StateId::NukuAdjust)return pc_p2_original_captain_pluck_preflight&&pc_p2_original_captain_pluck_preflight(n,id,e);
  if(id==StateId::Punch)return pc_p2_original_captain_punch_preflight&&pc_p2_original_captain_punch_preflight(n,e);
  if(id==StateId::Dope)return pc_p2_original_captain_dope_preflight&&pc_p2_original_captain_dope_preflight(n,e);
+ if(id==StateId::Container||id==StateId::Absorb)return pc_p2_original_captain_container_absorb_preflight&&pc_p2_original_captain_container_absorb_preflight(n,id,e);
  if(id==StateId::Gather||id==StateId::Throw||id==StateId::ThrowWait)return pc_p2_original_captain_throw_preflight&&pc_p2_original_captain_throw_preflight(n,id,e);
  if(id==StateId::Follow||id==StateId::Change)return pc_p2_original_captain_party_preflight&&pc_p2_original_captain_party_preflight(n,id,e);
  e="source action preflight provider is unavailable";return false;
@@ -171,6 +177,12 @@ std::optional<StateId> pc_p2_original_captain_reaction_backup(Navi* n,std::strin
  return backup(n);
 }
 bool pc_p2_original_captain_recover_reaction(Navi* n,std::string& e){auto saved=pc_p2_original_captain_reaction_backup(n,e);return saved&&pc_p2_original_captain_transit(n,*saved,e);}
+bool pc_p2_original_captain_read_walk_state(const Navi* actorPointer,walk::State& out,std::string& e){
+ e.clear();auto* n=const_cast<Navi*>(actorPointer);if(!actor(n,e))return false;
+ auto* scene=pc_p2_original_captain_loaded_scene();auto* state=dynamic_cast<WalkState*>(n->getCurrState());
+ if(!state||!state->initialized(n,*scene)||!nativecontrol::sceneAnimationTimer(n)){e="actual current initialized source Walk/control instance is unavailable";return false;}
+ out=state->fields();return true;
+}
 bool pc_p2_original_captain_continuation_valid(const LoadedScene& scene,std::string& e){
  e.clear();if(pc_p2_original_captain_loaded_scene()!=&scene||!scene.incarnation()){e="source bootstrap scene is not canonical";return false;}
  for(unsigned slot=0;slot<2;++slot){auto* n=scene.captainAt(slot);if(!actor(n,e))return false;
