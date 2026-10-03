@@ -37,6 +37,18 @@ implements `followPunch` with exact (following=true,next=Follow) args.
 Production link and gameplay remain unqualified until the concrete source
 party/body owner, required resources and animation-key routing are integrated.
 
+Matching root hooks are `pc_p2_original_captain_party_preflight` and
+`pc_p2_original_captain_party_advance_animation`. Preflight checks the actual
+canonical world/scene/roster, registered native source state, bank actor binding,
+source lifetime agreement and concrete Follow body/control observations. The
+startup motion owner implements read-only
+`pc_p2_original_captain_motion_preflight(Navi*,unsigned,std::string&)` against
+the actual selected clip map and bound actor. Missing query refuses activation;
+bank-ready alone cannot prove KIZUKU/idle resources. Actual animation advance
+rejects nonfinite/negative frames, rechecks canonical ownership and delivers
+real authored SourceBank keys only to the exact current native party state.
+Source-key failure is propagated; state/motion transitions stop old delivery.
+
 Short acceptance script once composed: launch centered 960x540 with 20 starting
 Pikmin and two genuine source captains; ordinary B whistles the idle partner
 and available Pikmin; ordinary Y switches control and both captains move;

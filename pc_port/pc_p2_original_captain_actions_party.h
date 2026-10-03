@@ -72,5 +72,11 @@ bool assistPunch(Navi*,EnemyHandle);
 void registerPartyStates(NaviStateMachine&);
 // SourceBank owner delivers actual authored keys; this consumes only Change.
 bool partyKey(Navi*,int authoredKey);
+bool partyKey(Navi*,int authoredKey,std::string&);
 } }
 const p2original::captain::party::PartySource* pc_p2_original_captain_party_source(const Navi*);
+bool pc_p2_original_captain_party_preflight(Navi*,p2original::captain::StateId,std::string&);
+bool pc_p2_original_captain_party_advance_animation(Navi*,float sourceFrames,std::string&);
+// Startup's real selected SourceBank implements this read-only query. It must
+// verify exact live roster binding AND selected authored motion availability.
+bool pc_p2_original_captain_motion_preflight(Navi*,unsigned retailMotion,std::string&);
