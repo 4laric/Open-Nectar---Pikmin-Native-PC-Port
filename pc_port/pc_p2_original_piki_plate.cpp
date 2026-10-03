@@ -41,9 +41,10 @@ public:
 class Plate::ReadOperation {
  const Plate& owner;bool entered=false;
 public:
- explicit ReadOperation(const Plate& p):owner(p){if(!p.mBusy){p.mBusy=true;p.mReentered=false;entered=true;}}
+ explicit ReadOperation(const Plate& p):owner(p){if(p.mBusy){p.mReentered=true;return;}p.mBusy=true;p.mReentered=false;entered=true;}
  ~ReadOperation(){if(entered)owner.mBusy=false;}
- bool complete()const{return !owner.mReentered;}
+ bool ok()const{return entered;}
+ bool complete()const{return entered&&!owner.mReentered;}
 };
 bool Plate::group(Navi* n,bool cleanup,Group*& out,std::string& e){
  SceneBinding binding;if(!nativeSceneBinding(binding,cleanup,e)||&mSource.scene()!=binding.scene
@@ -121,6 +122,7 @@ bool Plate::releaseSlot(Handle h,Navi* n,int slot,std::string& e){
 }
 bool Plate::canReleaseSlot(Handle h,Navi* n,int slot,std::string& e)const{
  ReadOperation operation(*this);
+ if(!operation.ok())return fail(e,"reentrant CPlate read refused");
  const Group* g=nullptr;for(const auto& candidate:mGroups)if(candidate.captain==n)g=&candidate;
  if(!g||!validate(*g,true,e)||slot<0||static_cast<unsigned>(slot)>=g->count
  ||!same(g->slots[slot].handle,h)||!operation.complete())return fail(e,"CPlate cleanup preflight lacks exact retained owner");
@@ -128,7 +130,7 @@ bool Plate::canReleaseSlot(Handle h,Navi* n,int slot,std::string& e)const{
 }
 bool Plate::slotPosition(Handle h,Navi* n,int slot,Vector3f& out,std::string& e)const{
  ReadOperation operation(*this);
- // Read-only nesting is allowed, but never invokes a producer to change pose.
+ if(!operation.ok())return fail(e,"reentrant CPlate read refused");
  const Group* g=nullptr;for(const auto& candidate:mGroups)if(candidate.captain==n)g=&candidate;
  if(!g||!validate(*g,false,e)||slot<0||static_cast<unsigned>(slot)>=g->count
  ||!same(g->slots[slot].handle,h))return fail(e,"source CPlate slot position unavailable");
@@ -250,13 +252,13 @@ bool Plate::changeFlower(Handle h,Navi* n,std::string& e){Operation op(*this,e);
  --g->happaCounts[previous];++g->happaCounts[b.happa];g->slots[slot].happa=b.happa;return true;
 }
 bool Plate::growthCounts(Navi* n,std::array<unsigned,3>& out,std::string& e)const{
- ReadOperation op(*this);const Group* g=nullptr;
+ ReadOperation op(*this);if(!op.ok())return fail(e,"reentrant CPlate read refused");const Group* g=nullptr;
  for(const auto& candidate:mGroups)if(candidate.captain==n)g=&candidate;
  if(!g||!validate(*g,false,e)||!op.complete())return false;
  out=g->happaCounts;return true;
 }
 bool Plate::state(Navi* n,PlateState& out,std::string& e)const{
- ReadOperation op(*this);const Group* g=nullptr;
+ ReadOperation op(*this);if(!op.ok())return fail(e,"reentrant CPlate read refused");const Group* g=nullptr;
  for(const auto& candidate:mGroups)if(candidate.captain==n)g=&candidate;
  if(!g||!validate(*g,true,e)||!op.complete())return false;
  PlateState next;next.count=g->count;next.activeCount=g->activeCount;next.shrinkTimer=g->shrinkTimer;

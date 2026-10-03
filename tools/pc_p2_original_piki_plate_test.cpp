@@ -30,17 +30,29 @@ public:
  mutable unsigned poseReads=0;
  PlatePose pose;bool missingPose=false;unsigned formedEvents=0;Plate* reenter=nullptr;
  Plate* parameterReenter=nullptr;mutable bool validationWindow=false;
+ Plate* nestedReads=nullptr;Handle nestedBody;bool readsFromPose=false;
+ void exerciseNestedReads()const{
+  if(!nestedReads)return;
+  std::string error;Vector3f position(77,78,79);PlateState state;state.count=91;
+  std::array<unsigned,3> counts{{71,72,73}};
+  check(!nestedReads->slotPosition(nestedBody,n1,0,position,error)&&position.x==77&&position.y==78&&position.z==79,"nested position refuses before callback with unchanged output");
+  check(!nestedReads->state(n1,state,error)&&state.count==91,"nested state refuses before callback with unchanged output");
+  check(!nestedReads->growthCounts(n1,counts,error)&&counts==std::array<unsigned,3>{{71,72,73}},"nested growth refuses before callback with unchanged output");
+  check(!nestedReads->canReleaseSlot(nestedBody,n1,0,error),"nested release preflight refuses before callback");
+ }
  unsigned phaseChangeAt=0;mutable unsigned parameterReads=0;
  Source(){pose.position.set(100,20,200);pose.velocity.set(0,0,0);pose.scale=1;}
  const captain::LoadedScene& scene()const override{return ::scene;}
  bool readParameters(const Navi*,PlateParameters& out,std::string& e)const override{
   ++parameterReads;if(phaseChangeAt==parameterReads)inactive=true;
   if(missingParameters){e="parameters missing";return false;}
+  if(!readsFromPose)exerciseNestedReads();
   if(parameterReenter&&validationWindow){std::string nested;parameterReenter->shrink(n0,nested);}
   out=parameters;return true;
  }
  bool readPose(const Navi*,PlatePose& out,std::string& e)const override{
   ++poseReads;if(missingPose){e="pose missing";return false;}
+  if(readsFromPose)exerciseNestedReads();
   if(reenter){std::string nested;reenter->shrink(n0,nested);}
   validationWindow=true;out=pose;return true;
  }
@@ -150,6 +162,15 @@ int main(){
  check(!split.refresh(n1,1,std::numeric_limits<float>::quiet_NaN(),e),"nonfinite strength refuses");
  splitSource.validationWindow=true;splitSource.parameterReenter=&split;
  check(!split.refresh(n1,1,1,e),"Refresh parameter callback reentry refuses");splitSource.parameterReenter=nullptr;
+ check(split.state(n1,before,e),"nested read initial snapshot");
+ splitSource.nestedReads=&split;splitSource.nestedBody=splitBody;
+ PlateState outer;outer.count=92;
+ check(!split.state(n1,outer,e)&&outer.count==92,"parameter nested reads refuse outer state without output");
+ check(!split.refresh(n1,1,1,e),"parameter nested reads refuse outer mutation");
+ splitSource.readsFromPose=true;
+ check(!split.setPos(n1,e),"pose nested reads refuse outer SetPos");
+ splitSource.nestedReads=nullptr;splitSource.readsFromPose=false;
+ check(split.state(n1,after,e)&&after.baseOffset.x==before.baseOffset.x&&after.angle==before.angle&&after.baseRadius==before.baseRadius,"nested reads preserve outer geometry");
  check(split.releaseSlot(splitBody,n1,0,e)&&split.reset(e),"split owner explicit retained cleanup");
  Plate defaultSort(source);auto leaf=birth(200,1,0),bud=birth(201,1,1),flower=birth(202,1,2);
  reserve(defaultSort,leaf,n0,0,e);reserve(defaultSort,bud,n0,1,e);reserve(defaultSort,flower,n0,2,e);
