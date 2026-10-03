@@ -27,11 +27,18 @@ int main(){
  finish(p);systemControl.dt=.5f;p.current->exec(&p);p.current->exec(&p);assert(p.motion==PIKIANIM_GetUp);finish(p);assert(p.getState()==0);
  // Wind remains distinct: Purple strips but refuses; ordinary wind does no HP.
  p.mP2Purple=true;p.mHappa=Flower;prior=systemControl.draws;assert(!pc_p2_hanachirashi_wind_piki(&owner,&p,Vector3f(5,40,10)));assert(p.mHappa==Leaf&&systemControl.draws==prior);
- p.mP2Purple=false;assert(pc_p2_hanachirashi_wind_piki(&owner,&p,Vector3f(5,40,10)));assert(p.mHealth==10&&p.mHappa==Leaf);p.mIsWhistlePending=true;p.current->procBounceMsg(&p,&bounce);finish(p);p.current->exec(&p);finish(p);assert(p.mode==PikiMode::FormationMode&&!p.mIsWhistlePending);
+ p.mP2Purple=false;assert(pc_p2_hanachirashi_wind_piki(&owner,&p,Vector3f(5,40,10)));assert(p.mHealth==10&&p.mHappa==Leaf);p.mIsWhistlePending=true;p.current->procBounceMsg(&p,&bounce);finish(p);p.current->exec(&p);p.current->exec(&p);finish(p);assert(p.mode==PikiMode::FormationMode&&!p.mIsWhistlePending);
+ // Pre-bounce flute records recovery but keeps the one-second Koke timer.
+ assert(pc_p2_hanachirashi_wind_piki(&owner,&p,Vector3f(5,40,10)));p.mIsWhistlePending=true;p.current->procBounceMsg(&p,&bounce);finish(p);systemControl.dt=.25f;p.current->exec(&p);assert(p.motion==PIKIANIM_JKoke);p.current->exec(&p);p.current->exec(&p);assert(p.motion==PIKIANIM_JKoke);p.current->exec(&p);assert(p.motion==PIKIANIM_GetUp);finish(p);assert(p.mode==PikiMode::FormationMode);
+ // Post-bounce flute clears the timer, including a fresh flute after an earlier one.
+ assert(pc_p2_hanachirashi_wind_piki(&owner,&p,Vector3f(5,40,10)));p.mIsWhistlePending=true;p.current->procBounceMsg(&p,&bounce);p.mIsWhistlePending=true;finish(p);p.current->exec(&p);assert(p.motion==PIKIANIM_GetUp);finish(p);
  Navi n;Machine<Navi> nm;NaviState walk(0),dead(29);auto* reaction=pc_p2_hanachirashi_navi_state_create();nm.states={{0,&walk},{29,&dead},{38,reaction}};n.mStateMachine=&nm;nm.transit(&n,0);systemControl.random=.5f;n.mFaceDirection=PI/2;prior=systemControl.draws;
  assert(pc_p2_source_flick_navi(&owner,&n,80,7,-1000));assert(systemControl.draws==prior+2&&n.mHealth==100);n.current->exec(&n);assert(std::fabs(n.mVelocity.x+84)<.001f&&n.mVelocity.y==0);
- finish(n);n.current->procBounceMsg(&n,&bounce);assert(n.mHealth==100);finish(n);assert(n.mHealth==93&&n.mLifeGauge.value==93&&n.mLifeGauge.updates==1);finish(n);assert(n.mHealth==93);
- n.current->exec(&n);n.current->exec(&n);finish(n);assert(n.current->getID()==0);
+ finish(n);finish(n);n.current->exec(&n);assert(n.mHealth==100&&n.mLifeGauge.updates==0&&n.motion==PIKIANIM_JKoke);n.current->procBounceMsg(&n,&bounce);assert(n.mHealth==100);finish(n);assert(n.mHealth==93&&n.mLifeGauge.value==93&&n.mLifeGauge.updates==1);finish(n);assert(n.mHealth==93);
+ systemControl.dt=.5f;n.current->exec(&n);n.current->exec(&n);finish(n);assert(n.current->getID()==0);
+ // Retail addDamage enters Dead immediately at Koke END when HP is below 1.
+ n.mHealth=7.5f;assert(pc_p2_source_flick_navi(&owner,&n,80,7,0));n.current->procBounceMsg(&n,&bounce);finish(n);assert(n.mHealth==.5f&&n.current->getID()==29);
+ n.mHealth=8;nm.transit(&n,0);assert(pc_p2_source_flick_navi(&owner,&n,80,7,0));n.current->procBounceMsg(&n,&bounce);finish(n);assert(n.mHealth==1&&n.current->getID()==38);systemControl.dt=.5f;n.current->exec(&n);n.current->exec(&n);finish(n);assert(n.current->getID()==0);
  prior=systemControl.draws;assert(!pc_p2_source_flick_navi(&owner,&n,80,std::numeric_limits<float>::quiet_NaN(),0));assert(!pc_p2_source_flick_piki(&owner,&p,-1,0));assert(systemControl.draws==prior);
  delete blow;delete reaction;std::cout<<"actual source receiver RNG/reacceptance/vector/HP/leaf/Koke/whistle controls PASS\n";
 }
