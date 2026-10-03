@@ -4,6 +4,7 @@ set(CMAKE_CXX_STANDARD 17)
 get_filename_component(SENTINEL_SOURCE "${CMAKE_CURRENT_LIST_DIR}/../.." ABSOLUTE)
 # Private composition includes the real owner-pinned Honey factory. Production
 # course admission remains separate until actual source77 native gameplay passes.
+set(PIKMIN_ORIGINAL_SENTINEL ON CACHE BOOL "Link original plant source77 factory and attachment consumers")
 add_subdirectory("${SENTINEL_SOURCE}/tools/original_resource_build" resources)
 # The generic runner hashes selected targets at the graph root. The producer
 # target is declared in the nested engine entry; keep its actual binary here.
@@ -14,19 +15,6 @@ target_include_directories(pc_p2_original_shijimi_group_test PRIVATE "${SENTINEL
 target_compile_options(pc_p2_original_shijimi_group_test PRIVATE -Wall -Wextra -Werror -UNDEBUG)
 enable_testing()
 add_test(NAME pc_p2_original_shijimi_group_test COMMAND pc_p2_original_shijimi_group_test)
-target_sources(pikmin_pc PRIVATE
- "${SENTINEL_SOURCE}/pc_port/pc_p2_original_shijimi_group.cpp"
- "${SENTINEL_SOURCE}/pc_port/pc_p2_shijimi_attachment.cpp"
- "${SENTINEL_SOURCE}/pc_port/pc_p2_shijimi_attachment_native.cpp"
- "${SENTINEL_SOURCE}/pc_port/pc_p2_shijimi_effect.cpp"
- "${SENTINEL_SOURCE}/pc_port/pc_p2_shijimi_effect_native.cpp"
- "${SENTINEL_SOURCE}/pc_port/pc_p2_original_shijimi_native.cpp"
- "${SENTINEL_SOURCE}/pc_port/pc_p2_original_shijimi_bank.cpp"
- "${SENTINEL_SOURCE}/pc_port/pc_p2_original_shijimi_state.cpp"
- "${SENTINEL_SOURCE}/pc_port/pc_p2_original_shijimi_honey.cpp"
- "${SENTINEL_SOURCE}/pc_port/pc_p2_original_shijimi_honey_native.cpp")
-target_compile_definitions(pikmin_pc PRIVATE PIKMIN_ORIGINAL_SENTINEL=1 PIKMIN_ORIGINAL_SENTINEL_ATTACHMENTS=1)
-target_compile_definitions(pikmin_legacy PRIVATE PIKMIN_ORIGINAL_SENTINEL=1)
 add_executable(p2_original_shijimi_honey_identity
  "${SENTINEL_SOURCE}/tools/test_p2_original_shijimi_honey.cpp"
  "${SENTINEL_SOURCE}/pc_port/pc_p2_original_shijimi_honey.cpp"
