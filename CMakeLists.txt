@@ -264,6 +264,7 @@ set(PC_PORT_SOURCES
     pc_port/pc_p2_sarai_manager.cpp
     pc_port/pc_p2_generated_placement.cpp
     pc_port/pc_p2_original_piki_init.cpp
+    pc_port/pc_p2_original_piki_spawn.cpp
     pc_port/pc_p2_campaign_goal_probe.cpp
     pc_port/pc_bbft.cpp
     pc_port/pc_p2_surface_topology.cpp
@@ -3243,3 +3244,7 @@ find_package(Threads REQUIRED)
 target_link_libraries(pc_p2_original_piki_init_test PRIVATE Threads::Threads)
 add_test(NAME p2_original_piki_init COMMAND pc_p2_original_piki_init_test)
 pikmin_add_ci_fixture(original_piki_init tools/p2_original_piki_init_runtime.cpp)
+
+add_executable(pc_p2_original_piki_spawn_test tools/pc_p2_original_piki_spawn_test.cpp pc_port/pc_p2_original_piki_spawn.cpp)
+target_include_directories(pc_p2_original_piki_spawn_test PRIVATE "${PROJECT_SOURCE_DIR}/pc_port")
+add_test(NAME p2_original_piki_spawn COMMAND pc_p2_original_piki_spawn_test)
