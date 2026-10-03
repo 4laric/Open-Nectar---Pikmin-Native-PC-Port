@@ -41,3 +41,13 @@ add_executable(p2_shijimi_effect_control
  "${SENTINEL_SOURCE}/pc_port/pc_p2_shijimi_effect.cpp")
 target_include_directories(p2_shijimi_effect_control PRIVATE "${SENTINEL_SOURCE}/pc_port")
 target_compile_options(p2_shijimi_effect_control PRIVATE -Wall -Wextra -Werror -UNDEBUG)
+
+# Released397 SDK is a separately pinned predecessor, not a new native Piki
+# producer. These controls link its real registry with controlled observers.
+add_executable(p2_shijimi_attachment_control
+ "${SENTINEL_SOURCE}/tools/test_p2_shijimi_attachment.cpp"
+ "${SENTINEL_SOURCE}/pc_port/pc_p2_shijimi_attachment.cpp"
+ "${SENTINEL_SOURCE}/pc_port/pc_p2_original_piki_origin.cpp")
+target_include_directories(p2_shijimi_attachment_control PRIVATE "${SENTINEL_SOURCE}/pc_port")
+target_compile_options(p2_shijimi_attachment_control PRIVATE -Wall -Wextra -Werror -UNDEBUG)
+add_test(NAME original_shijimi_attachment_refs COMMAND p2_shijimi_attachment_control)

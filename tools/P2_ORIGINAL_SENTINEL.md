@@ -141,3 +141,22 @@ and source30 clipping. The ordinary Teki manager advances it once per step,
 including detached drain. Native syntax passes; actual linked rendering and
 scene ownership remain unqualified. Hit24 and the physical provider remain
 open. The genuine-resource controls are source evidence only.
+
+## Released GenPiki attachment reference preparation
+
+The attachment successor uses the unchanged owner397599b3 SDK (four imported
+files, separately identified predecessor). GenPiki references serialize complete
+catalog/sourceKey/recordUID/successful attempt/activation and local position;
+native pointer/lifetime never enter saved bytes. The successful attempt already
+identifies the member, including failure gaps: do not invent another ordinal.
+Current process incarnations reject pending, expired or reused body pointers.
+Saved ancestry resolves to fresh handles supplied by the actual party owner,
+with independent source membership checks and unchanged output on refusal.
+
+The native reader traverses actual sticker links/part/local positions and
+rechecks topology and incarnation after authority queries. Only GenPiki is
+prepared here; unknown, BudConversion or Onyon provenance must refuse instead
+of losing relationships. The reader is not yet linked to a live source77 scene.
+This reference preparation does not allocate bodies, apply stick/FSM state,
+implement the full physical provider, or publish a graph. SAVE admission stays
+closed until actual cross-family party/whole-context restoration is complete.
