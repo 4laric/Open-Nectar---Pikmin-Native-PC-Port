@@ -2,6 +2,7 @@
 #include "pc_p2_surface_save.h"
 #include "pc_p2_original_foliage_native.h"
 #include "pc_p2_ship.h"
+#include "pc_p2_white_poison.h"
 #include "pc_p2_original_course.h"
 #include "pc_p2_original_cave_native.h"
 #include "pc_p2_original_onyon_native.h"

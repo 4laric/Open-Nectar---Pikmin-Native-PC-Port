@@ -1,5 +1,7 @@
 #include "pc_p2_original_pelplant_native.h"
 #include "pc_p2_campaign_treasure_held.h"
+#include "pc_p2_original_pod.h"
+#include "pc_p2_retail_treasure_cargo.h"
 #include "pc_p2_original_corpse_native.h"
 #include "pc_p2_purple.h"
 #include "pc_p2_cargo_ground.h"
@@ -266,6 +268,7 @@ void Pellet::finishWaterEffect()
  */
 void Pellet::doKill()
 {
+    pc_p2_original_pod_forget_pellet(this);
 #if defined(PIKI_PC_PORT) && PIKI_PC_PORT
     pc_p2_campaign_treasure_held_retire(this);
     pc_p2_original_corpse_forget(this);
@@ -749,6 +752,10 @@ Vector3f Pellet::getSlotLocalPos(int slotID, f32 offset)
 		const float y=(p->height*0.5f+1.0f+(mPickOffset!=0.0f?4.0f:0.0f))*(isFrontFace()?-1.0f:1.0f);
 		return Vector3f(radius*sinf(angle),y,radius*cosf(angle));
 	}
+	f32 carryRadius = getBottomRadius();
+#if defined(PIKI_PC_PORT) && PIKI_PC_PORT
+    pc_p2_retail_treasure_cargo_carry_radius(this, carryRadius);
+#endif
 	f32 grabAngle;
 	if (slotID == -2) {
 		grabAngle = mStuckAngle;
@@ -759,10 +766,10 @@ Vector3f Pellet::getSlotLocalPos(int slotID, f32 offset)
 	f32 grabRadius;
 	f32 pickupHeight = mPickOffset;
 	if (!mPelletView) {
-		grabRadius = getBottomRadius() + offset;
+		grabRadius = carryRadius + offset;
 		grabRadius /= mSRT.s.x;
 	} else {
-		grabRadius = getBottomRadius() + offset;
+		grabRadius = carryRadius + offset;
 	}
 
 	Vector3f localPos;

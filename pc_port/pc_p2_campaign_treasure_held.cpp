@@ -32,7 +32,7 @@ void reconcileEquipment() {
 #endif
 }
 p2treasure::Catalog catalog;p2treasureheld::Config config;
-std::map<std::string,Shape*> shapes;Shape* pod=nullptr;bool ready=false;
+std::map<std::string,Shape*> shapes;bool ready=false;
 struct Release {std::string id;Pellet* actor=nullptr;PelletConfig* profile=nullptr;};
 std::map<p2original::InstanceIdentity,Release> released;
 [[noreturn]] void reject(const char* message) {std::fprintf(stderr,"P2 original held treasure: %s\n",message);std::abort();}
@@ -53,22 +53,15 @@ bool ensure(std::string& error) {
     if(!p2treasureheld::load_verified(catalog,config)||config.identity!=p2treasurestate::state.source())return fail(error,"literal held source/catalog/model descriptor mismatch");
     // A real typed original ship is required; verify its literal manifest before
     // any enemy reservation or birth. The ship actor itself is born afterwards.
-    const char* directory=std::getenv("PIKMIN_P2_ORIGINAL_CATALOG");
-    std::vector<p2original::OnyonRecord> receivers;
-    if(!p2original::readOnyons(std::string(directory)+"/"+config.course+".p2on",receivers,error))return false;
-    bool receiver=false;
-    for(const auto& row:receivers)if(row.uid==config.receiver) {
-        if(row.index!=4||row.sourceSha+":"+row.sourceKey!=config.receiverIdentity)return fail(error,"held receiver is not the literal typed ship");
-        receiver=true;
-    }
-    if(!receiver||!gsys||!pc_p2_original_drop_host_ready())return fail(error,"held original receiver/physical host resources missing");
+    // load_verified already parsed the exact hashed receiver buffer. Reopening
+    // its path here would introduce an unauthenticated second source buffer.
+    if(!gsys||!pc_p2_original_drop_host_ready())return fail(error,"held original receiver/physical host resources missing");
     const int heap=gsys->setHeap(SYSHEAP_App);
     for(const auto& row:config.rows) {
         const std::string path="courses/pikmin2treasures/"+row.id+".mod";
         Shape* shape=gameflow.loadShape(path.c_str(),true);
         if(!shape)reject("verified original treasure shape load failed");textures(shape);shapes.emplace(row.id,shape);
     }
-    pod=gameflow.loadShape("courses/pikmin2treasures/pod.mod",true);if(!pod)reject("verified original Pod shape load failed");textures(pod);
     gsys->setHeap(heap);ready=true;reconcileEquipment();error.clear();return true;
 }
 UfoItem* receiver() {
@@ -148,8 +141,9 @@ bool pc_p2_campaign_treasure_held_draw(Pellet* pellet,Graphics& gfx,Matrix4f& ma
     auto* shape=shapes.at(held->id);shape->updateAnim(gfx,matrix,nullptr,pellet);shape->drawshape(gfx,*gfx.mCamera,nullptr);return true;
 }
 bool pc_p2_campaign_treasure_held_draw_receiver(UfoItem* ship,Graphics& gfx,const Matrix4f& matrix) {
-    if(!ready||ship!=receiver()||!pod)return false;
-    pod->updateAnim(gfx,matrix,nullptr,ship);pod->drawshape(gfx,*gfx.mCamera,nullptr);return true;
+    // The held descriptor's legacy Pod asset is not the surface Ship model.
+    // Original Ship presentation belongs to the typed Onyon source provider.
+    return false;
 }
 void pc_p2_campaign_treasure_held_retire(Pellet* pellet) {
     for(auto& record:released)if(record.second.actor==pellet){record.second.actor=nullptr;record.second.profile=nullptr;}
@@ -161,6 +155,6 @@ unsigned pc_p2_campaign_treasure_held_pending() {
 }
 bool pc_p2_campaign_treasure_held_unload(std::string& error) {
     if(pc_p2_campaign_treasure_held_pending())return fail(error,"uncollected held physical graph has no authenticated cache restore");
-    released.clear();shapes.clear();pod=nullptr;ready=false;catalog=p2treasure::Catalog{};config=p2treasureheld::Config{};
+    released.clear();shapes.clear();ready=false;catalog=p2treasure::Catalog{};config=p2treasureheld::Config{};
     error.clear();return true;
 }

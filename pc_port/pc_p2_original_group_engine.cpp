@@ -3,6 +3,7 @@
 #include "pc_p2_original_drop_engine.h"
 #include "pc_p2_original_course.h"
 #include "pc_p2_original_progress.h"
+#include "pc_p2_retail_cave_native.h"
 #include "Generator.h"
 #include "MapMgr.h"
 #include "gameflow.h"
@@ -60,4 +61,7 @@ void pc_p2_original_native_retired(Creature* creature){
   std::fprintf(stderr,"P2_ORIGINAL_NATIVE_RETIRE_FAIL %s\n",error.c_str());std::abort();
  }
  pc_p2_original_course_retired(creature);
+ if(!pc_p2_retail_cave_native_retired(creature,error)){
+  std::fprintf(stderr,"P2_RETAIL_NATIVE_RETIRE_FAIL %s\n",error.c_str());std::abort();
+ }
 }

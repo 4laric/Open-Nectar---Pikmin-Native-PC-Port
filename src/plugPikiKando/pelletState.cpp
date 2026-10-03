@@ -1,6 +1,7 @@
 #include "PelletState.h"
 #include "pc_p2_preview.h"
 #include "pc_p2_campaign_treasure_held.h"
+#include "pc_p2_original_pod.h"
 #include "pc_p2_original_corpse_native.h"
 #include "DebugLog.h"
 #include "FlowController.h"
@@ -248,6 +249,8 @@ PelletGoalState::PelletGoalState()
  */
 void PelletGoalState::init(Pellet* pelt)
 {
+	const bool originalPod=pc_p2_original_pod_owns(pelt);
+	if(originalPod)P2OriginalPodNativeSeam::begin(pelt);
 	mTargetIsShip = false;
 	if (pelt->mTargetGoal->mObjType == OBJTYPE_Ufo) {
 		mTargetIsShip = true;
@@ -279,7 +282,7 @@ void PelletGoalState::init(Pellet* pelt)
 #endif
 		playerState->preloadHenkaMovie();
 
-	} else if (flowCont.mCurrentStage->mStageID == STAGE_Practice) {
+	} else if (!originalPod && flowCont.mCurrentStage->mStageID == STAGE_Practice) {
 		if (!playerState->mDemoFlags.isFlag(DEMOFLAG_CollectFirstPellet)) {
 			PRINT("** FIRST PELLET IN\n");
 			playerState->mDemoFlags.setFlag(DEMOFLAG_CollectFirstPellet, pelt);
@@ -296,7 +299,7 @@ void PelletGoalState::init(Pellet* pelt)
 	pelt->disableGravity();
 	pelt->mVelocity.y = 0.0f;
 
-	if (pelt->mTargetGoal->mObjType != OBJTYPE_Ufo) {
+	if (!originalPod && pelt->mTargetGoal->mObjType != OBJTYPE_Ufo) {
 		Vector3f pos = pelt->mTargetGoal->getGoalPos();
 		EffectParm parm(pos);
 		utEffectMgr->cast(KandoEffect::Goal, parm);
@@ -323,7 +326,7 @@ void PelletGoalState::init(Pellet* pelt)
 		PRINT("still stick %s\n", ObjType::getName(obj->mObjType));
 	}
 
-	if (pelt->mConfig->mPelletType() == PELTYPE_UfoPart) {
+	if (!originalPod && pelt->mConfig->mPelletType() == PELTYPE_UfoPart) {
 		pelt->mTargetGoal->suckMe(pelt);
 	}
 }
@@ -358,7 +361,9 @@ void PelletGoalState::exec(Pellet* pelt)
 	mSuckSpeed += gsys->getFrameTime() * 720.0f;
 
 	if (mSuckProgress >= 1.0f) {
-		if (pc_p2_original_corpse_profile(pelt)) {
+		if (P2OriginalPodNativeSeam::done(pelt,*this)) {
+			// Original cave receiver emits the canonical callback only here.
+		} else if (pc_p2_original_corpse_profile(pelt)) {
 			// Actual source corpse completion belongs to ordinary Onion stock;
 			// it cannot enter a preview/treasure economy receipt path.
 			pelt->mTargetGoal->suckMe(pelt);
@@ -379,8 +384,9 @@ void PelletGoalState::exec(Pellet* pelt)
 /**
  * @todo: Documentation
  */
-void PelletGoalState::cleanup(Pellet*)
+void PelletGoalState::cleanup(Pellet* pellet)
 {
+	P2OriginalPodNativeSeam::cleanup(pellet);
 	PRINT("pelletGoalState * CLEAN UP\n");
 	if (mTargetIsShip) {
 		utEffectMgr->kill(KandoEffect::UfoSuck);

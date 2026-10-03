@@ -33,6 +33,7 @@
 #include "pc_window.h"
 #include "pc_gpu_preference.h"
 #include "pc_p2_original_foliage_native.h"
+#include "pc_p2_retail_cave_context.h"
 #include "p2_original_foliage_guard.h"
 #include "pc_p2_original_group_engine.h"
 #include "pc_randomizer.h"
@@ -43,10 +44,10 @@
 namespace {
 using namespace p2original;
 using namespace p2original::foliage;
-bool human=false,refusal=false,naturalWalk=false,forestBatch=false;
-unsigned firstSource(){return forestBatch?47:91;}
-unsigned secondSource(){return forestBatch?49:88;}
-const char* batchSources(){return forestBatch?"47,49":"91,88";}
+bool human=false,refusal=false,naturalWalk=false,forestBatch=false,brownLargeBatch=false,caveBatch=false;
+unsigned firstSource(){return brownLargeBatch?92:forestBatch?47:91;}
+unsigned secondSource(){return brownLargeBatch?91:forestBatch?49:88;}
+const char* batchSources(){return brownLargeBatch?"92,91":forestBatch?"47,49":"91,88";}
 SDL_Joystick* pad=nullptr;
 void require(bool ok,const char* message){if(!ok){std::printf("FAIL ORIGINAL_FOLIAGE %s\n",message);std::fflush(nullptr);std::_Exit(1);}}
 void checked(bool ok,const std::string& e){if(!ok)std::fprintf(stderr,"ORIGINAL_FOLIAGE_ERROR %s\n",e.c_str());require(ok,"native foliage operation");}
@@ -71,13 +72,64 @@ class FoliageApp final:public PlugPikiApp {
  std::array<Creature*,2> actors{};
  std::array<InstanceIdentity,2> firstIdentity;
  std::array<Vector3f,2> collisionCentre;
+ std::array<Vector3f,2> brownLargeChildCentre;
  std::array<float,2> health{};
  int ready=0,phase=0,age=0,pelletBaseline=0,rewardBaseline=0,tekiBaseline=0;
  bool captainSeen=false;
  unsigned walked=0;std::array<bool,2> naturalTouch{};
  const std::string fingerprint=std::string(64,'f');
- CatalogRow literal(unsigned source,unsigned index,unsigned uid,const Position& at,float facing){
-  CatalogRow r;r.course=forestBatch?"forest":"tutorial";r.member="plantsgen.txt";r.index=index;r.sourceKey=r.course+"/plantsgen.txt#"+std::to_string(index);
+ ActorRegistry caveRegistry;
+ struct CaveLeaf{Creature* actor=nullptr;unsigned row=0,ordinal=0,token=0;std::uint64_t handle=0;Vector3f centre,child;float health=0;};
+ std::vector<CaveLeaf> caveLeaves;
+ std::array<std::uint64_t,3> caveGenerators{};
+ unsigned caveActivation=1;
+ unsigned previousCaveToken=0;
+ void caveInstall(Navi* n){
+  HeapScope heap;std::string e;checked(native->provider().cavePrepare(rows,e),e);checked(native->provider().caveReserve(rows,e),e);
+  for(unsigned r=0;r<rows.size();++r){auto* g=generators[r].get();checked(caveRegistry.generator(g,rows[r].enemy.uid,caveGenerators[r],e),e);
+   for(unsigned ordinal=0;ordinal<rows[r].enemy.count;++ordinal){Position at{n->mSRT.t.x+90,0,n->mSRT.t.z+float(caveLeaves.size()*7)};at.y=mapMgr->getMinY(at.x,at.z,true);require(std::isfinite(at.y),"bounded cave control native floor");
+    CaveLeaf leaf;leaf.row=r;leaf.ordinal=ordinal;checked(native->provider().caveBirth(rows[r],g,ordinal,at,0,leaf.actor,e),e);
+    checked(caveRegistry.actorActivation(leaf.actor,rows[r].enemy.uid,ordinal,caveActivation,caveActivation,leaf.token,leaf.handle,e),e);checked(native->provider().bind(rows[r],leaf.actor,leaf.token,e),e);
+    require(leaf.token>previousCaveToken,"cave reentry never reuses retired family token");previousCaveToken=leaf.token;
+    auto* h=native->provider().lookup(leaf.actor);require(h&&h->generator==nullptr&&leaf.actor->mGenerator==nullptr&&h->token==leaf.token,"cave association never attaches P1 generator");
+    unsigned source=0,token=0;InstanceIdentity id;require(caveRegistry.query(leaf.actor,source,token,&id)&&source==rows[r].enemy.source&&id.generator==rows[r].enemy.uid&&id.ordinal==ordinal&&id.epoch==caveActivation&&id.activation==caveActivation,"caller cave registry exact source identity");
+    auto* root=leaf.actor->mCollInfo->getSphere(0x66303030u);auto* child=leaf.actor->mCollInfo->getSphere(0x66303031u);require(root&&child&&root->mRadius==(source==92?50:30)&&child->mRadius==(source==92?35:20),"cave literal source root and child spheres");
+    leaf.centre=root->mCentre;leaf.child=child->mCentre;leaf.health=leaf.actor->mHealth;caveLeaves.push_back(leaf);
+    std::printf("ORIGINAL_CAVE_FOLIAGE_BIRTH cave=tutorial_1 floor=2 source=%u row=%u uid=%u ordinal=%u epoch=%u activation=%u token=%u native_generator=0 initialized_placement=1\n",source,rows[r].caveRow,id.generator,ordinal,caveActivation,caveActivation,token);
+   }
+  }
+  require(caveLeaves.size()==12&&native->provider().size()==12&&tekiMgr->getSize()==tekiBaseline+12,"all authored cave leaf minimum counts6,4,2 physically born");require(!caveRegistry.retireGenerator(generators[0].get(),caveGenerators[0]),"live cave leaves retain caller generator association");checkEconomy();std::fflush(nullptr);
+ }
+ void caveRelease(){std::string e;for(const auto& leaf:caveLeaves){checked(native->provider().release(leaf.actor,leaf.token,e),e);unsigned source=0,token=0;
+   require(caveRegistry.query(leaf.actor,source,token),"caller association retained until explicit retirement");require(caveRegistry.retire(leaf.actor,leaf.handle)&&!caveRegistry.query(leaf.actor,source,token),"caller explicitly retires released cave leaf before address reuse");}
+  for(unsigned r=0;r<rows.size();++r){require(generators[r]->mAliveCount==17&&generators[r]->mLatestSpawnDay==123,"cave release changes no P1 generator counts or day");require(caveRegistry.retireGenerator(generators[r].get(),caveGenerators[r]),"caller retires cave association generator after all leaves");}
+  caveLeaves.clear();require(native->provider().size()==0,"cave owned roots released");checkEconomy();
+ }
+ void caveSetup(Navi* n){
+  HeapScope heap;std::string e;const auto* d=p2retail::descriptor("tutorial_1");const auto* f=d?p2retail::definition(*d,2):nullptr;require(f,"genuine cave tutorial_1 floor2 descriptor");
+  for(unsigned i=0;i<f->rows.size();++i){const auto& literal=f->rows[i];if(literal.sourceId!=91&&literal.sourceId!=92&&literal.sourceId!=47)continue;CatalogRow r;
+   r.course=d->cave;r.member=d->source;r.caveFloor=2;r.caveRow=i;r.index=2*256+i;r.sourceKey=r.course+"/"+r.member+"#"+std::to_string(r.index);r.sourceForm=SourceForm::CaveTekiInfo;r.caveSourceSha256=d->sourceSha256;
+   r.enemy.source=unsigned(literal.sourceId);r.enemy.uid=originalGeneratorUid(r.sourceKey);r.enemy.count=literal.minimum();r.enemy.generatorVersion="CAVE";rows.push_back(r);
+  }
+  require(rows.size()==3&&rows[0].enemy.count==6&&rows[1].enemy.count==4&&rows[2].enemy.count==2,"literal cave three-source minimums");native=std::make_unique<Native>();tekiBaseline=tekiMgr->getSize();pelletBaseline=pelletMgr->getSize();rewardBaseline=rewards();
+  bool physical=native->provider().cavePrepare(rows,e);if(refusal){require(!physical&&native->provider().size()==0&&tekiMgr->getSize()==tekiBaseline,"cave missing bank refuses before any native allocation");std::puts("PASS ORIGINAL_CAVE_FOLIAGE_RESOURCE_REFUSAL sources=91,92,47 births=0 direct_control=1 cave_layout=0");std::fflush(nullptr);std::_Exit(0);}
+  checked(physical,e);checked(native->geometryOwnershipControl(e),e);checked(caveRegistry.install(fingerprint,rows,caveDecode,e),e);
+  for(auto& g:generators){g=std::make_unique<Generator>();g->mGenType=nullptr;g->mGenObject=nullptr;g->mAliveCount=17;g->mLatestSpawnDay=123;}
+  caveInstall(n);std::puts("ORIGINAL_CAVE_FOLIAGE_READY sources=91,92,47 counts=6,4,2 descriptor=tutorial_1 floor=2 native_fixture_course=tutorial initialized_placement=1 cave_layout=0 other_families=skipped direct_control=1 gameplay=0");std::fflush(nullptr);
+ }
+ void caveControl(Navi* n){
+  if(phase==4||phase==5){if(age>=30){require(tekiMgr->getSize()==tekiBaseline,"normal engine recycles released cave pool references");if(phase==4){++caveActivation;caveInstall(n);phase=3;age=0;}else{checkEconomy();std::puts("PASS ORIGINAL_CAVE_FOLIAGE sources=91,92,47 counts=6,4,2 typed_tekiinfo=1 normal_animation=1 no_p1_generator_effects=1 caller_retirement=1 reentry=1 no_rewards=1 initialized_placement=1 cave_layout=0 direct_control=1 gameplay=0");std::fflush(nullptr);std::_Exit(0);}}return;}
+  for(const auto& leaf:caveLeaves){auto* h=native->provider().lookup(leaf.actor);require(h&&h->generator==nullptr&&leaf.actor->mGenerator==nullptr&&leaf.actor->isAlive()&&leaf.actor->mHealth==leaf.health,"cave host ownership and invulnerability retained");
+   auto* actor=static_cast<BTeki*>(leaf.actor);require(actor->mVelocity.length()==0&&actor->mVolatileVelocity.length()==0&&actor->mTargetVelocity.length()==0,"cave roots retain zero physical velocities");
+   auto* root=leaf.actor->mCollInfo->getSphere(0x66303030u);auto* child=leaf.actor->mCollInfo->getSphere(0x66303031u);require(root&&child&&(root->mCentre-leaf.centre).length()<.01f&&(child->mCentre-leaf.child).length()<.01f,"cave animation retains actual static colliders");}
+  for(const auto& g:generators)require(g->mAliveCount==17&&g->mLatestSpawnDay==123,"cave touch and clock change no P1 generator bookkeeping");checkEconomy();
+  if(phase==1&&age>=15){for(const auto& leaf:caveLeaves){auto* actor=static_cast<BTeki*>(leaf.actor);const Vector3f position=n->mSRT.t,velocity=n->mVelocity;n->mSRT.t=actor->mSRT.t;n->mVelocity.set(2,0,0);CollEvent event(n,nullptr,actor->mCollInfo->getBoundingSphere());actor->collisionCallback(event);n->mSRT.t=position;n->mVelocity=velocity;
+    auto* h=native->provider().lookup(actor);require(h->active&&h->touched,"actual engine cave leaf collision dispatch starts motion");InteractAttack attack(n,actor->mCollInfo->getBoundingSphere(),1000,false);actor->stimulate(attack);InteractPress press(n,1000);actor->stimulate(press);require(actor->mHealth==leaf.health,"actual cave leaf attack and press invulnerable");}phase=2;age=0;}
+  else if(phase==2){bool done=true;for(const auto& leaf:caveLeaves){auto* h=native->provider().lookup(leaf.actor);if(age==1)require(h->frame>0,"actual engine cave leaf motion clock advances");done&=!h->active&&!h->touched;if(!h->active)require(h->frame==(h->row.enemy.source==47?49:59),"cave literal normal END frame");}if(done){caveRelease();phase=4;age=0;}else require(age<900,"actual cave leaf motions finish normally");}
+  else if(phase==3&&age>=30){caveRelease();phase=5;age=0;}
+ }
+ CatalogRow literal(unsigned source,unsigned index,unsigned uid,const Position& at,float facing,const char* course=nullptr){
+  CatalogRow r;r.course=course?course:forestBatch?"forest":"tutorial";r.member="plantsgen.txt";r.index=index;r.sourceKey=r.course+"/plantsgen.txt#"+std::to_string(index);
   r.enemy.source=source;r.enemy.uid=uid;r.enemy.count=1;r.enemy.position=at;r.enemy.directionDegrees=facing;return r;
  }
  int rewards(){int total=heads();for(int color=0;color<3;++color){auto* onion=itemMgr->getContainer(color);if(onion)total+=onion->getTotalStorePikis();}return total;}
@@ -104,6 +156,8 @@ class FoliageApp final:public PlugPikiApp {
    if(reentry)require(identity.activation==firstIdentity[i].activation+1&&identity.epoch==firstIdentity[i].epoch+1,"disc cache reentry advances epoch and activation");else firstIdentity[i]=identity;
    require(actor->mCollInfo&&actor->mCollInfo->getBoundingSphere(),"actual source static collider");
    collisionCentre[i]=actor->mCollInfo->getBoundingSphere()->mCentre;health[i]=actor->mHealth;
+   if(source==92){auto* root=actor->mCollInfo->getSphere(0x66303030u);auto* child=actor->mCollInfo->getSphere(0x66303031u);
+    require(root&&child&&root->getChildCount()==1&&root->mRadius==50&&child->mRadius==35,"brown large literal static root50 child35");brownLargeChildCentre[i]=child->mCentre;}
    std::printf("ORIGINAL_FOLIAGE_BIRTH source=%u uid=%u ordinal=%u epoch=%llu activation=%llu reentry=%d\n",source,identity.generator,identity.ordinal,(unsigned long long)identity.epoch,(unsigned long long)identity.activation,int(reentry));
   }
   require(actors[0]&&actors[1],"both literal variants physically admitted");checkEconomy();
@@ -116,7 +170,12 @@ class FoliageApp final:public PlugPikiApp {
   // plants on the east approach used by the successfully surveyed walk.
   Position a{n->mSRT.t.x+90,0,n->mSRT.t.z},b{n->mSRT.t.x+90,0,n->mSRT.t.z+70};
   a.y=mapMgr->getMinY(a.x,a.z,true);b.y=mapMgr->getMinY(b.x,b.z,true);require(std::isfinite(a.y)&&std::isfinite(b.y),"actual native arena floor");
-  if(forestBatch){
+  if(brownLargeBatch){
+   // Literal Last #0 uses source object0004's constructor birthType0 default.
+   // Startup now decodes this version explicitly. Only positions are moved;
+   // these controls establish neither Last-course nor cave placement.
+   rows={literal(92,0,1390080862u,a,0,"last"),literal(91,0,1390538979u,b,0,"tutorial")};
+  }else if(forestBatch){
    // Actual forest/plantsgen.txt literals #23 (Clover47) and #0 (Ooinu_s49),
    // decoded in forest47-49-source-records.json. Only positions are relocated
    // to the same surveyed tutorial arena; this is not forest-course admission.
@@ -125,7 +184,7 @@ class FoliageApp final:public PlugPikiApp {
   auto zero=literal(firstSource(),0,originalGeneratorUid("fixture/foliage-zero#0"),a,0);zero.course="fixture";zero.member="foliage-zero";zero.sourceKey="fixture/foliage-zero#0";zero.enemy.count=0;rows.push_back(zero);
   native=std::make_unique<Native>();tekiBaseline=tekiMgr->getSize();pelletBaseline=pelletMgr->getSize();rewardBaseline=rewards();
   bool physical=native->provider().preflight(rows,e);
-  if(refusal){require(!physical&&native->provider().size()==0&&tekiMgr->getSize()==tekiBaseline&&pelletMgr->getSize()==pelletBaseline,"physical resource refusal before allocation");std::puts(forestBatch?"PASS ORIGINAL_FOLIAGE_RESOURCE_REFUSAL sources=47,49 births=0 direct_control=1 gameplay=0":"PASS ORIGINAL_FOLIAGE_RESOURCE_REFUSAL births=0 direct_control=1 gameplay=0");std::fflush(nullptr);std::_Exit(0);}
+  if(refusal){require(!physical&&native->provider().size()==0&&tekiMgr->getSize()==tekiBaseline&&pelletMgr->getSize()==pelletBaseline,"physical resource refusal before allocation");if(brownLargeBatch||forestBatch)std::printf("PASS ORIGINAL_FOLIAGE_RESOURCE_REFUSAL sources=%s births=0 direct_control=1 gameplay=0\n",batchSources());else std::puts("PASS ORIGINAL_FOLIAGE_RESOURCE_REFUSAL births=0 direct_control=1 gameplay=0");std::fflush(nullptr);std::_Exit(0);}
   checked(physical,e);checked(native->geometryOwnershipControl(e),e);
   checked(originalActors().install(fingerprint,rows,[](const CatalogRow& r,std::string& err){return decode(r,err);},e),e);install(false);
   std::printf("ORIGINAL_FOLIAGE_READY sources=%s zero_count=1 baseline=20 window=960x540 initialized_placement=1 original_positions=0 naturalinput=%d callbackcontrol=%d gameplay=0\n",batchSources(),int(naturalWalk),int(!naturalWalk&&!human));std::fflush(nullptr);
@@ -145,6 +204,7 @@ class FoliageApp final:public PlugPikiApp {
  }
  void checkStatic(){for(unsigned i=0;i<2;++i){auto* actor=actors[i];const auto* h=native->provider().lookup(actor);require(h&&actor->mHealth==health[i]&&actor->isAlive(),"native foliage remains invulnerable");
    const auto& centre=actor->mCollInfo->getBoundingSphere()->mCentre;const auto& before=collisionCentre[i];require(std::fabs(centre.x-before.x)<.01f&&std::fabs(centre.y-before.y)<.01f&&std::fabs(centre.z-before.z)<.01f,"animated pose does not move static source collider");
+   if(h->row.enemy.source==92){const auto* child=actor->mCollInfo->getSphere(0x66303031u);require(child&&child->mRadius==35,"brown large child retained");const auto& old=brownLargeChildCentre[i];require(std::fabs(child->mCentre.x-old.x)<.01f&&std::fabs(child->mCentre.y-old.y)<.01f&&std::fabs(child->mCentre.z-old.z)<.01f,"brown large child remains static through touch");}
    require(actor->mVelocity.x==0&&actor->mVelocity.y==0&&actor->mVelocity.z==0,"native scenery remains constrained");}
   checkEconomy();
  }
@@ -164,7 +224,7 @@ class FoliageApp final:public PlugPikiApp {
 public:
  int idle()override{
   const auto budget=std::chrono::seconds(human?600:90);
-  if(std::chrono::steady_clock::now()-started>=budget){if(native){std::string e;if(!pc_p2_original_course_unload(e))std::fprintf(stderr,"ORIGINAL_FOLIAGE_GUARD_CLEANUP %s\n",e.c_str());}std::puts("ORIGINAL_FOLIAGE_GUARD_EXIT exit=86 bounded=1");std::fflush(nullptr);std::_Exit(86);}
+  if(std::chrono::steady_clock::now()-started>=budget){if(native){if(caveBatch)caveRelease();else{std::string e;if(!pc_p2_original_course_unload(e))std::fprintf(stderr,"ORIGINAL_FOLIAGE_GUARD_CLEANUP %s\n",e.c_str());}}std::puts("ORIGINAL_FOLIAGE_GUARD_EXIT exit=86 bounded=1");std::fflush(nullptr);std::_Exit(86);}
   int result=PlugPikiApp::idle();auto* n=naviMgr?naviMgr->getNavi():nullptr;const bool initialized=n&&n->getCurrState();if(initialized)captainSeen=true;
   require(!captainSeen||initialized,"initialized captain retained");
   if(initialized){
@@ -177,8 +237,9 @@ public:
   }
   if(gameflow.mMoviePlayer&&gameflow.mMoviePlayer->mIsActive){gameflow.mMoviePlayer->requestSkip();return result;}
   if(!initialized||!pikiMgr||!tekiMgr||!pelletMgr||!itemMgr||!mapMgr||gameflow.mPauseAll||gameflow.mIsUIOverlayActive)return result;
-  if(!phase){if(n->getCurrState()->getID()!=NAVISTATE_Walk||++ready<45)return result;int live=0,red=0;Iterator it(pikiMgr);CI_LOOP(it){auto* p=static_cast<Piki*>(*it);if(p->isAlive()){++live;red+=p->mColor==Red;}}require(live==20&&red==20,"actual20 Red Pikmin baseline");setup(n);phase=1;return result;}
+  if(!phase){if(n->getCurrState()->getID()!=NAVISTATE_Walk||++ready<45)return result;int live=0,red=0;Iterator it(pikiMgr);CI_LOOP(it){auto* p=static_cast<Piki*>(*it);if(p->isAlive()){++live;red+=p->mColor==Red;}}require(live==20&&red==20,"actual20 Red Pikmin baseline");if(caveBatch)caveSetup(n);else setup(n);phase=1;return result;}
   if(human)return result;++age;
+  if(caveBatch){caveControl(n);return result;}
   if(phase==4){if(naturalWalk)input();if(age>=30){require(tekiMgr->getSize()==tekiBaseline,"normal engine recycles unloaded pool references");install(true);phase=3;age=0;}return result;}
   if(phase==5){if(naturalWalk)input();if(age>=30){require(native->provider().size()==0&&tekiMgr->getSize()==tekiBaseline,"final normal engine pool cleanup");checkEconomy();std::printf(naturalWalk?"PASS ORIGINAL_FOLIAGE_WALK sources=%s naturalinput=1 callbackcontrol=0 natural_touch=2 normal_animation=1 collider_static=1 no_rewards=1 initialized_placement=1 cache_disc_reentry=1 full_course=0\n":"PASS ORIGINAL_FOLIAGE sources=%s resources=1 collider_static=1 invulnerable=1 typed_touch=1 normal_animation=1 cache_disc_reentry=1 no_rewards=1 direct_control=1 gameplay=0\n",batchSources());std::fflush(nullptr);std::_Exit(0);}return result;}
   checkStatic();if(phase==3&&age>=30){if(naturalWalk)input();std::string e;checked(pc_p2_original_course_unload(e),e);require(native->provider().size()==0,"final owned release");phase=5;age=0;return result;}
@@ -193,6 +254,8 @@ public:
 int main(int argc,char** argv){
  human=std::getenv("P2_ORIGINAL_FOLIAGE_HUMAN")!=nullptr;refusal=std::getenv("P2_ORIGINAL_FOLIAGE_REFUSE_RESOURCES")!=nullptr;naturalWalk=!human&&std::getenv("P2_ORIGINAL_FOLIAGE_WALK")!=nullptr;
  forestBatch=std::getenv("P2_ORIGINAL_FOLIAGE_FOREST")!=nullptr;
+ if(const char* batch=std::getenv("P2_ORIGINAL_FOLIAGE_BATCH")){require(!std::strcmp(batch,"tutorial")||!std::strcmp(batch,"forest")||!std::strcmp(batch,"brown-large")||!std::strcmp(batch,"cave"),"known explicit foliage batch");forestBatch=!std::strcmp(batch,"forest");brownLargeBatch=!std::strcmp(batch,"brown-large");caveBatch=!std::strcmp(batch,"cave");}
+ require(!caveBatch||(!naturalWalk&&!human),"cave birth/lifetime control requires diagnostic or refusal mode");
  SDL_setenv("PIKMIN_RANDOMIZER_TEST_BACKGROUND","1",1);SDL_setenv("SDL_AUDIODRIVER","dummy",1);SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS,"1");SDL_SetMainReady();
  pc_sim_rng_note_main_thread();std::string e;checked(pc_sim_rng_begin_offline(0x9188,0x8891,e),e);pc_gpu_preference_apply();pc_bbft_init(argc,argv);
  require(!pc_randomizer_enabled()&&pc_pikipelago_surface_course()&&!std::strcmp(pc_pikipelago_surface_course(),"tutorial")&&!pc_pikipelago_room_preview(),"real tutorial course assets required");

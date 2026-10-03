@@ -352,6 +352,9 @@ set(PC_PORT_SOURCES
     pc_port/pc_p2_preview.cpp
     pc_port/pc_p2_campaign_treasure.cpp
     pc_port/pc_p2_campaign_treasure_held.cpp
+    pc_port/pc_p2_retail_treasure_engine.cpp
+    pc_port/pc_p2_retail_treasure_cargo.cpp
+    pc_port/pc_p2_original_pod.cpp
     pc_port/pc_p2_captain.cpp
     pc_port/pc_p2_second_captain.cpp
     pc_port/pc_p2_economy.cpp
@@ -418,9 +421,20 @@ set(PC_PORT_SOURCES
     pc_port/pc_p2_cave_geometry.cpp
     pc_port/pc_p2_cave_items.cpp
     pc_port/pc_p2_cave_bud_actor.cpp
+    pc_port/pc_p2_original_blackpom_native.cpp
     pc_port/pc_p2_cave_carry.cpp
     pc_port/pc_p2_enemy.cpp
     pc_port/pc_p2_sheargrub.cpp
+    pc_port/pc_p2_original_snow.cpp
+    pc_port/pc_p2_original_snow_native.cpp
+    pc_port/pc_p2_retail_cave_native.cpp
+    pc_port/pc_p2_retail_scene_input.cpp
+    pc_port/pc_p2_retail_start.cpp
+    pc_port/pc_p2_retail_geometry.cpp
+    pc_port/pc_p2_retail_scene_map.cpp
+    pc_port/pc_p2_retail_cave_foliage.cpp
+    pc_port/pc_p2_retail_cave_blackpom.cpp
+    pc_port/pc_p2_retail_cave_placement.cpp
     pc_port/pc_p2_original_red.cpp
     pc_port/pc_p2_original_red_native.cpp
     pc_port/pc_p2_kochappy.cpp
@@ -2612,6 +2626,9 @@ target_compile_options(pc_randomizer_probe PRIVATE ${NATIVE_COMPILE_OPTIONS})
 add_executable(p2_cave_seed_binding_test tools/p2_cave_seed_binding_test.cpp)
 target_include_directories(p2_cave_seed_binding_test PRIVATE pc_port)
 add_test(NAME p2_cave_seed_binding_test COMMAND p2_cave_seed_binding_test)
+add_executable(p2_retail_floor_ledger_test tools/test_p2_retail_floor_ledger.cpp)
+target_include_directories(p2_retail_floor_ledger_test PRIVATE pc_port)
+add_test(NAME p2_retail_floor_ledger_test COMMAND p2_retail_floor_ledger_test)
 
 # Netplay M4 lane A snapshot codec + reassembler test (issue #885).
 # Engine-free (no gekkonet/game/SDL link), registered in every build.
@@ -3525,6 +3542,7 @@ add_executable(pc_p2_original_foliage_test tools/test_p2_original_foliage.cpp
 target_include_directories(pc_p2_original_foliage_test PRIVATE pc_port)
 target_compile_options(pc_p2_original_foliage_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
 add_test(NAME pc_p2_original_foliage_test COMMAND pc_p2_original_foliage_test)
+add_test(NAME p2_campaign_treasure_test COMMAND p2_campaign_treasure_test)
 add_executable(p2_campaign_treasure_config_test tools/test_p2_campaign_treasure_config.cpp)
 target_include_directories(p2_campaign_treasure_config_test PRIVATE pc_port)
 target_compile_options(p2_campaign_treasure_config_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
@@ -3533,6 +3551,19 @@ add_executable(p2_campaign_treasure_held_test tools/test_p2_campaign_treasure_he
 target_include_directories(p2_campaign_treasure_held_test PRIVATE pc_port)
 target_compile_options(p2_campaign_treasure_held_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
 add_test(NAME p2_campaign_treasure_held_test COMMAND p2_campaign_treasure_held_test)
+add_executable(p2_retail_treasure_policy_test pc_port/pc_p2_retail_treasure_policy_test.cpp)
+target_include_directories(p2_retail_treasure_policy_test PRIVATE pc_port)
+target_compile_options(p2_retail_treasure_policy_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_retail_treasure_policy_test COMMAND p2_retail_treasure_policy_test)
+add_executable(p2_retail_treasure_session_test pc_port/pc_p2_retail_treasure_session_test.cpp
+    pc_port/pc_p2_retail_treasure_engine.cpp pc_port/pc_p2_original_progress.cpp)
+target_include_directories(p2_retail_treasure_session_test PRIVATE pc_port)
+target_compile_options(p2_retail_treasure_session_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_retail_treasure_session_test COMMAND p2_retail_treasure_session_test)
+add_executable(p2_original_progress_test tools/pc_p2_original_progress_test.cpp pc_port/pc_p2_original_progress.cpp)
+target_include_directories(p2_original_progress_test PRIVATE pc_port)
+target_compile_options(p2_original_progress_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+add_test(NAME p2_original_progress_standalone COMMAND p2_original_progress_test)
 
 add_executable(pc_p2_original_catfish_test tools/test_p2_original_catfish.cpp
     pc_port/pc_p2_original_catfish.cpp pc_port/pc_p2_original_spawn_plan.cpp
@@ -3590,10 +3621,7 @@ add_test(NAME p2_surface_water_drain COMMAND pc_p2_surface_water_drain_test)
 add_executable(pc_p2_original_contact_clock_test tools/pc_p2_original_contact_clock_test.cpp)
 target_include_directories(pc_p2_original_contact_clock_test PRIVATE pc_port)
 add_test(NAME p2_original_contact_clock COMMAND pc_p2_original_contact_clock_test)
-add_executable(p2_original_progress_test tools/pc_p2_original_progress_test.cpp pc_port/pc_p2_original_progress.cpp)
-target_include_directories(p2_original_progress_test PRIVATE pc_port)
-target_compile_options(p2_original_progress_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
-add_test(NAME p2_original_progress COMMAND p2_original_progress_test)
+add_test(NAME p2_original_progress_foundation COMMAND p2_original_progress_test)
 add_executable(p2_campaign_checkpoint_state_test tools/pc_p2_campaign_checkpoint_state_test.cpp
     pc_port/pc_p2_original_progress.cpp pc_port/pc_p2_original_lifecycle.cpp)
 target_include_directories(p2_campaign_checkpoint_state_test PRIVATE pc_port)
@@ -3645,6 +3673,50 @@ foreach(pikmin_component IN LISTS pikmin_component_targets)
         endif()
     endif()
 endforeach()
+add_executable(pc_p2_original_snow_test tools/test_p2_original_snow.cpp
+    pc_port/pc_p2_original_snow.cpp pc_port/pc_p2_original_spawn_plan.cpp
+    pc_port/pc_p2_original_catalog.cpp pc_port/pc_p2_original_drop.cpp)
+target_include_directories(pc_p2_original_snow_test PRIVATE pc_port)
+target_compile_options(pc_p2_original_snow_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME pc_p2_original_snow_test COMMAND pc_p2_original_snow_test)
+
+add_executable(pc_p2_retail_cave_context_test pc_port/pc_p2_retail_cave_context_test.cpp)
+target_include_directories(pc_p2_retail_cave_context_test PRIVATE pc_port)
+target_compile_options(pc_p2_retail_cave_context_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME pc_p2_retail_cave_context_test COMMAND pc_p2_retail_cave_context_test)
+add_executable(pc_p2_retail_cave_registry_test pc_port/pc_p2_retail_cave_registry_test.cpp
+    pc_port/pc_p2_original_catalog.cpp pc_port/pc_p2_original_spawn_plan.cpp)
+target_include_directories(pc_p2_retail_cave_registry_test PRIVATE pc_port)
+target_compile_options(pc_p2_retail_cave_registry_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME pc_p2_retail_cave_registry_test COMMAND pc_p2_retail_cave_registry_test)
+
+# Compile immutable metadata once; putting its large initializer in every actor
+# TU needlessly multiplies compile memory/time. Initialization is a startup-only
+# operation, so this data accessor does not need optimizer/LTO work.
+add_library(p2_retail_cave_catalog STATIC pc_port/pc_p2_retail_cave_catalog.cpp)
+target_include_directories(p2_retail_cave_catalog PRIVATE pc_port)
+target_compile_options(p2_retail_cave_catalog PRIVATE ${NATIVE_COMPILE_OPTIONS} -O0)
+set_property(TARGET p2_retail_cave_catalog PROPERTY INTERPROCEDURAL_OPTIMIZATION FALSE)
+
+
+# Original decorative source91/88 (#1251); no asset payloads are committed.
+pikmin_add_ci_fixture(original_foliage tools/p2_original_foliage_runtime.cpp)
+add_executable(pc_p2_original_foliage_test tools/test_p2_original_foliage.cpp
+    pc_port/pc_p2_original_foliage.cpp pc_port/pc_p2_original_spawn_plan.cpp pc_port/pc_p2_original_catalog.cpp pc_port/pc_p2_original_actor.cpp)
+target_include_directories(pc_p2_original_foliage_test PRIVATE pc_port)
+target_compile_options(pc_p2_original_foliage_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME pc_p2_original_foliage_test COMMAND pc_p2_original_foliage_test)
+get_property(p2_retail_catalog_consumers DIRECTORY PROPERTY BUILDSYSTEM_TARGETS)
+foreach(p2_retail_catalog_consumer IN LISTS p2_retail_catalog_consumers)
+    if(NOT p2_retail_catalog_consumer STREQUAL "p2_retail_cave_catalog")
+        get_target_property(p2_retail_catalog_consumer_type ${p2_retail_catalog_consumer} TYPE)
+        if(p2_retail_catalog_consumer_type STREQUAL "EXECUTABLE" OR
+           p2_retail_catalog_consumer_type STREQUAL "SHARED_LIBRARY")
+            # Unreferenced archive members are not pulled into unrelated tools.
+            target_link_libraries(${p2_retail_catalog_consumer} PRIVATE p2_retail_cave_catalog)
+        endif()
+    endif()
+endforeach()
 
 add_executable(pc_p2_original_calendar_state_test tools/pc_p2_original_calendar_state_test.cpp)
 target_include_directories(pc_p2_original_calendar_state_test PRIVATE pc_port)
@@ -3664,3 +3736,17 @@ add_executable(pc_p2_original_barrel_test tools/test_p2_original_barrel.cpp
 target_include_directories(pc_p2_original_barrel_test PRIVATE pc_port)
 target_compile_options(pc_p2_original_barrel_test PRIVATE -UNDEBUG)
 add_test(NAME p2_original_barrel COMMAND pc_p2_original_barrel_test)
+
+add_executable(pc_p2_retail_scene_input_test tools/p2_retail_scene_input_test.cpp)
+target_include_directories(pc_p2_retail_scene_input_test PRIVATE pc_port)
+target_compile_options(pc_p2_retail_scene_input_test PRIVATE -UNDEBUG)
+add_test(NAME p2_retail_scene_input COMMAND pc_p2_retail_scene_input_test)
+
+add_executable(pc_p2_retail_start_test tools/p2_retail_start_test.cpp pc_port/pc_p2_retail_start.cpp)
+target_include_directories(pc_p2_retail_start_test PRIVATE pc_port)
+target_compile_options(pc_p2_retail_start_test PRIVATE -UNDEBUG)
+target_link_libraries(pc_p2_retail_start_test PRIVATE p2_retail_cave_catalog)
+
+add_executable(pc_p2_retail_geometry_test tools/p2_retail_geometry_test.cpp pc_port/pc_p2_retail_geometry.cpp)
+target_include_directories(pc_p2_retail_geometry_test PRIVATE pc_port)
+target_compile_options(pc_p2_retail_geometry_test PRIVATE -UNDEBUG)
