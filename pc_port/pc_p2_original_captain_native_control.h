@@ -65,13 +65,20 @@ bool resetThrowAnimationSpeed(Navi*,std::string&);
 // Actual native Walk/action states call once BEFORE inspecting post-control
 // timer. Walk command application must not execute this same control twice.
 bool control(Navi*,std::string&);
+// Actual FakePiki::doAnimation phase, before physics/input AI. Consumes the
+// previously selected rate; never selects locomotion or a next-frame rate.
+bool advanceAnimation(Navi*,const std::function<bool(Animator,Listener,int)>& emit,std::string&);
+// Actual FakePiki::doSimulation phase, after eligible actual movement. Selects
+// locomotion/next-frame rate; never advances either animator clock.
+bool selectWalkAnimation(Navi*,std::string&);
 // Common FakePiki locomotion for every genuine source state. Bound motion
 // controls selection; locked Self motion survives. Advances Self then Bound
 // using the prior simulation's actual rate, then selects the next motion/rate.
 // Actual body owner supplies eligible postmove facts from the common body phase;
 // movieMotion/mapless/stuck routes require their own literal source phase owner.
 // Source listeners and generation guards apply; frozen skips both clocks.
-// Callers must not additionally use a state-style bank advance that frame.
+// Controlled-test convenience composition ONLY. Production must invoke the
+// two phase functions above at their actual source body phases independently.
 bool animateWalk(Navi*,const std::function<bool(Animator,Listener,int)>& emit,std::string&);
 // Untyped legacy receiver is valid only when neither animator has SourceState.
 bool animateWalk(Navi*,const std::function<bool(int)>& emit,std::string&);

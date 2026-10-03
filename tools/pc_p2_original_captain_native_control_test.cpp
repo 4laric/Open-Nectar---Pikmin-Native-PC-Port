@@ -8,6 +8,7 @@
 #include <iostream>
 #include <stdexcept>
 #include <vector>
+#include <limits>
 using namespace p2original::captain;
 namespace nc=nativecontrol;
 // Engineered canonical providers and strong SourceBank method doubles below
@@ -115,6 +116,15 @@ int main(int argc,char** argv){try{
  typed.id=StateId::Walk;check(!nc::resetThrowAnimationSpeed(&a,error)&&nc::animationSpeed(&a)==50,"rate reset refuses unrelated typed state without altering rate");typed.id=StateId::Throw;check(nc::resetThrowAnimationSpeed(&a,error)&&nc::animationSpeed(&a)==30,"genuine Throw init event resets next animation rate30");
  typed.id=StateId::ThrowWait;check(nc::resetThrowAnimationSpeed(&a,error)&&nc::animationSpeed(&a)==30,"genuine held ThrowWait init event resets animation rate30");
  ++scene.epoch;check(!nc::animationSpeed(&a)&&!nc::resetThrowAnimationSpeed(&a,error),"stale body incarnation cannot observe or reset rate");
+ reset(Motion::Walk,Motion::Walk,-1);observation.displacement={std::numeric_limits<float>::quiet_NaN(),0};
+ check(nc::advanceAnimation(&a,[](Animator,Listener,int){return true;},error)&&starts.empty()&&advances.size()==2&&amounts[0]==30&&amounts[1]==30&&nc::animationSpeed(&a)==30,"independent prephysics clock phase consumes prior rate without sampling postmove displacement or selector");
+ const float phaseSelf=channels[0].frame,phaseBound=channels[1].frame;const auto phaseAdvances=advances.size();observation.displacement={40,0};
+ for(int i=0;i<5;++i)check(nc::selectWalkAnimation(&a,error),error);
+ check(advances.size()==phaseAdvances&&channels[0].frame==phaseSelf&&channels[1].frame==phaseBound&&nc::animationSpeed(&a)==50,"independent postsimulation selector preserves both clocks while choosing next rate");
+ const auto phaseStarts=starts.size();check(nc::advanceAnimation(&a,[](Animator,Listener,int){return true;},error)&&starts.size()==phaseStarts&&amounts.back()==50&&nc::animationSpeed(&a)==50,"next prephysics phase uses selected rate and never selects additional motion");
+ reset(Motion::Throw,Motion::Nigeru,33);typed.id=StateId::Throw;listeners[0]=Listener::SourceState;sendEvents=true;events=0;
+ check(nc::advanceAnimation(&a,[&](Animator channel,Listener listener,int){check(channel==Animator::Self&&listener==Listener::SourceState,"independent clock key carries actual state listener");++events;a.current=&alternate;return true;},error)&&events==1&&advances.size()==1&&starts.empty(),"independent clock statechange stops stale Bound without selector effects");
+ reset(Motion::Walk,Motion::Walk,-1);observation.gameFrozen.reset();check(!nc::selectWalkAnimation(&a,error)&&starts.empty()&&advances.empty(),"independent selector requires actual frozen authority");check(!nc::advanceAnimation(&a,[](Animator,Listener,int){return true;},error)&&starts.empty()&&advances.empty(),"independent clock requires actual frozen authority");
  reset(Motion::Wait,Motion::Wait,-1);resource[0]^=1;check(!animate()&&starts.empty()&&advances.empty(),"mutated actual parameter resource refuses beforeclock");resource[0]^=1;
  reset(Motion::Wait,Motion::Wait,-1);NaviState p1;a.current=&p1;check(!animate()&&starts.empty()&&advances.empty(),"common selector neverfalls back from untyped P1state");
  reset(Motion::Wait,Motion::Wait,-1);effectsProvider=nullptr;check(!animate()&&starts.empty()&&advances.empty(),"missing actual observation provider refuses");
