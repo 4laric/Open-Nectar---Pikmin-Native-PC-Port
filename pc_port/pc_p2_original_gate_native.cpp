@@ -18,6 +18,7 @@ using namespace p2original;
 constexpr unsigned type=0x70326774u,version=0x47543031u; // p2gt / GT01
 struct GateBinding {unsigned uid;GateState state;};
 std::map<unsigned,GateRecord> records;
+std::vector<unsigned> sourceOrder;
 std::map<const Generator*,unsigned> generators;
 std::map<const Creature*,GateBinding> actors;
 bool admitted=false;
@@ -70,9 +71,9 @@ void cache(GenObjectOriginalGate& object,RandomAccessStream& stream,bool write){
 bool pc_p2_original_gate_install(const std::vector<p2original::GateRecord>& rows,std::string& e){
  if(!records.empty()||!actors.empty()||!generators.empty()||rows.empty()||rows.size()>4096){e="gate authority already installed or incomplete";return false;}
  std::map<unsigned,p2original::GateRecord> next;for(const auto& r:rows){if(!p2original::validateGate(r,e))return false;if(!next.emplace(r.uid,r).second){e="duplicate source gate UID";return false;}}
- records.swap(next);e.clear();return true;
+ records.swap(next);for(const auto& r:rows)sourceOrder.push_back(r.uid);e.clear();return true;
 }
-void pc_p2_original_gate_unload(){admitted=false;actors.clear();generators.clear();records.clear();}
+void pc_p2_original_gate_unload(){admitted=false;actors.clear();generators.clear();records.clear();sourceOrder.clear();}
 void pc_p2_original_gate_register(){auto* f=GenObjectFactory::factory;if(!f)die("gate native factory missing");for(int i=0;i<f->mSpawnerCount;++i)if(f->mSpawnerInfo[i].mID==type)return;if(f->mSpawnerCount>=f->mMaxSpawners)die("gate factory capacity exhausted");f->registerMember(type,make,"original P2 gate",version);}
 GenObjectOriginalGate::GenObjectOriginalGate():GenObject(type,"original P2 gate"){}
 void GenObjectOriginalGate::doRead(RandomAccessStream& s){if(mVersion!=version)die("gate adapter version mismatch");if(Generator::ramMode)return;auto next=unsigned(s.readInt());row(next);uid=next;}
@@ -124,3 +125,9 @@ bool pc_p2_original_gate_save(BuildingItem* b,RandomAccessStream& stream,bool& h
 bool pc_p2_original_gate_load(BuildingItem* b,RandomAccessStream& stream,bool& handled,std::string& e){auto i=actors.find(b);handled=i!=actors.end();if(!handled)return true;GateState s;if(!readState(stream,row(i->second.uid),s,e))return false;restore(b,i->second,s);e.clear();return true;}
 void pc_p2_original_gate_forget(BuildingItem* b){actors.erase(b);}
 bool pc_p2_original_gate_snapshot(const Creature* b,GateState& s,std::string& id){auto i=actors.find(b);if(i==actors.end())return false;s=i->second.state;const auto& r=row(i->second.uid);id=r.sourceSha+":"+r.sourceKey;return true;}
+std::vector<PcOriginalGateLink> pc_p2_original_gate_links(){
+ std::vector<PcOriginalGateLink> links;
+ for(unsigned uid:sourceOrder)for(const auto& a:actors)if(a.second.uid==uid){const auto& r=row(uid);const auto& p=a.first->mSRT.t;links.push_back(PcOriginalGateLink{r.sourceSha+":"+r.sourceKey,{p.x,p.y,p.z},a.second.state.phase!=GatePhase::Open});break;}
+ return links;
+}
+bool pc_p2_original_gate_alive(const std::string& identity,bool& alive){for(const auto& link:pc_p2_original_gate_links())if(link.identity==identity){alive=link.alive;return true;}return false;}
