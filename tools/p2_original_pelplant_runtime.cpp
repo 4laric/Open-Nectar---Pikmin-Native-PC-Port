@@ -20,6 +20,7 @@
 #include "NaviState.h"
 #include "Camera.h"
 #include "Piki.h"
+#include "PikiState.h"
 #include "PikiMgr.h"
 #include "PikiHeadItem.h"
 #include "ItemMgr.h"
@@ -190,15 +191,21 @@ public:
   if(phase==3){
    Piki* nearest=nullptr;float closest=1e9f;Iterator roster(pikiMgr);CI_LOOP(roster){auto* p=static_cast<Piki*>(*roster);if(p->isAlive()&&p->mColor==Red&&distance(n->mSRT.t,p->mSRT.t)<closest){closest=distance(n->mSRT.t,p->mSRT.t);nearest=p;}}
    if(n->getPlatePikis()<10&&nearest&&closest>50)point(n,nearest->mSRT.t,true);else input(KeyConfig::_instance->mSetCursorKey.mBind);
-   if(n->getPlatePikis()>=10&&age-phaseStart>30){phase=4;input();}return result;}
+   if(n->getPlatePikis()>=10&&age-phaseStart>30){phase=4;phaseStart=age;input();}return result;}
   if(body){require(!native->captured(body),"released cargo stays ordinary");
    if(body->mCarrierCount>=body->mConfig->mCarryMinPikis()){carried=true;travel=std::max(travel,distance(body->mSRT.t,i.release));}
    if(carried&&body->mTargetGoal==static_cast<Suckable*>(onion)&&distance(body->mSRT.t,onion->mSRT.t)<100)nearGoal=true;
-   if(age%60==0){std::printf("P2_ORIGINAL_PELPLANT_CARRY amount=%u carriers=%u strength=%u ordinary_Onion=1 travel=%.2f rewards=%d\n",i.amount,body->mCarrierCount,body->mCarrierCounter,travel,rewards()-baseline);std::fflush(nullptr);}
+   if(age%60==0){
+    float closest=1e9f;int formation=0,flying=0;Iterator roster(pikiMgr);CI_LOOP(roster){auto* p=static_cast<Piki*>(*roster);if(p->isAlive()){closest=std::min(closest,distance(p->mSRT.t,body->mSRT.t));formation+=p->mMode==PikiMode::FormationMode;flying+=p->getState()==PIKISTATE_Flying;}}
+    std::printf("P2_ORIGINAL_PELPLANT_CARRY amount=%u carriers=%u strength=%u ordinary_Onion=1 travel=%.2f rewards=%d free=%d atari=%d state=%d slot=%d body=%.2f,%.2f,%.2f navi_distance=%.2f cursor_distance=%.2f followers=%d nearest_piki=%.2f formation=%d flying=%d cstick=%.3f free_camera=%d\n",i.amount,body->mCarrierCount,body->mCarrierCounter,travel,rewards()-baseline,int(body->isFree()),int(body->isAtari()),body->getState(),body->getMinFreeSlotIndex(),body->mSRT.t.x,body->mSRT.t.y,body->mSRT.t.z,distance(n->mSRT.t,body->mSRT.t),distance(n->mCursorWorldPos,body->mSRT.t),n->getPlatePikis(),closest,formation,flying,n->mCStick.length(),pc_settings_get_free_camera());std::fflush(nullptr);
+   }
    if(body->mCarrierCount>=body->mConfig->mCarryMinPikis()){input();return result;}
-   float dx=body->mSRT.t.x-n->mSRT.t.x,dz=body->mSRT.t.z-n->mSRT.t.z,d=std::sqrt(dx*dx+dz*dz);const Vector3f& a=n->controlCamera()->mViewXAxis;
-   int x=d>1?int(65*(dx*a.x+dz*a.z)/d):0,y=d>1?int(65*(dx*a.z-dz*a.x)/d):0;
-   input(0,d>60?x:0,d>60?y:0,x,y);return result;
+   // Use the ordinary tutorial driver's approach and cursor-aimed throw.
+   // A flying Pikmin's real collision with an available number-pellet slot
+   // enters Transport; no fixture writes to Pikmin or pellet action state.
+   if(distance(n->mSRT.t,body->mSRT.t)>100){point(n,body->mSRT.t,true);phaseStart=age;return result;}
+   const unsigned keys=(age-phaseStart)%60<15?KeyConfig::_instance->mThrowKey.mBind:0;
+   point(n,body->mSRT.t,false,keys);return result;
   }
   input();require(carried&&nearGoal&&travel>25,"cargo disappeared without actual Piki carry and Onion approach");
   if(++settled<90)return result;
