@@ -10,6 +10,7 @@
 #include "MoviePlayer.h"
 #include "Piki.h"
 #include "PikiMgr.h"
+#include "PikiState.h"
 #include "GameStat.h"
 #include "PlayerState.h"
 #include "gameflow.h"
@@ -64,6 +65,10 @@ public:int idle()override{
     int living=0,formation=0;float liveX=0,liveZ=0;
     if(pikiMgr){Iterator it(pikiMgr);CI_LOOP(it){auto* p=static_cast<Piki*>(*it);if(p->isAlive()){
         ++living;liveX+=p->mSRT.t.x;liveZ+=p->mSRT.t.z;
+        if(frames%60==0)std::printf("CAVE_VISIBLE_PIKI frame=%d uid=%u state=%d mode=%d callable=%d stick=%d owner=%d player=%d health=%.9g xyz=%.3f,%.3f,%.3f\n",
+            frames,p->mGenerator?pc_randomizer_generator_id(p->mGenerator):0,
+            p->getCurrState()?p->getCurrState()->getID():-1,p->mMode,int(p->mIsCallable),int(p->isStickTo()),
+            p->mNavi?p->mNavi->getNaviIndex():-1,p->mPlayerId,p->mHealth,p->mSRT.t.x,p->mSRT.t.y,p->mSRT.t.z);
         if(p->mMode==PikiMode::FormationMode)++formation;}}}
     if(n&&n->getCurrState())p2_fixture_require_captain(GameStat::orimaDead,
         n->getCurrState()->getID()==NAVISTATE_Dead,n->mHealth,frames);
