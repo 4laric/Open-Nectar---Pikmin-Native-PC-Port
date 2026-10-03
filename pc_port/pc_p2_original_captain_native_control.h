@@ -1,6 +1,7 @@
 #pragma once
 #include "pc_p2_original_captain_control.h"
 #include "pc_p2_original_captain_damage.h"
+#include "pc_p2_original_captain_motion.h"
 #include <functional>
 #include <memory>
 #include <optional>
@@ -57,13 +58,22 @@ public:
 // source-ready/authentication bool and no lazy inference from P1 actor flags.
 bool resetAfterBootstrap(Navi*,std::string&);
 std::optional<float> sceneAnimationTimer(const Navi*);
+std::optional<float> animationSpeed(const Navi*);
+// Literal NaviThrowState::init / held NaviThrowWaitState::init speed assignment.
+// Only the genuine typed Throw/ThrowWait init owner may invoke this event.
+bool resetThrowAnimationSpeed(Navi*,std::string&);
 // Actual native Walk/action states call once BEFORE inspecting post-control
 // timer. Walk command application must not execute this same control twice.
 bool control(Navi*,std::string&);
 // Common FakePiki locomotion for every genuine source state. Bound motion
 // controls selection; locked Self motion survives. Advances Self then Bound
-// exactly once with source listeners and generation guards; frozen skips clocks.
+// using the prior simulation's actual rate, then selects the next motion/rate.
+// Actual body owner supplies eligible postmove facts from the common body phase;
+// movieMotion/mapless/stuck routes require their own literal source phase owner.
+// Source listeners and generation guards apply; frozen skips both clocks.
 // Callers must not additionally use a state-style bank advance that frame.
+bool animateWalk(Navi*,const std::function<bool(Animator,Listener,int)>& emit,std::string&);
+// Untyped legacy receiver is valid only when neither animator has SourceState.
 bool animateWalk(Navi*,const std::function<bool(int)>& emit,std::string&);
 void forget(Navi*);
 }}}

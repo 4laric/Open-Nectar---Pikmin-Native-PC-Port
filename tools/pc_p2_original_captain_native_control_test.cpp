@@ -50,13 +50,13 @@ struct Effects:nc::Effects {
 SourceBank* bankProvider=nullptr;const nc::Effects* effectsProvider=&effects;
 MotionState channels[2];Listener listeners[2];int lock=-1;unsigned long long generation=10;
 struct Start {Animator channel;Motion motion;bool preserve;Listener listener;float oldFrame;};
-std::vector<Start> starts;std::vector<Animator> advances;bool sendEvents=false;
+std::vector<Start> starts;std::vector<Animator> advances;std::vector<float> amounts;bool sendEvents=false,listenerAvailable=true;
 int checks=0;std::string error;
 void check(bool value,const std::string& label){++checks;if(!value)throw std::runtime_error("check "+std::to_string(checks)+": "+label);}
 void reset(Motion self,Motion bound,int boundLock){
  ++scene.epoch;a.current=&typed;b.current=&typed;typed.id=StateId::Punch;nc::forget(&a);
  channels[0]={self,29,++generation,false,false};channels[1]={bound,11,++generation,false,false};listeners[0]=Listener::SourceActor;listeners[1]=Listener::None;lock=boundLock;
- starts.clear();advances.clear();sendEvents=false;effectsProvider=&effects;observation={};observation.deltaTime=1;observation.gameFrozen=false;
+ starts.clear();advances.clear();amounts.clear();sendEvents=false;listenerAvailable=true;effectsProvider=&effects;observation={};observation.deltaTime=1;observation.gameFrozen=false;
  check(nc::resetAfterBootstrap(&a,error),error);
 }
 bool animate(){return nc::animateWalk(&a,[](int){return true;},error);}
@@ -73,10 +73,11 @@ bool SourceBank::ready()const{return true;}
 bool SourceBank::parameters(SourceParameters& out,std::string&)const{out={};out.rawSourceSha=control::parameterSha256();return true;}
 bool SourceBank::state(const Navi* n,MotionState& out,std::string& e)const{return stateAnimator(n,Animator::Self,out,e);}
 bool SourceBank::stateAnimator(const Navi*,Animator channel,MotionState& out,std::string&)const{out=channels[unsigned(channel)];return true;}
+bool SourceBank::listenerAnimator(const Navi*,Animator channel,Listener& out,std::string& e)const{if(!listenerAvailable){e="test listener authority missing";return false;}out=listeners[unsigned(channel)];return true;}
 bool SourceBank::boundMotionLock(const Navi*,int& out,std::string&)const{out=lock;return true;}
 bool SourceBank::supports(Navi*,Motion,std::string&)const{return true;}
 bool SourceBank::startAnimator(Navi*,Animator channel,Motion target,bool preserve,Listener listener,std::string&){auto i=unsigned(channel);starts.push_back({channel,target,preserve,listener,channels[i].frame});channels[i]={target,preserve?channels[i].frame:0,++generation,false,false};listeners[i]=listener;return true;}
-bool SourceBank::advanceAnimator(Navi*,Animator channel,float amount,const std::function<bool(int)>& emit,std::string&){auto i=unsigned(channel);advances.push_back(channel);channels[i].frame+=amount;if(sendEvents&&listeners[i]==Listener::SourceActor){if(!emit(200))return true;emit(1000);}return true;}
+bool SourceBank::advanceAnimator(Navi*,Animator channel,float amount,const std::function<bool(int)>& emit,std::string&){auto i=unsigned(channel);advances.push_back(channel);amounts.push_back(amount);channels[i].frame+=amount;if(sendEvents&&listeners[i]!=Listener::None){if(!emit(200))return true;emit(1000);}return true;}
 }}
 int main(int argc,char** argv){try{
  check(argc==2,"verified private resource argument");std::ifstream file(argv[1],std::ios::binary);resource=std::string((std::istreambuf_iterator<char>(file)),{});control::Params p;check(control::parseParameters(resource,p,error),error);SourceBank bank;bankProvider=&bank;
@@ -101,7 +102,19 @@ int main(int argc,char** argv){try{
  reset(Motion::Damage,Motion::Damage,-1);sendEvents=true;events=0;check(nc::animateWalk(&a,[&](int){++events;nc::forget(&a);return true;},error),error);check(events==1&&advances.size()==1,"retired actorcallback stops sourceclockdelivery");
  reset(Motion::Damage,Motion::Damage,-1);sendEvents=true;events=0;check(nc::animateWalk(&a,[&](int){++events;return false;},error),error);check(events==1&&advances.size()==1,"callback stop cancels siblingBound even unchangedgeneration");
  reset(Motion::Damage,Motion::Damage,-1);sendEvents=true;events=0;check(nc::animateWalk(&a,[&](int){++events;effectsProvider=nullptr;return true;},error),error);check(events==1&&advances.size()==1,"canonical observation provider replacement stops staleBound");
- reset(Motion::Wait,Motion::Wait,-1);check(!nc::animateWalk(&a,{},error)&&starts.empty()&&advances.empty(),"missing actual eventcallback refuses beforestart");
+ reset(Motion::Wait,Motion::Wait,-1);check(!nc::animateWalk(&a,std::function<bool(int)>{},error)&&starts.empty()&&advances.empty(),"missing actual eventcallback refuses beforestart");
+ reset(Motion::Throw,Motion::Nigeru,33);typed.id=StateId::Throw;listeners[0]=Listener::SourceState;listeners[1]=Listener::SourceActor;sendEvents=true;
+ check(!animate()&&!error.empty()&&starts.empty()&&advances.empty(),"legacy callback refuses ambiguous SourceState listener before mutation");
+ std::vector<std::pair<Animator,Listener>> delivered;check(nc::animateWalk(&a,[&](Animator channel,Listener listener,int){delivered.push_back({channel,listener});return true;},error),error);
+ check(delivered.size()==4&&delivered[0]==std::make_pair(Animator::Self,Listener::SourceState)&&delivered[1]==delivered[0]&&delivered[2]==std::make_pair(Animator::Bound,Listener::SourceActor)&&delivered[3]==delivered[2],"Throw Self state keys and Bound actor keys keep distinct listener identity");
+ reset(Motion::ThrowWait,Motion::Nigeru,34);typed.id=StateId::ThrowWait;listeners[0]=Listener::SourceState;listenerAvailable=false;check(!nc::animateWalk(&a,[](Animator,Listener,int){return true;},error)&&starts.empty()&&advances.empty(),"missing real listener query refuses before clocks");
+ reset(Motion::Walk,Motion::Walk,-1);check(nc::animationSpeed(&a)==30,"genuine body bootstrap retains retail constructor animation rate30");observation.displacement={40,0};
+ for(int i=0;i<5;++i)check(animate(),error);
+ check(nc::animationSpeed(&a)==50&&amounts.back()==30,"simulation selectingRun50 consumes prior30 in same animation pass");
+ check(animate()&&amounts.back()==50,"next actual animation pass consumes previously selectedRun50");
+ typed.id=StateId::Walk;check(!nc::resetThrowAnimationSpeed(&a,error)&&nc::animationSpeed(&a)==50,"rate reset refuses unrelated typed state without altering rate");typed.id=StateId::Throw;check(nc::resetThrowAnimationSpeed(&a,error)&&nc::animationSpeed(&a)==30,"genuine Throw init event resets next animation rate30");
+ typed.id=StateId::ThrowWait;check(nc::resetThrowAnimationSpeed(&a,error)&&nc::animationSpeed(&a)==30,"genuine held ThrowWait init event resets animation rate30");
+ ++scene.epoch;check(!nc::animationSpeed(&a)&&!nc::resetThrowAnimationSpeed(&a,error),"stale body incarnation cannot observe or reset rate");
  reset(Motion::Wait,Motion::Wait,-1);resource[0]^=1;check(!animate()&&starts.empty()&&advances.empty(),"mutated actual parameter resource refuses beforeclock");resource[0]^=1;
  reset(Motion::Wait,Motion::Wait,-1);NaviState p1;a.current=&p1;check(!animate()&&starts.empty()&&advances.empty(),"common selector neverfalls back from untyped P1state");
  reset(Motion::Wait,Motion::Wait,-1);effectsProvider=nullptr;check(!animate()&&starts.empty()&&advances.empty(),"missing actual observation provider refuses");
