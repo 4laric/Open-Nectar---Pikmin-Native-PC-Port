@@ -1,4 +1,5 @@
 #include "pc_p2_original_foliage.h"
+#include "pc_p2_original_foliage_lod.h"
 #include "pc_p2_retail_cave_context.h"
 #include <cmath>
 #include <iostream>
@@ -26,9 +27,9 @@ struct ControlledEngine final:Engine {
 };
 CatalogRow row(unsigned uid,unsigned source=91,unsigned count=1){CatalogRow r;r.course="tutorial";r.member="plantsgen.txt";r.sourceKey="literal-source:"+std::to_string(uid);r.index=uid;r.enemy.uid=uid;r.enemy.source=source;r.enemy.count=count;return r;}
 void identityAndResources(){
- std::string e;CHECK(supported(91)&&supported(88)&&supported(47)&&supported(49)&&supported(92)&&!supported(50));
+ std::string e;for(auto source:{46u,47u,49u,51u,52u,80u,88u,90u,91u,92u})CHECK(supported(source));CHECK(!supported(50));
  auto literal=row(1);CHECK(decode(literal,e));
- for(auto source:{0u,46u,48u,50u,90u,93u}){auto bad=literal;bad.enemy.source=source;CHECK(!decode(bad,e));}
+ for(auto source:{0u,48u,50u,53u,81u,89u,93u}){auto bad=literal;bad.enemy.source=source;CHECK(!decode(bad,e));}
  for(auto version:{"0000","0001","?????"}){auto bad=literal;bad.enemy.generatorVersion=version;CHECK(!decode(bad,e));}
  auto bad=literal;bad.enemy.generatorTail={"0"};CHECK(!decode(bad,e));bad=literal;bad.enemy.uid=0;CHECK(!decode(bad,e));
  bad=literal;bad.enemy.pelletColor=0;bad.enemy.pelletSize=1;CHECK(!decode(bad,e));
@@ -73,6 +74,33 @@ void forestIdentityAndResources(){
  CHECK(p.bind(large,largeActor,47,e)&&p.bind(small,smallActor,49,e));
  Creature* noActor=nullptr;CHECK(!p.birth(zero,&largeGen,0,{},0,noActor,e)&&!noActor);CHECK(!p.birth(dead,&smallGen,1,{},0,noActor,e)&&!noActor);
  CHECK(p.release(largeActor,47,e)&&p.release(smallActor,49,e));CHECK(p.preflight(rows,e)&&p.reserve(rows,e));
+}
+void allNineOwnership(){
+ ControlledEngine engine;Provider p(engine);std::string e;const unsigned sources[]={46,47,49,51,52,80,88,90,91};
+ std::vector<CatalogRow> zeroRows,liveRows;for(auto source:sources){zeroRows.push_back(row(100+source,source,0));liveRows.push_back(row(100+source,source));}
+ CHECK(p.preflight(zeroRows,e));for(auto source:sources)CHECK(engine.resourceCalls[source]==1);CHECK(p.reserve(zeroRows,e)&&engine.reserved==0&&engine.allocations==0);
+ CHECK(p.preflight(liveRows,e));for(unsigned i=0;i<liveRows.size();++i){auto altered=liveRows;altered[i].enemy.source=sources[(i+1)%9];CHECK(!p.reserve(altered,e));}
+ CHECK(p.reserve(liveRows,e)&&engine.reserved==9);Generator generators[9];Creature* actors[9]{};
+ for(unsigned i=0;i<liveRows.size();++i){CHECK(p.birth(liveRows[i],&generators[i],0,{float(i),0,0},0,actors[i],e));CHECK(p.bind(liveRows[i],actors[i],1000+i,e));CHECK(p.lookup(actors[i])->row.enemy.source==sources[i]);}
+ CHECK(p.size()==9);for(unsigned i=0;i<liveRows.size();++i)CHECK(!p.release(actors[i],1000+(i+1)%9,e));
+ engine.cleanupFails=true;CHECK(!p.release(actors[8],1008,e)&&p.size()==9);engine.cleanupFails=false;
+ for(unsigned i=0;i<liveRows.size();++i){CHECK(p.release(actors[i],1000+i,e));}
+ CHECK(p.size()==0&&p.preflight(zeroRows,e)&&p.reserve(zeroRows,e));
+}
+void literalCylinderPlanes(){
+ for(auto source:{51u,52u,80u,88u,90u}){CHECK(cylinderSource(source));}
+ for(auto source:{46u,47u,49u,91u}){CHECK(!cylinderSource(source));}
+ Cylinder c{{0,0,0},10,2};
+ CHECK(!cylinderPlaneVisible(c,1,0,0,2));CHECK(cylinderPlaneVisible(c,1,0,0,1.99f));CHECK(!cylinderPlaneVisible(c,1,0,0,2.01f));
+ CHECK(!cylinderPlaneVisible(c,0,1,0,10));CHECK(cylinderPlaneVisible(c,0,1,0,9.99f));CHECK(!cylinderPlaneVisible(c,0,1,0,10.01f));
+ CHECK(!cylinderPlaneVisible(c,0,-1,0,0));CHECK(cylinderPlaneVisible(c,0,-1,0,-.01f));
+ // Radial support on this tilted unit plane is1.6; the upper endpoint adds6.
+ CHECK(cylinderPlaneVisible(c,0,.6f,.8f,7.5f));CHECK(!cylinderPlaneVisible(c,0,.6f,.8f,7.7f));
+ // An enclosing sphere would incorrectly admit a tall cylinder behind x=3.
+ CHECK(!cylinderPlaneVisible(c,1,0,0,3));
+ auto ordinary=sourceCylinder(90,{10,20,30},1.57079632679f,4,8);CHECK(ordinary.bottom.x==10&&ordinary.bottom.y==20&&ordinary.bottom.z==30&&ordinary.radius==4&&ordinary.height==8);
+ auto foxtail=sourceCylinder(88,{10,20,30},0,4,8);CHECK(foxtail.bottom.x==10&&foxtail.bottom.y==20&&foxtail.bottom.z==-20);
+ foxtail=sourceCylinder(88,{10,20,30},1.57079632679f,4,8);CHECK(std::fabs(foxtail.bottom.x+40)<.001f&&std::fabs(foxtail.bottom.z-30)<.001f);
 }
 void brownLargeIdentityAndEnd(){
  ControlledEngine engine;Provider p(engine);std::string e;const unsigned sources[]={47,49,88,91,92};std::vector<CatalogRow> zeros;
@@ -175,4 +203,4 @@ void typedTouchHooks(const CatalogRow& r,bool cave){
  // A fresh reservation owns a fresh actor even when source/ordinal repeat.
  CHECK(prepare()&&birth()&&p.bind(r,plant,701,e));CHECK(p.earthquake(plant,e)&&engine.touches.size()==6&&engine.touches.back().plant==plant&&engine.touches.back().token==701&&engine.touches.back().instigator==nullptr);CHECK(p.release(plant,701,e));
 }
-int main(){try{identityAndResources();reservationAndCleanup();forestIdentityAndResources();brownLargeIdentityAndEnd();for(auto source:{91u,88u,47u,49u,92u}){touchAndTiming(source);typedTouchHooks(row(source,source),false);}caveAuthenticationAndResources();caveLifetimeAndRegistry();for(const auto& r:caveRows())typedTouchHooks(r,true);std::cout<<"Foliage surface and authenticated cave controls, typed contact/quake hook failure, instigator, once-per-motion and fresh-reservation reuse PASS; native gameplay not claimed\n";}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}
+int main(){try{identityAndResources();reservationAndCleanup();forestIdentityAndResources();allNineOwnership();brownLargeIdentityAndEnd();literalCylinderPlanes();typedTouchHooks(row(91,91),false);typedTouchHooks(caveRows()[0],true);caveAuthenticationAndResources();caveLifetimeAndRegistry();for(auto source:{46u,47u,49u,51u,52u,80u,88u,90u,91u,92u})touchAndTiming(source);std::cout<<"Foliage sources46,47,49,51,52,80,88,90,91 literal identities, distinct banks, zero resource rows, lifecycle, cylinder planes and touch timing controls PASS; native gameplay not claimed\n";}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

@@ -46,6 +46,34 @@ Set both `P2_ORIGINAL_FOLIAGE_FOREST=1` and `P2_ORIGINAL_FOLIAGE_HUMAN=1` for th
 same human walking script below using Clover and small Figwort in place of the
 brown Figwort and Foxtail. Preserve the20Red baseline and centered960x540 window.
 
+Additional literal species fixtures are tracked in
+[issue1272](https://github.com/4laric/pikmin-randomizer/issues/1272). They retain
+the same20Red tutorial arena, centered960x540 window,60-second supervisor,
+captain guard and phased native pool cleanup. Default tutorial91/88 and
+forest47/49 batches are preserved. Select the new batches with the supervisor's
+`--batch` argument, or set `P2_ORIGINAL_FOLIAGE_BATCH` for direct fixture launch:
+
+| Batch | Source pair | Literal source keys and UIDs | Facing degrees |
+| --- | --- | --- | --- |
+| `dandelion` |46,80| `forest/plantsgen.txt#13` UID1375741226; `forest/plantsgen.txt#5` UID1390227387 |0;90|
+| `shoots` |51,52| `yakushima/plantsgen.txt#0` UID1382955810; `yakushima/plantsgen.txt#5` UID1390174228 |240;270|
+| `horsetails` |90,88| `forest/plantsgen.txt#14` UID1384248119; `tutorial/plantsgen.txt#4` UID1381420794 |270;95|
+
+The new sources are Tanpopo46, Wakame_s51, Wakame_l52, Tukushi80 and Zenmai90.
+The batch names are test groups. These representative rows keep literal count1,
+reserved0, respawn0, common fields, zero offset and empty `????` generator tail.
+Their positions are disclosed fixture relocations. Every batch still launches
+the tutorial scene and reports its exact source pair in the PASS marker; this
+does not qualify original forest/yakushima positions or whole-course admission.
+
+Source51/52/80/88/90 LOD uses retail cylinder plane support, including strict
+tangency exclusion and source88's backward50 offset. Pure controls cover those
+boundaries and all nine distinct resource identities, count-zero resource rows,
+ownership, retained cleanup failures and touch timing. These controls and the
+visible fixture do not prove fully culled animation scheduling: retail
+`isCullingOff()` depends on nearby Pikmin, and an equivalent native predicate
+remains unproved. Plain frustum visibility must not be substituted for it.
+
 Brown large Figwort92 is tracked separately in
 [issue1279](https://github.com/4laric/pikmin-randomizer/issues/1279). Select
 `--batch brown-large` in the Linux supervisor, or

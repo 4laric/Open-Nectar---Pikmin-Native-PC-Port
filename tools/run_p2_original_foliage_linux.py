@@ -15,7 +15,7 @@ p.add_argument('--source-pin', required=True)
 p.add_argument('--run-dir', type=Path, required=True)
 p.add_argument('--evidence', type=Path, required=True)
 p.add_argument('--mode', choices=['diagnostic', 'walk', 'refusal', 'captain-down'], default='diagnostic')
-p.add_argument('--batch', choices=['tutorial', 'forest', 'brown-large', 'cave'], default='tutorial')
+p.add_argument('--batch', choices=['tutorial', 'forest', 'dandelion', 'shoots', 'horsetails', 'brown-large', 'cave'], default='tutorial')
 a = p.parse_args()
 if a.batch == 'cave' and a.mode == 'walk':
     p.error('cave batch is a bounded native birth/lifetime diagnostic; walking is not qualified')
@@ -44,9 +44,9 @@ if a.mode in mode_keys:
     env[mode_keys[a.mode]] = '1'
 if a.batch == 'forest':
     env['P2_ORIGINAL_FOLIAGE_FOREST'] = '1'
-elif a.batch in ('brown-large', 'cave'):
+elif a.batch != 'tutorial':
     env['P2_ORIGINAL_FOLIAGE_BATCH'] = a.batch
-sources = dict(tutorial=[91,88],forest=[47,49],cave=[91,92,47],**{'brown-large':[92,91]})[a.batch]
+sources = dict(tutorial=[91,88],forest=[47,49],cave=[91,92,47],dandelion=[46,80],shoots=[51,52],horsetails=[90,88],**{'brown-large':[92,91]})[a.batch]
 source_marker = ','.join(map(str, sources))
 command = ['xvfb-run','-a','-s','-screen 0 1280x720x24',str(exe),'--experimental-pikmin2-surface','tutorial']
 inputs = dict(native=a.source_pin, exe_sha256=actual, exe=str(exe), cwd=str(run), mode=a.mode,
