@@ -2704,14 +2704,14 @@ void Piki::updateLookCreature()
 void Piki::doAnimation()
 {
     pc_p2_spicy_tick(this);
-    if(pc_p2_is_purple(this)||pc_p2_is_white(this))mP2AnimationTime+=gsys->getFrameTime();
+    if(pc_p2_is_purple(this)||pc_p2_is_white(this))mP2AnimationTime+=gsys->getFrameTime()*mP2Spicy.animationRate();
 	updateWalkAnimation();
 	mLastAnimPosition = mSRT.t;
 	// Change only attack loops, not walking, thrown arcs, plucking or cutscenes.
     const int motion = mPikiAnimMgr.getUpperAnimator().getCurrentMotionIndex();
     const bool attackLoop = motion == PIKIANIM_Attack || motion == PIKIANIM_Kuttuku
         || (motion == PIKIANIM_Job2 && mMode == PikiMode::BreakwallMode);
-    mPikiAnimMgr.updateAnimation(mMotionSpeed * mP2Spicy.animationRate(), attackLoop ? pc_randomizer_color_multiplier(mColor, PC_PIKI_ATTACK_RATE) : 1.0f);
+    mPikiAnimMgr.updateAnimation(mMotionSpeed, mP2Spicy.animationRate() * (attackLoop ? pc_randomizer_color_multiplier(mColor, PC_PIKI_ATTACK_RATE) : 1.0f));
 }
 
 /**
