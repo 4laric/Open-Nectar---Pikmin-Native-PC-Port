@@ -224,8 +224,9 @@ public:
             // Actual Appdown constructor revokes before resetting its heap.
             // Do not read stage actors or fixture members after this boundary.
             GameExitSection exit;
-            require(!pc_p2_spicy_save_roster_bound()&&!pc_p2_spicy_save_preflight(e)
-                &&e=="spicy_missing_roster","actual GameExit retained stale save roster");
+            // Inspect only static binding state here, without touching even
+            // local strings that existed before App heap reset.
+            require(!pc_p2_spicy_save_roster_bound(),"actual GameExit retained stale save roster");
             std::puts("P2_SPICY_SAVE_EXIT_CONTROL actual_GameExit_Appdown=1 roster_revoked_before_heap_reset=1 title_day_end_card_save=UNTESTED");
             std::printf("P2_SPICY_RUNTIME_PASS formation=%zu actual_animation=1 source_stats=1 pause=1 refresh=1 stock_zero=1 recovery_seconds=%.3f injected_stock_and_input=1 natural_pickup=UNTESTED save_resume=UNTESTED\n",formation,recoverySeconds);
             std::fflush(nullptr);std::_Exit(0);
