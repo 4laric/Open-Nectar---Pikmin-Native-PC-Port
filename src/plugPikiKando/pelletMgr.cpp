@@ -1,4 +1,5 @@
 #include "pc_p2_original_pelplant_native.h"
+#include "pc_p2_original_pod.h"
 #include "pc_p2_purple.h"
 #include "pc_p2_cargo_ground.h"
 #include "pc_randomizer.h"
@@ -261,6 +262,7 @@ void Pellet::finishWaterEffect()
  */
 void Pellet::doKill()
 {
+    pc_p2_original_pod_forget_pellet(this);
 #if defined(PIKI_PC_PORT) && PIKI_PC_PORT
     pc_p2_original_pelplant_forget_pellet(this);
 #endif

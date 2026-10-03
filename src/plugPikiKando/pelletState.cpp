@@ -1,5 +1,6 @@
 #include "PelletState.h"
 #include "pc_p2_preview.h"
+#include "pc_p2_original_pod.h"
 #include "DebugLog.h"
 #include "FlowController.h"
 #include "GoalItem.h"
@@ -246,6 +247,8 @@ PelletGoalState::PelletGoalState()
  */
 void PelletGoalState::init(Pellet* pelt)
 {
+	const bool originalPod=pc_p2_original_pod_owns(pelt);
+	if(originalPod)pc_p2_original_pod_suction_begin(pelt);
 	mTargetIsShip = false;
 	if (pelt->mTargetGoal->mObjType == OBJTYPE_Ufo) {
 		mTargetIsShip = true;
@@ -278,7 +281,7 @@ void PelletGoalState::init(Pellet* pelt)
 #endif
 		playerState->preloadHenkaMovie();
 
-	} else if (flowCont.mCurrentStage->mStageID == STAGE_Practice) {
+	} else if (!originalPod && flowCont.mCurrentStage->mStageID == STAGE_Practice) {
 		if (!playerState->mDemoFlags.isFlag(DEMOFLAG_CollectFirstPellet)) {
 			PRINT("** FIRST PELLET IN\n");
 			playerState->mDemoFlags.setFlag(DEMOFLAG_CollectFirstPellet, pelt);
@@ -322,7 +325,7 @@ void PelletGoalState::init(Pellet* pelt)
 		PRINT("still stick %s\n", ObjType::getName(obj->mObjType));
 	}
 
-	if (pelt->mConfig->mPelletType() == PELTYPE_UfoPart) {
+	if (!originalPod && pelt->mConfig->mPelletType() == PELTYPE_UfoPart) {
 		pelt->mTargetGoal->suckMe(pelt);
 	}
 }
@@ -357,7 +360,9 @@ void PelletGoalState::exec(Pellet* pelt)
 	mSuckSpeed += gsys->getFrameTime() * 720.0f;
 
 	if (mSuckProgress >= 1.0f) {
-		if (pc_p2_preview_deliver(pelt)) {
+		if (pc_p2_original_pod_suction_done(pelt)) {
+			// Original cave receiver emits the canonical callback only here.
+		} else if (pc_p2_preview_deliver(pelt)) {
 			// Private treasure receipt; no Onion seeds or ship repair side effects.
 		} else if (pelt->mConfig->mPelletType() == PELTYPE_UfoPart) {
 			pelt->mTargetGoal->finishSuck(pelt);
@@ -374,8 +379,9 @@ void PelletGoalState::exec(Pellet* pelt)
 /**
  * @todo: Documentation
  */
-void PelletGoalState::cleanup(Pellet*)
+void PelletGoalState::cleanup(Pellet* pellet)
 {
+	pc_p2_original_pod_suction_cleanup(pellet);
 	PRINT("pelletGoalState * CLEAN UP\n");
 	if (mTargetIsShip) {
 		utEffectMgr->kill(KandoEffect::UfoSuck);

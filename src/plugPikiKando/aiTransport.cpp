@@ -16,6 +16,7 @@
 #include "Pellet.h"
 #include "pc_p2_preview.h"
 #include "pc_p2_cave_items_engine.h"
+#include "pc_p2_original_pod.h"
 #include "PelletState.h"
 #include "PikiAI.h"
 #include "PikiMgr.h"
@@ -32,6 +33,8 @@
 #include "zen/Math.h"
 #include "zen/ogTutorial.h"
 #include <stddef.h>
+#include <cstdio>
+#include <cstdlib>
 
 /**
  * @todo: Documentation
@@ -1035,6 +1038,11 @@ int ActTransport::moveGuruGuru()
 void ActTransport::decideGoal(Creature* cargo)
 {
 	Pellet* pel = mPellet.getPtr();
+    if (pc_p2_original_pod_owns(pel)) {
+        mGoal=pc_p2_original_pod_goal_for(pel);
+        if(!mGoal){std::fputs("P2 original Pod cargo has no committed live receiver\n",stderr);std::abort();}
+        pel->mTargetGoal=mGoal;return;
+    }
     if(Suckable* pod=pc_p2_cave_items_goal_for(pel)) {mGoal=pod;pel->mTargetGoal=pod;return;}
     if(Suckable* pod=pc_p2_preview_goal()) {mGoal=pod;pel->mTargetGoal=pod;return;}
 	PRINT("pellet type is %d\n", pel->mConfig->mPelletType());

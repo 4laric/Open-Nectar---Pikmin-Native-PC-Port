@@ -326,6 +326,7 @@ set(PC_PORT_SOURCES
     # without this TU.
     pc_port/pc_p2_challenge_stages_ext.cpp
     pc_port/pc_p2_preview.cpp
+    pc_port/pc_p2_original_pod.cpp
     pc_port/pc_p2_captain.cpp
     pc_port/pc_p2_second_captain.cpp
     pc_port/pc_p2_economy.cpp

@@ -1,0 +1,202 @@
+#include "pc_p2_original_pod.h"
+#include "Suckable.h"
+#include "Pellet.h"
+#include "PelletState.h"
+#include "CreatureNode.h"
+#include "Collision.h"
+#include "Graphics.h"
+#include "Camera.h"
+#include "Texture.h"
+#include "Route.h"
+#include "Shape.h"
+#include "system.h"
+#include "sysNew.h"
+#include "netplay/pc_netplay_sha256.h"
+#include <cmath>
+#include <fstream>
+#include <map>
+#include <cstdio>
+#include <cstdlib>
+
+namespace {
+using namespace p2originalpod;
+struct HeapScope {int previous;HeapScope():previous(gsys->setHeap(SYSHEAP_App)){}~HeapScope(){gsys->setHeap(previous);}};
+bool reject(std::string& e,const char* s){e=s;return false;}
+void fail(const char* s){std::fprintf(stderr,"P2_ORIGINAL_POD refusal: %s\n",s);std::fflush(nullptr);std::abort();}
+bool same(const p2retail::Snapshot& a,const p2retail::Snapshot& b){
+ return a.scene==b.scene&&a.cave==b.cave&&a.floor==b.floor&&a.maxFloor==b.maxFloor
+  &&a.source==b.source&&a.sourceSha256==b.sourceSha256&&a.catalogSha256==b.catalogSha256
+  &&a.story==b.story&&a.inCave==b.inCave;
+}
+bool source(const p2retail::Snapshot& f){
+ const auto* c=p2retail::descriptor(f.cave);
+ return c&&p2retail::definition(*c,f.floor)&&f.inCave&&f.story
+  &&f.source==c->source&&f.sourceSha256==c->sourceSha256
+  &&f.catalogSha256==c->catalogSha256&&f.maxFloor==c->maxFloor
+  &&!f.scene.seed.empty()&&!f.scene.visit.empty()&&f.scene.serial&&p2retail::hex64(f.scene.layoutSha256);
+}
+bool digestFile(const std::string& path,std::string& digest){
+ std::ifstream in(path,std::ios::binary);if(!in)return false;
+ pc_netplay_sha::Sha256 sha;char buffer[32768];std::size_t total=0;
+ while(in){in.read(buffer,sizeof(buffer));auto n=in.gcount();total+=n;
+  if(total>32*1024*1024)return false;if(n)sha.update(buffer,n);}
+ if(!in.eof()||!total)return false;uint8_t out[32];sha.final(out);digest=pc_netplay_sha::hex(out,32);return true;
+}
+class Pod final:public Suckable {
+public:
+ Pod(CreatureProp* prop,Shape* shape,const Config& c,int route)
+  :Suckable(OBJTYPE_P2Pod,prop),bank(shape),waypoint(route){
+  ItemCreature::init(Vector3f(c.x,c.y,c.z));mSRT.r.set(0,c.yaw,0);mSRT.s.set(1,1,1);
+  mHealth=1;disableGravity();setCreatureFlag(CF_DisableAutoFaceDir);
+  // Original pod/texts.szs coll.txt: four joint spheres flattened into the
+  // exact model bind pose. Static presentation and collision share that pose.
+  const float radius[]={31,22,10,13};
+  const Vector3f offset[]={Vector3f(-.0012467411f,14.3038835f,24.6685720f),
+   Vector3f(.000694147f,3.47091705f,22.7589036f),Vector3f(0,-2,10),
+   Vector3f(-.0024818517f,21.1975895f,25.8838155f)};
+  ObjCollInfo* nodes[4];
+  for(unsigned i=0;i<4;++i){nodes[i]=new ObjCollInfo;nodes[i]->mId.setID('pod0'+i);
+   nodes[i]->mCode.setID('____');nodes[i]->mJointIndex=-1;nodes[i]->mRadius=radius[i];
+   nodes[i]->mCentrePosition=offset[i];if(i)nodes[0]->add(nodes[i]);}
+  mCollInfo=new CollInfo(4);mCollInfo->initInfoTree(nodes[0]);
+  for(unsigned i=0;i<4;++i){auto* p=mCollInfo->getSphere('pod0'+i);p->mIsUpdateActive=false;
+   p->mRadius=radius[i];p->mJointMatrix.makeIdentity();
+   p->mCentre.set(c.x+offset[i].x*std::cos(c.yaw)+offset[i].z*std::sin(c.yaw),
+    c.y+offset[i].y,c.z-offset[i].x*std::sin(c.yaw)+offset[i].z*std::cos(c.yaw));}
+  update();
+ }
+ Vector3f getGoalPos()override{return mSRT.t;}
+ f32 getGoalPosRadius()override{return 31.0f;} // Native route arrival uses source bounding radius.
+ Vector3f getSuckPos()override{return mSRT.t+Vector3f(0,95,0);} // Onyon::getSuckPos, non-Ufo.
+ int getRouteIndex()override{return waypoint;}
+ f32 getiMass()override{return 0;}
+ f32 getSize()override{return 31;}
+ bool needShadow()override{return false;}
+ bool isAlive()override{return live;}
+ bool isVisible()override{return live;}
+ // Cargo crosses the solid body to its source goal point; captains/Pikmin
+ // still collide with the original static sphere tree through the manager.
+ bool ignoreAtari(Creature* c)override{return c&&c->mObjType==OBJTYPE_Pellet;}
+ bool stimulate(immut Interaction&)override{return false;}
+ void startAI(int)override{}
+ void doAI()override{}
+ void doAnimation()override{}
+ void update()override{mVelocity.set(0,0,0);mVolatileVelocity.set(0,0,0);
+  mGrid.updateGrid(mSRT.t);mGrid.updateAIGrid(mSRT.t,false);}
+ void refresh(Graphics& gfx)override{
+  if(!live||!gfx.mCamera)return;Matrix4f root,view;root.makeSRT(mSRT.s,mSRT.r,mSRT.t);
+  gfx.mCamera->mLookAtMtx.multiplyTo(root,view);gfx.useMatrix(Matrix4f::ident,0);
+  bank->updateAnim(gfx,view,nullptr,this);bank->drawshape(gfx,*gfx.mCamera,nullptr);
+ }
+ // No arrival-time rewards. P1 UfoPart's early suckMe must never reach this.
+ void suckMe(Pellet*)override{}
+ void finishSuck(Pellet*)override{}
+ Shape* bank;int waypoint;bool live=true;
+};
+enum class Phase {Bound,Sucking,Completed,Lost};
+struct Cargo {p2retail::BirthIdentity birth;p2retail::SceneIdentity scene;CompletedCallback callback;Phase phase=Phase::Bound;};
+Config config;ContextProvider contextProvider;Shape* shape=nullptr;Pod* pod=nullptr;
+CreatureNode* node=nullptr;MeltingPotMgr* manager=nullptr;
+std::map<Pellet*,Cargo> cargo;
+bool prepared=false,committed=false,everSucked=false;Pellet* completing=nullptr;
+bool current(p2retail::Snapshot* out=nullptr){
+ p2retail::Snapshot actual;
+ if(!prepared||!contextProvider||!contextProvider(config.floor.scene,actual)||!source(actual)||!same(actual,config.floor))return false;
+ if(out)*out=actual;return true;
+}
+void clear(){
+ if(pod)pod->live=false;if(node){node->del();node->mCreature=nullptr;}
+ pod=nullptr;node=nullptr;manager=nullptr;shape=nullptr;cargo.clear();contextProvider={};
+ config={};prepared=committed=everSucked=false;completing=nullptr;
+ // App-heap resources share the floor lifetime, never free borrowed textures.
+}
+}
+
+bool pc_p2_original_pod_preflight(const p2originalpod::Config& c,ContextProvider provider,std::string& e){
+ if(prepared)return reject(e,"pod_already_prepared");
+ if(!gsys||!itemMgr||!itemMgr->mMeltingPotMgr||!routeMgr||!provider||!source(c.floor)
+  ||c.baseGenType!=7||!std::isfinite(c.x)||!std::isfinite(c.y)||!std::isfinite(c.z)||!std::isfinite(c.yaw))return reject(e,"pod_source_or_managers");
+ p2retail::Snapshot actual;if(!provider(c.floor.scene,actual)||!same(actual,c.floor))return reject(e,"pod_unverified_scene");
+ auto* wp=routeMgr->findNearestWayPoint('test',Vector3f(c.x,c.y,c.z),false);
+ if(!wp||!routeMgr->getWayPoint('test',wp->mIndex))return reject(e,"pod_route_missing");
+ std::string sha;if(!digestFile(c.model,sha)||sha!=convertedModelSha256)return reject(e,"pod_original_model_hash");
+ if(!digestFile(c.sourceArchive,sha)||sha!=archiveSha256
+  ||!digestFile(c.sourceModel,sha)||sha!=originalModelSha256
+  ||!digestFile(c.sourceCollision,sha)||sha!=originalCollisionSha256)return reject(e,"pod_original_source_provenance");
+ HeapScope heap;Shape* loaded=gsys->loadShape(c.model.c_str(),true);
+ if(!loaded||loaded->mJointCount!=1)return reject(e,"pod_converted_model_missing");
+ for(int i=0;i<loaded->mTexAttrCount;++i)if(loaded->mTexAttrList[i].mTexture)loaded->mTexAttrList[i].mTexture->attach();
+ config=c;contextProvider=std::move(provider);shape=loaded;prepared=true;e.clear();return true;
+}
+bool pc_p2_original_pod_birth(const Config& c,ContextProvider provider,std::string& e){
+ if(!prepared&&!pc_p2_original_pod_preflight(c,std::move(provider),e))return false;
+ if(pod||!same(c.floor,config.floor)||c.unit!=config.unit||c.slot!=config.slot||c.baseGenType!=config.baseGenType
+  ||c.x!=config.x||c.y!=config.y||c.z!=config.z||c.yaw!=config.yaw||c.model!=config.model
+  ||c.sourceArchive!=config.sourceArchive||c.sourceModel!=config.sourceModel||c.sourceCollision!=config.sourceCollision||!current())return reject(e,"pod_prepared_identity");
+ auto* wp=routeMgr->findNearestWayPoint('test',Vector3f(c.x,c.y,c.z),false);if(!wp)return reject(e,"pod_route_changed");
+ HeapScope heap;auto* prop=new CreatureProp;prop->mCreatureProps.mFriction.mValue=.1f;
+ pod=new Pod(prop,shape,c,wp->mIndex);node=new CreatureNode;node->mCreature=pod;
+ manager=itemMgr->mMeltingPotMgr;manager->mRootNode.add(node);
+ std::printf("P2_ORIGINAL_POD_BORN cave=%s floor=%u type=3 bank=1 basegen=7 unit=%u slot=%u source=%s static_pose=1\n",
+  c.floor.cave.c_str(),c.floor.floor,c.unit,c.slot,archive);e.clear();return true;
+}
+bool pc_p2_original_pod_commit_floor(const p2retail::SceneIdentity& scene,std::string& e){
+ if(committed||!pod||!(scene==config.floor.scene)||!current())return reject(e,"pod_commit_identity");
+ committed=true;e.clear();return true;
+}
+bool pc_p2_original_pod_abort_prepared(const p2retail::SceneIdentity& scene,std::string& e){
+ if(!prepared||!(scene==config.floor.scene)||committed||everSucked||completing)return reject(e,"pod_abort_after_observable_floor");
+ clear();e.clear();return true;
+}
+bool pc_p2_original_pod_context(Suckable* receiver,const p2retail::SceneIdentity& scene,p2retail::Snapshot& out){
+ return committed&&pod&&receiver==pod&&pod->live&&scene==config.floor.scene&&current(&out);
+}
+Suckable* pc_p2_original_pod_goal(const p2retail::SceneIdentity& scene){p2retail::Snapshot out;return pc_p2_original_pod_context(pod,scene,out)?pod:nullptr;}
+bool pc_p2_original_pod_bind_cargo(Pellet* p,const p2retail::BirthIdentity& birth,const p2retail::SceneIdentity& scene,CompletedCallback callback,std::string& e){
+ if(!pod||!current()||!(scene==config.floor.scene)||!p||!p->isAlive()||!p->mConfig||!birth.epoch||birth.instance.empty()||!callback||cargo.count(p)||completing)return reject(e,"pod_cargo_identity");
+ const auto* c=p2retail::descriptor(config.floor.cave);const auto* f=c?p2retail::definition(*c,config.floor.floor):nullptr;
+ if(!f||birth.row>=f->rows.size()||birth.ordinal>=f->rows[birth.row].minimum()
+  ||birth.instance!=p2retail::instanceKey(*c,config.floor.floor,f->rows[birth.row],birth.ordinal))return reject(e,"pod_cargo_original_incarnation");
+ for(const auto& row:cargo)if(row.second.birth.instance==birth.instance)return reject(e,"pod_duplicate_cargo_incarnation");
+ cargo.emplace(p,Cargo{birth,scene,std::move(callback),Phase::Bound});e.clear();return true;
+}
+bool pc_p2_original_pod_owns(const Pellet* p){return cargo.count(const_cast<Pellet*>(p))!=0;}
+Suckable* pc_p2_original_pod_goal_for(Pellet* p){auto it=cargo.find(p);return it!=cargo.end()&&it->second.phase!=Phase::Completed&&it->second.phase!=Phase::Lost?pc_p2_original_pod_goal(it->second.scene):nullptr;}
+bool pc_p2_original_pod_completed(Pellet* p,Suckable* receiver,const p2retail::SceneIdentity& scene){
+ auto it=cargo.find(p);p2retail::Snapshot out;
+ return completing==p&&it!=cargo.end()&&it->second.phase==Phase::Sucking&&it->second.scene==scene
+  &&p->getState()==PELSTATE_Goal&&p->mTargetGoal==receiver&&pc_p2_original_pod_context(receiver,scene,out);
+}
+unsigned pc_p2_original_pod_pending(){unsigned n=0;for(const auto& row:cargo)if(row.second.phase!=Phase::Completed)++n;return n;}
+bool pc_p2_original_pod_snapshot(const p2retail::SceneIdentity& scene,p2originalpod::Snapshot& out){
+ if(!pod||!committed||completing||!(scene==config.floor.scene)||!current())return false;
+ p2originalpod::Snapshot capture;capture.floor=config.floor;capture.unit=config.unit;capture.slot=config.slot;capture.committed=true;
+ for(const auto& row:cargo)if(row.second.phase!=Phase::Completed)capture.pending.push_back({row.second.birth,static_cast<unsigned>(row.second.phase)});
+ out=std::move(capture);return true;
+}
+bool pc_p2_original_pod_release(std::string& e){
+ if(completing||pc_p2_original_pod_pending())return reject(e,"pod_pending_cargo");
+ clear();e.clear();return true;
+}
+void pc_p2_original_pod_suction_begin(Pellet* p){
+ auto it=cargo.find(p);if(it==cargo.end())return;
+ if(it->second.phase!=Phase::Bound||p->mTargetGoal!=pc_p2_original_pod_goal_for(p))fail("pod_stale_or_duplicate_suction");
+ it->second.phase=Phase::Sucking;everSucked=true;
+}
+bool pc_p2_original_pod_suction_done(Pellet* p){
+ auto it=cargo.find(p);if(it==cargo.end())return false;
+ if(completing||it->second.phase!=Phase::Sucking||p->getState()!=PELSTATE_Goal||!p->isAlive()
+  ||p->mTargetGoal!=pc_p2_original_pod_goal_for(p))fail("pod_unverified_completed_suction");
+ completing=p;std::string e;auto callback=it->second.callback;bool ok=callback(p,pod,e);completing=nullptr;
+ if(!ok)fail(e.empty()?"canonical_pod_receipt_failed":e.c_str());
+ it=cargo.find(p);if(it==cargo.end()||it->second.phase!=Phase::Sucking)fail("pod_callback_retired_cargo_before_native_completion");
+ it->second.phase=Phase::Completed;
+ std::printf("P2_ORIGINAL_POD_SUCK_DONE cave=%s floor=%u instance=%s epoch=%llu\n",config.floor.cave.c_str(),config.floor.floor,it->second.birth.instance.c_str(),static_cast<unsigned long long>(it->second.birth.epoch));
+ return true;
+}
+void pc_p2_original_pod_suction_cleanup(Pellet* p){auto it=cargo.find(p);if(it!=cargo.end()&&it->second.phase==Phase::Sucking)it->second.phase=Phase::Bound;}
+void pc_p2_original_pod_forget_pellet(Pellet* p){
+ auto it=cargo.find(p);if(it==cargo.end())return;
+ if(it->second.phase==Phase::Completed)cargo.erase(it);
+ else it->second.phase=Phase::Lost; // Lost cargo cannot silently permit unload/SAVE.
+}
