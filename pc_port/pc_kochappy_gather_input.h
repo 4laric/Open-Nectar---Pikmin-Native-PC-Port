@@ -143,7 +143,10 @@ public:
 // never prospective route/slot padding.
 inline double pc_kochappy_current_wall_tolerance(double radius,double coordinateScale){
  if(!std::isfinite(radius)||radius<=0||!std::isfinite(coordinateScale)||coordinateScale<1||coordinateScale<radius)return -1;
- return 8.*std::numeric_limits<float>::epsilon()*coordinateScale;
+ const double uncertainty=8.*std::numeric_limits<float>::epsilon()*coordinateScale;
+ // Refuse materially uncertain geometry rather than capping its error and
+ // certifying contact. Qualified map2208 yields .002106 versus radius8.5.
+ return std::isfinite(uncertainty)&&uncertainty<radius/1024.?uncertainty:-1.;
 }
 inline bool pc_kochappy_current_wall_contact(double distance,double radius,double coordinateScale){
  const double tolerance=pc_kochappy_current_wall_tolerance(radius,coordinateScale);

@@ -200,4 +200,9 @@ int main(){
  CHECK(!pc_kochappy_current_wall_contact(8.5,8.5,NAN));
  CHECK(!pc_kochappy_current_wall_contact(8.5,8.5,1));
  CHECK(!(8.499937478>8.5+.10)); // Prospective reserve still refuses same touching pose.
+ CHECK(!pc_kochappy_current_wall_contact(0,8.5,1e38));
+ CHECK(!pc_kochappy_current_wall_contact(8.5,8.5,1e38));
+ CHECK(!pc_kochappy_current_wall_contact(0,8.5,1000000));
+ CHECK(pc_kochappy_current_wall_tolerance(8.5,2208.129883)>0);
+ CHECK(pc_kochappy_current_wall_tolerance(8.5,1000000)<0);
 }
