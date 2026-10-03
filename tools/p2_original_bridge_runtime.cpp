@@ -67,7 +67,8 @@ public:int idle()override{
  require(std::chrono::steady_clock::now()-start<std::chrono::seconds(55),"bounded fixture startup");int result=PlugPikiApp::idle();auto* guarded=naviMgr?naviMgr->getNavi():nullptr;require(!captainSeen||guarded,"captain did not disappear");
  if(guarded&&guarded->getCurrState()){captainSeen=true;if(forceDown)p2_fixture_require_captain(false,false,0,0);p2_fixture_require_captain(GameStat::orimaDead,guarded->getCurrState()->getID()==NAVISTATE_Dead,guarded->mHealth,0);}
  if(gameflow.mMoviePlayer&&gameflow.mMoviePlayer->mIsActive){gameflow.mMoviePlayer->requestSkip();return result;}
- if(!pc_randomizer_ready()||!guarded||!pikiMgr||!itemMgr||!workObjectMgr||gameflow.mPauseAll||gameflow.mIsUIOverlayActive)return result;
+ const bool surface=pc_pikipelago_surface_course()!=nullptr;
+ if((!surface&&!pc_randomizer_ready())||!guarded||!pikiMgr||!itemMgr||!workObjectMgr||gameflow.mPauseAll||gameflow.mIsUIOverlayActive)return result;
  int count=0;Iterator it(pikiMgr);for(it.first();!it.isDone();it.next())++count;if(count!=20)return result;std::puts("ORIGINAL_BRIDGE_BASELINE pikmin=20 window=960x540");run();return result;
  }
 };
