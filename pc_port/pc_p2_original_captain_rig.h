@@ -13,9 +13,9 @@ struct Clip {unsigned id;std::string name,sourceSha;std::vector<std::array<Matri
 inline bool digest(const std::string& s){return s.size()==64&&s.find_first_not_of("0123456789abcdef")==std::string::npos;}
 inline bool models(std::istream& in,std::array<Model,3>& out){
  std::string word;int count;if(!(in>>word>>count)||word!="P2_SOURCE_CAPTAIN_RIG_1"||count!=3)return false;
- const char* models[]={"orima1","orima3","syatyou"};const char* names20[]={"kosinull","legcentre","llegjnt","rlegjnt","sebonjnt","headjnt","happajnt1","happajnt2","happajnt3","lhandjnt","rhandjnt"};const int parents[]={-1,0,1,1,0,4,5,6,7,4,4};std::array<Model,3> parsed;
+ const char* models[]={"orima1","orima3","syatyou"};const char* jointNames[]={"kosinull","legcentre","llegjnt","rlegjnt","sebonjnt","headjnt","happajnt1","happajnt2","happajnt3","lhandjnt","rhandjnt"};const int parents[]={-1,0,1,1,0,4,5,6,7,4,4};std::array<Model,3> parsed;
  for(unsigned j=0;j<3;++j){auto& m=parsed[j];int joints;if(!(in>>word>>m.name>>m.sourceSha>>joints)||word!="model"||m.name!=models[j]||!digest(m.sourceSha)||joints!=11)return false;
-  for(unsigned i=0;i<11;++i){unsigned id;if(!(in>>word>>id>>m.parent[i]>>m.names[i])||word!="joint"||id!=i||m.parent[i]!=parents[i]||m.names[i]!=names20[i])return false;}
+  for(unsigned i=0;i<11;++i){unsigned id;if(!(in>>word>>id>>m.parent[i]>>m.names[i])||word!="joint"||id!=i||m.parent[i]!=parents[i]||m.names[i]!=jointNames[i])return false;}
   for(unsigned k=0;k<2;++k){unsigned n;if(!(in>>word>>n)||word!=(k?"normals":"positions")||n<1||n>p2pose::MaxVectors)return false;auto& v=k?m.normals:m.positions;v.reserve(n);for(unsigned i=0;i<n;++i){Vertex item;if(!(in>>item.joint>>item.local.x>>item.local.y>>item.local.z)||item.joint>=11||!p2pose::valid(item.local))return false;p2pose::Vec unit;if(k&&!p2pose::unit(item.local,unit))return false;v.push_back(item);}}
  }
  if(in>>word)return false;out=std::move(parsed);return true;
