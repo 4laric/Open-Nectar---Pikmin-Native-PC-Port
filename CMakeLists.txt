@@ -3358,6 +3358,12 @@ if(TARGET pikmin_ci_fixture_white_campaign)
     target_include_directories(pikmin_ci_fixture_white_campaign PRIVATE ${P2_CHALLENGE_GUARD_INCLUDE_DIR})
 endif()
 
+# #1191 ordinary White acquisition, original cargo, day SAVE and fresh resume.
+pikmin_add_ci_fixture(white_bank_campaign tools/p2_white_bank_campaign_runtime.cpp)
+if(TARGET pikmin_ci_fixture_white_bank_campaign)
+    target_include_directories(pikmin_ci_fixture_white_bank_campaign PRIVATE ${P2_CHALLENGE_GUARD_INCLUDE_DIR})
+endif()
+
 # #1191 injected native Ivory allocation/overcapacity refund controls; opt-in only.
 pikmin_add_ci_fixture(ivory_budget tools/preview_p2_ivory_budget.cpp)
 if(TARGET pikmin_ci_fixture_ivory_budget)
