@@ -39,6 +39,8 @@ bool held=false,released=false,flying=false;
 float peak=0,startY=0,expectedPeak=0;
 void require(bool condition,const char* message){if(!condition){std::printf("FAIL ORIGINAL_YELLOW_THROW %s\n",message);std::fflush(nullptr);std::_Exit(1);}}
 void input(unsigned keys=0){
+    pc_window_input_assign(0,PC_INPUT_DEV_GAMEPAD,SDL_JoystickInstanceID(pad));
+    pc_window_input_assign(1,PC_INPUT_DEV_NONE,-1);
     for(int b=0;b<SDL_CONTROLLER_BUTTON_MAX;++b)SDL_JoystickSetVirtualButton(pad,b,0);
     SDL_JoystickSetVirtualButton(pad,SDL_CONTROLLER_BUTTON_A,bool(keys&KBBTN_A));
     SDL_JoystickSetVirtualButton(pad,SDL_CONTROLLER_BUTTON_B,bool(keys&KBBTN_B));
@@ -128,7 +130,7 @@ public:int idle()override {
             std::fflush(nullptr);std::_Exit(0);
         }
     }
-    if(tick%60==0){std::printf("ORIGINAL_YELLOW_THROW_PROGRESS tick=%d phase=%d state=%d mode=%d navi=%p y=%.3f peak=%.3f\n",tick,phase,yellow->getState(),yellow->mMode,static_cast<void*>(yellow->mNavi),yellow->mSRT.t.y,peak);std::fflush(nullptr);}
+    if(tick%60==0){std::printf("ORIGINAL_YELLOW_THROW_PROGRESS tick=%d phase=%d state=%d mode=%d navi=%p y=%.3f peak=%.3f captain_state=%d buttons=%08x pressed=%08x next=%p\n",tick,phase,yellow->getState(),yellow->mMode,static_cast<void*>(yellow->mNavi),yellow->mSRT.t.y,peak,captain->getCurrState()->getID(),captain->mKontroller->mCurrentInput,captain->mKontroller->mInputPressed,static_cast<void*>(captain->mNextThrowPiki));std::fflush(nullptr);}
     return result;
 }
 };
@@ -151,5 +153,6 @@ int main(int argc,char**argv){
     pc_window_input_assign(0,PC_INPUT_DEV_GAMEPAD,SDL_JoystickInstanceID(pad));pc_window_input_assign(1,PC_INPUT_DEV_NONE,-1);
     const int bindings[]={SDL_CONTROLLER_BUTTON_A,SDL_CONTROLLER_BUTTON_B,SDL_CONTROLLER_BUTTON_X,SDL_CONTROLLER_BUTTON_Y,SDL_CONTROLLER_BUTTON_RIGHTSHOULDER,SDL_CONTROLLER_BUTTON_LEFTSHOULDER,SDL_CONTROLLER_BUTTON_START};
     for(int i=0;i<7;++i)pc_window_set_gamepad_binding(i,bindings[i]);
+    pc_window_set_gamepad_binding(PC_KEY_ACT_DPAD_RIGHT,SDL_CONTROLLER_BUTTON_DPAD_RIGHT);
     gsys->Initialise();pc_settings_p2d_init();nodeMgr=new NodeMgr();gsys->run(new ThrowApp());return 0;
 }
