@@ -9102,6 +9102,26 @@ void pc_gfx_invalidate_resident_meshes(void) {
     sDynamicVertexRanges.clear(); // heap reset: the blend shapes die with it
 }
 
+void pc_gfx_forget_owned_native_storage(bool (*owns)(const void*, void*), void* owner) {
+    if (!owns) return;
+    for (auto it = sResidentMeshes.begin(); it != sResidentMeshes.end();) {
+        const ResidentMesh& mesh = it->second;
+        bool owned = mesh.list && owns(mesh.list, owner);
+        for (int attr = 0; !owned && attr < GX_VA_MAX_ATTR; ++attr)
+            if (mesh.arrays[attr].base && owns(mesh.arrays[attr].base, owner)) owned = true;
+        if (owned) it = sResidentMeshes.erase(it);
+        else ++it;
+    }
+    // These registrations store addresses only. Preserve all foreign ranges.
+    sDynamicVertexRanges.erase(std::remove_if(sDynamicVertexRanges.begin(), sDynamicVertexRanges.end(),
+        [&](const std::pair<uintptr_t, uintptr_t>& range) {
+            return owns(reinterpret_cast<const void*>(range.first), owner);
+        }), sDynamicVertexRanges.end());
+    // Current GX array bindings must not retain a freed source address either.
+    for (auto& array : sVtxArrays)
+        if (array.base && owns(array.base, owner)) { array.base = nullptr; array.stride = 0; }
+}
+
 void pc_gfx_invalidate_cpu_range(const void* addr, size_t bytes) {
     if (sResidentMeshes.empty() || !addr || bytes == 0) return;
     const uintptr_t lo = uintptr_t(addr);

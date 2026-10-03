@@ -52,6 +52,8 @@ struct alignas(std::max_align_t) BootBlockHeader {
 	BootBlockHeader* mNext;
 	size_t mSize;
 	size_t mPad2;
+
+    unsigned long long mResourceTag;
 };
 
 static const u32 BOOT_MAGIC = 0x50694B31; // "PiK1"
@@ -80,6 +82,10 @@ static size_t sTotalAllocations = 0;
 static size_t sTotalFrees = 0;
 static size_t sUnknownFrees = 0;
 static bool sDumpRegistered = false;
+static unsigned long long sResourceHighWater = 0;
+static unsigned long long sResourceThreadHighWater = 0;
+static thread_local unsigned long long sResourceThread = 0;
+static thread_local unsigned long long sResourceCapture = 0;
 // Where the bytes are, by block size. 810 MB across twelve thousand blocks is
 // not a game object leak; it is a small number of very large ones, and the
 // totals alone cannot say which.
@@ -132,6 +138,96 @@ PikiPcAllocationStats piki_pc_allocation_stats()
     return {sLiveAllocations, sLiveBytes, sUnknownFrees};
 }
 
+bool PikiPcAllocationArena::beginCapture() noexcept
+{
+    if (sResourceCapture || (mThread && mThread != sResourceThread)) return false;
+    std::lock_guard<std::mutex> lock(sAllocMutex);
+    // A TLS address or std::thread::id may be reused after thread exit. Use a
+    // monotonic physical-thread incarnation instead; never authorize its heir.
+    if (!sResourceThread) {
+        if (sResourceThreadHighWater == std::numeric_limits<unsigned long long>::max()) return false;
+        sResourceThread = ++sResourceThreadHighWater;
+    }
+    if (!mTag) {
+        if (sResourceHighWater == std::numeric_limits<unsigned long long>::max()) return false;
+        mTag = ++sResourceHighWater;
+        mThread = sResourceThread;
+    }
+    sResourceCapture = mTag;
+    return true;
+}
+
+PikiPcAllocationArena::~PikiPcAllocationArena() noexcept
+{
+    // Never leave a destroyed capture tagging subsequent ordinary allocations.
+    // Typed resource cleanup/releaseStorage is deliberately the outer owner's
+    // responsibility: blindly freeing storage here could leave live GPU refs.
+    if (capturing()) endCapture();
+}
+
+bool PikiPcAllocationArena::endCapture() noexcept
+{
+    if (!mTag || mThread != sResourceThread || sResourceCapture != mTag) return false;
+    sResourceCapture = 0;
+    return true;
+}
+
+bool PikiPcAllocationArena::capturing() const noexcept
+{
+    return mTag && mThread == sResourceThread && sResourceCapture == mTag;
+}
+
+bool PikiPcAllocationArena::owns(const void* ptr) const noexcept
+{
+    if (!mTag || !ptr) return false;
+    const auto address = reinterpret_cast<uintptr_t>(ptr);
+    std::lock_guard<std::mutex> lock(sAllocMutex);
+    for (auto bucket : sBootBuckets) for (auto* block = bucket; block; block = block->mNext) {
+        const auto start = reinterpret_cast<uintptr_t>(block + 1);
+        if (block->mResourceTag == mTag && address >= start && address - start < block->mSize) return true;
+    }
+    return false;
+}
+
+PikiPcAllocationStats PikiPcAllocationArena::storage() const noexcept
+{
+    PikiPcAllocationStats result = {};
+    if (!mTag) return result;
+    std::lock_guard<std::mutex> lock(sAllocMutex);
+    for (auto bucket : sBootBuckets) for (auto* block = bucket; block; block = block->mNext) {
+        if (block->mResourceTag == mTag) { ++result.liveBlocks; result.liveBytes += block->mSize; }
+    }
+    return result;
+}
+
+bool PikiPcAllocationArena::canReleaseStorage() const noexcept
+{
+    return !mTag || (mThread == sResourceThread && !sResourceCapture);
+}
+
+bool PikiPcAllocationArena::releaseStorage() noexcept
+{
+    // Any active capture (including another arena) could allocate into a graph
+    // whose disposal is in progress. Cross-thread disposal is also refused.
+    if (!mTag) return true;
+    if (!canReleaseStorage()) return false;
+    std::lock_guard<std::mutex> lock(sAllocMutex);
+    for (auto& bucket : sBootBuckets) for (auto** link = &bucket; *link;) {
+        auto* header = *link;
+        if (header->mResourceTag != mTag) { link = &header->mNext; continue; }
+        *link = header->mNext;
+        header->mMagic = 0;
+        --sLiveAllocations;
+        sLiveBytes -= header->mSize;
+        const auto cls = sizeClassOf(header->mSize);
+        --sClassCount[cls]; sClassBytes[cls] -= header->mSize;
+        ++sTotalFrees;
+        if (header->mPad2) unmap_pages(header, header->mPad2);
+        else std::free(header);
+    }
+    return true;
+}
+
 void* piki_pc_alloc(size_t size)
 {
 	if (size == 0) {
@@ -175,6 +271,7 @@ void* piki_pc_alloc(size_t size)
 	header->mNext           = nullptr;
 	header->mSize           = size;
 	header->mPad2           = mappedBytes; // non-zero: whole block is one mapping
+    header->mResourceTag = sResourceCapture;
 
 	void* result = header + 1;
 	{
@@ -274,6 +371,12 @@ void operator delete[](void* ptr, size_t) noexcept
  */
 void* System::alloc(size_t size)
 {
+#if defined(PIKI_PC_PORT)
+    // Shape's PIKI_ALIGNED arrays normally use the active AyuHeap. During an
+    // explicit resource capture they must belong to the same isolated arena
+    // as its ordinary-new root and nested objects, not borrow stage storage.
+    if (sResourceCapture) return piki_pc_alloc(size);
+#endif
 	void* result = nullptr;
 	System* system = gsys;
 	if (!system) {
