@@ -197,7 +197,8 @@ int main(){
  PcKochappyGuidePulse guidePulse;
  CHECK(guidePulse.observe(0,20)==PcKochappyGuideInput::Walk);
  CHECK(guidePulse.observe(0,11)==PcKochappyGuideInput::Walk);
- for(int i=0;i<3;++i)CHECK(guidePulse.observe(0,10.9f)==PcKochappyGuideInput::Neutral);
+ CHECK(guidePulse.observe(0,10.9f)==PcKochappyGuideInput::Walk);
+ CHECK(guidePulse.observe(0,10.9f)==PcKochappyGuideInput::Neutral);
  CHECK(guidePulse.observe(0,10.8f)==PcKochappyGuideInput::Walk);
  CHECK(guidePulse.observe(1,11)==PcKochappyGuideInput::Walk);
  PcKochappyGuidePulse guideStall;
