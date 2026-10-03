@@ -73,6 +73,8 @@ public:
  virtual bool install(const CaveDescriptor&,const FloorDefinition&,unsigned,
                       const SceneIdentity&,const std::vector<BirthIdentity>&,
                       std::vector<LiveBinding>&,std::string&)=0;
+ // Nonmutating ordinary boundary refusal keeps the installed floor active.
+ virtual bool canRelease(std::string&)const{return true;}
  // Must release even a partial install; false retains the session for recovery.
  virtual bool release(std::string&)=0;
  // True only for the actual native release event emitted by this owning floor.
@@ -172,6 +174,7 @@ public:
   out=mSnapshot;return true;
  }
  bool unload(std::string& error){
+  if(mProvider&&!mProvider->canRelease(error))return false;
   // Revoke authority before touching native content. A failed release cannot
   // grant last-floor/boss authority but keeps provider ownership for retry.
   mActive=false;
