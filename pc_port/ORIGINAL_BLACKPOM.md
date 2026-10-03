@@ -41,7 +41,26 @@ an unbound root in ordinary gameplay or free a reused address.
 converted pose hashes before private stage writes. It installs 31 source poses
 and six clip frame lists; no Chappy/proxy actor sidecar is generated. Legal data
 remains in ignored output. Run it with `--imported <flora extraction> --stage
-<private stage>`.
+<private stage> --source-root <read-only randomizer converter source>`.
+It also validates the raw model, animation and collider hashes and exports all
+161 original integer BCA frames for the six collider joints. The leaf installs
+all seven actual collider parts using borrowed, bounded arrays; `follow` seats
+them from simulation motion, independently of drawing. Anonymous source IDs
+receive internal lookup IDs; literal `slot/st__` remains the actual receptor.
+Collider storage is released only after no attached references remain.
+
+Audited source contract: `native/pikmin2-research/src/plugProjectNishimuraU/`
+`PomState.cpp`, `Pom.cpp`, `PomMgr.cpp` and `PomAnimator.cpp`. Wait immediately
+enters Open; original Open KEY2 arms touch/swallow; actual collision starts
+Swing; Swing closes after timer>1 second or intake budget spent; Close END
+chooses Shot when mouth Pikmin remain; Shot KEY2 emits, Shot END chooses Wait
+or Dead, and Dead END kills. Press/hipdrop accepts only original slot while
+swallow is armed and lifetime slots remain. Successful native swallow reserves
+intake immediately. Same-Purple successful output refunds the budget but still
+emits a real Purple head. Retail kills donors before head allocation; the
+qualified capacity-conservation override allocates before consuming, deliberately
+preserving the held donor on allocation failure. It is not literal retail
+allocation ordering and creates no successful emission identity on failure.
 
 Focused verification: source birth-policy boundaries passed under MinGW
 C++17 -Wall -Wextra -Werror. Both native factory and BossMgr compiled to object
