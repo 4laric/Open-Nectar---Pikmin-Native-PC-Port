@@ -35,6 +35,7 @@ bool entered=false,returned=false,baselineKnown=false;
 bool gatherArrived=false,surfaceGathered=false;
 bool coldFloor=false;
 int entryPulse=0;
+int committedTotalRed=-1;
 float gatherX=0,gatherZ=0;
 P2CaveCampaignParty floorParty;
 auto start=std::chrono::steady_clock::now();
@@ -62,14 +63,15 @@ public:int idle()override{
     const bool controlling=n&&n->getCurrState()
         &&(walk||n->getCurrState()->getID()==NAVISTATE_Gather)
         &&!movie&&!gameflow.mPauseAll&&!gameflow.mIsUIOverlayActive;
-    int living=0,formation=0;float liveX=0,liveZ=0;
+    int living=0,formation=0,loose=0;float liveX=0,liveZ=0,looseX=0,looseZ=0;
     if(pikiMgr){Iterator it(pikiMgr);CI_LOOP(it){auto* p=static_cast<Piki*>(*it);if(p->isAlive()){
         ++living;liveX+=p->mSRT.t.x;liveZ+=p->mSRT.t.z;
-        if(frames%60==0)std::printf("CAVE_VISIBLE_PIKI frame=%d uid=%u state=%d mode=%d callable=%d stick=%d owner=%d player=%d health=%.9g xyz=%.3f,%.3f,%.3f\n",
+        if(frames%60==0)std::printf("CAVE_VISIBLE_PIKI frame=%d uid=%u state=%d mode=%d callable=%d stick=%d owner=%d player=%d health=%.9g xyz=%.3f,%.3f,%.3f kinoko=%d\n",
             frames,p->mGenerator?pc_randomizer_generator_id(p->mGenerator):0,
             p->getCurrState()?p->getCurrState()->getID():-1,p->mMode,int(p->mIsCallable),int(p->isStickTo()),
-            p->mNavi?p->mNavi->getNaviIndex():-1,p->mPlayerId,p->mHealth,p->mSRT.t.x,p->mSRT.t.y,p->mSRT.t.z);
-        if(p->mMode==PikiMode::FormationMode)++formation;}}}
+            p->mNavi?p->mNavi->getNaviIndex():-1,p->mPlayerId,p->mHealth,p->mSRT.t.x,p->mSRT.t.y,p->mSRT.t.z,int(p->isKinoko()));
+        if(p->mMode==PikiMode::FormationMode)++formation;
+        else{++loose;looseX+=p->mSRT.t.x;looseZ+=p->mSRT.t.z;}}}}
     if(n&&n->getCurrState())p2_fixture_require_captain(GameStat::orimaDead,
         n->getCurrState()->getID()==NAVISTATE_Dead,n->mHealth,frames);
     int a=0,b=0,x=0;float sx=0,sy=0;
@@ -78,6 +80,22 @@ public:int idle()override{
         if(len>8&&n->mNaviCamera){const auto& axis=n->mNaviCamera->mViewXAxis;
             sx=65*(dx*axis.x+dz*axis.z)/len;sy=65*(dx*axis.z-dz*axis.x)/len;}
         return len;
+    };
+    auto gather=[&](){
+        const float tx=loose?looseX/loose:liveX/living,tz=loose?looseZ/loose:liveZ/living;
+        const float bx=tx-n->mSRT.t.x,bz=tz-n->mSRT.t.z;
+        b=1;
+        if(!std::isfinite(bx)||!std::isfinite(bz))finish(18);
+        if(std::hypot(bx,bz)>100){move(tx,tz);return;}
+        // Qualified White input convention: 22 PAD units stays in the native
+        // cursor look band; pulse corrections and observe the resulting cursor.
+        if(ticks%10==0&&n->mNaviCamera){
+            const float dx=tx-n->mCursorWorldPos.x,dz=tz-n->mCursorWorldPos.z,d=std::hypot(dx,dz);
+            if(!std::isfinite(d))finish(18);
+            if(d>8){const auto& axis=n->mNaviCamera->mViewXAxis;
+                if(!std::isfinite(axis.x)||!std::isfinite(axis.z))finish(18);
+                sx=22*(dx*axis.x+dz*axis.z)/d;sy=22*(dx*axis.z-dz*axis.x)/d;}
+        }
     };
     if(choice.active){a=frames%40<4?1:0;}
     else if(gameflow.mIsTutorialTextActive){a=frames%40<4?1:0;}
@@ -104,14 +122,14 @@ public:int idle()override{
                     if(move(gatherX,gatherZ)<20){gatherArrived=true;ticks=0;
                         std::puts("CAVE_VISIBLE_INPUT approach_actual_squad ordinary_movement=1");}
                 }else{
-                    b=1;
+                    gather();
                     if(ticks>=120&&formation==20){surfaceGathered=true;ticks=0;
                         std::puts("CAVE_VISIBLE_INPUT gather_surface20 ordinary_B=1");}
                     else if(ticks>=360){std::puts("P2_CAVE_VISIBLE_RUNTIME FAIL gather_surface20=0");finish(15);}
                 }
             }else if(move(boundary.x,boundary.z)<45){stage=1;ticks=0;std::puts("CAVE_VISIBLE_INPUT near_hole ordinary_movement=1");}
         }else if(stage==1){
-            if(ticks<45)b=1;
+            if(ticks<45)gather();
             if(ticks>=90&&ready&&entryClicks==0){++entryClicks;entryPulse=4;
                 std::puts("CAVE_VISIBLE_INPUT enter_A=1 F6=0");}
             if(entryPulse>0){a=1;--entryPulse;}
@@ -120,6 +138,9 @@ public:int idle()override{
             if(ticks==45){
                 floorParty=pc_randomizer_authored_cave_session().party;
                 if(!floorParty.present || floorParty.bodies.size()!=20 || !floorParty.inside)finish(10);
+                committedTotalRed=int(GameStat::allPikis[Red]);
+                std::printf("CAVE_VISIBLE_COMMITTED_POPULATION map=%d all_red=%d stored_or_off_field=%d\n",
+                    int(GameStat::mapPikis),committedTotalRed,committedTotalRed-living);
                 if(!coldFloor&&std::getenv("PIKMIN_AUTHORED_FIXTURE_STOP_AFTER_FLOOR_SAVE")){
                     std::uint64_t generation=0;std::uint8_t digest[32]{};P2CaveCampaignParty actual;
                     const bool passed=pc_randomizer_checkpoint_info(&generation,digest)&&generation==baselineGeneration+1
@@ -130,7 +151,7 @@ public:int idle()override{
                 }
                 std::puts("CAVE_VISIBLE_INPUT gather_on_landing ordinary_B=1");
             }
-            if(ticks>=45&&ticks<135)b=1;
+            if(ticks>=45&&ticks<135)gather();
             if(ticks>=135&&formation==20){
                 if(move(320,0)<12){stage=3;ticks=0;}
             }
@@ -154,7 +175,7 @@ public:int idle()override{
             // Surface weeds/nearby actors can legitimately start work before a
             // read-only snapshot. Settle through ordinary whistle, never FSM writes.
             if(ticks==1)std::puts("CAVE_VISIBLE_INPUT gather_after_return ordinary_B=1");
-            if(ticks<90)b=1;
+            if(ticks<90)gather();
             if(ticks>=150&&ticks%15==0){
             P2CaveCampaignParty actual;const bool captured=pc_p2_cave_campaign_party_capture(actual,false);
             if(captured||ticks>=300){
@@ -162,7 +183,9 @@ public:int idle()override{
             std::uint64_t generation=0;std::uint8_t sha[32]{};
             const bool checkpoint=pc_randomizer_checkpoint_info(&generation,sha)&&generation==baselineGeneration+(coldFloor?1:2);
             const bool preserved=captured&&same(actual,floorParty);
-            const bool population=int(GameStat::mapPikis)==20&&int(GameStat::allPikis[Red])==20;
+            const bool population=int(GameStat::mapPikis)==20&&committedTotalRed>=20&&int(GameStat::allPikis[Red])==committedTotalRed;
+            std::printf("CAVE_VISIBLE_RETURN_POPULATION map=%d all_red=%d committed_all_red=%d\n",
+                int(GameStat::mapPikis),int(GameStat::allPikis[Red]),committedTotalRed);
             const bool passed=entered&&returned&&entryClicks==(coldFloor?0:1)&&exitClicks==1&&preserved&&population&&checkpoint&&!bank.inside;
             std::printf("P2_CAVE_VISIBLE_RUNTIME %s entry_A=%d return_A=%d identity_health=%d live20=%d generation=%llu authored_segment=1 F6=0\n",
                 passed?"PASS":"FAIL",entryClicks,exitClicks,int(preserved),int(population),(unsigned long long)generation);
@@ -180,6 +203,9 @@ public:int idle()override{
     SDL_JoystickSetVirtualAxis(pad,SDL_CONTROLLER_AXIS_LEFTY,Sint16(-int(sy)*256));SDL_JoystickUpdate();
     if(frames%30==0&&n){std::printf("CAVE_VISIBLE_OBSERVER frame=%d stage=%d floor=%d ready=%d living=%d formation=%d xyz=%.3f,%.3f,%.3f UI=%d\n",
         frames,stage,boundary.floor,int(ready),living,formation,n->mSRT.t.x,n->mSRT.t.y,n->mSRT.t.z,int(choice.active));std::fflush(nullptr);}
+    if(frames%60==0&&n)std::printf("CAVE_VISIBLE_CURSOR frame=%d cursor=%.3f,%.3f target=%.3f,%.3f loose=%d control_mode=%d\n",
+        frames,n->mCursorWorldPos.x,n->mCursorWorldPos.z,living?(loose?looseX/loose:liveX/living):0,
+        living?(loose?looseZ/loose:liveZ/living):0,loose,int(pc_window_get_control_mode()));
 
     if(std::chrono::steady_clock::now()-start>std::chrono::seconds(180)){std::puts("P2_CAVE_VISIBLE_RUNTIME TIMEOUT");finish(2);}
     ++frames;return PlugPikiApp::idle();
