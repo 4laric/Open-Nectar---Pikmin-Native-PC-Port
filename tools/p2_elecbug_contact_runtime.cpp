@@ -93,14 +93,14 @@ class ContactApp:public PlugPikiApp {
     int acquisition=0,acquisitionTicks=0,whiteGather=0,ivoryThrowTicks=0;
     bool sawWhiteSprout=false,ivoryCaptured=false;
     Piki* acquiredWhite=nullptr;
-    Piki* stagedYellow=nullptr;
+    Piki* stagedRgb=nullptr;
     bool yellowRecovered() const {
-        if(!stagedYellow||!stagedYellow->isAlive()||!stagedYellow->isCreatureFlag(CF_IsOnGround))return false;
-        const int state=stagedYellow->getState();
+        if(!stagedRgb||!stagedRgb->isAlive()||!stagedRgb->isCreatureFlag(CF_IsOnGround))return false;
+        const int state=stagedRgb->getState();
         return state!=PIKISTATE_Flying&&state!=PIKISTATE_Hanged&&state!=PIKISTATE_Dying
             &&state!=PIKISTATE_Dead&&state!=PIKISTATE_Drown&&state!=PIKISTATE_DenkiDying;
     }
-    void stageYellow(Navi* captain){
+    void stageRgb(Navi* captain){
         Iterator actors(pikiMgr);actors.first();auto* replace=static_cast<Piki*>(*actors);
         require(replace&&replace->isAlive(),"owned baseline replacement exists");
         replace->setEraseKill();replace->kill(false);
@@ -108,17 +108,18 @@ class ContactApp:public PlugPikiApp {
         const std::string fingerprint="b8a4fb5a39f8371a879eec4ece9025bee75977a4b4394111d5825e6ec79c0bbf";
         const unsigned uid=p2original::originalSourceCatalogUid(key);
         std::string error;
-        require(pc_p2_original_piki_origin_install(fingerprint,{{key,uid,20,2}},error),"Yellow fixture catalog");
+        const int species=desiredSpecies();
+        require(pc_p2_original_piki_origin_install(fingerprint,{{key,uid,20,species}},error),"RGB fixture catalog");
         const std::string campaign="6a012015368158125b7b88bdd14000ed2a10613f02474b0f08830d9a3b5ec029";
-        require(p2original::originalProgress().initialize(campaign,error),"Yellow fixture progress");
+        require(p2original::originalProgress().initialize(campaign,error),"RGB fixture progress");
         auto context=p2original::originalProgress().context();context.story=false;
-        require(p2original::originalProgress().restoreContext(context,error),"disclosed non-story Yellow fixture context");
-        require(pc_p2_original_piki_recruit_bind(campaign,fingerprint,error),"Yellow paired recruitment");
-        OriginalPikiBody body{{key,uid,0,1,fingerprint},{2,false,false}};
+        require(p2original::originalProgress().restoreContext(context,error),"disclosed non-story RGB fixture context");
+        require(pc_p2_original_piki_recruit_bind(campaign,fingerprint,error),"RGB paired recruitment");
+        OriginalPikiBody body{{key,uid,0,1,fingerprint},{species,false,false}};
         const auto& pos=captain->mSRT.t;
-        require(pc_p2_original_piki_physical_birth(body,{{pos.x+12,pos.y,pos.z}},stagedYellow,error)==p2original::PikiBirthResult::Born,"disclosed Yellow replacement");
-        require(pc_p2_original_rgb_throw_species(stagedYellow)==2,"canonical staged Yellow");
-        std::printf("P2_ELECBUG_YELLOW_STAGED piki=%p species=2 relocated_debug_member=1 non_story_fixture=1 acquisition=0 campaign=0\n",static_cast<void*>(stagedYellow));
+        require(pc_p2_original_piki_physical_birth(body,{{pos.x+12,pos.y,pos.z}},stagedRgb,error)==p2original::PikiBirthResult::Born,"disclosed RGB replacement");
+        require(pc_p2_original_rgb_throw_species(stagedRgb)==species,"canonical staged RGB");
+        std::printf("P2_ELECBUG_%s_STAGED piki=%p species=%d relocated_debug_member=1 non_story_fixture=1 acquisition=0 campaign=0\n",species==P2SpeciesYellow?"YELLOW":"RED",static_cast<void*>(stagedRgb),species);
     }
     std::map<Piki*,int> observedSpecies;
     void guardCaptains(){
@@ -235,7 +236,7 @@ public:
             std::printf("P2_ELECBUG_BASELINE live=%d red=%d captain=%.3f,%.3f,%.3f\n",live,red,n->mSRT.t.x,n->mSRT.t.y,n->mSRT.t.z);std::fflush(nullptr);
             require(live==20&&red==20,"fresh20 nativeRed1 baseline");
             require(enemy->mCollInfo&&enemy->mCollInfo->hasInfo(),"initialized enemy geometry");
-            if(desiredSpecies()==P2SpeciesYellow)stageYellow(n);
+            if(desiredSpecies()==P2SpeciesYellow||!std::strcmp(mode,"red-electric"))stageRgb(n);
             started=true;
             std::printf("P2_ELECBUG_CONTACT_READY live=%d red=%d captain_hp=%.3f source_id=28 generators=%u,%u\n",live,red,n->mHealth,Target,Partner);
             if(std::getenv("P2_ELECBUG_READY_ONLY")){
@@ -247,9 +248,9 @@ public:
         if(!acquireWhite(n))return result;
         ++age;
         if(desiredSpecies()==P2SpeciesYellow){
-            require(live==20&&stagedYellow&&stagedYellow->isAlive(),"Yellow encounter preserves20 living Pikmin");
-            require(pc_p2_original_rgb_throw_species(stagedYellow)==2,"Yellow source identity retained");
-            require(stagedYellow->getState()!=PIKISTATE_DenkiDying,"Yellow must reject electric death");
+            require(live==20&&stagedRgb&&stagedRgb->isAlive(),"Yellow encounter preserves20 living Pikmin");
+            require(pc_p2_original_rgb_throw_species(stagedRgb)==2,"Yellow source identity retained");
+            require(stagedRgb->getState()!=PIKISTATE_DenkiDying,"Yellow must reject electric death");
         }
         const char* state=pc_p2_elecbug_state_name(enemy);
         require(state,"registered state exists");
@@ -271,7 +272,7 @@ public:
             int& phase=flight[p];
             observedSpecies[p]=pc_p2_species(p);
             const int pstate=p->getState();
-            if(aHeld&&p->mNavi==n&&pstate==PIKISTATE_Hanged&&phase!=1&&pc_p2_species(p)==desiredSpecies()&&(desiredSpecies()!=P2SpeciesWhite||p==acquiredWhite)){phase=1;witness(p,"held");}
+            if(aHeld&&p->mNavi==n&&pstate==PIKISTATE_Hanged&&phase!=1&&pc_p2_species(p)==desiredSpecies()&&(desiredSpecies()!=P2SpeciesWhite||p==acquiredWhite)&&(!stagedRgb||p==stagedRgb)){phase=1;witness(p,"held");}
             if(phase==2){
                 if(pstate==PIKISTATE_Flying&&p->mVelocity.y>.01f){phase=3;witness(p,"rising");}
                 else {
@@ -311,13 +312,13 @@ public:
             std::printf("P2_ELECBUG_CONTACT_PROGRESS age=%d live=%d target_distance=%.2f state=%s throw_ticks=%d off_contact=%d contacts=%d\n",
                 age,live,distance(n->mSRT.t,enemy->mSRT.t),state,throwTicks,offContactSamples,contactSamples);
             std::fflush(nullptr);
-            if(stagedYellow){std::printf("P2_ELECBUG_SELECTION age=%d a_held=%d neutral=%d captain_state=%d buttons=%08x throw_bind=%08x yellow_state=%d yellow_mode=%d yellow_navi=%p captain=%p yellow_distance=%.3f next=%p\n",age,int(aHeld),neutralThrowTicks,n->getCurrState()->getID(),n->mKontroller->mCurrentInput,KeyConfig::_instance->mThrowKey.mBind,stagedYellow->getState(),stagedYellow->mMode,static_cast<void*>(stagedYellow->mNavi),static_cast<void*>(n),distance(stagedYellow->mSRT.t,n->mSRT.t),static_cast<void*>(n->mNextThrowPiki));std::fflush(nullptr);}
+            if(stagedRgb){std::printf("P2_ELECBUG_SELECTION age=%d a_held=%d neutral=%d captain_state=%d buttons=%08x throw_bind=%08x yellow_state=%d yellow_mode=%d yellow_navi=%p captain=%p yellow_distance=%.3f next=%p\n",age,int(aHeld),neutralThrowTicks,n->getCurrState()->getID(),n->mKontroller->mCurrentInput,KeyConfig::_instance->mThrowKey.mBind,stagedRgb->getState(),stagedRgb->mMode,static_cast<void*>(stagedRgb->mNavi),static_cast<void*>(n),distance(stagedRgb->mSRT.t,n->mSRT.t),static_cast<void*>(n->mNextThrowPiki));std::fflush(nullptr);}
         }
         if(offContactSeen&&reverseSeen){
             for(const auto& entry:flight)if(entry.second==5&&(desiredSpecies()!=P2SpeciesWhite||entry.first==acquiredWhite)){
                 if(desiredSpecies()==P2SpeciesYellow){
-                    if(entry.first!=stagedYellow||!yellowRecovered())continue;
-                    std::printf("P2_ELECBUG_YELLOW_SURVIVED frame=%d piki=%p species=2 alive=1 grounded=1 live=%d state=%d\n",frame,static_cast<void*>(stagedYellow),live,stagedYellow->getState());
+                    if(entry.first!=stagedRgb||!yellowRecovered())continue;
+                    std::printf("P2_ELECBUG_YELLOW_SURVIVED frame=%d piki=%p species=2 alive=1 grounded=1 live=%d state=%d\n",frame,static_cast<void*>(stagedRgb),live,stagedRgb->getState());
                 }
                 // Exit supplies a candidate only. The launcher must correlate
                 // production contact-dispatch evidence to this exact Pikmin.
@@ -325,7 +326,7 @@ public:
             }
             // Yellow waits for actual ground recovery after the dispatch.
             if(desiredSpecies()!=P2SpeciesYellow ||
-                (flight.count(stagedYellow)&&flight[stagedYellow]==5
+                (flight.count(stagedRgb)&&flight[stagedRgb]==5
                  &&yellowRecovered())){
                 std::fflush(nullptr);std::_Exit(0);
             }
@@ -356,7 +357,7 @@ public:
             // Hold and select with the ordinary pad while awaiting real discharge.
             const bool discharging=!std::strcmp(state,"discharge")||!std::strcmp(state,"childdischarge");
             if(held&&desiredSpecies()==P2SpeciesWhite&&pc_p2_species(held)==P2SpeciesWhite)require(held==acquiredWhite,"held White must be acquired witness");
-            if(held&&pc_p2_species(held)!=desiredSpecies()){
+            if(held&&(pc_p2_species(held)!=desiredSpecies()||(stagedRgb&&held!=stagedRgb))){
                 aHeld=true;point(n,enemy->mSRT.t,false,KBBTN_A|(age%6==0?KBBTN_DPAD_RIGHT:0));return result;
             }
             bool pending=false;for(const auto& entry:flight)if(entry.second>=2)pending=true;
