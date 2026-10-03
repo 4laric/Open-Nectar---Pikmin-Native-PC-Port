@@ -1,8 +1,9 @@
 # Ordinary White ingestion witness
 
 Opt-in target: `pikmin_ci_fixture_white_adult_ingestion`.
-Configure with `PIKMIN_CI_FIXTURES=ON`, then build that target in a private
-directory. The canonical captain-down guard is included by CMake.
+Configure the normal supported desktop build, then explicitly build that target
+in a private directory; it is excluded from the default build. The canonical
+captain-down guard is included by CMake.
 
 This scenario resumes a genuine day-three White campaign card, withdraws two
 Whites through ordinary ship keys, and approaches a source-generated native
