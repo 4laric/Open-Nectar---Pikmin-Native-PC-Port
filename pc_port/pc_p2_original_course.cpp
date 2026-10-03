@@ -6,14 +6,21 @@
 #include "pc_p2_original_chappy_native.h"
 #include "pc_p2_original_frog_native.h"
 #include "pc_p2_original_uji_native.h"
+#include "pc_p2_original_red_native.h"
+#include "pc_p2_original_tank_native.h"
+#include "pc_p2_original_armor_native.h"
+#include "pc_p2_original_onyon_native.h"
 #include "pc_p2_original_manifest.h"
 #include "pc_p2_original_progress.h"
 #include "Creature.h"
 #include "teki.h"
+#include "Pellet.h"
 #include <fstream>
 #include <memory>
 #include <cstdio>
 #include <cstdlib>
+#include <algorithm>
+#include <filesystem>
 namespace {
 using namespace p2original;
 struct Course {
@@ -21,10 +28,14 @@ struct Course {
  std::unique_ptr<chappy::Native> chappies;
  std::unique_ptr<frog::Native> frogs;
  std::unique_ptr<uji::Native> ujis;
+ std::unique_ptr<red::Native> reds;
+ std::unique_ptr<tank::Native> tanks;
+ std::unique_ptr<armor::Native> armors;
  Dispatch dispatch;
  std::map<unsigned,GeneratorState> literal;
  std::set<const Generator*> shadows;
  bool started=false;
+ bool onyons=false;
 };
 std::unique_ptr<Course> current;
 bool fail(std::string& e,const char* text){e=text;return false;}
@@ -34,10 +45,14 @@ bool pc_p2_original_course_prepare(const std::string& fingerprint,const std::vec
  if(current||!metColor||rows.size()!=literal.size())return fail(e,"original course prepare requires unowned complete source inventory");
  auto next=std::make_unique<Course>();next->plants=std::make_unique<pelplant::Native>(std::move(metColor));
  next->chappies=std::make_unique<chappy::Native>();next->frogs=std::make_unique<frog::Native>();next->ujis=std::make_unique<uji::Native>();
+ next->reds=std::make_unique<red::Native>();next->tanks=std::make_unique<tank::Native>();next->armors=std::make_unique<armor::Native>();
  if(!next->dispatch.add(0,next->plants->provider(),[](const CatalogRow& r,std::string& e){pelplant::Initial value;return pelplant::decode(r,value,e);},e))return false;
  for(unsigned source:{2u,43u})if(!next->dispatch.add(source,next->chappies->provider(),chappy::admits,e))return false;
  for(unsigned source:{17u,18u})if(!next->dispatch.add(source,next->frogs->provider(),frog::capability,e))return false;
  for(unsigned source:{12u,13u,14u})if(!next->dispatch.add(source,next->ujis->provider(),uji::decode,e))return false;
+ if(!next->dispatch.add(1,next->reds->provider(),red::capability,e))return false;
+ for(unsigned source:{24u,25u})if(!next->dispatch.add(source,next->tanks->provider(),tank::decode,e))return false;
+ if(!next->dispatch.add(15,next->armors->provider(),armor::admits,e))return false;
  // Validate structural/source metadata atomically BEFORE publishing catalog.
  Catalog checked;
  if(!checked.install(fingerprint,rows,[&](const CatalogRow& r,std::string& e){return next->dispatch.capability(r,e);},e))return false;
@@ -69,9 +84,11 @@ bool pc_p2_original_course_prepare(const std::string& fingerprint,const std::vec
 bool pc_p2_original_course_start(GeneratorList* list,std::string& e){
  if(!current||current->started||!list||!list->mGenListHead)return fail(e,"original course start requires prepared native generator list");
  std::vector<GroupBinding> bindings;std::map<unsigned,std::vector<Generator*>> inventory;
+ std::vector<Generator*> onyonInventory;
  // Validate the entire list before collect mutates compatibility observations.
  for(auto* node=list->mGenListHead->mChild;node;node=node->mNext){
   auto* g=static_cast<Generator*>(node);auto* object=dynamic_cast<GenObjectOriginalEnemy*>(g->mGenObject);
+  if(dynamic_cast<GenObjectOriginalOnyon*>(g->mGenObject))onyonInventory.push_back(g);
   if(!object)continue;
   auto found=current->literal.find(object->mState.uid);
   if(found==current->literal.end())return fail(e,"original native list has unknown source object");
@@ -92,6 +109,17 @@ bool pc_p2_original_course_start(GeneratorList* list,std::string& e){
   if(cached&&disc)shadows.insert(disc); // exact literal validation already passed
   bindings.push_back(selected);
  }
+ // Family reservations observe the same shared pools. Check the aggregate
+ // inventory first so individually valid families cannot oversubscribe them.
+ unsigned roots=0,pellets=0;
+ for(const auto& row:originalActors().rows()){
+  const auto& r=row.second.enemy;roots+=r.count;
+  pellets+=r.count*(1+(r.pelletProbability>0?std::max(r.pelletMinimum,r.pelletMaximum):0));
+ }
+ if(!tekiMgr||!pelletMgr||tekiMgr->getMax()-tekiMgr->getSize()<int(roots)
+  ||pelletMgr->getMax()-pelletMgr->getSize()<int(pellets))return fail(e,"original whole-course native actor/corpse/drop capacity insufficient");
+ if(current->onyons){if(!pc_p2_original_onyon_preflight(onyonInventory,e))return false;}
+ else if(!onyonInventory.empty())return fail(e,"original source Onyons lack admitted typed manifest");
  if(!pc_p2_original_course_install(bindings,current->dispatch,e))return false;
  current->shadows=std::move(shadows);current->started=true;e.clear();return true;
 }
@@ -116,7 +144,26 @@ bool pc_p2_original_course_load(const char* directory,const char* course,std::fu
  SourceManifest manifest;
  if(!readSourceManifest(bytes,selected,manifest,e))return false;
  if(!originalProgress().initialize(manifest.fingerprint,e))return false;
- return pc_p2_original_course_prepare(manifest.fingerprint,manifest.rows,manifest.literal,std::move(metColor),e);
+ const std::string onyonPath=std::string(directory)+"/"+selected+".p2on";
+ std::error_code statusError;
+ const bool hasOnyons=std::filesystem::exists(onyonPath,statusError);
+ if(statusError)return fail(e,"original typed Onyon manifest status failed");
+ std::vector<OnyonRecord> onyons;
+ if(hasOnyons){
+  if(!readOnyons(onyonPath,onyons,e))return false;
+  for(const auto& row:onyons){
+   if(row.sourceKey.compare(0,selected.size()+1,selected+"/"))return fail(e,"original Onyon manifest belongs to another course");
+   for(const auto& enemy:manifest.rows)if(enemy.enemy.uid==row.uid)return fail(e,"original typed source UID collision");
+  }
+ }
+ if(!pc_p2_original_course_prepare(manifest.fingerprint,manifest.rows,manifest.literal,std::move(metColor),e))return false;
+ if(hasOnyons){
+  auto progress=[](){const auto& s=originalProgress().snapshot();return PcOriginalOnyonProgress{std::uint8_t(s.container&7),std::uint8_t(s.boot&7)};};
+  auto boot=[](int species){std::string e;if(!originalProgress().boot(unsigned(species),e)){std::fprintf(stderr,"P2_ORIGINAL_ONYON_BOOT_FAIL %s\n",e.c_str());std::abort();}};
+  if(!pc_p2_original_onyon_install(onyons,progress,boot,e)){current.reset();return false;}
+  current->onyons=true;
+ }
+ e.clear();return true;
 }
 bool pc_p2_original_course_use_models(std::string& e){
  if(!current){e.clear();return true;}
@@ -126,10 +173,12 @@ bool pc_p2_original_course_use_models(std::string& e){
  for(const auto& entry:originalActors().rows()){
   const unsigned source=entry.second.enemy.source;int type=-1;
   if(source==0)type=TEKI_Palm;
+  else if(source==1||source==15)type=TEKI_Chappy;
   else if(source==2||source==43)type=TEKI_Swallow;
   else if(source==17)type=TEKI_Frog;
   else if(source==18)type=TEKI_Frow;
   else if(uji::species(source))type=uji::nativeType(source);
+  else if(tank::species(source))type=tank::nativeType(source);
   if(type<0)return fail(e,"original source has no early resource owner");
   tekiMgr->mUsingType[type]=true;
  }
