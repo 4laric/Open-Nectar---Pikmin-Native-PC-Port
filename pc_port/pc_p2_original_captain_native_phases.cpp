@@ -1,5 +1,6 @@
 #include "pc_p2_original_captain_native_phases.h"
 #include "pc_p2_original_captain_native_water.h"
+#include "pc_p2_original_captain_camera_pose.h"
 #include "pc_p2_retail_scene.h"
 #include "Navi.h"
 #include <array>
@@ -15,6 +16,7 @@ public:
  std::array<Navi*,2> actors;std::unique_ptr<Owner> phases;
  std::array<std::unique_ptr<water::NativeCache>,2> waters;
  std::optional<unsigned> lastFrame;bool frameInFlight=false;mutable unsigned readers=0;
+ bool cameraResetInFlight=false,cameraResetReentered=false;
  NativeComposition(const p2retail::SceneContext& c,Provider& p,SourceSceneTrace& t,SourceBank& b)
   :context(&c),source(p),trace(t),bank(b),loaded(&p.scene()),epoch(loaded->incarnation()),revision(c.selectionRevision()),
    campaign(loaded->selectedCampaign()),session(loaded->selectedFingerprint()),catalog(loaded->sourceCatalog()),actors{loaded->captainAt(0),loaded->captainAt(1)}{}
@@ -130,3 +132,79 @@ Owner* nativePhaseOwner(const Navi* n){
 }
 }}}
 p2original::captain::bodyphases::Owner* pc_p2_original_captain_body_phase_owner(const Navi* n){return p2original::captain::bodyphases::nativePhaseOwner(n);}
+
+namespace p2original {namespace captain {namespace camera {
+struct CameraResetPoseScope::Impl {
+ bodyphases::NativeComposition* owner=nullptr;const World* world=nullptr;
+ bool bodyHeld=false;std::uint64_t bodyRevision=0;
+ std::array<std::uint64_t,2> births{},motions{};std::array<const void*,2> states{};
+ ~Impl(){if(owner){if(bodyHeld)owner->phases->endCameraReset();--owner->readers;owner->cameraResetInFlight=false;owner->cameraResetReentered=false;}}
+ bool identity(std::string& error)const {
+  if(!owner||bodyphases::composition!=owner||!owner->cameraResetInFlight||owner->cameraResetReentered||!owner->readers||
+     pc_p2_original_captain_world()!=world||!world||world->phase()!=Phase::Loading||
+     pc_p2_retail_scene_committed()!=owner->context||!owner->current()||!bodyHeld||!owner->phases->cameraResetCurrent(bodyRevision,error)){
+   error="source camera reset lost exact Loading composition/committed floor";return false;
+  }
+  return true;
+ }
+ bool current(std::string& error)const {
+  if(!identity(error))return false;
+  for(unsigned slot=0;slot<2;++slot){
+   auto* actor=owner->actors[slot];bodyphases::Fields fields;MotionState motion;
+   if(actor->getCurrState()!=states[slot]||!owner->phases->readFields(actor,fields,error)||
+      fields.initializationSerial!=births[slot]||!births[slot]||!identity(error)||
+      !owner->bank.state(actor,motion,error)||motion.generation!=motions[slot]||!identity(error)||actor->getCurrState()!=states[slot]){
+    error="source camera reset body birth/FSM/bank observation expired";return false;
+   }
+  }
+  // Later actor observations cannot invalidate the already observed partner.
+  for(unsigned slot=0;slot<2;++slot)if(owner->actors[slot]->getCurrState()!=states[slot]){
+   error="source camera reset partner FSM changed";return false;
+  }
+  error.clear();return identity(error);
+ }
+};
+CameraResetPoseScope::CameraResetPoseScope(std::unique_ptr<Impl> impl):m(std::move(impl)){}
+CameraResetPoseScope::~CameraResetPoseScope()=default;
+std::unique_ptr<CameraResetPoseScope> CameraResetPoseScope::begin(const p2retail::SceneContext& context,const LoadedScene& descriptor,std::string& error){
+ auto* live=bodyphases::composition;
+ if(live&&live->cameraResetInFlight){live->cameraResetReentered=true;error="source camera reset reentered actual pose scope";return {};}
+ if(!live||live->context!=&context||live->loaded!=&descriptor||!live->phases||live->frameInFlight){
+  error="source camera reset requires initialized actual Loading body phases and committed floor";return {};
+ }
+ auto next=std::make_unique<Impl>();next->owner=live;
+ live->cameraResetInFlight=true;live->cameraResetReentered=false;++live->readers;
+ // Retain storage before any virtual World/provider identity observations.
+ next->world=pc_p2_original_captain_world();
+ if(!next->world||next->world->phase()!=Phase::Loading||pc_p2_retail_scene_committed()!=&context||!live->current()){
+  error="source camera reset requires actual Loading World and committed floor";return {};
+ }
+ if(!live->phases->beginCameraReset(next->bodyRevision,error))return {};
+ next->bodyHeld=true;
+ for(unsigned slot=0;slot<2;++slot){
+  auto* actor=live->actors[slot];next->states[slot]=actor->getCurrState();bodyphases::Fields fields;MotionState motion;
+  if(!next->identity(error)||!live->phases->readFields(actor,fields,error)||!next->identity(error)||
+     !live->bank.state(actor,motion,error)||!next->identity(error)||actor->getCurrState()!=next->states[slot])return {};
+  next->births[slot]=fields.initializationSerial;next->motions[slot]=motion.generation;
+ }
+ if(!next->current(error))return {};
+ error.clear();return std::unique_ptr<CameraResetPoseScope>(new CameraResetPoseScope(std::move(next)));
+}
+bool CameraResetPoseScope::current(std::string& error)const{return m->current(error);}
+bool CameraResetPoseScope::read(unsigned slot,ActorPose& out,std::string& error)const {
+ if(slot>1||!m->current(error)){error="source camera initial pose lacks exact reset slot/scope";return false;}
+ const Demo demo=m->world->demo();
+ if((demo!=Demo::Absent&&demo!=Demo::Inactive)||!m->current(error)){
+  error="source camera initial movie/model-translation authority unavailable";return false;
+ }
+ const auto* actor=m->owner->actors[slot];ActorPose next{{actor->mSRT.t.x,actor->mSRT.t.y,actor->mSRT.t.z},actor->mFaceDirection};
+ if(!std::isfinite(next.position[0])||!std::isfinite(next.position[1])||!std::isfinite(next.position[2])||!std::isfinite(next.face)){
+  error="source camera initial actor pose is nonfinite";return false;
+ }
+ if(!m->current(error))return false;
+ if(m->world->demo()!=demo||!m->current(error)){
+  error="source camera initial movie/body observation expired";return false;
+ }
+ out=next;error.clear();return true;
+}
+}}}

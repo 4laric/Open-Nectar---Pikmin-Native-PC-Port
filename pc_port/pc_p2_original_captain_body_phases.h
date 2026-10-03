@@ -3,6 +3,7 @@
 #include "pc_p2_original_captain_motion.h"
 #include "pc_p2_original_captain_native_control.h"
 #include <memory>
+namespace p2original {namespace captain {namespace camera {class CameraResetPoseScope;}}}
 namespace p2original {namespace captain {namespace bodyphases {
 using Vec3=control::Vec3;
 struct Sphere {Vec3 center;float radius=8.5f;};
@@ -81,6 +82,10 @@ public:
  bool canRetire(std::string&)const; // actual in-flight callback ownership
  void forget(Navi*)noexcept;
 private:
+ bool beginCameraReset(std::uint64_t&,std::string&);
+ bool cameraResetCurrent(std::uint64_t,std::string&)const;
+ void endCameraReset()noexcept;
+ friend class p2original::captain::camera::CameraResetPoseScope;
  struct Impl;std::unique_ptr<Impl> m;explicit Owner(std::unique_ptr<Impl>);
 };
 // Root's canonical actual stage owner publishes this real composition; no

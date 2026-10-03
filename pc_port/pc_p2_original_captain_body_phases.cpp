@@ -144,6 +144,18 @@ bool Owner::initializeAfterBodyReset(Navi* n,std::string& e){
  auto slot=n==m->scene->captainAt(0)?0:1;m->entries[slot].actor=n;m->entries[slot].fields=Fields{};m->entries[slot].fields.initializationSerial=++nextInitializationSerial;return true;
 }
 bool Owner::readFields(const Navi* n,Fields& out,std::string& e)const{auto* a=m->entry(n);if(!a||!m->auth(n,e,true))return false;out=a->fields;return true;}
+bool Owner::beginCameraReset(std::uint64_t& revision,std::string& e){
+ if(m->operationDepth||!m->auth(nullptr,e,true)||pc_p2_original_captain_world()->phase()!=Phase::Loading||
+    !m->entries[0].actor||!m->entries[1].actor||!m->entries[0].fields.initializationSerial||!m->entries[1].fields.initializationSerial)
+  return fail(e,"source camera reset lacks idle initialized Loading body owner");
+ ++m->operationDepth;revision=m->mutationRevision;return true;
+}
+bool Owner::cameraResetCurrent(std::uint64_t revision,std::string& e)const{
+ if(!m->operationDepth||m->mutationRevision!=revision||!m->auth(nullptr,e,true)||pc_p2_original_captain_world()->phase()!=Phase::Loading)
+  return fail(e,"source camera body hold expired");
+ return m->mutationRevision==revision;
+}
+void Owner::endCameraReset()noexcept{--m->operationDepth;}
 bool Owner::roomVisitCurrent(const Navi* n,const SourceSceneTrace& trace,int room,std::string& e)const{
  const auto* call=m->roomCall;
  if(!call||!m->operationDepth||call->actor!=n||call->room!=room||room<0||&m->trace!=&trace||!m->auth(n,e))

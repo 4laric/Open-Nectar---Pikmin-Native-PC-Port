@@ -15,6 +15,13 @@
 #include <algorithm>
 #include <limits>
 class MapMgr {}; // Physical pointer holder only; real query TU is a strong double.
+namespace p2original {namespace sourceCamera {
+// Friend Rig double exercises the ACTUAL private scope/composition/body TUs.
+// This is not the selected camera Rig or a real Stage reset execution claim.
+class Rig {public:template<class Callback>static bool resetControl(const p2retail::SceneContext& c,const captain::LoadedScene& s,Callback&& callback,std::string& e){
+ auto scope=captain::camera::CameraResetPoseScope::begin(c,s,e);return scope&&callback(*scope);
+}};
+}}
 namespace p2retail {
 
 class SceneRuntime {public:static void revision(SceneContext& c,unsigned value){c.mRevision=value;}static std::unique_ptr<SceneContext> make(MapMgr& map,const std::string& campaign,const std::string& session,unsigned serial){auto c=std::unique_ptr<SceneContext>(new SceneContext);c->mMap=&map;c->mCampaign=campaign;c->mSession=session;c->mRevision=4;c->mSnapshot.scene.serial=serial;return c;}};
@@ -93,7 +100,7 @@ bool selectWalkAnimation(Navi*,std::string&){events.push_back("selector");++sele
 }
 }}
 namespace {
-const p2retail::SceneContext* prepared=nullptr;int queries=0;bool queryAvailable=true,queryWrong=false,queryExpire=false,queryRetire=false,queryRetireDenied=false;float expectedWaterY=0;
+const p2retail::SceneContext* prepared=nullptr;bool loadingFloorCommitted=false;int queries=0;bool queryAvailable=true,queryWrong=false,queryExpire=false,queryRetire=false,queryRetireDenied=false;float expectedWaterY=0;
 // Immutable wide selected geometry exercises the REAL numeric grid and trace;
 // these authored triangles are engineering fixtures, not imported source assets.
 const p2retail::SourceRoomGeometry geometry=[](){p2retail::SourceRoomGeometry g;g.vertices={{{-1000,0,-1000}},{{-1000,0,1000}},{{1000,0,-1000}},{{1000,0,1000}}};g.triangles={{{0,2,1},0,0x28},{{2,3,1},0,0x28}};return g;}();
@@ -106,7 +113,7 @@ unsigned geometryQueries=0,expireGeometryAt=0;unsigned sceneVisitCalls=0,sceneWr
 
 }
 const p2retail::SceneContext* pc_p2_retail_scene_prepared()noexcept{return prepared;}
-const p2retail::SceneContext* pc_p2_retail_scene_committed()noexcept{return world.value==Phase::GameWorldActive?prepared:nullptr;}
+const p2retail::SceneContext* pc_p2_retail_scene_committed()noexcept{return world.value==Phase::GameWorldActive||(world.value==Phase::Loading&&loadingFloorCommitted)?prepared:nullptr;}
 const p2retail::SourceRoomGeometry* pc_p2_retail_scene_source_geometry(const p2retail::SceneContext& c,std::uint64_t serial,std::uint64_t revision)noexcept{
  ++geometryQueries;if(&c!=prepared||serial!=scene.epoch||revision!=4)return nullptr;
  if(expireGeometryAt==geometryQueries)++scene.epoch;
@@ -138,7 +145,20 @@ int main(int argc,char** argv){try{
  parameterOwner=nullptr;check(!bp::createNativeTrace(*context,error),"actual trace requires selected floor parameter owner");parameterOwner=&floorParameters;
  auto nativeTrace=bp::createNativeTrace(*context,error);wrongTrace=nativeTrace.get();check(bool(nativeTrace),"Loading builds actual numeric trace from immutable wide selected geometry");
  parameterOwner=&hiddenParameters;auto hiddenTrace=bp::createNativeTrace(*context,error);check(bool(hiddenTrace),"actual hidden selected parameters bind separately");parameterOwner=&floorParameters;
+ auto resetControl=[&](auto callback){return p2original::sourceCamera::Rig::resetControl(*context,scene,callback,error);};
+ check(!resetControl([](auto&){return true;}),"Loading camera initialization cannot precede actual phase composition");
  check(bp::createNativePhases(*context,provider,trace,bank,error),"real native composition initializes both actual body and water owners");body=pc_p2_original_captain_body_phase_owner(&a);check(body&&body==pc_p2_original_captain_body_phase_owner(&b),"genuine source composition owns both actors");bp::Fields fields;check(body->readFields(&a,fields,error)&&!fields.bounding&&!fields.previous,"source cached center deliberately unknown before simulation");auto firstBirth=fields.initializationSerial;
+ check(!resetControl([](auto&){return true;}),"Loading camera initialization requires actual committed physical floor");loadingFloorCommitted=true;
+ check(resetControl([&](auto& scope){camera::ActorPose initial;check(scope.read(0,initial,error)&&initial.position[0]==a.mSRT.t.x&&initial.face==a.mFaceDirection,"private reset scope observes first actual initialized Loading pose");check(scope.read(1,initial,error)&&initial.position[0]==b.mSRT.t.x,"private reset scope observes actual partner Loading pose");check(!scope.read(2,initial,error),"reset scope rejects non-roster camera slot");check(!body->canRetire(error),"private body hold blocks retirement through entire camera reset");world.value=Phase::Inactive;check(!bp::retireNativePhases(scene,error),"composition read hold blocks native retirement during camera callback");world.value=Phase::Loading;return scope.current(error);}),"actual Loading body scope closes normally without animation/Plate prerequisites");
+ check(resetControl([&](auto& scope){check(!resetControl([](auto&){return true;}),"nested actual camera reset scope refuses");return !scope.current(error);}),"nested reset invalidates outer initialization publication");
+ check(resetControl([&](auto& scope){body->forget(&b);camera::ActorPose initial{{81,82,83},84};check(!scope.read(0,initial,error)&&initial.position[0]==81&&initial.face==84,"partner forget during camera reset blocks first pose publication");return !scope.current(error);}),"private body hold preserves storage and revokes forgotten-partner scope");check(body->readFields(&b,fields,error),"callback forget cannot remove held partner storage");
+ check(resetControl([&](auto& scope){check(!body->initializeAfterBodyReset(&a,error),"camera reset hold refuses body cold reinitialization");return !scope.current(error);}),"attempted camera callback reinitialization revokes outer scope");
+ check(resetControl([&](auto& scope){camera::ActorPose initial{{81,82,83},84};world.movie=Demo::Playing;check(!scope.read(0,initial,error)&&initial.face==84,"Loading camera movie-active pose refuses without output");world.movie=Demo::Inactive;world.value=Phase::GameWorldActive;check(!scope.current(error),"reset scope cannot continue after World activation");world.value=Phase::Loading;return true;}),"private reset scope owns only exact Loading observation");
+ check(resetControl([&](auto& scope){camera::ActorPose initial{{81,82,83},84};a.current=&second;check(!scope.read(0,initial,error)&&initial.face==84,"reset scope refuses actual FSM transition before camera publication");a.current=&typed;return true;}),"initial camera observations retain exact captured FSM identity");
+ check(resetControl([&](auto& scope){camera::ActorPose initial{{81,82,83},84};cameraDemoReads=0;cameraDemoExpireAt=2;check(!scope.read(0,initial,error)&&initial.face==84,"Loading camera post-movie callback expiry refuses atomic publication");--scene.epoch;cameraDemoExpireAt=0;return true;}),"Loading reset callback expiry control");
+ check(resetControl([&](auto& scope){camera::ActorPose initial{{81,82,83},84};actorAlive=false;check(scope.read(0,initial,error),"known CF-dead Loading body remains an actual initial camera target");actorAlive=true;initial={{81,82,83},84};lifetime=false;check(!scope.read(0,initial,error)&&initial.face==84,"unknown Loading body lifetime refuses initial camera publication");lifetime=true;const float face=a.mFaceDirection;a.mFaceDirection=std::numeric_limits<float>::infinity();check(!scope.read(0,initial,error)&&initial.face==84,"nonfinite Loading face refuses initial camera publication");a.mFaceDirection=face;return scope.current(error);}),"Loading camera finite/lifetime controls preserve output and release scope");
+ world.wrong=true;check(!resetControl([](auto&){return true;}),"Loading reset cannot admit changed actual World roster");world.wrong=false;
+ check(resetControl([&](auto& scope){return scope.current(error);}),"closed failure scopes release private body/composition holds for a fresh reset");loadingFloorCommitted=false;
  bool wet=true;check(bp::cachedNativeWater(&a,wet,error)&&!wet&&queries==0,"genuine init cached null without fresh map query");check(!bp::createNativePhases(*context,provider,trace,bank,error),"live composition cannot be overwritten");
  camera::ActorPose pose{{91,92,93},94};auto unchangedPose=[&](){return pose.position==std::array<float,3>{91,92,93}&&pose.face==94;};
  check(!camera::readCameraPose(*context,&a,pose,error)&&unchangedPose(),"ordinary camera pose cannot bypass Loading bootstrap scope");
