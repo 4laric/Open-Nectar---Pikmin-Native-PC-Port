@@ -2635,6 +2635,11 @@ add_executable(p2_authored_cave_session_test tools/p2_authored_cave_session_test
 target_include_directories(p2_authored_cave_session_test PRIVATE pc_port)
 target_compile_options(p2_authored_cave_session_test PRIVATE -UNDEBUG)
 add_test(NAME p2_authored_cave_session_test COMMAND p2_authored_cave_session_test)
+add_executable(p2_authored_checkpoint_test tools/p2_authored_checkpoint_test.cpp pc_port/pc_p2_authored_cave_route.cpp pc_port/netplay/pc_netplay_randstate.cpp pc_port/pc_randomizer_outbox.cpp pc_port/pc_p2_delivery_host.cpp pc_port/pc_p2_proxy.cpp pc_port/pc_p2_original_progress.cpp pc_port/pc_p2_original_lifecycle.cpp)
+target_include_directories(p2_authored_checkpoint_test PRIVATE pc_port)
+target_compile_options(p2_authored_checkpoint_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+target_link_libraries(p2_authored_checkpoint_test PRIVATE p2_retail_cave_catalog)
+add_test(NAME p2_authored_checkpoint_test COMMAND p2_authored_checkpoint_test "${CMAKE_CURRENT_BINARY_DIR}/authored-checkpoint-test-$<CONFIG>")
 target_compile_definitions(pc_randomizer_probe PRIVATE PC_RANDOMIZER_NO_ORIGINAL_ENGINE=1)
 # Same engine-header preinclude as pc_bbft_test above (pc_p2_proxy.cpp needs it).
 target_compile_options(pc_randomizer_probe PRIVATE ${NATIVE_COMPILE_OPTIONS})
