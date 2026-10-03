@@ -36,7 +36,7 @@ struct WorldOwner:World {
  std::uint64_t incarnation()const override{return scene.epoch;}Phase phase()const override{return value;}Demo demo()const override{return Demo::Inactive;}Navi* captainAt(unsigned i)const override{return wrong?nullptr:scene.captainAt(i);}
 } world;
 const LoadedScene* sceneProvider=&scene;const World* worldProvider=&world;SourceBank* bankProvider=nullptr;bp::Owner* body=nullptr;
-bool lifetime=true,actorAlive=true,fsmTransition=false;bp::Facts observation;int animationCount=0,selectorCount=0,timerCount=0,execCount=0;int floorKey=0,wallKey=0;unsigned slip=0;bool floorOut=false,wallOut=false,platformFloor=false,below=false,expire=false,nested=false,retireDenied=false,flagChild=false;int traceRoom=-1,observedRoom=-1;bool roomRefuses=false;float randomDraw=1;bp::Vec3 traceNormal{0,1,0};
+bool lifetime=true,actorAlive=true,fsmTransition=false;bp::Facts observation;int animationCount=0,selectorCount=0,timerCount=0,execCount=0;int floorKey=0,wallKey=0;unsigned slip=0;bool floorOut=false,wallOut=false,platformFloor=false,below=false,expire=false,nested=false,retireDenied=false,flagChild=false;int traceRoom=-1,observedRoom=-1;bool roomRefuses=false,roomInvalidates=false,roomRebirth=false;bp::SourceSceneTrace* wrongTrace=nullptr;float randomDraw=1;bp::Vec3 traceNormal{0,1,0};
 struct Typed:NaviState,State {
  StateId id;Typed(StateId value):NaviState(48+int(value)),id(value){}
  const NaviState* nativeState()const override{return this;}StateId sourceStateId()const override{return id;}bool sourceAlive(const Navi&)const override{return true;}bool sourceInvincible()const override{return false;}
@@ -65,7 +65,14 @@ struct Trace:bp::SourceSceneTrace {
  bool map(Navi&,bp::TraceInfo& out,float rate,std::string&)override{events.push_back("map");out.sphere.center.x+=out.velocity.x*rate;out.sphere.center.y+=out.velocity.y*rate;out.sphere.center.z+=out.velocity.z*rate;out.floor=floorOut?bp::FloorHandle{&floorKey,::scene.epoch}:bp::FloorHandle{};out.floorNormal=traceNormal;out.wall=wallOut?bp::FloorHandle{&wallKey,::scene.epoch}:bp::FloorHandle{};out.wallNormal={1,0,0};out.roomIndex=traceRoom;return true;}
  bool platforms(Navi&,bp::TraceInfo& out,float,std::string&)override{events.push_back("platform");if(platformFloor)out.floor={&floorKey,::scene.epoch};return true;}
  bool constrain(Navi&,bp::Sphere& out,std::string&)override{events.push_back("constrain");out.center.x=99;return true;}
- bool room(Navi& n,int expected,std::string&)override{events.push_back("room");bp::Fields f;if(!body->readFields(&n,f,error))return false;observedRoom=f.roomIndex;return !roomRefuses&&observedRoom==expected;}
+ bool room(Navi& n,int expected,std::string&)override{events.push_back("room");bp::Fields f;if(!body->readFields(&n,f,error))return false;observedRoom=f.roomIndex;
+ check(body->roomVisitCurrent(&n,*this,expected,error),"exact Owner room callback guard is active after published index");
+ check(!body->roomVisitCurrent(&b,*this,expected,error),"room phase rejects other captain");check(!body->roomVisitCurrent(&n,*this,expected+1,error),"room phase rejects wrong room");
+ if(wrongTrace)check(!body->roomVisitCurrent(&n,*wrongTrace,expected,error),"room phase rejects another trace");
+ auto* old=n.current;n.current=&second;check(!body->roomVisitCurrent(&n,*this,expected,error),"room phase rejects current FSM mutation");n.current=old;
+ if(roomRebirth){auto birth=f.initializationSerial;world.value=Phase::Loading;check(!body->initializeAfterBodyReset(&n,error),"room callback cannot replace actual body birth during retained operation");world.value=Phase::GameWorldActive;check(body->readFields(&n,f,error)&&f.initializationSerial==birth&&!body->roomVisitCurrent(&n,*this,expected,error),"rejected birth mutation preserves fields and revokes room continuation");return false;}
+ if(roomInvalidates){body->forget(&n);check(!body->roomVisitCurrent(&n,*this,expected,error),"attempted body retirement invalidates in-flight room generation");return false;}
+ return !roomRefuses&&observedRoom==expected;}
 } trace;
 void frame(){observation={};observation.deltaTime=.01f;observation.gravity=100;observation.mapPresent=true;observation.movieMotion=false;observation.movieActor=false;observation.movieExtra=false;observation.gameFrozen=false;observation.movieActive=false;observation.naviManagerFlag1=false;observation.stuck=false;observation.targetCollision=false;observation.platformsPresent=false;observation.hiddenCollision=false;observation.inWater=false;observation.rushBoots=false;observation.gamePaused=false;observation.frameTimer=1;observation.managerSlotOpen=true;}
 }
@@ -92,7 +99,7 @@ const p2retail::SourceFloorParameters floorParameters{};
 const p2retail::SourceFloorParameters hiddenParameters=[](){p2retail::SourceFloorParameters p;p.hasHiddenCollision=true;return p;}();
 const p2retail::SourceRoomGeometry* geometryOwner=&geometry;
 const p2retail::SourceFloorParameters* parameterOwner=&floorParameters;
-unsigned geometryQueries=0,expireGeometryAt=0;
+unsigned geometryQueries=0,expireGeometryAt=0;unsigned sceneVisitCalls=0,sceneWrites=0,laterWrites=0;bool writerExpires=false;float writerExpectedVelocity=0;
 
 }
 const p2retail::SceneContext* pc_p2_retail_scene_prepared()noexcept{return prepared;}
@@ -103,6 +110,17 @@ const p2retail::SourceRoomGeometry* pc_p2_retail_scene_source_geometry(const p2r
  return geometryOwner;
 }
 const p2retail::SourceFloorParameters* pc_p2_retail_scene_floor_parameters(const p2retail::SceneContext& c,std::uint64_t serial,std::uint64_t revision)noexcept{return &c==prepared&&serial==scene.epoch&&revision==4?parameterOwner:nullptr;}
+bool pc_p2_original_captain_room_visit_current(const p2retail::SceneContext&,std::uint64_t,std::uint64_t,const Navi*,int,std::string&);
+bool pc_p2_retail_scene_visit_room(const p2retail::SceneContext& c,std::uint64_t serial,std::uint64_t revision,Navi* n,int room,std::string& e){
+ ++sceneVisitCalls;
+ if(!pc_p2_original_captain_room_visit_current(c,serial,revision,n,room,e))return false;
+ bp::Fields f;if(!body->readFields(n,f,e)||f.roomIndex!=room||n->mVelocity.y!=writerExpectedVelocity){e="writer observed room="+std::to_string(f.roomIndex)+" velocityY="+std::to_string(n->mVelocity.y);return false;}
+ check(!pc_p2_original_captain_room_visit_current(c,serial,revision,&b,room,e),"Scene writer rejects wrong actor");check(!pc_p2_original_captain_room_visit_current(c,serial,revision,n,room+1,e),"Scene writer rejects wrong room");check(!pc_p2_original_captain_room_visit_current(c,serial,revision+1,n,room,e),"Scene writer rejects wrong selected revision");
+ events.push_back("sceneVisit");++sceneWrites;
+ if(writerExpires)lifetime=false;
+ if(!pc_p2_original_captain_room_visit_current(c,serial,revision,n,room,e))return false;
+ ++laterWrites;return true;
+}
 bool pc_p2_retail_scene_find_water(const p2retail::SceneContext& c,std::uint64_t serial,std::uint64_t revision,const std::array<float,3>& position,p2retail::SourceWaterResult& out,std::string& e){
  ++queries;events.push_back("findWater");if(!queryAvailable){e="engineering Scene930 query unavailable";return false;}
  if(&c!=prepared||serial!=scene.epoch||revision!=4||position[1]!=expectedWaterY)throw std::runtime_error("exact cached sphere/query ownership");
@@ -115,7 +133,7 @@ int main(int argc,char** argv){try{
  world.value=Phase::GameWorldActive;check(!bp::createNativePhases(*context,provider,trace,bank,error),"actual composition requires Loading");world.value=Phase::Loading;
  geometryOwner=nullptr;check(!bp::createNativeTrace(*context,error),"actual trace requires selected geometry owner");geometryOwner=&geometry;
  parameterOwner=nullptr;check(!bp::createNativeTrace(*context,error),"actual trace requires selected floor parameter owner");parameterOwner=&floorParameters;
- auto nativeTrace=bp::createNativeTrace(*context,error);check(bool(nativeTrace),"Loading builds actual numeric trace from immutable wide selected geometry");
+ auto nativeTrace=bp::createNativeTrace(*context,error);wrongTrace=nativeTrace.get();check(bool(nativeTrace),"Loading builds actual numeric trace from immutable wide selected geometry");
  parameterOwner=&hiddenParameters;auto hiddenTrace=bp::createNativeTrace(*context,error);check(bool(hiddenTrace),"actual hidden selected parameters bind separately");parameterOwner=&floorParameters;
  check(bp::createNativePhases(*context,provider,trace,bank,error),"real native composition initializes both actual body and water owners");body=pc_p2_original_captain_body_phase_owner(&a);check(body&&body==pc_p2_original_captain_body_phase_owner(&b),"genuine source composition owns both actors");bp::Fields fields;check(body->readFields(&a,fields,error)&&!fields.bounding&&!fields.previous,"source cached center deliberately unknown before simulation");auto firstBirth=fields.initializationSerial;
  bool wet=true;check(bp::cachedNativeWater(&a,wet,error)&&!wet&&queries==0,"genuine init cached null without fresh map query");check(!bp::createNativePhases(*context,provider,trace,bank,error),"live composition cannot be overwritten");world.value=Phase::GameWorldActive;
@@ -135,7 +153,8 @@ int main(int argc,char** argv){try{
  auto clock=std::find(events.begin(),events.end(),"clocks"),execute=std::find(events.begin(),events.end(),"exec"),mapEvent=std::find(events.begin(),events.end(),"map"),queryEvent=std::find(events.begin(),events.end(),"findWater");
  check(execute<clock&&clock<queryEvent&&queryEvent<mapEvent,"literal source manager update before animation before simulation");
  nativecontrol::AnimationFrame observed;check(bp::nativeAnimationFrame(&a,observed,error)&&observed.displacementKnown&&observed.faceDirectionOffset==.3f&&observed.deltaTime==.01f,"native control observations borrow actual source phase fields and GameSystem facts");
- traceRoom=9;check(bp::body_simulation(&a,0,error)&&observedRoom==9,"source roomIndex published before actual Room callback");traceRoom=10;roomRefuses=true;check(!bp::body_simulation(&a,0,error)&&observedRoom==10&&body->readFields(&a,fields,error)&&fields.roomIndex==10,"Room refusal retains literal source partial roomIndex write");traceRoom=-1;roomRefuses=false;
+ check(!body->roomVisitCurrent(&a,trace,0,error),"Owner room guard refuses outside actual simulation callback");
+ traceRoom=9;check(bp::body_simulation(&a,0,error)&&observedRoom==9,"source roomIndex published before actual Room callback");traceRoom=10;roomRefuses=true;check(!bp::body_simulation(&a,0,error)&&observedRoom==10&&body->readFields(&a,fields,error)&&fields.roomIndex==10,"Room refusal retains literal source partial roomIndex write");traceRoom=11;roomRefuses=false;roomInvalidates=true;events.clear();check(!bp::body_simulation(&a,0,error)&&events.back()=="room","room callback generation expiry stops post-room simulation suffix");roomInvalidates=false;roomRebirth=true;traceRoom=12;events.clear();check(!bp::body_simulation(&a,0,error)&&events.back()=="room","attempted callback reinitialization stops source suffix");roomRebirth=false;traceRoom=-1;roomRefuses=false;
  // Trace calls execute production NativeTrace and Numeric411 against actual
  // composition/BodyBorrowerGuard; only geometry/session providers are doubles.
  check(!bp::createNativeTrace(*context,error),"active native trace construction refuses");
@@ -152,7 +171,7 @@ int main(int argc,char** argv){try{
  geometryOwner=nullptr;check(!nativeTrace->map(a,info,.1f,error)&&same(info,before),"replaced selected geometry refuses atomically");geometryOwner=&geometry;
  expireGeometryAt=geometryQueries+2;check(!nativeTrace->map(a,info,.1f,error)&&same(info,before),"source geometry callback expiry refuses numeric publication");expireGeometryAt=0;--scene.epoch;
  parameterOwner=&hiddenParameters;check(!hiddenTrace->map(a,info,.1f,error)&&same(info,before),"actual hidden collision flag requires unavailable sentinel and refuses");bp::Sphere clamp=info.sphere;check(!hiddenTrace->constrain(a,clamp,error)&&clamp.center.y==info.sphere.center.y,"actual hidden clamp producer unavailable without fabricated bounds");parameterOwner=&floorParameters;
- check(!nativeTrace->platforms(a,info,.1f,error)&&same(info,before),"missing original PlatMgr refuses without output");check(!nativeTrace->room(a,0,error),"missing original Room/RouteMgr receiver explicitly refuses");
+ check(!nativeTrace->platforms(a,info,.1f,error)&&same(info,before),"missing original PlatMgr refuses without output");check(!nativeTrace->room(a,0,error)&&sceneVisitCalls==0,"direct map plus room cannot invoke Scene writer outside Owner simulation");check(!pc_p2_original_captain_room_visit_current(*context,scene.epoch,4,&a,0,error),"Scene room writer receiver absent outside actual trace callback");
  bp::BodyBorrowerGuard borrower;check(!borrower.current(error),"default borrowed trace guard has no source authority");
  check(bp::BodyBorrowerGuard::capture(*context,&a,borrower,error)&&borrower.current(error),"trace guard borrows actual committed scene/body generation");
  a.current=&second;check(!borrower.current(error),"source trace callback changing real FSM revokes borrower");a.current=&typed;
@@ -163,6 +182,10 @@ int main(int argc,char** argv){try{
  check(!bp::tickNativePhases(.01f,error)&&queries==failureQueries,"refused source frame cannot replay callback effects");queryAvailable=true;
  world.value=Phase::GameWorldActive;check(!bp::retireNativePhases(scene,error),"active retirement refuses");world.value=Phase::Inactive;check(bp::retireNativePhases(scene,error),"exact inactive composition retirement drains actual child owners");check(!pc_p2_original_captain_body_phase_owner(&a),"retired composition revokes owner");wet=true;check(!bp::cachedNativeWater(&a,wet,error)&&wet,"missing composition leaves output untouched");body=nullptr;
  world.value=Phase::Loading;check(bp::createNativePhases(*context,provider,trace,bank,error),"actual replacement composition");body=pc_p2_original_captain_body_phase_owner(&a);check(body->readFields(&a,fields,error)&&fields.initializationSerial>firstBirth&&!fields.bounding,"replacement owner birth defeats scene-slot ABA without invented sphere");world.value=Phase::Inactive;check(bp::retireNativePhases(scene,error),"replacement inactive cleanup");body=nullptr;
+ world.value=Phase::Loading;check(bp::createNativePhases(*context,provider,*nativeTrace,bank,error),"actual phase composition borrows production NativeTrace");body=pc_p2_original_captain_body_phase_owner(&a);world.value=Phase::GameWorldActive;frame();a.mSRT.t.set(0,0,0);observation.naviManagerFlag1=true;check(bp::body_simulation(&a,0,error),"genuine simulation establishes native trace body's cached sphere");observation.naviManagerFlag1=false;expectedWaterY=0;check(bp::body_animation(&a,error),"actual native trace body previous position established by animation");a.mVelocity.set(0,-10,0);bp::TraceInfo predicted;predicted.sphere={{a.mSRT.t.x,a.mSRT.t.y+8.5f,a.mSRT.t.z},8.5f};predicted.velocity={0,-10,0};check(nativeTrace->map(a,predicted,.1f,error),"reference real trace computes source response before room publication test");writerExpectedVelocity=predicted.velocity.y;events.clear();auto writesBefore=sceneWrites;
+ check(bp::body_simulation(&a,.1f,error)&&sceneWrites==writesBefore+1&&laterWrites==sceneWrites,"real NativeTrace room writer admitted through actual Owner map simulation");auto visit=std::find(events.begin(),events.end(),"sceneVisit"),bounce=std::find(events.begin(),events.end(),"bounce");check(visit<bounce&&std::find(events.begin(),events.end(),"selector")>visit,"Scene room write occurs after velocity/index publication before bounce and selector");
+ writerExpires=true;a.mVelocity.set(0,-10,0);predicted={};predicted.sphere={{a.mSRT.t.x,a.mSRT.t.y+8.5f,a.mSRT.t.z},8.5f};predicted.velocity={0,-10,0};check(nativeTrace->map(a,predicted,.1f,error),"reference real trace for expiry branch");writerExpectedVelocity=predicted.velocity.y;events.clear();auto laterBefore=laterWrites;check(!bp::body_simulation(&a,.1f,error)&&sceneWrites==writesBefore+2&&laterWrites==laterBefore&&events.back()=="sceneVisit","Scene callback lifetime expiry blocks later writer mutation and body suffix");writerExpires=false;lifetime=true;
+ check(!nativeTrace->room(a,0,error)&&sceneVisitCalls==sceneWrites,"receiver closes after callback failure; direct room cannot replay writer");world.value=Phase::Inactive;check(bp::retireNativePhases(scene,error),"actual NativeTrace composition cleanup");body=nullptr;
  std::cout<<checks<<" actual native composition/body/water TU controls PASS (engineering doubles; no gameplay claim)\n";return 0;
  }catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}
 
