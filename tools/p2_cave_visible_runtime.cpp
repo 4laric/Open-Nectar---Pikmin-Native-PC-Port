@@ -29,6 +29,7 @@
 namespace {
 SDL_Joystick* pad=nullptr;
 int frames=0,stage=0,ticks=0,entryClicks=0,exitClicks=0;
+std::uint64_t baselineGeneration=0;
 bool entered=false,returned=false;
 P2CaveCampaignParty floorParty;
 auto start=std::chrono::steady_clock::now();
@@ -68,6 +69,11 @@ public:int idle()override{
     else if(ready&&living==20){
         ++ticks;
         if(stage==0&&boundary.ready&&boundary.floor==0){
+            if(!baselineGeneration){
+                std::uint8_t digest[32]{};
+                if(!pc_randomizer_checkpoint_info(&baselineGeneration,digest)||!baselineGeneration||!pc_randomizer_resumed())finish(12);
+                std::printf("CAVE_VISIBLE_BASELINE actual_surface_SAVE=%llu resumed=1 live20=1\n",(unsigned long long)baselineGeneration);
+            }
             if(ticks<90)b=ticks%30<12?1:0;
             else if(move(boundary.x,boundary.z)<45){stage=1;ticks=0;std::puts("CAVE_VISIBLE_INPUT near_hole ordinary_movement=1");}
         }else if(stage==1){
@@ -91,7 +97,7 @@ public:int idle()override{
             P2CaveCampaignParty actual;const bool captured=pc_p2_cave_campaign_party_capture(actual,false);
             const auto& bank=pc_randomizer_generated_cave_cache();
             std::uint64_t generation=0;std::uint8_t sha[32]{};
-            const bool checkpoint=pc_randomizer_checkpoint_info(&generation,sha)&&generation==2;
+            const bool checkpoint=pc_randomizer_checkpoint_info(&generation,sha)&&generation==baselineGeneration+2;
             const bool preserved=captured&&same(actual,floorParty);
             const bool population=int(GameStat::mapPikis)==20&&int(GameStat::allPikis[Red])==20;
             const bool passed=entered&&returned&&entryClicks==1&&exitClicks==1&&preserved&&population&&checkpoint&&!bank.inside;
