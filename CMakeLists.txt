@@ -268,6 +268,7 @@ set(PC_PORT_SOURCES
     pc_port/pc_p2_original_actor.cpp
     pc_port/pc_p2_original_lifecycle.cpp
     pc_port/pc_p2_original_group.cpp
+    pc_port/pc_p2_original_progress.cpp
     pc_port/pc_p2_original_group_engine.cpp
     pc_port/pc_p2_original_piki_init.cpp
     pc_port/pc_p2_original_piki_spawn.cpp
@@ -3244,6 +3245,10 @@ add_test(NAME pc_midday_render_graph COMMAND pc_midday_render_graph_test)
         pc_port/pc_p2_original_lifecycle.cpp)
     target_include_directories(pc_p2_original_group_test PRIVATE "${PROJECT_SOURCE_DIR}/pc_port")
     add_test(NAME p2_original_group COMMAND pc_p2_original_group_test)
+    add_executable(pc_p2_original_progress_test tools/pc_p2_original_progress_test.cpp
+        pc_port/pc_p2_original_progress.cpp)
+    target_include_directories(pc_p2_original_progress_test PRIVATE "${PROJECT_SOURCE_DIR}/pc_port")
+    add_test(NAME p2_original_progress COMMAND pc_p2_original_progress_test)
 
     add_executable(pc_p2_original_piki_init_test tools/pc_p2_original_piki_init_test.cpp
         pc_port/pc_p2_original_piki_init.cpp)
@@ -3294,3 +3299,11 @@ endif()
 # Real native factory/cache transport fixture; synthetic zero-birth admission only.
 pikmin_add_ci_fixture(original_gen_object tools/p2_original_gen_object_runtime.cpp)
 pikmin_add_ci_fixture(original_piki_init tools/p2_original_piki_init_runtime.cpp)
+
+# Compile the real rescue implementation against minimal observable engine doubles.
+if(PIKMIN_BUILD_TESTS)
+add_executable(rescue_actual_test tools/test_rescue_actual.cpp src/plugPikiKando/aiRescue.cpp)
+target_include_directories(rescue_actual_test BEFORE PRIVATE tools/rescue_stubs)
+target_compile_options(rescue_actual_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG -Wno-multichar)
+add_test(NAME rescue_actual_test COMMAND rescue_actual_test)
+endif()
