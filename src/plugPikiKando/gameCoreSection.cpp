@@ -1,3 +1,4 @@
+#include "pc_p2_source_body.h"
 #include "pc_p2_surface_save.h"
 #include "pc_p2_original_foliage_native.h"
 #include "pc_p2_ship.h"
@@ -1035,6 +1036,7 @@ void GameCoreSection::exitStage()
   std::fprintf(stderr,"P2_ORIGINAL_COURSE_EXIT_FAIL %s\n",originalError.c_str());std::abort();
  }
     pc_p2_surface_save_scene_exit();
+    pc_p2_source_body_scene_exit_external();
     pc_p2_original_piki_recruit_unbind();
     pc_p2_original_piki_origin_scene_exit();
     p2budorigin::registry().sceneExit();

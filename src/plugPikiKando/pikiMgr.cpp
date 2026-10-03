@@ -1,3 +1,4 @@
+#include "pc_p2_source_body.h"
 #include "PikiMgr.h"
 #if defined(PIKI_PC_PORT)
 #include "settings/pc_settings.h"
@@ -97,6 +98,7 @@ Creature* PikiMgr::birthWithFieldLimit(int fieldLimit, bool allowSproutExtra)
 	// inherit a stale captain-capture actor id. Both inert unless opted in.
 	if (born) {
         pc_p2_cave_campaign_party_forget(static_cast<Piki*>(born));
+        pc_p2_source_body_forget_external(static_cast<Piki*>(born));
 		pc_p2_bulbmin_forget(static_cast<Piki*>(born));
 		pc_p2_captain_forget_piki(static_cast<Piki*>(born));
 		pc_p2_captor_forget_piki(static_cast<Piki*>(born)); // #886 captor mouths

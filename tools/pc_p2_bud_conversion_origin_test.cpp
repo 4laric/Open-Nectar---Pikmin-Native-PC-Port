@@ -57,6 +57,16 @@ struct MockFloor final:LiveFloorReader,NativeDonorReader {
  bool receive(const Snapshot& s,const std::vector<BodyBinding>& b,std::string& e)const override{return a.receive(s,b,e);}
  bool query(const Piki* p,Donor& d,std::string& e)const override{return a.donor(p,d,e);}
 };
+struct MockOnyon final:PcP2SourceOnyonReader {
+ Piki* actor=nullptr;std::uint64_t serial=7;bool ready=true,permit=true;unsigned forgets=0,exits=0;
+ bool owned(const Piki* p)const noexcept override{return actor==p&&p;}
+ bool lifetime(const Piki*,std::uint64_t& out)const noexcept override{if(!serial)return false;out=serial;return true;}
+ bool query(const Piki*,std::uint64_t n,PcP2SourceOnyonRoot& out,OriginalPikiBodyState& state)const override{if(!ready||n!=serial)return false;out={hash('a'),hash('b'),hash('c'),"onyon:actual:1",0,1,11};state={1,false,false};return true;}
+ bool admitted(const Piki* p,std::uint64_t n,const PcP2SourceOnyonRoot& r,const std::string& campaign,std::string&)const override{return permit&&p==actor&&n==serial&&r.campaign==campaign;}
+ bool recruited(Piki* p,std::uint64_t n)override{return p==actor&&n==serial&&ready;}
+ void forget(Piki* p)noexcept override{++forgets;if(p==actor)actor=nullptr;}
+ void sceneExit()noexcept override{++exits;actor=nullptr;}
+};
 int main(){
  MockAuthority a;Registry r;std::string e;Pom pom;Piki donor,body;PikiHeadItem head,head2;
  p2original::InstanceIdentity bud{hash('f'),19,0,1,9};
@@ -187,5 +197,19 @@ int main(){
  Carry ram;const std::vector<BodyBinding> from{{unsavedRecord.identity,&body}},to{{unsavedRecord.identity,&arrived}};
  check(neverSaved.detachCarry(from,ram,e),"actual committed RAM owner can escrow before first saved-card proof");++a.live.nativeSerial;
  Registry ramDestination;check(ramDestination.receiveCarry(a,ram,to,e)&&ramDestination.body(&arrived,savedBody)&&savedBody.identity==unsavedRecord.identity,"RAM destination retains exact unsaved origin; no fake card/activation/emission");
+ MockOnyon onyon,foreignReader;Piki emitted;
+ check(pc_p2_source_body_install_onyon_reader(onyon),"install actual producer-owned reader");
+ check(!pc_p2_source_body_install_onyon_reader(foreignReader),"reader cannot be replaced while identities may exist");
+ onyon.actor=&emitted;PcP2SourceBody external;external.kind=PcP2SourceBodyKind::GenPiki;
+ onyon.ready=false;check(pc_p2_source_body_query(&emitted,external)==PcP2SourceBodyKind::Unavailable&&external.kind==PcP2SourceBodyKind::GenPiki,"tag without adopted state never ordinary fallback or output mutation");onyon.ready=true;
+ onyon.serial=0;check(pc_p2_source_body_query(&emitted,external)==PcP2SourceBodyKind::Unavailable,"actual lifetime missing refuses owned tag");onyon.serial=7;
+ check(pc_p2_source_body_query(&emitted,external)==PcP2SourceBodyKind::OnyonEmission,"typed Onyon body distinct from GenPiki and Bud");
+ check(pc_p2_source_body_admitted(external,hash('a'),hash('d'),e),"actual reader owns campaign admission");
+ ++onyon.serial;check(!pc_p2_source_body_admitted(external,hash('a'),hash('d'),e),"same address new lifetime rejects old read-view");--onyon.serial;
+ check(!pc_p2_source_body_admitted(external,hash('f'),hash('d'),e),"foreign campaign rejected by actual producer");
+ check(pc_p2_source_body_recruited(&emitted),"recruit dispatch uses exact current native lifetime");
+ registry().swap(ramDestination);onyon.actor=&arrived;check(pc_p2_source_body_query(&arrived,external)==PcP2SourceBodyKind::Unavailable,"overlapping Bud and Onyon tags refuse");
+ onyon.actor=&emitted;pc_p2_source_body_forget_external(&emitted);check(onyon.forgets==1&&pc_p2_source_body_query(&emitted,external)==PcP2SourceBodyKind::None,"pool/kill forget removes actual producer association");
+ onyon.actor=&emitted;pc_p2_source_body_scene_exit_external();check(onyon.exits==1&&pc_p2_source_body_query(&emitted,external)==PcP2SourceBodyKind::None,"scene exit forgets external tags before reuse");
  std::printf("BUD_ORIGIN_CONTROLS PASS %d (mock proof/opaque actors only)\n",checks);return 0;
 }
