@@ -3591,3 +3591,8 @@ foreach(pikmin_component IN LISTS pikmin_component_targets)
         endif()
     endif()
 endforeach()
+
+add_executable(pc_p2_original_calendar_state_test tools/pc_p2_original_calendar_state_test.cpp)
+target_include_directories(pc_p2_original_calendar_state_test PRIVATE pc_port)
+target_compile_options(pc_p2_original_calendar_state_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME pc_p2_original_calendar_state COMMAND pc_p2_original_calendar_state_test)

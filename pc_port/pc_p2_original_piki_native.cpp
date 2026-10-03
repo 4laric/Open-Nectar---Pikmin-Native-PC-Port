@@ -9,9 +9,10 @@
 #include "netplay/pc_sim_rng.h"
 #include <map>
 #include <set>
+#include <algorithm>
 #include <cstdio>
 #include <cstdlib>
-#include <regex>
+
 namespace {
 constexpr unsigned type=0x70327069u,version=0x4f503031u;
 p2original::PikiManifest atlas;
@@ -22,11 +23,8 @@ bool admitted=false;
 bool reject(std::string& e,const char* s){e=s;return false;}
 [[noreturn]] void fatal(const char* s){std::fprintf(stderr,"P2_ORIGINAL_PIKI_NATIVE_FAIL %s\n",s);std::abort();}
 const p2original::PikiSourceRecord* row(unsigned uid){for(const auto& r:atlas.rows)if(r.spawn.uid==uid)return &r;return nullptr;}
-int calendarLimit(const p2original::PikiSourceRecord& r){
- std::smatch match;static const std::regex nonloop("^[a-z]+/nonloop/[0-9]+-([0-9]+)\\.txt#[0-9]+$");
- if(std::regex_match(r.sourceKey,match,nonloop)){const auto end=std::stoul(match[1].str());return r.dayLimit==-1?int(end):std::min(r.dayLimit,int(end));}
- return r.dayLimit;
-}
+std::map<unsigned,int> selectedExpiry;
+int calendarLimit(const p2original::PikiSourceRecord& r){auto found=selectedExpiry.find(r.spawn.uid);return found==selectedExpiry.end()?r.dayLimit:found->second;}
 GenObject* make(){return new GenObjectOriginalPiki;}
 struct Provider final:p2original::PikiSpawnProvider {
  const p2original::PikiSourceRecord& source;std::uint64_t activation;
@@ -42,16 +40,27 @@ struct Provider final:p2original::PikiSpawnProvider {
  }
 };
 }
-bool pc_p2_original_piki_install(const p2original::PikiManifest& manifest,const std::vector<unsigned>& active,std::string& e){
+bool pc_p2_original_piki_install(const p2original::PikiManifest& manifest,const std::vector<unsigned>& active,std::string& e,const std::map<unsigned,int>& effectiveExpiry){
  if(!atlas.rows.empty()||admitted||!bindings.empty()||!p2original::originalProgress().ready()
   ||manifest.campaign!=p2original::originalProgress().snapshot().campaign)return reject(e,"original Piki install lacks selected campaign authority or fresh scene");
  std::string encoded;if(!p2original::writePikiManifest(manifest,encoded,e))return false;
  std::vector<OriginalPikiSource> sources;std::set<unsigned> all,next;
  for(const auto& r:manifest.rows){all.insert(r.spawn.uid);sources.push_back({r.sourceKey,r.spawn.uid,r.spawn.count,std::uint8_t(r.spawn.species)});}
  for(unsigned uid:active)if(!all.count(uid)||!next.insert(uid).second)return reject(e,"original active Piki census unknown or duplicate UID");
+ std::map<unsigned,int> expiry;
+ if(!effectiveExpiry.empty()&&effectiveExpiry.size()!=next.size())return reject(e,"original Piki calendar expiry census incomplete");
+ for(const auto& value:effectiveExpiry){
+  if(!next.count(value.first)||value.second< -1)return reject(e,"original Piki calendar expiry unknown or invalid");
+  const auto source=std::find_if(manifest.rows.begin(),manifest.rows.end(),[&](const auto& r){return r.spawn.uid==value.first;});
+  const int limit=source->dayLimit==-1?value.second:(value.second==-1?source->dayLimit:std::min(source->dayLimit,value.second));
+  expiry.emplace(value.first,limit);
+ }
+ for(const auto& source:manifest.rows)if(next.count(source.spawn.uid)
+  &&(source.sourceKey.find("/nonloop/")!=std::string::npos||source.sourceKey.find("/loop/")!=std::string::npos)
+  &&!effectiveExpiry.count(source.spawn.uid))return reject(e,"limited original Piki source requires authenticated declared calendar expiry");
  if(!pc_p2_original_piki_origin_install(manifest.catalog,sources,e))return false;
  if(!pc_p2_original_piki_recruit_bind(manifest.campaign,manifest.catalog,e))return false;
- atlas=manifest;selected=std::move(next);e.clear();return true;
+ atlas=manifest;selected=std::move(next);selectedExpiry=std::move(expiry);e.clear();return true;
 }
 bool pc_p2_original_piki_preflight(const std::vector<Generator*>& inventory,std::string& e){
  if(admitted||atlas.rows.empty()||inventory.size()!=selected.size()||!pikiMgr||!pikiMgr->mPikiParms)return reject(e,"original Piki preflight requires complete selected inventory and physical manager");
@@ -82,7 +91,7 @@ bool pc_p2_original_piki_generator_init(Generator* g,bool& handled,std::string& 
  if(!p2original::spawnOriginalPiki(r.spawn,{s.met,s.boot,false},provider,result,e))return false;
  g->mAliveCount=0;g->mLatestSpawnCreature=nullptr;e.clear();return true;
 }
-void pc_p2_original_piki_unload(){admitted=false;bindings.clear();generated.clear();selected.clear();atlas={};pc_p2_original_piki_recruit_unbind();}
+void pc_p2_original_piki_unload(){admitted=false;bindings.clear();generated.clear();selected.clear();selectedExpiry.clear();atlas={};pc_p2_original_piki_recruit_unbind();}
 void pc_p2_original_piki_register(){auto* f=GenObjectFactory::factory;if(!f)fatal("factory unavailable");for(int i=0;i<f->mSpawnerCount;++i)if(f->mSpawnerInfo[i].mID==type)return;if(f->mSpawnerCount>=f->mMaxSpawners)fatal("factory full");f->registerMember(type,make,"original P2 GenPiki",version);}
 GenObjectOriginalPiki::GenObjectOriginalPiki():GenObject(type,"original P2 GenPiki"){}
 void GenObjectOriginalPiki::doRead(RandomAccessStream& s){if(mVersion!=version||Generator::ramMode)fatal("unsupported Piki adapter/cache version");unsigned next=unsigned(s.readInt());if(!row(next)||!selected.count(next))fatal("Piki UID not selected from immutable atlas");uid=next;}

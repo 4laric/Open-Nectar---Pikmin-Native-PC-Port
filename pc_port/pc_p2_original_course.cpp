@@ -21,6 +21,8 @@
 #include "pc_p2_original_bridge_native.h"
 #include "pc_p2_original_manifest.h"
 #include "pc_p2_original_progress.h"
+#include "pc_p2_original_calendar_state.h"
+#include "pc_randomizer.h"
 #include "pc_p2_original_piki_native.h"
 #include "pc_p2_campaign_treasure_held.h"
 #include "Creature.h"
@@ -55,8 +57,13 @@ struct Course {
  bool pikis=false;
  bool gates=false;
  bool bridges=false;
+ bool selectedSession=false;
+ bool loaded=false;
+ std::string course;
+ std::vector<CalendarLoad> plannedLoads;
 };
 std::unique_ptr<Course> current;
+CalendarLedger calendarLedger;
 bool fail(std::string& e,const char* text){e=text;return false;}
 }
 bool pc_p2_original_course_prepare(const std::string& fingerprint,const std::vector<CatalogRow>& rows,
@@ -199,7 +206,20 @@ bool pc_p2_original_course_load(const char* directory,const char* course,std::fu
  if(!input.read(bytes.data(),size))return fail(e,"original private manifest read failed");
  SourceManifest manifest;
  if(!readSourceManifest(bytes,selected,manifest,e))return false;
+ const bool selectedSession=pc_randomizer_original_session();
+ if(selectedSession){
+  const char* selectedRoot=pc_randomizer_original_catalog_root();std::error_code status;
+  if(!selectedRoot||manifest.fingerprint!=pc_randomizer_original_campaign()
+   ||std::filesystem::canonical(directory,status)!=std::filesystem::path(selectedRoot)||status)
+   return fail(e,"original manifest differs from verified selected session");
+ }
  if(!originalProgress().initialize(manifest.fingerprint,e))return false;
+ std::vector<CalendarLoad> plannedLoads;CalendarState sourceFlags;
+ if(selectedSession){
+  if(!calendarLedger.initialize(manifest.fingerprint,originalProgress().context().day,e)
+   ||!calendarLedger.state(selected,sourceFlags,e)
+   ||!pc_randomizer_original_calendar_plan(selected,sourceFlags,plannedLoads,e))return false;
+ }
  if(!pc_p2_original_incarnation_initialize(manifest.fingerprint,e))return false;
  // P2PK1 is all-calendar authority; P2PA1 names the exact selected native
  // calendar inventory and binds its zero-based source day independently.
@@ -208,13 +228,20 @@ bool pc_p2_original_course_load(const char* directory,const char* course,std::fu
   auto n=in.tellg();if(n<=0||n>4*1024*1024)return fail(e,"original typed source size invalid");
   std::string b(size_t(n),'\0');in.seekg(0);if(!in.read(b.data(),n))return fail(e,"original typed source read failed");out.swap(b);return true;
  };
- p2original::PikiManifest pikiAtlas;std::vector<unsigned> pikiActive;
+ p2original::PikiManifest pikiAtlas;std::vector<unsigned> pikiActive;std::map<unsigned,int> pikiExpiry;
  std::error_code pikiStatus;const std::string pikiPath=std::string(directory)+"/campaign.p2pk";
  const bool hasPikis=std::filesystem::exists(pikiPath,pikiStatus);if(pikiStatus)return fail(e,"original Pikmin atlas status failed");
  if(hasPikis){std::string b;
   if(!loadBytes(pikiPath,b)||!p2original::readPikiManifest(b,pikiAtlas,e))return false;
   if(pikiAtlas.campaign!=manifest.fingerprint)return fail(e,"original Pikmin atlas selected campaign mismatch");
-  if(!loadBytes(std::string(directory)+"/"+selected+".p2pa",b)
+  if(selectedSession){
+   for(const auto& load:plannedLoads)for(const auto& source:load.member->sources)if(source.kind=="piki"){
+    auto row=std::find_if(pikiAtlas.rows.begin(),pikiAtlas.rows.end(),[&](const auto& r){return r.spawn.uid==source.uid;});
+    if(row==pikiAtlas.rows.end()||row->sourceKey!=selected+"/"+load.member->name+"#"+std::to_string(source.index)||row->sourceSha!=load.member->sha
+     ||!pikiExpiry.emplace(source.uid,load.expiry).second)return fail(e,"original active calendar Piki authority mismatch");
+    pikiActive.push_back(source.uid);
+   }
+  }else if(!loadBytes(std::string(directory)+"/"+selected+".p2pa",b)
    ||!p2original::readPikiActive(b,pikiAtlas,selected,originalProgress().context().day,pikiActive,e))return false;
  }
  const std::string onyonPath=std::string(directory)+"/"+selected+".p2on";
@@ -264,7 +291,7 @@ bool pc_p2_original_course_load(const char* directory,const char* course,std::fu
   if(!pc_p2_original_bridge_install(bridges,e)){rollback();return false;}current->bridges=true;
  }
  if(hasPikis){
-  if(!pc_p2_original_piki_install(pikiAtlas,pikiActive,e)){rollback();return false;}
+  if(!pc_p2_original_piki_install(pikiAtlas,pikiActive,e,pikiExpiry)){rollback();return false;}
   current->pikis=true;
  }
  if(hasOnyons){
@@ -273,6 +300,7 @@ bool pc_p2_original_course_load(const char* directory,const char* course,std::fu
   if(!pc_p2_original_onyon_install(onyons,progress,boot,e)){rollback();return false;}
   current->onyons=true;
  }
+ current->selectedSession=selectedSession;current->course=selected;current->plannedLoads=std::move(plannedLoads);
  e.clear();return true;
 }
 bool pc_p2_original_course_use_models(std::string& e){
@@ -303,10 +331,20 @@ bool pc_p2_original_course_boot(const char* directory,const char* course,std::st
  return pc_p2_original_course_load(directory,course,pc_p2_original_progress_met,e);
 }
 void pc_p2_original_course_day_advanced(){
- const char* catalog=std::getenv("PIKMIN_P2_ORIGINAL_CATALOG");
+ const char* catalog=pc_randomizer_original_session()?pc_randomizer_original_catalog_root():std::getenv("PIKMIN_P2_ORIGINAL_CATALOG");
  if(!catalog||!*catalog||!originalProgress().ready()||!originalProgress().context().story)return;
  std::string e;
- if(!originalProgress().nextDay(e)){
+ if(!originalProgress().nextDay(e)||(pc_randomizer_original_session()&&!calendarLedger.advance(originalProgress().context().day,e))){
   std::fprintf(stderr,"P2_ORIGINAL_DAY_ADVANCE_FAIL %s\n",e.c_str());std::abort();
  }
+}
+
+bool pc_p2_original_calendar_encode(std::string& bytes,std::string& e){return calendarLedger.encode(bytes,e);}
+bool pc_p2_original_calendar_decode(const std::string& campaign,unsigned day,const std::string& bytes,std::string& e){
+ if(current)return fail(e,"original calendar adoption requires unloaded scene");return calendarLedger.decode(campaign,day,bytes,e);
+}
+bool pc_p2_original_course_loaded(std::string& e){
+ if(!current||!current->selectedSession){e.clear();return true;}
+ if(!current->started||current->loaded)return fail(e,"original calendar successful-load event outside fresh admitted scene");
+ if(!calendarLedger.commit(current->course,current->plannedLoads,e))return false;current->loaded=true;e.clear();return true;
 }
