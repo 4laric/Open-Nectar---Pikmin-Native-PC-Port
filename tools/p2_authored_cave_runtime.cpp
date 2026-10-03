@@ -32,6 +32,8 @@ int frames=0,stage=0,ticks=0,entryClicks=0,exitClicks=0;
 std::uint64_t baselineGeneration=0;
 bool entered=false,returned=false,baselineKnown=false;
 bool gatherArrived=false,surfaceGathered=false;
+bool coldFloor=false;
+int entryPulse=0;
 float gatherX=0,gatherZ=0;
 P2CaveCampaignParty floorParty;
 auto start=std::chrono::steady_clock::now();
@@ -77,6 +79,12 @@ public:int idle()override{
     else if(gameflow.mIsUIOverlayActive&&!movie){b=frames%40<4?1:0;}
     else if(controlling&&living==20){
         ++ticks;
+        if(stage==0&&boundary.ready&&boundary.floor==1&&!baselineKnown){
+            std::uint8_t digest[32]{};
+            if(!pc_randomizer_checkpoint_info(&baselineGeneration,digest))finish(16);
+            baselineKnown=true;coldFloor=true;entered=true;stage=2;ticks=0;
+            std::puts("CAVE_VISIBLE_BASELINE genuine_cold_floor=1 live20=1");
+        }
         if(stage==0&&boundary.ready&&boundary.floor==0){
             if(!baselineKnown){
                 std::uint8_t digest[32]{};
@@ -98,14 +106,23 @@ public:int idle()override{
                 }
             }else if(move(boundary.x,boundary.z)<45){stage=1;ticks=0;std::puts("CAVE_VISIBLE_INPUT near_hole ordinary_movement=1");}
         }else if(stage==1){
-            if(ticks<60)b=1;
-            if(ticks>=60&&ticks<64)a=1;
-            if(ticks==60){++entryClicks;std::puts("CAVE_VISIBLE_INPUT enter_A=1 F6=0");}
+            if(ticks<45)b=1;
+            if(ticks>=90&&ready&&entryClicks==0){++entryClicks;entryPulse=4;
+                std::puts("CAVE_VISIBLE_INPUT enter_A=1 F6=0");}
+            if(entryPulse>0){a=1;--entryPulse;}
             if(boundary.floor==1){stage=2;ticks=0;entered=true;}
         }else if(stage==2){
             if(ticks==45){
                 floorParty=pc_randomizer_authored_cave_session().party;
                 if(!floorParty.present || floorParty.bodies.size()!=20 || !floorParty.inside)finish(10);
+                if(!coldFloor&&std::getenv("PIKMIN_AUTHORED_FIXTURE_STOP_AFTER_FLOOR_SAVE")){
+                    std::uint64_t generation=0;std::uint8_t digest[32]{};P2CaveCampaignParty actual;
+                    const bool passed=pc_randomizer_checkpoint_info(&generation,digest)&&generation==baselineGeneration+1
+                        &&pc_p2_cave_campaign_party_capture(actual,true)&&same(actual,floorParty)
+                        &&GameStat::mapPikis==20&&pc_randomizer_generated_cave_cache().inside;
+                    std::printf("P2_AUTHORED_FLOOR_SAVE_RUNTIME %s generation=%llu live20=1 actual_native_SAVE=1\n",
+                        passed?"PASS":"FAIL",(unsigned long long)generation);finish(passed?0:17);
+                }
                 std::puts("CAVE_VISIBLE_INPUT gather_on_landing ordinary_B=1");
             }
             if(ticks>=45&&ticks<135)b=1;
@@ -138,10 +155,10 @@ public:int idle()override{
             if(captured||ticks>=300){
             const auto& bank=pc_randomizer_generated_cave_cache();
             std::uint64_t generation=0;std::uint8_t sha[32]{};
-            const bool checkpoint=pc_randomizer_checkpoint_info(&generation,sha)&&generation==baselineGeneration+2;
+            const bool checkpoint=pc_randomizer_checkpoint_info(&generation,sha)&&generation==baselineGeneration+(coldFloor?1:2);
             const bool preserved=captured&&same(actual,floorParty);
             const bool population=int(GameStat::mapPikis)==20&&int(GameStat::allPikis[Red])==20;
-            const bool passed=entered&&returned&&entryClicks==1&&exitClicks==1&&preserved&&population&&checkpoint&&!bank.inside;
+            const bool passed=entered&&returned&&entryClicks==(coldFloor?0:1)&&exitClicks==1&&preserved&&population&&checkpoint&&!bank.inside;
             std::printf("P2_CAVE_VISIBLE_RUNTIME %s entry_A=%d return_A=%d identity_health=%d live20=%d generation=%llu authored_segment=1 F6=0\n",
                 passed?"PASS":"FAIL",entryClicks,exitClicks,int(preserved),int(population),(unsigned long long)generation);
             finish(passed?0:11);
