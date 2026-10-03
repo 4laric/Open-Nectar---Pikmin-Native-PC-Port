@@ -28,6 +28,13 @@ inline bool parse(const std::string& bytes,const std::string& fingerprint,const 
  if(!next.files.count("p2-original/calendar.p2sc")||!next.files.count("p2-original/stages.txt"))return false;
  out=std::move(next);return true;
 }
+inline bool input(const Bundle& bundle,const std::string& role,std::string& bytes,std::string& error){
+ if(!path(role)){error="original immutable input path invalid";return false;}
+ const auto found=bundle.files.find(role);std::string next;
+ if(found==bundle.files.end()||!p2treasureplacements::bounded(role,128*1024*1024,next)
+    ||p2treasureplacements::hash(next)!=found->second){error="original immutable input is absent or changed: "+role;return false;}
+ bytes=std::move(next);error.clear();return true;
+}
 inline bool verify(const Bundle& bundle,std::string& error){
  // Hash every selected physical input before adopting scalar state or spawning.
  for(const auto& entry:bundle.files){std::string bytes;if(!p2treasureplacements::bounded(entry.first,128*1024*1024,bytes)||p2treasureplacements::hash(bytes)!=entry.second){error="original session physical input changed: "+entry.first;return false;}}
