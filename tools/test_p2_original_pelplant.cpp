@@ -61,6 +61,7 @@ int main(){
  Generator gen;Creature* actor=nullptr;assert(provider.birth(rows[0],&gen,0,{1,2,3},0.5f,actor,error));
  assert(provider.bind(rows[0],actor,0x53000001,error));Host* host=provider.lookup(actor);Pellet* captured=host->captured;
  assert(captured&&captured->captured&&captured->color==1);
+ assert(host->cullable&&host->lodRadius==45);
  assert(provider.damage(actor,0,"s__0",error));assert(provider.tick(actor,0,Event::Other,error)&&host->state==State::Full);
  assert(provider.tick(actor,0,Event::None,error)&&host->state==State::Dead&&engine.releases==0);
  assert(provider.tick(actor,0,Event::LoopEnd,error)&&engine.releases==0);
@@ -70,11 +71,16 @@ int main(){
  assert(provider.onion(captured,token,duplicate)&&duplicate);provider.forgetPellet(captured);assert(!provider.onion(captured,token,duplicate));
  Generator middle;assert(provider.birth(rows[6],&middle,0,{0,0,0},0,actor,error));assert(provider.bind(rows[6],actor,0x53000002,error));host=provider.lookup(actor);
  assert(!host->captured&&provider.damage(actor,100,"s__0",error)&&host->damage==0);
+ assert(!host->cullable&&host->lodRadius==45);
  assert(provider.tick(actor,61,Event::None,error)&&host->state==State::Middle);
  assert(provider.tick(actor,0,Event::LoopEnd,error)&&host->state==State::GrowMiddleFull&&host->captured&&engine.motionIndex==7);
+ assert(!host->cullable&&host->lodRadius==103);
  assert(provider.tick(actor,0,Event::End,error)&&host->state==State::Full);
+ assert(host->cullable&&host->lodRadius==103);
  captured=host->captured;assert(provider.farm(actor,-1,error)&&provider.tick(actor,0,Event::LoopEnd,error)&&host->state==State::WitherFull);
+ assert(host->cullable&&host->lodRadius==103);
  assert(provider.tick(actor,0,Event::EndBlend,error)&&host->state==State::Small&&host->captured==captured);
+ assert(!host->cullable&&host->lodRadius==45);
  assert(provider.farm(actor,1,error)&&provider.tick(actor,0,Event::LoopEnd,error)&&host->state==State::GrowSmallMiddle);
  assert(provider.tick(actor,0,Event::End,error)&&provider.tick(actor,0,Event::LoopEnd,error)&&host->captured==captured);
  assert(provider.release(actor,0x53000002,error)&&!captured->alive);

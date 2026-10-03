@@ -36,8 +36,10 @@ struct Host {
  State state=State::Small, previous=State::Full;
  Pellet* captured=nullptr;
  float health=1, damage=0, growthTime=0, colorTime=0;
+ float lodRadius=45;
  int farmPower=0, actualColor=1;
  bool growing=true, dead=false, released=false;
+ bool cullable=false;
 };
 // Native bridge: allocation is a real manager-owned creature with the family
 // update/damage/render hooks installed, never a bare P1 Palm with its AI active.
