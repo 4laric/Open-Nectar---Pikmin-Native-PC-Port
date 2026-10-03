@@ -6,7 +6,7 @@
 class Navi;class Graphics;
 namespace p2original { namespace captain {
 // Actual Game::IPikiAnims identities, never P1 PaniMotion IDs.
-enum class Motion:unsigned {Asibumi=1,Damage=4,Getup=14,Jhit=22,Jkoke=23,Nigeru=28,Run2=29,Walk=30,Wait=31};
+enum class Motion:unsigned {Asibumi=1,Damage=4,Fue=10,Getup=14,Jhit=22,Jkoke=23,Nigeru=28,Run2=29,Walk=30,Wait=31,Throw=33,ThrowWait=34};
 struct MotionState {Motion motion=Motion::Wait;float frame=0;std::uint64_t generation=0;bool finishing=false,complete=false;};
 enum class SourceResource {Parameters,AnimRegistry,Collision,DownStudio,DownAnimation};
 struct SourceParameters {
