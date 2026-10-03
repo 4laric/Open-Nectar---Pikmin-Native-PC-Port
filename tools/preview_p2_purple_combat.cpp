@@ -40,6 +40,7 @@
 #include "Boss.h"
 #include "ItemMgr.h"
 #include "GameStat.h"
+#include "BaseInf.h"
 #include "MapMgr.h"
 #include "Collision.h"
 #include "Camera.h"
@@ -538,6 +539,7 @@ class PurpleCombatApp : public PlugPikiApp {
     }
     bool sdlAcquisitionMode() const { return mode("sdl_acquire") || mode("sdl_dayend"); }
     bool ordinarySaveMode() const { return mode("natural_dayend") || mode("sdl_dayend"); }
+    bool ordinaryResumeMode() const { return mode("natural_resume") || mode("natural_resume_consistency"); }
     void injectInitializedGuard(Navi* n) {
         const char* test=std::getenv("P2_PURPLE_GUARD_CASE");
         if(!test && std::getenv("P2_FIXTURE_FORCE_CAPTAIN_DOWN")) test="health";
@@ -1318,11 +1320,41 @@ class PurpleCombatApp : public PlugPikiApp {
                 else if(p->mColor==Blue)++registryBlue;else ++registryOther;
             }
         }
-        std::printf("P2_PURPLE_ORDINARY_RESUME_POPULATION registry_red=%d registry_yellow=%d registry_blue=%d registry_other=%d map_red=%d map_yellow=%d map_blue=%d container_red=%d container_yellow=%d container_blue=%d all_red=%d all_yellow=%d all_blue=%d p2_stock=%d expected_total=20 read_only=1\n",
+        std::printf("P2_PURPLE_ORDINARY_RESUME_POPULATION registry_red=%d registry_yellow=%d registry_blue=%d registry_other=%d map_red=%d map_yellow=%d map_blue=%d container_red=%d container_yellow=%d container_blue=%d all_red=%d all_yellow=%d all_blue=%d p2_stock=%d expected_total=%d read_only=1\n",
             registryRed,registryYellow,registryBlue,registryOther,
             GameStat::mapPikis[Red],GameStat::mapPikis[Yellow],GameStat::mapPikis[Blue],
             GameStat::containerPikis[Red],GameStat::containerPikis[Yellow],GameStat::containerPikis[Blue],
-            GameStat::allPikis[Red],GameStat::allPikis[Yellow],GameStat::allPikis[Blue],p2ship::stock.total());
+            GameStat::allPikis[Red],GameStat::allPikis[Yellow],GameStat::allPikis[Blue],p2ship::stock.total(),mode("natural_resume_consistency")?-1:20);
+        if(mode("natural_resume_consistency")) {
+            // This is a read-only stock observation, not the original starting
+            // population oracle. The host must compare every compartment to
+            // the independently pinned genuine card and preserve its hash.
+            require(registryRed==0 && registryYellow==0 && registryBlue==0 && registryOther==0,
+                "stock-only consistency unexpected live field body");
+            require(itemMgr->getPikiHeadMgr()!=nullptr,"stock-only consistency head manager missing");
+            int liveHeads=0;
+            Iterator sprouts(itemMgr->getPikiHeadMgr());CI_LOOP(sprouts) {
+                PikiHeadItem* head=static_cast<PikiHeadItem*>(*sprouts);
+                if(head && head->isAlive())++liveHeads;
+            }
+            require(liveHeads==0,"stock-only consistency unexpected live sprout");
+            require(int(GameStat::mapPikis)==0,"stock-only consistency registry/stat discrepancy");
+            for(int color=0;color<3;++color)for(int maturity=0;maturity<3;++maturity) {
+                const int count=pikiInfMgr.mPikiCounts[color][maturity];
+                require(count>=0 && count<=100000,"stock-only consistency invalid RGB count");
+                std::printf("P2_PURPLE_RESUME_STOCK kind=rgb color=%d maturity=%d count=%d read_only=1\n",color,maturity,count);
+            }
+            for(int color=0;color<3;++color)require(pikiInfMgr.getColorTotal(color)==GameStat::containerPikis[color]
+                && pikiInfMgr.getColorTotal(color)==GameStat::allPikis[color],"stock-only consistency RGB/stat discrepancy");
+            for(int species=0;species<2;++species)for(int maturity=0;maturity<3;++maturity) {
+                const int count=p2ship::stock.counts[species][maturity];
+                require(count>=0 && count<=p2ship::Capacity,"stock-only consistency invalid P2 count");
+                std::printf("P2_PURPLE_RESUME_STOCK kind=p2 color=%d maturity=%d count=%d read_only=1\n",species+3,maturity,count);
+            }
+            ordinaryInput();
+            std::printf("P2_PURPLE_RESUME_STOCK_OBSERVED day=%d generations=1 checkpoint_resumed=1 field=0 heads=0 starting_population_validated=0 external_card_comparison_required=1 saved_bytes_injected=0\n",expectedDay);
+            std::fflush(nullptr);std::_Exit(0);
+        }
         require(int(GameStat::allPikis)+p2ship::stock.total()==20,"ordinary saved starting population conservation");
         ordinaryInput();milestone("ordinary_checkpoint_restored",ticks);
         std::printf("P2_PURPLE_ORDINARY_RESUME_PASS day=%d maturity=%d stock=1 field=%d native_population=20 generations=1 checkpoint_resumed=1 direct_stock_helpers=0 withdrawal_ui_validated=0 saved_bytes_injected=0\n",
@@ -1855,7 +1887,7 @@ public:
         }
         require(ticks<(sunsetRequested?15000:6000),"global fixture timeout");
         if(mode("persistence_resume")) pc_p2_input_script_set(1,(!n || gameflow.mIsUIOverlayActive) && ticks%20<4?KBBTN_A:0,0,0);
-        if(mode("natural_resume")) {
+        if(ordinaryResumeMode()) {
             const PcWorldMapSnapshot map=pc_world_map_observe();
             const int expectedCourse=pc_randomizer_start_stage(); // Parsed from the actual seed profile, never a UI write.
             const PcWorldMapInput intent=ordinaryResumeMapInput.observe(map,gsys->mTotalFrames,expectedCourse);
@@ -1883,7 +1915,7 @@ public:
             return result;
         }
         if(gameflow.mMoviePlayer&&gameflow.mMoviePlayer->mIsActive) {
-            if(!mode("natural_resume")) gameflow.mMoviePlayer->requestSkip();
+            if(!ordinaryResumeMode()) gameflow.mMoviePlayer->requestSkip();
             return result;
         }
         if(!n||!pikiMgr||!itemMgr||!bossMgr||!tekiMgr||!mapMgr||!n->getCurrState()
@@ -1891,13 +1923,13 @@ public:
         if(!activeSeen && (n->getCurrState()->getID()==NAVISTATE_Walk || n->getCurrState()->getID()==NAVISTATE_Idle)) {
             activeSeen=true;milestone("active_gameplay",ticks);
         }
-        if(mode("persistence_resume") || mode("natural_resume")) {
+        if(mode("persistence_resume") || ordinaryResumeMode()) {
             // The restored captain exists during ship/map entry before the
             // playable stage actors are ready. Match the ordinary fixture's
             // active walk/idle gate before checking live combat bindings.
             const int state=n->getCurrState()->getID();
             if(state==NAVISTATE_Walk || state==NAVISTATE_Idle) {
-                if(mode("natural_resume")) ordinaryResume(n);else resumePersistence(n);
+                if(ordinaryResumeMode()) ordinaryResume(n);else resumePersistence(n);
             }
             return result;
         }
@@ -1976,14 +2008,14 @@ int main(int argc,char** argv) {
         || !std::strcmp(guardCase,"global") || !std::strcmp(guardCase,"dead_state") || !std::strcmp(guardCase,"missing")
         || !std::strcmp(guardCase,"health_pause") || !std::strcmp(guardCase,"missing_movie"),"unknown initialized guard case");
     const char* mode=std::getenv("P2_PURPLE_COMBAT_MODE");
-    if(mode && std::strcmp(mode,"sdl_acquire") && std::strcmp(mode,"sdl_dayend") && std::strcmp(mode,"natural_dayend") && std::strcmp(mode,"natural_resume") && std::strcmp(mode,"adult_direct") && std::strcmp(mode,"persistence_dayend") && std::strcmp(mode,"persistence_resume") && std::strcmp(mode,"transport_delivery") && std::strcmp(mode,"transport_positive") && std::strcmp(mode,"transport_red_control") && std::strcmp(mode,"transport_staged") && std::strcmp(mode,"transport_manual")) {
-        std::printf("P2_PURPLE_COMBAT_UNIMPLEMENTED mode=%s implemented=sdl_acquire,sdl_dayend,adult_direct,persistence_dayend,persistence_resume,natural_dayend,natural_resume,transport_delivery,transport_positive,transport_red_control,transport_staged,transport_manual\n",mode); return 2;
+    if(mode && std::strcmp(mode,"sdl_acquire") && std::strcmp(mode,"sdl_dayend") && std::strcmp(mode,"natural_dayend") && std::strcmp(mode,"natural_resume") && std::strcmp(mode,"natural_resume_consistency") && std::strcmp(mode,"adult_direct") && std::strcmp(mode,"persistence_dayend") && std::strcmp(mode,"persistence_resume") && std::strcmp(mode,"transport_delivery") && std::strcmp(mode,"transport_positive") && std::strcmp(mode,"transport_red_control") && std::strcmp(mode,"transport_staged") && std::strcmp(mode,"transport_manual")) {
+        std::printf("P2_PURPLE_COMBAT_UNIMPLEMENTED mode=%s implemented=sdl_acquire,sdl_dayend,adult_direct,persistence_dayend,persistence_resume,natural_dayend,natural_resume,natural_resume_consistency,transport_delivery,transport_positive,transport_red_control,transport_staged,transport_manual\n",mode); return 2;
     }
     SDL_SetMainReady(); pc_gpu_preference_apply(); pc_bbft_init(argc,argv);
     require(pc_randomizer_purple_campaign() && pc_randomizer_p2_bridge(),"ordinary Purple seed campaign required");
     if(!pc_window_init(mode && !std::strcmp(mode,"transport_manual")?"Purple carry smoke - staged Purple - F7 resets":"Purple campaign combat fixture",960,540)) return 3;
     pc_settings_init(); pc_window_set_display_mode(PC_WINDOW_FULLSCREEN_WINDOWED);
-    if(mode && (!std::strcmp(mode,"sdl_acquire") || !std::strcmp(mode,"sdl_dayend") || !std::strcmp(mode,"natural_dayend") || !std::strcmp(mode,"natural_resume"))) ordinaryController();
+    if(mode && (!std::strcmp(mode,"sdl_acquire") || !std::strcmp(mode,"sdl_dayend") || !std::strcmp(mode,"natural_dayend") || !std::strcmp(mode,"natural_resume") || !std::strcmp(mode,"natural_resume_consistency"))) ordinaryController();
     pc_window_set_window_size(960,540); pc_window_center();
     std::puts("Experimental preview window set to 960x540 windowed and centered");
     int w=0,h=0,x=0,y=0; SDL_Window* window=SDL_GL_GetCurrentWindow();
@@ -1992,7 +2024,7 @@ int main(int argc,char** argv) {
     std::printf("P2_FIXTURE_WINDOW width=%d height=%d x=%d y=%d\n",w,h,x,y);
     milestone("window_ready",0);
     std::printf("P2_PURPLE_COMBAT_SCOPE mode=%s natural_acquisition=%d player_controls_validated=0 production_collision_marker_required=1\n",
-        mode?mode:"adult_direct",int(!mode || (std::strcmp(mode,"natural_resume") && std::strcmp(mode,"persistence_resume") && std::strcmp(mode,"transport_red_control") && std::strcmp(mode,"transport_staged") && std::strcmp(mode,"transport_manual"))));
+        mode?mode:"adult_direct",int(!mode || (std::strcmp(mode,"natural_resume") && std::strcmp(mode,"natural_resume_consistency") && std::strcmp(mode,"persistence_resume") && std::strcmp(mode,"transport_red_control") && std::strcmp(mode,"transport_staged") && std::strcmp(mode,"transport_manual"))));
     gsys->Initialise(); pc_settings_p2d_init(); nodeMgr=new NodeMgr();
     gsys->run(new PurpleCombatApp()); return 0;
 }
