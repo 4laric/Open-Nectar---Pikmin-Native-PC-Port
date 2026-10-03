@@ -10,6 +10,11 @@ bool pc_p2_catfish_source_resources(std::string&);
 bool pc_p2_catfish_source_birth(BTeki*,unsigned uid,unsigned ordinal,std::string&);
 bool pc_p2_catfish_source_registry(BTeki*,unsigned token,std::string&);
 bool pc_p2_catfish_source_clip(const BTeki*,const char*&,float& phase);
+bool pc_p2_catfish_source_corpse_clip(const BTeki*,const char*&,float& phase);
+// Actual pellet view lifecycle: pre-carry is prepared/paused at corpse birth.
+// Start resumes; restart=true corresponds to view_start_carrymotion.
+bool pc_p2_catfish_source_carry_start(BTeki*,bool restart=false);
+bool pc_p2_catfish_source_carry_finish(BTeki*);
 void pc_p2_catfish_source_update(BTeki*);
 void pc_p2_catfish_source_forget(BTeki*);
 // Reports ownership/handled to suppress the P1 Pressed event. The source

@@ -22,7 +22,7 @@ using CatVec=p2catfishsource::Vec;
 struct Actor {
  unsigned uid=0,ordinal=0,token=0;State state=Wait,previous=Wait,next=Wait;int flickNext=-1;
  CatVec home;float heading=0,alert=0,speed=30;Creature* target=nullptr;
- Motion motion;bool escaped=false;
+ Motion motion;CorpseMotion corpseMotion;bool escaped=false;
 };
 std::map<const BTeki*,Actor> actors;
 P2CatfishSourceFlick receiver=nullptr;std::string residentBank;bool ready=false;
@@ -114,6 +114,18 @@ bool pc_p2_catfish_source_registry(BTeki* a,unsigned token,std::string& error){
 bool pc_p2_catfish_source_clip(const BTeki* a,const char*& clip,float& phase){auto at=actors.find(a);if(at==actors.end())return false;
  const auto& s=at->second;clip=s.motion.clip();phase=s.motion.frame()/float(registration(s.motion.id()).duration-1);return true;
 }
+bool pc_p2_catfish_source_corpse_clip(const BTeki* a,const char*& clip,float& phase){
+ auto at=actors.find(a);if(at==actors.end()||!at->second.escaped||!a->mPellet||a->mDeadState!=2)return false;
+ const auto& motion=at->second.corpseMotion.motion();clip=motion.clip();phase=motion.frame()/float(registration(CarryAnim).duration-1);return true;
+}
+bool pc_p2_catfish_source_carry_start(BTeki* a,bool restart){
+ auto at=actors.find(a);if(at==actors.end()||!at->second.escaped||!a->mPellet||a->mDeadState!=2)return false;
+ at->second.corpseMotion.start(restart);return true;
+}
+bool pc_p2_catfish_source_carry_finish(BTeki* a){
+ auto at=actors.find(a);if(at==actors.end()||!at->second.escaped||!a->mPellet||a->mDeadState!=2)return false;
+ at->second.corpseMotion.finish();return true;
+}
 void pc_p2_catfish_source_forget(BTeki* a){if(actors.erase(a))pc_p2_catfish_mouth_forget(a);}
 bool pc_p2_catfish_source_press(BTeki* a,Creature*,float damage){
  auto at=actors.find(a);if(at!=actors.end()&&std::isfinite(damage)&&damage>=0&&!a->getTekiOption(TEKIOPT_Invincible)&&at->second.state!=Dead){
@@ -130,6 +142,9 @@ void pc_p2_catfish_source_update(BTeki* a){
  auto at=actors.find(a);if(at==actors.end())return;Actor& s=at->second;
  const float dt=gsys->getFrameTime();if(!std::isfinite(dt)||dt<=0||dt>.5f)return;
  if(!s.token||pc_p2_original_actor_token(a)!=s.token)fail("update lost original registry token");
+ // The host family update precedes BTeki's dead-state gate, so retained
+ // actor-backed pellets still tick. Never replay death events or drops.
+ if(s.escaped){if(a->mPellet&&a->mDeadState==2)s.corpseMotion.advance(dt*30);return;}
  if(a->mStoredDamage>0)a->makeDamaged();
  auto events=s.motion.advance(dt*s.speed);
  if(!pc_p2_catfish_mouth_follow(a,s.motion.clip(),s.motion.frame()))fail("actual mouth follow failed");
@@ -192,7 +207,7 @@ void pc_p2_catfish_source_update(BTeki* a){
   if(end)enter(a,s,flickReturn(s.previous,s.flickNext));
   break;
  case Dead:
-  stop(a);if(end&&!s.escaped){s.escaped=true;a->pcEscapeNow();return;}break;
+  stop(a);if(end&&!s.escaped){s.escaped=true;s.corpseMotion.prepare();a->pcEscapeNow();return;}break;
  }
  if(a->mHealth<=0&&s.state!=Dead)enter(a,s,Dead);
  // KEY2 and enter() can replace the animation, and walking can rotate the

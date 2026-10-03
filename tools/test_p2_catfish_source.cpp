@@ -21,6 +21,16 @@ int main(int argc,char** argv){
  motion.start(FlickAnim);assert(!has(motion.advance(25),2));assert(has(motion.advance(1),2));
  assert(!has(motion.advance(21),3));assert(has(motion.advance(1),3));assert(has(motion.advance(22),1000));
  assert(motion.advance(0).empty()&&motion.advance(-1).empty()&&motion.advance(std::numeric_limits<float>::infinity()).empty());
+ CorpseMotion corpse;corpse.prepare();corpse.advance(30);
+ assert(corpse.motion().id()==CarryAnim&&corpse.motion().frame()==0); // pre-carry is paused
+ corpse.start();corpse.advance(10);assert(corpse.motion().frame()==10);
+ corpse.advance(19);assert(corpse.motion().frame()==29);corpse.advance(1);
+ assert(corpse.motion().frame()==10); // key29 is observed at30, loops to10
+ corpse.advance(40);assert(corpse.motion().frame()==10); // discard overshoot
+ corpse.finish();corpse.advance(30);assert(corpse.motion().frame()==39);
+ corpse.advance(30);assert(corpse.motion().frame()==39); // completed END remains stable
+ corpse.start(true);assert(corpse.motion().frame()==0&&!corpse.motion().finishing());
+ corpse.advance(11);assert(corpse.motion().frame()==11);
  assert(registration(WaitAnim).keys.size()==2&&registration(TurnAnim).keys.size()==2&&registration(PressAnim).keys.empty());
  assert(!startFlick(1,0)&&startFlick(2,0)&&startFlick(2,1));
  assert(!startFlick(2,2)&&startFlick(3,2)&&startFlick(3,3));
@@ -35,5 +45,5 @@ int main(int argc,char** argv){
  assert(attackEnd(false,false)==TurnToHome&&attackEnd(true,false)==Turn&&attackEnd(true,true)==Attack);
  assert(flickReturn(Walk)==Walk&&flickReturn(Wait,Turn)==Turn);
  if(argc==2){std::ifstream bank(argv[1]);std::string e;assert(p2original::catfish::validateCatfishBank(bank,e));}
- std::cout<<"Catfish source indexed clocks, observed keys, loop finish, 3D attack, retail flick bands and return states PASS\n";
+ std::cout<<"Catfish source indexed clocks, corpse carry lifecycle, observed keys, loop finish, 3D attack, retail flick bands and return states PASS\n";
 }
