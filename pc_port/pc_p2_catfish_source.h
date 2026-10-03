@@ -1,5 +1,6 @@
 #pragma once
 #include <string>
+#include "pc_p2_original_catalog.h"
 class BTeki;class Creature;
 // The receiver must implement source flick geometry/vectors and report failure.
 // It receives the logical EnemyFunc angle (faceDir or backward sentinel), before
@@ -16,6 +17,17 @@ bool pc_p2_catfish_source_corpse_clip(const BTeki*,const char*&,float& phase);
 bool pc_p2_catfish_source_carry_start(BTeki*,bool restart=false);
 bool pc_p2_catfish_source_carry_stop(BTeki*);
 bool pc_p2_catfish_source_carry_finish(BTeki*);
+struct P2CatfishSourceGate {
+ p2original::InstanceIdentity identity;unsigned token=0;
+ bool alive=false,dead=false,bitterImmune=false,invulnerable=false,noInterrupt=false;
+ int state=0,animation=0;float sourceFrame=0,health=0;
+ std::uint64_t nonStoneClearSerial=0;
+};
+bool pc_p2_catfish_source_gate(const BTeki*,P2CatfishSourceGate&);
+// Only actual lifecycle owner calls these after real Stone entry/exit;
+// they implement family virtual callbacks, never accept/create Stone.
+bool pc_p2_catfish_source_do_start_stone(BTeki*,const p2original::InstanceIdentity&);
+bool pc_p2_catfish_source_do_finish_stone(BTeki*,const p2original::InstanceIdentity&);
 void pc_p2_catfish_source_update(BTeki*);
 void pc_p2_catfish_source_forget(BTeki*);
 // Reports ownership/handled to suppress the P1 Pressed event. The source

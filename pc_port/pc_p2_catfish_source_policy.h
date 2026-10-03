@@ -77,6 +77,16 @@ public:
  const Motion& motion()const{return mMotion;}
 private:Motion mMotion;bool mRunning=false;
 };
+// Catfish setEnemyNonStone/resetEnemyNonStone: reset requests the down
+// effect only when the flag was set. Bitter queue ownership is separate.
+class NonStoneGate {
+public:
+ void set(){mNoInterrupt=true;}
+ void reset(){if(mNoInterrupt){mNoInterrupt=false;++mClearSerial;}}
+ bool noInterrupt()const{return mNoInterrupt;}
+ std::uint64_t clearSerial()const{return mClearSerial;}
+private:bool mNoInterrupt=false;std::uint64_t mClearSerial=0;
+};
 inline State attackEnd(bool target,bool inAttackRange){return target?(inAttackRange?Attack:Turn):TurnToHome;}
 inline State flickReturn(State previous,int requested=-1){return requested>=0?State(requested):previous;}
 } // namespace p2catfishsource

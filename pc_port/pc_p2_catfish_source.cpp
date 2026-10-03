@@ -22,7 +22,7 @@ using CatVec=p2catfishsource::Vec;
 struct Actor {
  unsigned uid=0,ordinal=0,token=0;State state=Wait,previous=Wait,next=Wait;int flickNext=-1;
  CatVec home;float heading=0,alert=0,speed=30;Creature* target=nullptr;
- Motion motion;CorpseMotion corpseMotion;bool escaped=false;
+ Motion motion;CorpseMotion corpseMotion;NonStoneGate nonStone;bool escaped=false;
 };
 std::map<const BTeki*,Actor> actors;
 P2CatfishSourceFlick receiver=nullptr;std::string residentBank;bool ready=false;
@@ -56,7 +56,7 @@ float turn(BTeki* a,Actor& s,CatVec target){const float difference=facing(vec(a-
 void walk(BTeki* a,Actor& s,CatVec target){turn(a,s,target);Vector3f drive(std::sin(s.heading)*60,0,std::cos(s.heading)*60);a->inputDrive(drive);a->mVelocity.set(drive);}
 void flick(BTeki* a,bool stickOnly,float logicalAngle){if(!receiver||!receiver(a,stickOnly,logicalAngle,25,80,1))fail("source flick receiver failed");}
 void enter(BTeki* a,Actor& s,State next,int flickNext=-1){
- if(s.state==Flick)a->setTekiOption(TEKIOPT_DamageCountable);
+ if(s.state==Flick){a->setTekiOption(TEKIOPT_DamageCountable);s.nonStone.reset();}
  s.previous=s.state;s.state=next;s.next=next;s.flickNext=flickNext;
  int anim=WaitAnim;s.speed=30;
  switch(next){
@@ -64,7 +64,7 @@ void enter(BTeki* a,Actor& s,State next,int flickNext=-1){
  case Turn:anim=TurnAnim;stop(a);break;
  case Walk:anim=MoveAnim;s.speed=40*(60.0f/50);break;
  case Attack:anim=AttackAnim;stop(a);break;
- case Flick:anim=FlickAnim;stop(a);a->clearTekiOption(TEKIOPT_DamageCountable);break;
+ case Flick:anim=FlickAnim;stop(a);a->clearTekiOption(TEKIOPT_DamageCountable);s.nonStone.reset();break;
  case TurnToHome:stop(a);if(separation(vec(a->getPosition()),s.home)<80*80){enter(a,s,Wait);return;}anim=TurnAnim;break;
  case GoHome:anim=MoveAnim;s.speed=40;break;
  case Dead:anim=DeadAnim;stop(a);pc_p2_catfish_mouth_release(a);
@@ -131,6 +131,26 @@ bool pc_p2_catfish_source_carry_stop(BTeki* a){
 bool pc_p2_catfish_source_carry_finish(BTeki* a){
  auto at=actors.find(a);if(at==actors.end()||!at->second.escaped)return false;
  at->second.corpseMotion.finish();return true;
+}
+bool pc_p2_catfish_source_gate(const BTeki* a,P2CatfishSourceGate& out){
+ auto at=actors.find(a);if(at==actors.end())return false;
+ unsigned source=0,token=0;p2original::InstanceIdentity identity;
+ if(!at->second.token||!p2original::originalActors().query(a,source,token,&identity)||source!=26||token!=at->second.token)return false;
+ const auto& s=at->second;out={};out.identity=identity;out.token=token;
+ out.dead=s.state==Dead||s.escaped;out.alive=!out.dead;out.health=a->mHealth;
+ // Catfish has no EB_BitterImmune override. Invulnerability is a distinct
+ // damage gate, never a substitute for bitter immunity or Stone state.
+ out.invulnerable=a->getTekiOption(TEKIOPT_Invincible);out.noInterrupt=s.nonStone.noInterrupt();
+ out.state=int(s.state);out.animation=s.motion.id();out.sourceFrame=s.motion.frame();out.nonStoneClearSerial=s.nonStone.clearSerial();return true;
+}
+bool pc_p2_catfish_source_do_start_stone(BTeki* a,const p2original::InstanceIdentity& identity){
+ P2CatfishSourceGate gate;if(!pc_p2_catfish_source_gate(a,gate)||!(gate.identity==identity))return false;
+ // Kochappy delegates to EnemyBase, whose literal callback only zeros target
+ // velocity. The lifecycle owner handles stopMotion, event backup and freeze.
+ a->mTargetVelocity.set(0,0,0);return true;
+}
+bool pc_p2_catfish_source_do_finish_stone(BTeki* a,const p2original::InstanceIdentity& identity){
+ P2CatfishSourceGate gate;return pc_p2_catfish_source_gate(a,gate)&&gate.identity==identity;
 }
 void pc_p2_catfish_source_forget(BTeki* a){if(actors.erase(a))pc_p2_catfish_mouth_forget(a);}
 bool pc_p2_catfish_source_press(BTeki* a,Creature*,float damage){
@@ -206,10 +226,10 @@ void pc_p2_catfish_source_update(BTeki* a){
   if(end){Creature* target=search();s.target=target;enter(a,s,attackEnd(target!=nullptr,attackableTarget(target)));}
   break;
  case Flick:
-  for(const auto& e:events)if(e.type==2){flick(a,false,FLICK_BACKWARDS_ANGLE);a->mDamageCount=0;}
-  // Catfish::setEnemyNonStone enables EB_NoInterrupt, and KEY3 reset clears
-  // it and updates bitter bounce state. That source reaction remains open
-  // until the distinct original bitter receiver/state is implemented.
+  for(const auto& e:events){
+   if(e.type==2){flick(a,false,FLICK_BACKWARDS_ANGLE);a->mDamageCount=0;s.nonStone.set();}
+   if(e.type==3)s.nonStone.reset();
+  }
   if(end)enter(a,s,flickReturn(s.previous,s.flickNext));
   break;
  case Dead:

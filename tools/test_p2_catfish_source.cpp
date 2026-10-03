@@ -33,6 +33,10 @@ int main(int argc,char** argv){
  corpse.advance(11);assert(corpse.motion().frame()==11);
  corpse.stop();corpse.advance(18);assert(corpse.motion().frame()==11);
  corpse.start();corpse.advance(18);assert(corpse.motion().frame()==29);
+ NonStoneGate gate;gate.reset();assert(!gate.noInterrupt()&&gate.clearSerial()==0);
+ gate.set();assert(gate.noInterrupt());gate.reset();assert(!gate.noInterrupt()&&gate.clearSerial()==1);
+ gate.reset();assert(gate.clearSerial()==1); // init/cleanup after KEY3 does not repeat down-effect request
+ gate.set();gate.reset();assert(gate.clearSerial()==2); // interrupted Flick cleanup clears before KEY3
  assert(registration(WaitAnim).keys.size()==2&&registration(TurnAnim).keys.size()==2&&registration(PressAnim).keys.empty());
  assert(!startFlick(1,0)&&startFlick(2,0)&&startFlick(2,1));
  assert(!startFlick(2,2)&&startFlick(3,2)&&startFlick(3,3));
