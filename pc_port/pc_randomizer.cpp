@@ -2467,6 +2467,13 @@ bool pc_randomizer_original_session(){return originalStandalone;}
 std::uint64_t pc_randomizer_original_selection_revision() noexcept {
     return enabled&&originalStandalone?originalSelectionRevision:0;
 }
+bool pc_randomizer_original_has_input(const std::string& role) noexcept {
+    // Every stored key was validated by immutable Bundle parsing. Looking up
+    // the exact key allocates nothing and deliberately never opens its file.
+    return pc_randomizer_original_selection_revision()!=0
+        &&originalInputs.campaign==originalCampaign&&hex64(fingerprint)
+        &&originalInputs.files.find(role)!=originalInputs.files.end();
+}
 const char* pc_randomizer_original_catalog_root(){return originalStandalone?originalCatalogRoot.c_str():nullptr;}
 bool pc_randomizer_original_calendar_plan(const std::string& course,const p2original::CalendarState& flags,std::vector<p2original::CalendarLoad>& out,std::string& error){
     if(!originalStandalone||!p2original::originalProgress().context().story){error="original story calendar is inactive";return false;}
