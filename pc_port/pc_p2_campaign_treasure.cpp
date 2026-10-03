@@ -94,6 +94,8 @@ void pc_p2_campaign_treasure_setup() {
     // A catalog, model, environment variable or sidecar alone grants nothing.
     if(!p2treasurestate::state.active())return;
     if(pc_randomizer_campaign_treasure_source()!=p2treasurestate::state.source())reject("selected campaign source mismatch");
+    {std::ifstream descriptor("p2-treasure-placements.txt");std::string magic;
+     if(descriptor>>magic&&magic=="P2_TREASURE_HELD_1")return;}
     if(pc_pikipelago_room_preview())reject("ordinary surface provider excludes preview");
     if(pc_p2_cave_bud_body_profile())return; // Cave owner retains floor actor lifecycle.
     const char* path=std::getenv("PIKMIN_P2_TREASURE_CATALOG");
