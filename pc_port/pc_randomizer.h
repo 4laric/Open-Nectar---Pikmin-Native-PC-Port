@@ -29,6 +29,8 @@ int pc_randomizer_carry_strength(int color);
 bool pc_randomizer_init(int argc, char** argv);
 // Explicit authenticated bootstrap selections; empty for historical sessions.
 std::string pc_randomizer_original_campaign();
+bool pc_randomizer_original_selection_matches(const std::string& campaign,const std::string& session,
+    std::uint64_t revision) noexcept;
 bool pc_randomizer_original_session();
 // Nonallocating current immutable selection identity. Zero before successful
 // authenticated initialization and for ordinary/AP sessions. This is neither

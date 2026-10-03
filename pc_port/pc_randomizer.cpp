@@ -2466,6 +2466,10 @@ bool pc_randomizer_white_treasure_campaign() { return enabled && whiteTreasureCa
 bool pc_randomizer_second_captain() { return enabled && secondCaptain; }
 bool pc_randomizer_resumed() { return enabled && campaignResumed; }
 std::string pc_randomizer_original_campaign(){return originalCampaign;}
+bool pc_randomizer_original_selection_matches(const std::string& campaign,const std::string& session,std::uint64_t revision) noexcept {
+    return enabled&&originalStandalone&&revision&&originalSelectionRevision==revision&&
+        originalInputs.campaign==originalCampaign&&originalCampaign==campaign&&fingerprint==session&&hex64(fingerprint);
+}
 bool pc_randomizer_original_session(){return originalStandalone;}
 std::uint64_t pc_randomizer_original_selection_revision() noexcept {
     return enabled&&originalStandalone?originalSelectionRevision:0;

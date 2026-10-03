@@ -16,6 +16,18 @@ int main(int argc,char** argv){
   assert(census.units.size()==(floor==1?2:1));
   unsigned vertices=0,triangles=0;for(const auto& room:census.rooms){const auto& unit=census.units.at(room.unit);vertices+=unit.vertexBits.size();triangles+=unit.triangles.size();}
   assert(vertices==(floor==1?238u:800u));assert(triangles==(floor==1?352u:1414u));
+  SourceRoomGeometry geometry;assert(adoptSourceRoomGeometry(census,geometry,error));
+  assert(geometry.vertices.size()==vertices&&geometry.triangles.size()==triangles&&geometry.rooms.size()==census.rooms.size());
+  unsigned offset=0,triangleOffset=0;
+  for(unsigned i=0;i<census.rooms.size();++i){const auto& room=census.rooms[i];const auto& unit=census.units[room.unit];
+   assert(geometry.rooms[i].roomIndex==i&&geometry.rooms[i].unit==room.unit);
+   assert(geometry.rooms[i].matrix[3]==room.translation[0]&&geometry.rooms[i].matrix[11]==room.translation[2]);
+   for(unsigned t=0;t<unit.triangles.size();++t){const auto& actual=geometry.triangles[triangleOffset+t];
+    assert(actual.roomIndex==i&&actual.mapcode==unit.mapcodes[t]);for(unsigned k=0;k<3;++k)assert(actual.abc[k]==unit.triangles[t][k]+offset);}
+   offset+=unit.vertexBits.size();triangleOffset+=unit.triangles.size();}
+  if(floor==1)assert(geometry.rooms[2].matrix[2]>0&&geometry.rooms[2].matrix[2]<1e-6f);
+  auto alteredCensus=census;alteredCensus.rooms[0].roomIndex=999;auto retainedGeometry=geometry;
+  assert(!adoptSourceRoomGeometry(alteredCensus,retainedGeometry,error)&&retainedGeometry.vertices==geometry.vertices&&retainedGeometry.triangles.size()==geometry.triangles.size());
   unsigned negatives=0;auto refuse=[&](const SelectedSceneInputs& bad){auto retained=census;
    assert(!parseSourceRoomCensus(bad,retained,error));assert(!error.empty());assert(retained.sha256==census.sha256&&retained.rooms.size()==census.rooms.size()&&retained.units[0].gridBytes==census.units[0].gridBytes);++negatives;};
   auto bad=input;bad.selection.version=1;refuse(bad);

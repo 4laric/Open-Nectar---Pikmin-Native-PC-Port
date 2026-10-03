@@ -14,6 +14,7 @@ enum class ScenePhase { Prepared, Installing, Committed, Releasing };
 class SceneRuntime;
 struct SourceRoomCensus;
 struct SourceWaterInputs;
+struct SourceRoomGeometry;
 
 // Borrowed from the actual selected-floor owner. Callers cannot construct or
 // replace a context. Prepared facts admit resource checks, never live gameplay.
@@ -91,6 +92,25 @@ const p2retail::SourceRoomCensus* pc_p2_retail_scene_rooms(const p2retail::Scene
 // Authenticated raw WaterBox inputs only, never a current water/known-dry query.
 const p2retail::SourceWaterInputs* pc_p2_retail_scene_water_inputs(const p2retail::SceneContext&,
     std::uint64_t nativeSerial,std::uint64_t selectionRevision) noexcept;
+const p2retail::SourceRoomGeometry* pc_p2_retail_scene_source_geometry(const p2retail::SceneContext&,
+    std::uint64_t nativeSerial,std::uint64_t selectionRevision) noexcept;
+namespace p2retail {
+enum class SourceWaterState { Unavailable,KnownDry };
+struct SourceWaterResult {
+ SourceWaterState state=SourceWaterState::Unavailable;
+ const SourceRoomGeometry* geometry=nullptr;
+ const SourceWaterInputs* inputs=nullptr;
+ std::uint64_t nativeSerial=0,selectionRevision=0;
+ unsigned registeredRooms=0;
+};
+}
+// Genuine selected count-zero SeaMgr query only after source-unit registration.
+// False means unavailable, never known-dry or the source no-map condition.
+// Body owner must update its cached water at the actual doAnimation/checkWater
+// phase and validate canonical body lifetime; this query grants no phase.
+bool pc_p2_retail_scene_find_water(const p2retail::SceneContext&,std::uint64_t nativeSerial,
+    std::uint64_t selectionRevision,const std::array<float,3>& position,
+    p2retail::SourceWaterResult&,std::string& error);
 // Read-only retained actual parent incarnation, including natural retirement.
 // Requires this committed selected scene; grants no activity or SAVE authority.
 // The full native binding fingerprint remains layoutSha256, while Snapshot

@@ -28,7 +28,28 @@ threads. Returned const views are borrowed: the scene must outlive borrowers,
 and consumers must recheck the owner before access. Scene ownership records a
 monotonic creating-thread token, not a reused OS thread ID or bank-first caller.
 
-Current views grant no source transform matrix, combined planes/spheres/grid,
-hiddenCollision, Plat lifecycle, water query, movement/contact, World activity,
-original RNG or SAVE authority. The genuine source numeric transform is a
-separate producer; a native quantized quarter-turn matrix is not substituted.
+The source-geometry successor calls Numeric1261's makeTR/PSMTXMultVec helper
+from dd5b91f2e, with explicit f32/FMA boundaries and paired-lane order. The owner
+retains actual matrices, transformed source vertices, offset A/B/C, mapcodes,
+triangle-to-room indices and expanded vertex bounds. Portable quarter-LUT
+arithmetic controls pass; original PPC/libm runtime bit identity is unobserved.
+A native quantized quarter-turn matrix is not substituted. Source combined
+planes/spheres/grid, hiddenCollision and active Plat lifecycle remain absent.
+
+SceneRuntime registers each source-empty SeaMgr list against the adopted room
+matrix and native serial. `pc_p2_retail_scene_find_water` requires the exact
+current context, captured serial/revision, owner thread, actual map and retained
+registered room/matrix census. It returns KnownDry only for the authenticated
+version-0/count-0 profile; unavailable input/map/owner is a refusal, never dry.
+The result defaults to Unavailable, outputs stay unchanged on refusal, and a
+successful result pins the actual source geometry/water views. Queries revoke
+at Releasing before body teardown; storage remains through body retirement,
+then checked map release retires registration. No nonempty WaterBox or drain
+object is fabricated. Nonempty profiles remain unsupported.
+
+Captain/body must perform source checkWater at the actual FakePiki doAnimation
+phase and update its lifetime-bound cached water with the original callback
+ordering. Receiver callbacks read that cache; they must not recompute position.
+The scene query grants no actor phase, movement/contact, World activity,
+original RNG or SAVE authority. Actual native query/retirement runtime
+acceptance and full production linking remain pending.

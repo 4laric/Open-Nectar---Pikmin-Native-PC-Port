@@ -28,4 +28,17 @@ struct SourceWaterUnit {std::string name,raw;unsigned version=0,count=0;};
 // lifecycle must still adopt it; this record is never runtime known-dry.
 struct SourceWaterInputs {std::string sha256,roomCensusSha256;std::vector<SourceWaterUnit> units;};
 bool parseSourceWaterInputs(const SelectedSceneInputs&,const SourceRoomCensus&,SourceWaterInputs&,std::string&);
+struct SourceRoomMatrix {unsigned roomIndex=0,unit=0;std::array<float,12> matrix{};};
+struct SourceRoomTriangle {std::array<unsigned,3> abc{};unsigned roomIndex=0;unsigned char mapcode=0;};
+struct SourceRoomGeometry {
+ std::string censusSha256;
+ std::vector<SourceRoomMatrix> rooms;
+ std::vector<std::array<float,3>> vertices;
+ std::vector<SourceRoomTriangle> triangles;
+ std::array<float,6> expandedVertexBounds{};
+};
+// Source makeTR/PSMTXMultVec arithmetic, independently qualified portable
+// quarter-LUT implementation. Original PPC/libm runtime bit identity remains
+// unobserved; no source plane/sphere/grid or physical admission is asserted.
+bool adoptSourceRoomGeometry(const SourceRoomCensus&,SourceRoomGeometry&,std::string&);
 }

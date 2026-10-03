@@ -1,4 +1,5 @@
 #include "pc_p2_retail_rooms.h"
+#include "pc_p2_original_number_room.h"
 #include <map>
 #include <stdexcept>
 #include <cstring>
@@ -233,6 +234,33 @@ bool parseSourceWaterInputs(const SelectedSceneInputs& selected,const SourceRoom
    check(j.at("version").numeric(0)&&j.at("count").numeric(0)&&array(j.at("boxes"),0).empty(),"water literal count differs");
    next.units.push_back({u.name,literal,0,0});
   }
+  out=std::move(next);error.clear();return true;
+ }catch(const std::exception& e){error=e.what();return false;}
+}
+bool adoptSourceRoomGeometry(const SourceRoomCensus& census,SourceRoomGeometry& out,std::string& error){
+ try{
+  check(hex64(census.sha256)&&!census.rooms.empty()&&census.rooms.size()<=3,"source room adoption bounds");
+  SourceRoomGeometry next;next.censusSha256=census.sha256;
+  for(unsigned i=0;i<census.rooms.size();++i){const auto& room=census.rooms[i];
+   check(room.iteration==i&&room.roomIndex==i&&room.unit<census.units.size(),"source room adoption order");
+   const auto& unit=census.units[room.unit];SourceRoomMatrix matrix;matrix.roomIndex=i;matrix.unit=room.unit;
+   check(p2originalnumber::room::make(room.quarterTurn,room.centreX,room.centreZ,matrix.matrix,error),"source room matrix refused");
+   check(!unit.vertexBits.empty()&&next.vertices.size()+unit.vertexBits.size()<=65535&&next.triangles.size()+unit.triangles.size()<=65535&&
+    unit.triangles.size()==unit.mapcodes.size(),"source combined room bounds");
+   const unsigned offset=unsigned(next.vertices.size());
+   for(const auto& bits:unit.vertexBits){p2originalnumber::room::Vec3 transformed;
+    check(p2originalnumber::room::transformVertex(matrix.matrix,{floating(bits[0]),floating(bits[1]),floating(bits[2])},transformed,error),"source room vertex transform refused");
+    const std::array<float,3> vertex{{transformed.x,transformed.y,transformed.z}};
+    for(unsigned axis=0;axis<3;++axis){if(next.vertices.empty()||vertex[axis]<next.expandedVertexBounds[axis])next.expandedVertexBounds[axis]=vertex[axis];
+     if(next.vertices.empty()||vertex[axis]>next.expandedVertexBounds[axis+3])next.expandedVertexBounds[axis+3]=vertex[axis];}
+    next.vertices.push_back(vertex);
+   }
+   for(unsigned t=0;t<unit.triangles.size();++t){SourceRoomTriangle triangle;triangle.roomIndex=i;triangle.mapcode=unit.mapcodes[t];
+    for(unsigned k=0;k<3;++k){check(unit.triangles[t][k]<unit.vertexBits.size(),"source adoption ABC bound");triangle.abc[k]=offset+unit.triangles[t][k];}
+    next.triangles.push_back(triangle);}
+   next.rooms.push_back(matrix);
+  }
+  for(unsigned axis=0;axis<3;++axis){next.expandedVertexBounds[axis]-=10.0f;next.expandedVertexBounds[axis+3]+=10.0f;}
   out=std::move(next);error.clear();return true;
  }catch(const std::exception& e){error=e.what();return false;}
 }

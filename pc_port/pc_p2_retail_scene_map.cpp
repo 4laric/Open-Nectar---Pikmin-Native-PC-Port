@@ -103,6 +103,11 @@ class SceneRuntime final:public FloorIdentityAuthority,public SceneOps {
  SourceStart start;
  SourceRoomCensus roomCensus;
  SourceWaterInputs waterInputs;
+ SourceRoomGeometry sourceGeometry;
+ enum class SeaPhase { Absent,Registered,Retiring,Retired };
+ SeaPhase seaPhase=SeaPhase::Absent;
+ std::vector<SourceRoomMatrix> seaRooms;
+ std::uint64_t seaSerial=0;
  StageInfo stage;
  std::string stageName,stageFile;
  StageInfo* previousStage=nullptr;
@@ -132,7 +137,7 @@ class SceneRuntime final:public FloorIdentityAuthority,public SceneOps {
   out=context.mSnapshot;return true;
  };}
 public:
- SceneRuntime(SelectedSceneInputs input,SourceStart source,SourceRoomCensus rooms,SourceWaterInputs water):selected(std::move(input)),start(std::move(source)),roomCensus(std::move(rooms)),waterInputs(std::move(water)){context.mThreadToken=sceneThreadToken();}
+ SceneRuntime(SelectedSceneInputs input,SourceStart source,SourceRoomCensus rooms,SourceWaterInputs water,SourceRoomGeometry geometry):selected(std::move(input)),start(std::move(source)),roomCensus(std::move(rooms)),waterInputs(std::move(water)),sourceGeometry(std::move(geometry)){context.mThreadToken=sceneThreadToken();}
  bool install(MapMgr* map,std::string& error){
   if(!context.ownsCurrentThread()||!gsys||!map||map!=mapMgr||map->mMapModel||installed||!nextSerial||nextSerial==std::numeric_limits<std::uint64_t>::max()){
    error="retail scene map ownership/order";return false;
@@ -211,6 +216,22 @@ public:
   issuedBirths.reserve(birthCount);
   for(unsigned row=0;row<definitionRow->rows.size();++row)for(unsigned ordinal=0;ordinal<definitionRow->rows[row].minimum();++ordinal)
    issuedBirths.push_back({row,ordinal,identity.serial,instanceKey(*cave,selected.plan.floor,definitionRow->rows[row],ordinal),nextActivation++});
+  if(selected.selection.version==2){
+   // Original MapUnit::SeaMgr.read(count0) creates no WaterBox nodes; each
+   // adopted room still participates in addSeaMgr via its real source matrix.
+   // This owner registers those exact empty lists, not an absent input fallback.
+   if(sourceGeometry.censusSha256!=roomCensus.sha256||waterInputs.roomCensusSha256!=roomCensus.sha256||
+      sourceGeometry.rooms.size()!=roomCensus.rooms.size()||waterInputs.units.size()!=roomCensus.units.size())
+    return fail(error,"retail source SeaMgr input/room ownership differs");
+   for(const auto& unit:waterInputs.units)if(unit.version||unit.count||unit.raw.empty())
+    return fail(error,"retail source SeaMgr nonempty/unavailable unit unsupported");
+   for(unsigned i=0;i<sourceGeometry.rooms.size();++i){const auto& room=sourceGeometry.rooms[i];
+    if(room.roomIndex!=i||room.unit>=waterInputs.units.size()||waterInputs.units[room.unit].name!=roomCensus.units[room.unit].name)
+     return fail(error,"retail source SeaMgr room registration differs");
+    for(float value:room.matrix)if(!std::isfinite(value))return fail(error,"retail source SeaMgr matrix nonfinite");
+   }
+   seaRooms=sourceGeometry.rooms;seaSerial=context.nativeSerial();seaPhase=SeaPhase::Registered;
+  }
   flowCont.mCurrentStage=&stage;routeMgr=routes;installed=true;
   std::printf("P2_RETAIL_MAP_INSTALLED cave=%s floor=%u native_serial=%llu revision=%llu actual_ground=%.6f captain_base_y=%.6f map_yaw=%.6f world_active=0\n",
    cave->cave.c_str(),selected.plan.floor,(unsigned long long)identity.serial,(unsigned long long)selected.revision,ground,context.mStartBase[1],context.mMapYaw);
@@ -221,9 +242,9 @@ public:
    pc_randomizer_original_campaign()==selected.campaign&&pc_randomizer_session_fingerprint()==selected.session;
  }
  const SceneContext* prepared()const noexcept{
-  // Nonallocating incarnation/mode checks: the revision belongs to the real
-  // retained selection; campaign/session were captured and checked at install.
-  return context.ownsCurrentThread()&&installed&&pc_randomizer_original_session()&&pc_randomizer_original_selection_revision()==context.mRevision&&
+  // Nonallocating current immutable selection checks include the actual bundle
+  // campaign/session, not just a revision or an ambient string copy.
+  return context.ownsCurrentThread()&&installed&&pc_randomizer_original_selection_matches(context.mCampaign,context.mSession,context.mRevision)&&
    context.mSnapshot.scene.serial&&flowCont.mCurrentStage==context.mStage&&mapMgr==context.mMap&&
    mapMgr->mMapModel==shape&&routeMgr==context.mRoutes&&!flowCont.mIsVersusMode?&context:nullptr;
  }
@@ -248,6 +269,23 @@ public:
  }
  const SourceWaterInputs* water(const SceneContext& owner,std::uint64_t serial,std::uint64_t revision)const noexcept{
   return rooms(owner,serial,revision)&&waterInputs.roomCensusSha256==roomCensus.sha256?&waterInputs:nullptr;
+ }
+ const SourceRoomGeometry* geometry(const SceneContext& owner,std::uint64_t serial,std::uint64_t revision)const noexcept{
+  return rooms(owner,serial,revision)&&sourceGeometry.censusSha256==roomCensus.sha256?&sourceGeometry:nullptr;
+ }
+ bool findWater(const SceneContext& owner,std::uint64_t serial,std::uint64_t revision,const std::array<float,3>& position,SourceWaterResult& out,std::string& error)const{
+  if(!geometry(owner,serial,revision)||!water(owner,serial,revision)||seaPhase!=SeaPhase::Registered||seaSerial!=serial||
+     seaRooms.empty()||seaRooms.size()!=sourceGeometry.rooms.size())return fail(error,"retail source SeaMgr current registration unavailable");
+  for(float value:position)if(!std::isfinite(value)||std::fabs(value)>200000)return fail(error,"retail source water query position invalid");
+  for(unsigned i=0;i<seaRooms.size();++i){const auto& room=seaRooms[i];const auto& actual=sourceGeometry.rooms[i];
+   if(room.roomIndex!=actual.roomIndex||room.unit!=actual.unit||room.matrix!=actual.matrix||room.unit>=waterInputs.units.size()||
+      waterInputs.units[room.unit].count||waterInputs.units[room.unit].version)return fail(error,"retail source SeaMgr registration changed");
+   // Source SeaMgr::findWater iterates live WaterBox nodes. This authenticated
+   // source-empty room has zero nodes: there is no contains/drain object to fake.
+  }
+  SourceWaterResult next;next.state=SourceWaterState::KnownDry;next.geometry=&sourceGeometry;next.inputs=&waterInputs;
+  next.nativeSerial=serial;next.selectionRevision=revision;next.registeredRooms=unsigned(seaRooms.size());
+  out=next;error.clear();return true;
  }
  bool owns(const SceneIdentity& identity)const noexcept override{return prepared()&&identity==context.mSnapshot.scene;}
  bool mode(const SceneIdentity& identity,bool& story,bool& inCave,std::string& error)const override{
@@ -331,6 +369,7 @@ public:
   if(!canRelease(error))return false;
   if(pc_p2_retail_scene_bodies_owned(context)||pc_p2_original_captain_scene_owned(context))consumersClaimed=true;
   context.mPhase=ScenePhase::Releasing;
+  if(seaPhase==SeaPhase::Registered)seaPhase=SeaPhase::Retiring;
   // Revoke actual World/control authority first, while retaining its collision
   // bank lease through party/body/path retirement. Pause is not revocation.
   if(pc_p2_original_captain_scene_owned(context)&&!pc_p2_original_captain_scene_revoke(context,error))return false;
@@ -407,6 +446,7 @@ public:
    error="retail map teardown requires retired physical floor/Pod consumers";return false;
   }
   installed=false;context.mStartsGrounded=false;context.mSnapshot.scene.serial=0;
+  seaPhase=SeaPhase::Retired;seaSerial=0;seaRooms.clear();
   if(flowCont.mCurrentStage==&stage)flowCont.mCurrentStage=previousStage;
   if(routeMgr==ownedRoutes)routeMgr=nullptr;
   if(ownedMap&&mapMgr==ownedMap&&ownedMap->mMapModel==shape)ownedMap->mMapModel=nullptr;
@@ -424,6 +464,10 @@ const FloorIdentityAuthority* sceneBirths()noexcept{return runtime?runtime->birt
 const SceneContext* committedScene()noexcept{return runtime?runtime->committed():nullptr;}
 const SourceRoomCensus* sourceSceneRooms(const SceneContext& owner,std::uint64_t serial,std::uint64_t revision)noexcept{return runtime?runtime->rooms(owner,serial,revision):nullptr;}
 const SourceWaterInputs* sourceSceneWater(const SceneContext& owner,std::uint64_t serial,std::uint64_t revision)noexcept{return runtime?runtime->water(owner,serial,revision):nullptr;}
+const SourceRoomGeometry* sourceSceneGeometry(const SceneContext& owner,std::uint64_t serial,std::uint64_t revision)noexcept{return runtime?runtime->geometry(owner,serial,revision):nullptr;}
+bool sourceSceneFindWater(const SceneContext& owner,std::uint64_t serial,std::uint64_t revision,const std::array<float,3>& position,SourceWaterResult& out,std::string& error){
+ if(!runtime){error="retail source SeaMgr owner absent";return false;}return runtime->findWater(owner,serial,revision,position,out,error);
+}
 bool knownSceneSourceBirth(const p2original::InstanceIdentity& identity,BirthIdentity& out,Snapshot& floor,std::string& error){
  if(!runtime){error="retail retained parent has no actual scene owner";return false;}
  return runtime->knownSourceBirth(identity,out,floor,error);
@@ -437,10 +481,11 @@ bool installSceneMap(MapMgr* map,bool& handled,std::string& error){
  SelectedSceneInputs inputs;bool selected=false;
  if(!pc_p2_retail_scene_selection(inputs,selected,error))return false;
  if(!selected){handled=false;return true;}
- SourceStart start;GeometryFacts geometry;SourceRoomCensus rooms;SourceWaterInputs water;
+ SourceStart start;GeometryFacts geometry;SourceRoomCensus rooms;SourceWaterInputs water;SourceRoomGeometry sourceGeometry;
  if(!parseSourceStart(inputs,start,error)||!parseRetailGeometry(inputs,geometry,error))return false;
- if(inputs.selection.version==2&&(!parseSourceRoomCensus(inputs,rooms,error)||!parseSourceWaterInputs(inputs,rooms,water,error)))return false;
- runtime=std::make_unique<SceneRuntime>(std::move(inputs),std::move(start),std::move(rooms),std::move(water));
+ if(inputs.selection.version==2&&(!parseSourceRoomCensus(inputs,rooms,error)||!parseSourceWaterInputs(inputs,rooms,water,error)||
+    !adoptSourceRoomGeometry(rooms,sourceGeometry,error)))return false;
+ runtime=std::make_unique<SceneRuntime>(std::move(inputs),std::move(start),std::move(rooms),std::move(water),std::move(sourceGeometry));
  // Keep partial resource ownership on refusal. The caller must terminate or
  // run the owning scene's cleanup; it cannot reuse this map as a surface.
  if(!runtime->install(map,error))return false;
@@ -452,6 +497,8 @@ bool pc_p2_retail_scene_install_map(MapMgr* map,bool& handled,std::string& error
 const p2retail::FloorIdentityAuthority* pc_p2_retail_scene_births()noexcept{return p2retail::sceneBirths();}
 const p2retail::SourceRoomCensus* pc_p2_retail_scene_rooms(const p2retail::SceneContext& owner,std::uint64_t serial,std::uint64_t revision)noexcept{return p2retail::sourceSceneRooms(owner,serial,revision);}
 const p2retail::SourceWaterInputs* pc_p2_retail_scene_water_inputs(const p2retail::SceneContext& owner,std::uint64_t serial,std::uint64_t revision)noexcept{return p2retail::sourceSceneWater(owner,serial,revision);}
+const p2retail::SourceRoomGeometry* pc_p2_retail_scene_source_geometry(const p2retail::SceneContext& owner,std::uint64_t serial,std::uint64_t revision)noexcept{return p2retail::sourceSceneGeometry(owner,serial,revision);}
+bool pc_p2_retail_scene_find_water(const p2retail::SceneContext& owner,std::uint64_t serial,std::uint64_t revision,const std::array<float,3>& position,p2retail::SourceWaterResult& out,std::string& error){return p2retail::sourceSceneFindWater(owner,serial,revision,position,out,error);}
 bool pc_p2_retail_scene_known_source_birth(const p2original::InstanceIdentity& identity,p2retail::BirthIdentity& out,p2retail::Snapshot& floor,std::string& error){
  return p2retail::knownSceneSourceBirth(identity,out,floor,error);
 }
