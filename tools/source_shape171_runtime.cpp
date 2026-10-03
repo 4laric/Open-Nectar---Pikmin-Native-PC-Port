@@ -23,11 +23,17 @@ std::string digest(const std::string& bytes){unsigned char d[32];pc_netplay_sha:
 struct Input {std::string role,sha,bytes;};
 std::vector<Input> inputs(const char* manifest){
  std::ifstream file(manifest);check(bool(file),"constructor input manifest unavailable");
- std::string line;std::getline(file,line);check(line.rfind("SHAPE171_CONSTRUCTOR_INPUTS\t1\t",0)==0,"constructor manifest schema");
+ std::string line;std::getline(file,line);std::string prefix="p2-original/piki-bodies/red/";
+ if(line.rfind("SHAPE171_SOURCE_BANK_INPUTS\t1\t",0)==0){
+  std::istringstream header(line);std::string magic,version,species,receipt,extra;
+  std::getline(header,magic,'\t');std::getline(header,version,'\t');std::getline(header,species,'\t');std::getline(header,receipt,'\t');
+  check((species=="purple"||species=="white")&&receipt.size()==64&&std::all_of(receipt.begin(),receipt.end(),[](char c){return(c>='0'&&c<='9')||(c>='a'&&c<='f');})&&!std::getline(header,extra,'\t'),"source species manifest identity");
+  prefix="p2-original/piki-bodies/"+species+"/";
+ }else check(line.rfind("SHAPE171_CONSTRUCTOR_INPUTS\t1\t",0)==0,"constructor manifest schema");
  std::vector<Input> result;std::map<std::string,bool> seen;size_t total=0;
  while(std::getline(file,line)){
   std::istringstream fields(line);Input in;std::string size,path;std::getline(fields,in.role,'\t');std::getline(fields,in.sha,'\t');std::getline(fields,size,'\t');std::getline(fields,path,'\t');
-  check(in.role.rfind("p2-original/piki-bodies/red/",0)==0&&in.role.size()>4&&in.role.compare(in.role.size()-4,4,".mod")==0,"wrong model role");
+  check(in.role.rfind(prefix,0)==0&&in.role.size()>4&&in.role.compare(in.role.size()-4,4,".mod")==0,"wrong model role");
   check(seen.emplace(in.role,true).second&&in.sha.size()==64&&!path.empty(),"duplicate/invalid model identity");
   std::ifstream model(path,std::ios::binary);check(bool(model),"selected model unavailable");
   in.bytes.assign(std::istreambuf_iterator<char>(model),{});check(in.bytes.size()==std::stoull(size)&&in.bytes.size()>=32&&in.bytes.size()<=8*1024*1024&&digest(in.bytes)==in.sha,"selected model bytes differ");

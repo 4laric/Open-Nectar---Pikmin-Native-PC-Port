@@ -38,3 +38,21 @@ graphics plateau. These checks do not establish GL device upload/rendering,
 source actor allocation, species/FSM/animation, selected Scene/World ownership,
 the six strong Body lifecycle APIs, ordinary source20 mechanics or physical SAVE.
 Synthetic callback/census/state flags cannot fill those gaps.
+
+## Purple/White source-bank diagnostic
+
+`import_p2_piki_source_bank.py` authenticates GPVE01 archive/model/parameter bytes
+and imports the same fourteen-motion, 171-model baseline for Purple and White.
+Their ordinary bud/flower assets are genuine `bud.bmd`/`flower.bmd`; Red assets
+remain unchanged. The bank has 365 roles: the original 364-role counterpart plus
+`joint-anchors.json`, containing eleven sampled source joint matrices per pose.
+These anchors do not implement live source bone ownership or animation clocks.
+
+`source_shape171_species_inputs.py --bank <private-bank> --species purple|white
+--output <fresh-private.tsv>` verifies the complete bank and emits the distinct
+`SHAPE171_SOURCE_BANK_INPUTS` schema. The constructor reader accepts its exact
+Purple/White prefix and source receipt identity; it never relabels models as Red
+or manufactures a selected-packet fingerprint. Existing Red schema and tests
+remain supported. Run the actual native fixture with the TSV as its sole argument.
+This tests constructors and cleanup only. Full source FSM motion coverage,
+selected Body/Scene adoption, effects, impact/poison gameplay and SAVE remain open.
