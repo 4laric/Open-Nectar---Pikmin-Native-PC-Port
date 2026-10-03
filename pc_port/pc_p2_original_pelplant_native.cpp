@@ -23,6 +23,13 @@ extern Matrix4f invCamMat;
 
 namespace p2original { namespace pelplant {
 namespace {
+// idle callbacks may arrive with SYSHEAP_NULL after PlugPikiApp::idle.
+// Own only our resource/birth allocation scope and restore its caller's heap.
+struct AppHeapScope {
+ int previous;
+ AppHeapScope():previous(gsys->setHeap(SYSHEAP_App)){}
+ ~AppHeapScope(){gsys->setHeap(previous);}
+};
 const char* names[]={"damage3","dead3","grow1","grow2","wait1","wait2","wait3","bgrow1","bdamage1","bdead1"};
 const char* joints[]={"world_root","bodyjnt1","bodyjnt2","bodyeff","headchn","headjnt","headeff","tubomi"};
 std::set<Native*>& natives(){static std::set<Native*> instances;return instances;}
@@ -131,6 +138,7 @@ struct Native::Impl final:Engine {
   loaded=true;return true;
  }
  bool resources(Resources& out,std::string& e)override{
+  AppHeapScope heap;
   if(!load(e))return false;
   auto* chassis=tekiMgr->getTekiShapeObject(TEKI_Palm);
   if(!chassis||!chassis->mShape||!chassis->mAnimMgr||!tekiMgr->getTekiParameters(TEKI_Palm)||!tekiMgr->getStrategy(TEKI_Palm))return reject(e,"Pelplant native chassis shape/animation/parameters/strategy not preloaded before course admission");
@@ -149,6 +157,7 @@ struct Native::Impl final:Engine {
   if(!tekiMgr->hasModel(TEKI_Palm))return reject(e,"Pelplant manager chassis has not been initialized");return true;
  }
  bool allocate(Host& h,const Position& position,float facing,std::string& e)override{
+  AppHeapScope heap;
   Teki* actor=tekiMgr->newTeki(TEKI_Palm);if(!actor)return reject(e,"Pelplant real manager allocation failed");
   h.creature=actor;tracks.emplace(actor,std::make_unique<Track>());
   // newTeki::init performs only Creature::init; initialize the chassis's
@@ -174,6 +183,7 @@ struct Native::Impl final:Engine {
   if(!tracks.at(actor)->collision.bind(actor,spheres.data(),6))return reject(e,"Pelplant retail collider allocation failed");return true;
  }
  bool captureNumber(Host& h,unsigned amount,int c,Pellet*& out,std::string& e)override{
+  AppHeapScope heap;
   out=pelletMgr->newNumberPellet(c,amountIndex(amount));if(!out)return reject(e,"configured Pelplant number pellet birth failed");
   auto* track=tracks.at(h.creature).get();
   out->init(h.creature->mSRT.t);out->startAI(0);
