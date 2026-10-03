@@ -1,4 +1,5 @@
 #include "pc_p2_ship.h"
+#include "pc_p2_original_course.h"
 #include "pc_dev_console.h"
 #include "pc_p2_ship_store.h"
 #include "pc_p2_purple.h"
@@ -1008,6 +1009,14 @@ void GameCoreSection::prepareBadEnd()
 void GameCoreSection::exitStage()
 {
 #if defined(PIKI_PC_PORT)
+ // Normal day-end/cache writes precede scene exit. Release original groups
+ // while their actual generators, actor pools and family resources are alive.
+ std::string originalError;
+ if(!pc_p2_original_course_finish(originalError)) {
+  std::fprintf(stderr,"P2_ORIGINAL_COURSE_EXIT_FAIL %s\n",originalError.c_str());std::abort();
+ }
+#endif
+#if defined(PIKI_PC_PORT)
 	pc_demon_drop_scene_exit();
 	pc_demon_scene_exit();
 #endif
@@ -1485,6 +1494,16 @@ void GameCoreSection::initStage()
 
 	playerState->initCourse();
 
+#if defined(PIKI_PC_PORT)
+ if(const char* originalDirectory=std::getenv("PIKMIN_P2_ORIGINAL_CATALOG")) {
+  std::string originalError;
+  // The immutable catalog must exist before native cache/factory decoding.
+  if(!pc_p2_original_course_boot(originalDirectory,pc_pikipelago_surface_course(),originalError)) {
+   std::fprintf(stderr,"P2_ORIGINAL_COURSE_LOAD_FAIL %s\n",originalError.c_str());std::abort();
+  }
+ }
+#endif
+
 	PRINT("--------------- GeneratorCache : preload start\n");
 	memStat->start("genCache");
 #if defined(PIKMIN_RANDOMIZER_TEST_HOOKS)
@@ -1735,6 +1754,12 @@ void GameCoreSection::initStage()
 	if (pc_randomizer_progg_traps()) tekiMgr->mUsingType[TEKI_Dororo] = true;
 	// #942 dev console: load the P1 host vehicles of every dev-bound species.
 	pc_dev_console_reserve_host_types();
+#if defined(PIKI_PC_PORT)
+ std::string originalModelError;
+ if(!pc_p2_original_course_use_models(originalModelError)) {
+  std::fprintf(stderr,"P2_ORIGINAL_COURSE_MODEL_FAIL %s\n",originalModelError.c_str());std::abort();
+ }
+#endif
 	tekiMgr->startStage();
 	gsys->setHeap(oldT);
 	memStat->end("teki");
@@ -1761,6 +1786,14 @@ void GameCoreSection::initStage()
 	memStat->end("mapMgr");
 
 	memStat->start("bobby");
+#if defined(PIKI_PC_PORT)
+ if(pc_p2_original_course_prepared()) {
+  std::string originalError;
+  if(!pc_p2_original_course_start(generatorList,originalError)) {
+   std::fprintf(stderr,"P2_ORIGINAL_COURSE_START_FAIL %s\n",originalError.c_str());std::abort();
+  }
+ }
+#endif
 	playerState->reconcileBbftParts(); // Before generators/cache can recreate checked parts.
 	if (useDefault) {
 		PRINT("*** GEN1\n");
