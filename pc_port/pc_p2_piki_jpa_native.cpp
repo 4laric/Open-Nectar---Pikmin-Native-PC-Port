@@ -53,7 +53,13 @@ bool NativeEffects::sharedIdleHalo(const PcP2SourceBody& body,unsigned species,u
  // Acquire the native retained record before core registration so allocation
  // exceptions cannot leave an untracked core context.
  m->owners.push_back({body,species});
- if(!m->halo.sharedIdleHalo(id(body),species,pid,p,e)){m->owners.pop_back();return false;}
+ try{
+  if(!m->halo.sharedIdleHalo(id(body),species,pid,p,e)){m->owners.pop_back();return false;}
+ }catch(...){
+  // Core list insertion has the strong exception guarantee. Roll back the
+  // preceding native record so a refused creation cannot strand two censuses.
+  m->owners.pop_back();throw;
+ }
  e.clear();return true;
 }
 bool NativeEffects::canRemoveIdleHalo(const PcP2SourceBody& body,std::string& e)const{

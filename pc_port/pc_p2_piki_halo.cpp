@@ -2,6 +2,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <new>
 namespace p2original { namespace pikiJPA {
 namespace {
 bool fail(std::string& e,const char* s){e=s;return false;}
@@ -14,7 +15,9 @@ float f32(const std::vector<unsigned char>& b,unsigned i){std::uint32_t bits=(st
 }
 bool HaloEffects::prepare(const Bank& b,const std::array<std::uint32_t,6>& seeds,std::size_t capacity,std::string& e){
  if(!mContexts.empty()||!mParticles.empty())return fail(e,"Piki halo selected bank reload with retained owners/particles");
- if(!capacity||capacity>1024||!b.bytes("IP2_ringhalo_i.tex1"))return fail(e,"Piki halo selected texture/capacity absent");
+ // Source BaseGameSection owns a 2000-entry particle pool. The selected halo
+ // backend admits no other particle effects, so births are bounded by it.
+ if(!capacity||capacity>2000||!b.bytes("IP2_ringhalo_i.tex1"))return fail(e,"Piki halo selected texture/capacity absent");
  mBank=b;mSeeds=seeds;mCapacity=capacity;e.clear();return true;
 }
 bool HaloEffects::sharedIdleHalo(ContextId id,unsigned species,unsigned pid,Position p,std::string& e){
@@ -42,6 +45,10 @@ bool HaloEffects::sourceFrame(const Clipped& clipped,std::string& e){
  // Lifetime1 particles die at age1. New callback births reach age0 during the
  // same JPAResource::calc pass. Erasing a context leaves its preceding particle
  // intact until this actual frame, without killing other contexts' emitter.
+ // Allocate before either lifetime removal or any emitter RNG advance. Each
+ // admitted context creates at most one particle; inserts cannot allocate.
+ try{mParticles.reserve(mContexts.size());}
+ catch(const std::bad_alloc&){return fail(e,"Piki halo particle storage allocation failed");}
  mParticles.clear();
  for(unsigned species=0;species<6;++species){
   auto* resource=mBank.bytes(role(haloId(species)));if(!resource)continue;
