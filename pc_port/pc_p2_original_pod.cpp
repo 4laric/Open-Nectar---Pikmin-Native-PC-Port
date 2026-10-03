@@ -99,7 +99,7 @@ struct Cargo {p2retail::BirthIdentity birth;p2retail::SceneIdentity scene;Comple
 Config config;ContextProvider contextProvider;Shape* shape=nullptr;Pod* pod=nullptr;
 CreatureNode* node=nullptr;MeltingPotMgr* manager=nullptr;
 std::map<Pellet*,Cargo> cargo;
-bool prepared=false,committed=false,everSucked=false;Pellet* completing=nullptr;
+bool prepared=false,committed=false,everSucked=false,retaining=false;Pellet* completing=nullptr;
 bool current(p2retail::Snapshot* out=nullptr){
  p2retail::Snapshot actual;
  if(!prepared||!contextProvider||!contextProvider(config.floor.scene,actual)||!source(actual)||!same(actual,config.floor))return false;
@@ -161,7 +161,7 @@ bool pc_p2_original_pod_context(Suckable* receiver,const p2retail::SceneIdentity
 }
 Suckable* pc_p2_original_pod_goal(const p2retail::SceneIdentity& scene){p2retail::Snapshot out;return pc_p2_original_pod_context(pod,scene,out)?pod:nullptr;}
 bool pc_p2_original_pod_bind_cargo(Pellet* p,const p2retail::BirthIdentity& birth,const p2retail::SceneIdentity& scene,CompletedCallback callback,std::string& e){
- if(!pod||!current()||!(scene==config.floor.scene)||!p||!p->isAlive()||!p->mConfig||!birth.epoch||!birth.activation||birth.instance.empty()||!callback||cargo.count(p)||completing)return reject(e,"pod_cargo_identity");
+ if(!pod||!current()||!(scene==config.floor.scene)||!p||!p->isAlive()||!p->mConfig||!birth.epoch||!birth.activation||birth.instance.empty()||!callback||cargo.count(p)||completing||retaining)return reject(e,"pod_cargo_identity");
  if(p->getState()!=PELSTATE_Normal&&p->getState()!=PELSTATE_Appear)return reject(e,"pod_cargo_already_in_other_lifecycle");
  const auto* c=p2retail::descriptor(config.floor.cave);const auto* f=c?p2retail::definition(*c,config.floor.floor):nullptr;
  if(!f||birth.row>=f->rows.size()||birth.ordinal>=f->rows[birth.row].minimum()
@@ -187,12 +187,12 @@ bool pc_p2_original_pod_snapshot(const p2retail::SceneIdentity& scene,p2original
  out=std::move(capture);return true;
 }
 bool pc_p2_original_pod_release(std::string& e){
- if(completing||pc_p2_original_pod_pending())return reject(e,"pod_pending_transaction");
+ if(completing||retaining||pc_p2_original_pod_pending())return reject(e,"pod_pending_transaction");
  for(const auto& row:cargo)if(row.second.phase!=Phase::Completed)return reject(e,"pod_uncollected_cargo_requires_owner_retention");
  clear();e.clear();return true;
 }
 bool pc_p2_original_pod_release_uncollected(const p2retail::SceneIdentity& scene,RetainUncollected retain,std::string& e){
- if(!pod||!committed||completing||!(scene==config.floor.scene)||!retain||!current())return reject(e,"pod_boundary_identity");
+ if(!pod||!committed||completing||retaining||!(scene==config.floor.scene)||!retain||!current())return reject(e,"pod_boundary_identity");
  if(pc_p2_original_pod_pending())return reject(e,"pod_pending_transaction");
  std::vector<UncollectedCargo> loose;
  for(const auto& row:cargo)if(row.second.phase!=Phase::Completed){
@@ -203,7 +203,8 @@ bool pc_p2_original_pod_release_uncollected(const p2retail::SceneIdentity& scene
  }
  // No state is changed on a failed capture. The callback must retain/verify,
  // not retire/rebind actors or grant any consumed/seen/Poko receipt.
- if(!retain(config.floor,loose,e))return false;
+ retaining=true;bool retained=retain(config.floor,loose,e);retaining=false;
+ if(!retained)return false;
  unsigned unfinished=0;for(const auto& row:cargo)if(row.second.phase!=Phase::Completed)++unfinished;
  if(!current()||pc_p2_original_pod_pending()||loose.size()!=unfinished)return reject(e,"pod_boundary_changed_during_retention");
  for(const auto& row:loose){auto it=cargo.find(row.actor);
@@ -214,13 +215,13 @@ bool pc_p2_original_pod_release_uncollected(const p2retail::SceneIdentity& scene
 void P2OriginalPodNativeSeam::begin(Pellet* p){
  auto it=cargo.find(p);if(it==cargo.end())return;
  Suckable* receiver=pc_p2_original_pod_goal_for(p);
- if(!receiver||it->second.phase!=Phase::Bound||p->mTargetGoal!=receiver)fail("pod_stale_or_duplicate_suction");
+ if(retaining||!receiver||it->second.phase!=Phase::Bound||p->mTargetGoal!=receiver)fail("pod_stale_or_duplicate_suction");
  it->second.phase=Phase::Sucking;everSucked=true;
 }
 bool P2OriginalPodNativeSeam::done(Pellet* p,const PelletGoalState& state){
  auto it=cargo.find(p);if(it==cargo.end())return false;
  Suckable* receiver=pc_p2_original_pod_goal_for(p);
- if(completing||it->second.phase!=Phase::Sucking||p->getState()!=PELSTATE_Goal||!p->isAlive()
+ if(completing||retaining||it->second.phase!=Phase::Sucking||p->getState()!=PELSTATE_Goal||!p->isAlive()
   ||p->mCurrentState!=&state||!std::isfinite(state.mSuckProgress)||state.mSuckProgress<1
   ||state.mWaitTimer>0||state.mIsFirstMove||state.mTargetIsShip
   ||!receiver||p->mTargetGoal!=receiver)fail("pod_unverified_completed_suction");
