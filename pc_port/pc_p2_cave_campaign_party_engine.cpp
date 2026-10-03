@@ -41,6 +41,10 @@ bool pc_p2_cave_campaign_party_capture(P2CaveCampaignParty& party,bool inside){
     captured.resumeLiving=true;
     captured.landing=false;
     auto nextProvenance=provenance;
+    // A caller may inspect a capture without adopting its party. Existing live
+    // identities still own their keys; allocate beyond them on the next capture.
+    for(const auto& entry:nextProvenance)
+        if(entry.second.key>=captured.nextKey)captured.nextKey=entry.second.key+1;
     captured.captains.clear();captured.bodies.clear();
     Navi* active=naviMgr->getActiveNavi();if(!active)return held("missing_active_captain");
     if(!active->getCurrState()||active->getCurrState()->getID()!=NAVISTATE_Walk)return held("captain_not_walking");
