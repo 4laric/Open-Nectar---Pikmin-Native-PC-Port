@@ -2,6 +2,10 @@
 #include "pc_p2_species.h"
 #include "pc_p2_original_piki_origin.h"
 #include "pc_p2_source_body.h"
+#if __has_include("pc_p2_original_sprout_native.h")
+#include "pc_p2_original_sprout_native.h"
+#define PC_P2_PARTY_SOURCE_SPROUT_PROVIDER 1
+#endif
 #include "pc_p2_purple.h"
 #include "pc_p2_white.h"
 #include "pc_p2_captain.h"
@@ -103,6 +107,11 @@ bool pc_p2_cave_campaign_party_capture(P2CaveCampaignParty& party,bool inside){
         captured.bodies.push_back(b);}
     auto& heads=inside?captured.floorHeads:captured.surfaceHeads;heads.clear();
     Iterator sprouts(itemMgr->getPikiHeadMgr());CI_LOOP(sprouts){auto* h=static_cast<PikiHeadItem*>(*sprouts);
+#if defined(PC_P2_PARTY_SOURCE_SPROUT_PROVIDER)
+        // The retained tag survives an unavailable full lineage read. Party3
+        // cannot encode the source Onion family, including pending and stock.
+        if(pc_p2_original_sprout_head_tag(h))return held("typed_source_head_requires_graph");
+#endif
         p2budorigin::Record converted;
         if(p2budorigin::registry().head(h,converted))return held("typed_source_head_requires_graph");
         if(!h->canPullout()||!h->getCurrState()||h->getCurrState()->getID()!=PikiHeadAI::PIKIHEAD_Wait)return held("unsettled_head");
