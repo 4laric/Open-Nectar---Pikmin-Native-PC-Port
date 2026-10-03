@@ -1264,6 +1264,10 @@ int Bridge::getJointIndex(int id)
  */
 bool Bridge::isStageFinished(int id)
 {
+#if defined(PIKI_PC_PORT)
+	bool original=false;
+	if(pc_p2_original_bridge_stage_finished(this,id,original))return original;
+#endif
 	if (mDoUseJointSegments) {
 		if (id < 0 || id >= mStageCount) {
 			return true;

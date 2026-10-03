@@ -45,7 +45,8 @@ BridgeState bridgeInitial(const BridgeRecord& r){BridgeState s;for(int i=0;i<bri
 bool bridgeStateValid(const BridgeRecord& r,const BridgeState& s,std::string& e){
  if(!validateBridge(r,e))return false;int count=bridgeStageCount(r.type);
  if(s.stage<0||s.stage>count||s.extensionTicks>40||(s.stage==count&&s.extensionTicks))return fail(e,"invalid bridge stage/delay");
- for(int i=0;i<15;++i){float h=s.health[i];if(!std::isfinite(h)||h>r.stageLife||(i>=count&&h!=0)||(i<s.stage&&h>=r.stageLife)||(i>s.stage&&i<count&&h!=r.stageLife)||(i==s.stage&&i<count&&((s.extensionTicks==0&&h<=0)||(s.extensionTicks!=0&&h>0))))return fail(e,"invalid bridge stage health");}
+ // Breaking an earlier built section retains partial work in later sections.
+ for(int i=0;i<15;++i){float h=s.health[i];if(!std::isfinite(h)||h>r.stageLife||(i>=count&&h!=0)||(i<s.stage&&h>=r.stageLife)||(i==s.stage&&i<count&&s.extensionTicks!=0&&h>0))return fail(e,"invalid bridge stage health");}
  e.clear();return true;
 }
 bool bridgeAttack(const BridgeRecord& r,BridgeState& s,float damage){
