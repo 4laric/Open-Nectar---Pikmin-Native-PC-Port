@@ -361,23 +361,15 @@ class PurpleCombatApp : public PlugPikiApp {
         const float x=a.x-b.x,z=a.z-b.z;return std::sqrt(x*x+z*z);
     }
     bool pluckSegmentClear(const Vector3f& a,const Vector3f& b) const {
-        const float dx=b.x-a.x,dz=b.z-a.z,length2=dx*dx+dz*dz;
-        for(const auto& obstacle:pluckObstacles) {
-            const float t=length2>0?std::max(0.f,std::min(1.f,((obstacle.centre.x-a.x)*dx+(obstacle.centre.z-a.z)*dz)/length2)):0.f;
-            const float x=a.x+t*dx-obstacle.centre.x,z=a.z+t*dz-obstacle.centre.z;
-            if(x*x+z*z<obstacle.radius*obstacle.radius) return false;
-        }
+        if(!pcPurpleSegmentCircleClear(a.x,a.z,b.x,b.z,a.x,a.z,0.f,0.f))return false;
+        for(const auto& obstacle:pluckObstacles)
+            if(!pcPurpleSegmentCircleClear(a.x,a.z,b.x,b.z,obstacle.centre.x,obstacle.centre.z,obstacle.radius,0.f))return false;
         return true;
     }
     bool pluckAdmissionSegmentClear(const Vector3f& a,const Vector3f& b) const {
-        if(!std::isfinite(a.x)||!std::isfinite(a.z)||!std::isfinite(b.x)||!std::isfinite(b.z))return false;
-        const float dx=b.x-a.x,dz=b.z-a.z,length2=dx*dx+dz*dz;
-        for(const auto& obstacle:(sdlAcquisitionMode()?pluckAdmissionObstacles:pluckObstacles)) {
-            if(!std::isfinite(obstacle.centre.x)||!std::isfinite(obstacle.centre.z)||!std::isfinite(obstacle.radius)||obstacle.radius<0)return false;
-            const float t=length2>0?std::max(0.f,std::min(1.f,((obstacle.centre.x-a.x)*dx+(obstacle.centre.z-a.z)*dz)/length2)):0.f;
-            const float x=a.x+t*dx-obstacle.centre.x,z=a.z+t*dz-obstacle.centre.z;
-            if(x*x+z*z<obstacle.radius*obstacle.radius) return false;
-        }
+        if(!pcPurpleSegmentCircleClear(a.x,a.z,b.x,b.z,a.x,a.z,0.f,0.f))return false;
+        for(const auto& obstacle:(sdlAcquisitionMode()?pluckAdmissionObstacles:pluckObstacles))
+            if(!pcPurpleSegmentCircleClear(a.x,a.z,b.x,b.z,obstacle.centre.x,obstacle.centre.z,obstacle.radius,0.f))return false;
         return true;
     }
     void collectCaptainParts(CollPart* part,std::vector<CollPart*>& parts,int depth=0) {
