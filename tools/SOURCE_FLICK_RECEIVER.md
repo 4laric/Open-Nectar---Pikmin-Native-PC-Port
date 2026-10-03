@@ -47,3 +47,13 @@ JusticeAlloy, active-game/demo, state/actor invincibility or damage effects gate
 Native animation-assert interruption paths also remain unqualified. The engine
 doubles use a constant random value and identity roundAng: controls assert draw
 counts and caller arithmetic, not independent RNG draw ordering or angle wrapping.
+counts and caller arithmetic, not independent RNG draw ordering or angle wrapping.
+
+Read-only captain dispatch gate: pc_p2_source_navi_reaction_gate only succeeds
+when the active owned WindNaviState pointer matches the captain current state.
+Matching a numeric native ID alone is insufficient. Hit/Fling report source Flick;
+Koke/Timer/GetUp report source KokeDamage. Each init receives a distinct activation
+stamp. Both literal source states inherit NaviState invincible=false. Unsupported
+queries return false and kindUnsupported, not a native-state immunity judgment.
+Controller identity/alive/actor invincibility/demo/game-active gates belong to the
+original captain damage owner (#1289). This query does not install a damage seam.

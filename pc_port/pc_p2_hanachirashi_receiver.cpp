@@ -13,6 +13,9 @@ namespace {
 struct Pending { Vector3f direction; Creature* owner; bool wither=true; float damage=0; };
 std::map<Piki*,Pending> pikiPending;
 std::map<Navi*,Pending> naviPending;
+struct WindNaviState;
+std::map<Navi*,WindNaviState*> activeNaviStates;
+unsigned long long nextNaviActivation=0;
 enum Phase { Hit, Fling, Koke, Timer, GetUp };
 struct WindPikiState : PikiState {
     Vector3f direction; Phase phase=Hit; float timer=1; bool wither=true,whistled=false;
@@ -61,12 +64,16 @@ struct WindPikiState : PikiState {
     }
 };
 struct WindNaviState : NaviState {
-    Vector3f direction;Creature* owner=nullptr;unsigned ownerToken=0;bool wither=true;Phase phase=Hit;float timer=1,damage=0;
+    Vector3f direction;Creature* owner=nullptr;unsigned ownerToken=0;bool wither=true;Phase phase=Hit;float timer=1,damage=0;unsigned long long activation=0;
     WindNaviState():NaviState(NAVISTATE_HanachirashiFlick){}
     void init(Navi* n) override {
+        activation=++nextNaviActivation;activeNaviStates[n]=this;
         auto arg=naviPending.at(n);naviPending.erase(n);direction=arg.direction;owner=arg.owner;ownerToken=pc_p2_original_actor_token(owner);wither=arg.wither;damage=arg.damage;phase=Hit;timer=1;
         n->mVelocity.y=0;n->mFaceDirection=roundAng(std::atan2(direction.x,direction.z)+PI);
         n->startMotion(PaniMotionInfo(PIKIANIM_JHit,n),PaniMotionInfo(PIKIANIM_JHit));
+    }
+    void cleanup(Navi* n) override {
+        auto it=activeNaviStates.find(n);if(it!=activeNaviStates.end()&&it->second==this)activeNaviStates.erase(it);
     }
     void exec(Navi* n) override {
         if(phase==Hit){n->mVelocity.x=direction.x;n->mVelocity.z=direction.z;}
@@ -124,3 +131,10 @@ bool pc_p2_source_flick_navi(BTeki* a,Navi* n,float knockback,float damage,float
 }
 bool pc_p2_hanachirashi_flick_piki(BTeki* a,Piki* p){return pc_p2_source_flick_piki(a,p,150,FLICK_BACKWARDS_ANGLE);}
 bool pc_p2_hanachirashi_flick_navi(BTeki* a,Navi* n){return pc_p2_source_flick_navi(a,n,150,1,FLICK_BACKWARDS_ANGLE);}
+
+bool pc_p2_source_navi_reaction_gate(Navi* n,PcSourceNaviReactionGate& out){
+    out={};if(!n)return false;
+    auto it=activeNaviStates.find(n);if(it==activeNaviStates.end()||n->getCurrState()!=it->second||n->getCurrState()->getID()!=NAVISTATE_HanachirashiFlick)return false;
+    const auto* state=it->second;out.kind=state->phase<=Fling?PcSourceNaviReactionKind::Flick:PcSourceNaviReactionKind::KokeDamage;
+    out.phase=static_cast<unsigned>(state->phase);out.activation=state->activation;out.inheritedInvincible=false;return true;
+}

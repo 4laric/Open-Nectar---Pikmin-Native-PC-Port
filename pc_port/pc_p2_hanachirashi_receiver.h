@@ -13,3 +13,13 @@ bool pc_p2_source_flick_navi(BTeki*, Navi*, float knockback, float damage, float
 // Retail InteractFlick rejects Flick/Panic but permits the Blow state that
 // its previous acceptance entered. Keep native state IDs outside this policy.
 constexpr bool pc_p2_source_flick_reaction_blocked(int current,int flick,int panic){return current==flick||current==panic;}
+// Supported only for the currently active owned original receiver state.
+// A false return means unsupported, not that an arbitrary native state is immune.
+enum class PcSourceNaviReactionKind { Unsupported, Flick, KokeDamage };
+struct PcSourceNaviReactionGate {
+    PcSourceNaviReactionKind kind=PcSourceNaviReactionKind::Unsupported;
+    unsigned phase=0; // Hit0, Fling1, Koke2, Timer3, GetUp4.
+    unsigned long long activation=0;
+    bool inheritedInvincible=false; // Retail NaviState default, both source states.
+};
+bool pc_p2_source_navi_reaction_gate(Navi*,PcSourceNaviReactionGate&);
