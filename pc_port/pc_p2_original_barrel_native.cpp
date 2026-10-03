@@ -32,6 +32,7 @@ struct Clip {std::vector<Shape*> shapes;std::vector<float> frames;float duration
 Clip waitClip,deadClip;
 class SourceBarrel;
 std::vector<SourceBarrel*> bodies;
+std::vector<SourceBarrel*> allocations; // PC malloc bodies survive App-heap reset.
 std::vector<SourceBarrel*> pendingRetirement;
 std::map<unsigned,SourceBarrel*> carriers; // No physical node; typed native cache only.
 std::string waterCourse,waterSha;
@@ -40,8 +41,9 @@ const BarrelRecord& row(unsigned uid){auto i=records.find(uid);if(i==records.end
 Shape* pose(const Clip& clip,float frame){auto at=std::upper_bound(clip.frames.begin(),clip.frames.end(),frame);size_t index=at==clip.frames.begin()?0:size_t(at-clip.frames.begin()-1);return clip.shapes.at(index);}
 class SourceBarrel final:public BuildingItem {
 public:
- unsigned uid;BarrelState state;float idleFrame=0;ObjCollInfo sphere;CreatureNode* node=nullptr;
+ unsigned uid;BarrelState state;float idleFrame=0;ObjCollInfo sphere;CreatureNode* node=nullptr;CreatureNode* allocatedNode=nullptr;
  explicit SourceBarrel(unsigned id):BuildingItem(OBJTYPE_SluiceSoft,new BuildingItemProp,nullptr,nullptr),uid(id){mNumStages=1;mCurrStage=0;mWayPoint=nullptr;mMaxHealth=row(id).life;state.health=mMaxHealth;}
+ ~SourceBarrel(){delete allocatedNode;delete static_cast<BuildingItemProp*>(mProps);}
  bool isAlive()override{return state.phase==BarrelPhase::Normal;}
  bool isCompleted()override{return state.phase!=BarrelPhase::Normal;}
  f32 getBoundingSphereRadius()override{return 43;}
@@ -51,12 +53,12 @@ public:
   // Authored coll.txt is one joint0 sphere radius43. 'gate' only routes the
   // native work AI collision message; source barl identity remains unchanged.
   sphere.mId.setID('gate');sphere.mCode.setID('____');sphere.mJointIndex=-1;sphere.mRadius=43;
-  mCollInfo=&mBuildCollision;mCollInfo->initInfoTree(&sphere);auto* p=mCollInfo->getSphere('gate');if(!p)die("barrel native sphere missing");p->mIsUpdateActive=false;p->mIsStickEnabled=false;p->mCentre=mSRT.t;p->mRadius=43;
+  mCollInfo=&mBuildCollision;mBuildCollision.initInfoTree(&sphere,mBuildParts,mBuildPartIDs);auto* p=mCollInfo->getSphere('gate');if(!p)die("barrel native sphere missing");p->mIsUpdateActive=false;p->mIsStickEnabled=false;p->mCentre=mSRT.t;p->mRadius=43;
   mItemShape=pose(waitClip,0);mSeContext=&mBuildSFX;mSeContext->setContext(this,JACEVENT_Build);disableAICulling();
  }
  bool stimulate(immut Interaction& interaction)override{
   auto* attack=dynamic_cast<const InteractAttack*>(&interaction);
-  if(!attack||!attack->mOwner||!attack->mOwner->isPiki())return false;
+  if(!attack||!attack->mOwner||attack->mOwner->mObjType==OBJTYPE_Navi)return false;
   auto before=state.phase;if(!barrelDamage(state,attack->mDamage))return false;mHealth=state.health;
   if(before!=state.phase){mCurrStage=1;if(mSeContext)mSeContext->releaseEvent();std::printf("P2_ORIGINAL_BARREL_DEATH uid=%u health=%.6f pending_source_clip=1\n",uid,state.health);}
   return true;
@@ -111,10 +113,10 @@ void pc_p2_original_barrel_before_teardown(){
  auto physical=bodies;
  for(auto* b:physical){auto* g=b->mGenerator;b->mGenerator=nullptr;b->kill(false);if(g&&g->mLatestSpawnCreature==b)g->mLatestSpawnCreature=nullptr;}
  pendingRetirement.clear();
- for(auto& a:carriers){auto* g=a.second->mGenerator;if(g&&g->mLatestSpawnCreature==a.second)g->mLatestSpawnCreature=nullptr;a.second->mGenerator=nullptr;}
+ for(auto* b:allocations){b->mSearchContext.exit();auto* g=b->mGenerator;if(g&&g->mLatestSpawnCreature==b)g->mLatestSpawnCreature=nullptr;b->mGenerator=nullptr;}
  carriers.clear();
 }
-void pc_p2_original_barrel_unload(){admitted=false;records.clear();generators.clear();bodies.clear();pendingRetirement.clear();carriers.clear();waitClip={};deadClip={};waterCourse.clear();waterSha.clear();}
+void pc_p2_original_barrel_unload(){if(!bodies.empty()||!pendingRetirement.empty()||!carriers.empty())die("barrel live teardown required before unload");for(auto* b:allocations)delete b;allocations.clear();admitted=false;records.clear();generators.clear();bodies.clear();pendingRetirement.clear();carriers.clear();waitClip={};deadClip={};waterCourse.clear();waterSha.clear();}
 void pc_p2_original_barrel_register(){auto* f=GenObjectFactory::factory;if(!f)die("barrel factory absent");for(int i=0;i<f->mSpawnerCount;++i)if(f->mSpawnerInfo[i].mID==type)return;if(f->mSpawnerCount>=f->mMaxSpawners)die("barrel factory capacity");f->registerMember(type,make,"original P2 barrel",version);}
 GenObjectOriginalBarrel::GenObjectOriginalBarrel():GenObject(type,"original P2 barrel"){}
 void GenObjectOriginalBarrel::doRead(RandomAccessStream& s){if(mVersion!=version)die("barrel adapter version mismatch");if(!Generator::ramMode){uid=unsigned(s.readInt());row(uid);}}
@@ -131,7 +133,7 @@ bool pc_p2_original_barrel_preflight(const std::vector<Generator*>& list,std::st
  for(const auto& a:next){auto* g=const_cast<Generator*>(a.first);const auto& r=row(a.second);g->mGenPosition.set(r.position[0],r.position[1],r.position[2]);g->mGenOffset.set(r.offset[0],r.offset[1],r.offset[2]);g->_70=r.uid;}
  waterCourse=water.course;waterSha=water.sourceSha;generators.swap(next);admitted=true;e.clear();return true;
 }
-Creature* GenObjectOriginalBarrel::birth(BirthInfo& info){if(!admitted||!info.mGenerator||info.mGenerator->mGenObject!=this||!generators.count(info.mGenerator)||generators.at(info.mGenerator)!=uid)die("barrel birth without complete source admission");for(auto* b:bodies)if(b->uid==uid)die("duplicate physical barrel");const auto& r=row(uid);int heap=gsys->setHeap(SYSHEAP_App);auto* b=new SourceBarrel(uid);Vector3f p(r.position[0]+r.offset[0],r.position[1]+r.offset[1],r.position[2]+r.offset[2]);b->init(p);b->mGenerator=info.mGenerator;b->startAI(0);b->node=new CreatureNode;b->node->mCreature=b;itemMgr->mMeltingPotMgr->mRootNode.add(b->node);bodies.push_back(b);gsys->setHeap(heap);std::printf("P2_ORIGINAL_BARREL_BIRTH uid=%u health=4000 authored_radius=43 source_rotation_ignored=1 retail_geometry=1\n",uid);return b;}
+Creature* GenObjectOriginalBarrel::birth(BirthInfo& info){if(!admitted||!info.mGenerator||info.mGenerator->mGenObject!=this||!generators.count(info.mGenerator)||generators.at(info.mGenerator)!=uid)die("barrel birth without complete source admission");for(auto* b:bodies)if(b->uid==uid)die("duplicate physical barrel");const auto& r=row(uid);int heap=gsys->setHeap(SYSHEAP_App);auto* b=new SourceBarrel(uid);allocations.push_back(b);Vector3f p(r.position[0]+r.offset[0],r.position[1]+r.offset[1],r.position[2]+r.offset[2]);b->init(p);b->mGenerator=info.mGenerator;b->startAI(0);b->node=new CreatureNode;b->allocatedNode=b->node;b->node->mCreature=b;itemMgr->mMeltingPotMgr->mRootNode.add(b->node);bodies.push_back(b);gsys->setHeap(heap);std::printf("P2_ORIGINAL_BARREL_BIRTH uid=%u health=4000 authored_radius=43 source_rotation_ignored=1 retail_geometry=1\n",uid);return b;}
 bool pc_p2_original_barrel_owned(const Creature* c){return std::find(bodies.begin(),bodies.end(),c)!=bodies.end();}
 float pc_p2_original_barrel_work_damage(Piki* p){if(!p||!pikiMgr||!pikiMgr->mPikiParms)die("barrel Pikmin source damage absent");if(pc_p2_is_white(p))return pc_p2_white_attack();if(pc_p2_is_purple(p))return pc_p2_purple_attack();auto& a=pikiMgr->mPikiParms->mPikiParms;return p->mColor==Red?a.mRedAttackPower():p->mColor==Blue?a.mBlueAttackPower():a.mYellowAttackPower();}
 bool pc_p2_original_barrel_snapshot(const Creature* c,p2original::BarrelState& s,std::string& id){auto read=[&](SourceBarrel* b){if(b!=c)return false;s=b->state;const auto& r=row(b->uid);id=r.sourceSha+":"+r.sourceKey;return true;};for(auto* b:bodies)if(read(b))return true;for(auto& a:carriers)if(read(a.second))return true;return false;}
@@ -143,7 +145,7 @@ bool pc_p2_original_barrel_generator_load(Generator* g,RandomAccessStream& strea
  if(g->isExpired()){g->mAliveCount=0;return true;}
  if(next.phase==p2original::BarrelPhase::Retired){
   // Cold restore has no physical birth/death callback, calendar mutation or RNG.
-  const auto& r=row(o->uid);int heap=gsys->setHeap(SYSHEAP_App);auto* b=new SourceBarrel(o->uid);Vector3f p(r.position[0]+r.offset[0],r.position[1]+r.offset[1],r.position[2]+r.offset[2]);b->init(p);b->mGenerator=g;b->restore(next);b->finishDrain();g->mLatestSpawnCreature=b;g->mAliveCount=0;carriers[b->uid]=b;gsys->setHeap(heap);return true;
+  const auto& r=row(o->uid);int heap=gsys->setHeap(SYSHEAP_App);auto* b=new SourceBarrel(o->uid);allocations.push_back(b);b->mSRT.t.set(r.position[0]+r.offset[0],r.position[1]+r.offset[1],r.position[2]+r.offset[2]);b->mGenerator=g;b->restore(next);b->finishDrain();g->mLatestSpawnCreature=b;g->mAliveCount=0;carriers[b->uid]=b;gsys->setHeap(heap);return true;
  }
  BirthInfo info;info.mGenerator=g;auto* b=static_cast<SourceBarrel*>(o->birth(info));g->mLatestSpawnCreature=b;g->mAliveCount=1;b->restore(next);return true;
 }
