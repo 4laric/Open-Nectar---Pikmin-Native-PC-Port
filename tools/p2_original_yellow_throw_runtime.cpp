@@ -26,6 +26,7 @@
 #include "settings/pc_settings_p2d.h"
 #include "Camera.h"
 #include "KeyConfig.h"
+#include "Kontroller.h"
 #include "AIConstant.h"
 #include <cmath>
 #include <cstdio>
