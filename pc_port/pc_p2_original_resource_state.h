@@ -11,6 +11,7 @@ struct ResourceSnapshot {
  unsigned version=1;
  std::array<int,2> sprayCounts{{0,0}}; // source story PlayData: spicy=0,bitter=1
  std::array<int,2> berryCounts{{0,0}};
+ std::array<int,2> sprayUses{{0,0}};
  std::array<bool,2> sprayMade{{false,false}}; // authoritative demo flags
  std::vector<SprayCompletion> completed;
 };
