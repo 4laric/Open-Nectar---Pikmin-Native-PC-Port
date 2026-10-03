@@ -112,7 +112,7 @@ class FoliageApp final:public PlugPikiApp {
    r.course=d->cave;r.member=d->source;r.caveFloor=2;r.caveRow=i;r.index=2*256+i;r.sourceKey=r.course+"/"+r.member+"#"+std::to_string(r.index);r.sourceForm=SourceForm::CaveTekiInfo;r.caveSourceSha256=d->sourceSha256;
    r.enemy.source=unsigned(literal.sourceId);r.enemy.uid=originalGeneratorUid(r.sourceKey);r.enemy.count=literal.minimum();r.enemy.generatorVersion="CAVE";rows.push_back(r);
   }
-  require(rows.size()==3&&rows[0].enemy.count==6&&rows[1].enemy.count==4&&rows[2].enemy.count==2,"literal cave three-source minimums");native=std::make_unique<Native>();tekiBaseline=tekiMgr->getSize();pelletBaseline=pelletMgr->getSize();rewardBaseline=rewards();
+  require(rows.size()==3&&rows[0].enemy.count==6&&rows[1].enemy.count==4&&rows[2].enemy.count==2,"literal cave three-source minimums");native=std::make_unique<Native>();if(batch=="watage"&&!human&&!naturalWalk)native->requestWatageCameraControl();tekiBaseline=tekiMgr->getSize();pelletBaseline=pelletMgr->getSize();rewardBaseline=rewards();
   bool physical=native->provider().cavePrepare(rows,e);if(refusal){require(!physical&&native->provider().size()==0&&tekiMgr->getSize()==tekiBaseline,"cave missing bank refuses before any native allocation");std::puts("PASS ORIGINAL_CAVE_FOLIAGE_RESOURCE_REFUSAL sources=91,92,47 births=0 direct_control=1 cave_layout=0");std::fflush(nullptr);std::_Exit(0);}
   checked(physical,e);checked(native->geometryOwnershipControl(e),e);checked(caveRegistry.install(fingerprint,rows,caveDecode,e),e);
   for(auto& g:generators){g=std::make_unique<Generator>();g->mGenType=nullptr;g->mGenObject=nullptr;g->mAliveCount=17;g->mLatestSpawnDay=123;}
@@ -189,7 +189,7 @@ class FoliageApp final:public PlugPikiApp {
    rows={literal(90,14,1384248119u,a,270,"forest"),literal(88,4,1381420794u,b,95)};
   }else rows={literal(91,0,1390538979u,a,0),literal(88,4,1381420794u,b,95)};
   auto zero=literal(firstSource(),0,originalGeneratorUid("fixture/foliage-zero#0"),a,0);zero.course="fixture";zero.member="foliage-zero";zero.sourceKey="fixture/foliage-zero#0";zero.enemy.count=0;rows.push_back(zero);
-  native=std::make_unique<Native>();tekiBaseline=tekiMgr->getSize();pelletBaseline=pelletMgr->getSize();rewardBaseline=rewards();
+  native=std::make_unique<Native>();if(batch=="watage"&&!human&&!naturalWalk)native->requestWatageCameraControl();tekiBaseline=tekiMgr->getSize();pelletBaseline=pelletMgr->getSize();rewardBaseline=rewards();
   bool physical=native->provider().preflight(rows,e);
   if(refusal){require(!physical&&native->provider().size()==0&&tekiMgr->getSize()==tekiBaseline&&pelletMgr->getSize()==pelletBaseline,"physical resource refusal before allocation");if(batch=="tutorial")std::puts("PASS ORIGINAL_FOLIAGE_RESOURCE_REFUSAL births=0 direct_control=1 gameplay=0");else std::printf("PASS ORIGINAL_FOLIAGE_RESOURCE_REFUSAL sources=%s births=0 direct_control=1 gameplay=0\n",batchSources());std::fflush(nullptr);std::_Exit(0);}
   checked(physical,e);checked(native->geometryOwnershipControl(e),e);

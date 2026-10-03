@@ -2,7 +2,7 @@
 
 Use the private 20 Red Pikmin tutorial overlay and a qualified fixture executable.
 Set `P2_ORIGINAL_FOLIAGE_BATCH=watage` and `P2_ORIGINAL_FOLIAGE_HUMAN=1`,
-then launch `pikmin_p2_original_foliage_fixture --experimental-pikmin2-surface tutorial`
+then launch `fixtures/pikmin_ci_fixture_original_foliage --experimental-pikmin2-surface tutorial`
 from its private run directory. Keep the centered 960x540 window.
 
 1. Walk the captain east from camp into the white Watage. Observe the plant sway

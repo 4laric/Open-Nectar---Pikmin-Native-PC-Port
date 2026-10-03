@@ -12,6 +12,7 @@ public:
  bool touch(Vec position,std::string&);
  bool tick(float seconds,std::string&);
  void draw(Graphics&);
+ bool cameraControl(Graphics&,std::string&);
  std::size_t particles()const;
  unsigned emissions()const;
  DrawStats draws()const;

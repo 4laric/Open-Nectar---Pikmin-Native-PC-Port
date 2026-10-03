@@ -16,6 +16,7 @@ public:
  std::size_t watageParticles()const;
  unsigned watageEmissions()const;
  unsigned watageDrawQuads()const;
+ void requestWatageCameraControl();
  bool collision(BTeki*,Creature*,std::string&);
  bool earthquake(BTeki*,std::string&);
  void forget(Creature*);

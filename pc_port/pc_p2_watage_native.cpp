@@ -27,9 +27,22 @@ bool NativeEffect::tick(float seconds,std::string& e){return m->effect.tick(seco
 std::size_t NativeEffect::particles()const{return m->effect.particles();}
 unsigned NativeEffect::emissions()const{return m->effect.emissions();}
 DrawStats NativeEffect::draws()const{return m->stats;}
+bool NativeEffect::cameraControl(Graphics& g,std::string& e){
+ if(!g.mCamera||!g.mCamera->mPlanePointers[0]||!particles()){e="Watage camera control requires live rendered emitter";return false;}
+ auto* camera=g.mCamera;auto* plane=&camera->mPlanePointers[0]->mPlane;
+ const auto saved=*plane;const int count=camera->mActivePlaneCount;
+ const auto origin=m->effect.bursts()[0].origin;const int age=m->effect.bursts()[0].particles[0].age;
+ const auto n=particles();const auto emission=emissions();const auto before=draws();
+ camera->mActivePlaneCount=1;plane->mNormal.set(1,0,0);plane->mOffset=origin.x+101;
+ draw(g);const auto hidden=draws();plane->mOffset=origin.x-101;draw(g);const auto visible=draws();
+ *plane=saved;camera->mActivePlaneCount=count;
+ if(hidden.quads!=before.quads||hidden.culled!=before.culled+1||visible.quads<=hidden.quads||particles()!=n||emissions()!=emission||m->effect.bursts()[0].particles[0].age!=age){e="Watage draw-only camera control failed";return false;}
+ std::puts("PASS P2_WATAGE_CAMERA sphere_radius=100 actual_gx_draw=1 hidden_quads=0 visible_quads=1 clock_unchanged=1 planes_restored=1 direct_control=1 gameplay=0");e.clear();return true;
+}
+
 void NativeEffect::draw(Graphics& g){
  if(!g.mCamera||!particles())return;
- bool light=g.setLighting(false,nullptr);int blend=g.setCBlending(BLEND_Alpha);int cull=g.setCullFront(2);g.setDepth(false);
+ bool light=g.setLighting(false,nullptr);int blend=g.setCBlending(BLEND_Alpha);int cull=g.setCullFront(2);bool depth=g.setDepth(false);
  g.useMatrix(g.mCamera->mLookAtMtx,0);
  // Invalidate the native texture cache around this independently owned GX obj.
  // Otherwise a following actor can skip reloading its old cached texture.
@@ -65,7 +78,7 @@ void NativeEffect::draw(Graphics& g){
    }
   }
  }
- g.useTexture(nullptr,0);g.setCullFront(cull);g.setDepth(true);g.setCBlending(blend);g.setLighting(light,nullptr);
+ g.useTexture(nullptr,0);g.setCullFront(cull);g.setDepth(depth);g.setCBlending(blend);g.setLighting(light,nullptr);
 }
 }
 void pc_p2_watage_tick_all(float seconds){
