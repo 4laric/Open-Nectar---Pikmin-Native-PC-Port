@@ -1,4 +1,5 @@
 #include "pc_p2_candypop.h"
+#include <cstdlib>
 #include "pc_p2_cave_bud_actor.h"
 #include "pc_p2_purple.h"
 #include "pc_p2_white.h"
@@ -48,6 +49,23 @@ PomAi::PomAi(Pom* pom)
 void PomAi::initAI(Pom* pom)
 {
 	mPom = pom;
+    if(pc_p2_original_pom_managed(pom)) {
+        if(!pc_p2_original_pom_ready(pom))std::abort();
+        // Leaf allocated Boss/initBoss and installed its source collision tree.
+        // Initialize every PomAi payload without P1 animation, RNG, effects,
+        // white-card state, shared props mutation, or collision-tree replacement.
+        mHasCollided=false;mPlaySound=false;mIsOpening=false;
+        mPrevStickPikiCount=0;mReleasedSeedCount=0;mMaxSeedCount=5;
+        mDeformAmount=0;mCurrentDeform=0;
+        mOpenStarCallBack->set(&mIsOpening);
+        mPom->mColor=Red; // inert P1 base field; actual output species is source6 Purple.
+        mPom->setCurrentState(1);mPom->setNextState(1);
+        mPom->setMotionFinish(false);mPom->setAnimTimer(0);
+        mPom->setWalkTimer(0);mPom->setAttackTimer(0);mPom->setLoopCounter(0);
+        mPom->disableStick();
+        pc_p2_original_pom_motion(mPom,0);
+        return;
+    }
 	if (C_POM_PARM(mPom, mOpenOnInteractionOnly) < 2) {
 		mPom->setCurrentState(2);
 		mPom->setNextState(2);
