@@ -94,3 +94,22 @@ inline int pc_kochappy_neutral_edge(bool sent,bool locked,bool neutral,bool safe
     const int axis=deadZone>=22?deadZone+1:22;
     return axis<=74?axis:-1;
 }
+
+// Ordinary west-ramp guidance before the unchanged receiver corridor. A guide
+// observation is not a prediction of future native follower trajectories.
+enum class PcKochappyPrefixInput { Walk, Reached, Done, Refuse };
+struct PcKochappyPrefixProgress {
+    int guide=0,elapsed=0,lastProgress=0;
+    float best=-1.f;
+    PcKochappyPrefixInput observe(float distance,bool originalRoster,int count) {
+        using I=PcKochappyPrefixInput;
+        if(!originalRoster || count<=0 || guide<0 || guide>count
+            || !std::isfinite(distance) || distance<0.f)return I::Refuse;
+        if(guide==count)return I::Done;
+        ++elapsed;
+        if(best<0.f || distance<best-1.f){best=distance;lastProgress=elapsed;}
+        if(distance<=.5f){++guide;elapsed=lastProgress=0;best=-1.f;return guide==count?I::Done:I::Reached;}
+        if(elapsed>=180 || elapsed-lastProgress>=90)return I::Refuse;
+        return I::Walk;
+    }
+};

@@ -275,6 +275,13 @@ constexpr ReceiverWaypoint ReceiverRoute[]={
 };
 constexpr int ReceiverRouteCount=sizeof(ReceiverRoute)/sizeof(ReceiverRoute[0]);
 constexpr float ReceiverRouteReach=.5f;
+// Go west around the observed weak-slip face2949, gather on the lower
+// non-slip access, then ascend the western non-slip ramp. These are ordinary
+// guidance points, not assigned actor coordinates or AI-trajectory proof.
+constexpr ReceiverWaypoint ReceiverPrefix[]={
+ {-1100.f,2260.f},{-1100.f,2400.f},{-1100.f,2260.f},{-990.f,2260.f}
+};
+constexpr int ReceiverPrefixCount=sizeof(ReceiverPrefix)/sizeof(ReceiverPrefix[0]);
 struct RouteFloor {float y;int face;};
 constexpr RouteFloor ReceiverRouteFloor[]={
  {55.426667531f,2928},
@@ -497,6 +504,7 @@ class PurpleKochappyApp:public PlugPikiApp {
  bool gatherDiverted=false;
  PcKochappyReentryProgress reentryProgress;
  PcKochappyRouteCatchup routeCatchup;
+ PcKochappyPrefixProgress prefixProgress;
  int neutralEdgeGuide=-1,neutralEdgeAge=-1;
  bool neutralEdgeVerified=false;
  bool seenCaptain=false,wasActive=false,sawFit=false,sawPause=false,recovered=false,deathDuringStun=false;
@@ -547,6 +555,63 @@ class PurpleKochappyApp:public PlugPikiApp {
   std::printf("P2_PURPLE_KOCHAPPY_POPULATION age=%d field=%d purple_heads=%d other_heads=%d field_plus_heads=%d captured=%d dead=%d fall=%d victim=%d born=%d map=%d all=%d violet_generator=%u violet_state=%d violet_motion=%d violet_frame=%.4f loaded_cycle_capacity=%d loaded_min_cycles=%d loaded_max_cycles=%d source_violet_lifetime_capacity=5 remaining_budget=private_unobserved enemy_health=%.3f enemy_xyz=%.4f,%.4f,%.4f\n",
    age,live,purpleHeads,otherHeads,live+purpleHeads+otherHeads,captured,int(GameStat::deadPikis),int(GameStat::fallPikis),int(GameStat::victimPikis),int(GameStat::bornPikis),int(GameStat::mapPikis),int(GameStat::allPikis),violet->mGenerator?unsigned(violet->mGenerator->_70):0,violet->getCurrentState(),BossObserver::motion(*violet),BossObserver::frame(*violet),C_POM_PARM(violet,mMaxPikiPerCycle),C_POM_PARM(violet,mMinCycles),C_POM_PARM(violet,mMaxCycles),enemy->mHealth,enemy->mSRT.t.x,enemy->mSRT.t.y,enemy->mSRT.t.z);
   std::fflush(nullptr);
+ }
+ bool approachPrefix(Navi* n) {
+  if(prefixProgress.guide==ReceiverPrefixCount)return false;
+  receiverWallCache();
+  bool present[20]={};int count=0;float width=0.f,lag=0.f;
+  Iterator bodies(pikiMgr);CI_LOOP(bodies){Piki* p=static_cast<Piki*>(*bodies);
+   if(!p)continue;
+   int slot=-1;for(int i=0;i<initialBodyCount;++i)if(initialBodies[i]==p){slot=i;break;}
+   require(slot>=0&&!present[slot],"prefix foreign/duplicate current body");present[slot]=true;++count;
+   require(p->isAlive()&&std::isfinite(p->mHealth)&&p->mHealth>0&&p->mGenerator
+    &&unsigned(p->mGenerator->_70)==initialGeneratorIds[slot]&&initialGeneratorIds[slot]!=0,
+    "prefix original live generator identity lost");
+   require(p->getCurrState()&&p->getState()==PIKISTATE_Normal&&p->mMode==PikiMode::FormationMode
+    &&p->mNavi==n&&!p->isStickTo()&&!pc_p2_is_purple(p)&&!p->mP2White&&p->mColor==Red,
+    "prefix original owned Normal Formation roster lost");
+   require(rvfinite({p->mSRT.t.x,p->mSRT.t.y,p->mSRT.t.z})&&p->mInWaterTimer==0&&p->mGroundTriangle
+    &&std::isfinite(p->mGroundTriangle->mTriangle.mNormal.y)&&p->mGroundTriangle->mTriangle.mNormal.y>.5f,
+    "prefix original body contact/hazard changed");
+   const float bodySpan=distance(n->mSRT.t,p->mSRT.t);
+   require(std::isfinite(bodySpan)&&bodySpan<512.f,"prefix original body outside verified span");lag=std::max(lag,bodySpan);
+   Vector3f target;PcKochappyCrowdObservation observation;
+   require(CrowdObserver::target(*p,*n,target,observation),"prefix actual owned Crowd target missing/unsupported");
+   const float targetSpan=distance(n->mSRT.t,target);
+   require(std::isfinite(targetSpan)&&targetSpan<512.f,"prefix Crowd target outside verified span");width=std::max(width,targetSpan);
+   // Check every ACTUAL body and owned slot footprint against source walls;
+   // this is refreshed native geometry, not a rigid future-party translation.
+   const float r=p->mCollisionRadius;
+   require(std::isfinite(r)&&r>0.f,"prefix invalid native body radius");
+   const float offset=p->isCreatureFlag(CF_EnableGroundOffset)?p->mGroundOffset:0.f;
+   receiverCheckSphere({p->mSRT.t.x,p->mSRT.t.y-offset+r,p->mSRT.t.z},r+.10);
+   auto* floor=mapMgr->getCurrTri(target.x,target.z,true);const float y=mapMgr->getMinY(target.x,target.z,true);
+   require(floor&&std::isfinite(y)&&std::isfinite(floor->mTriangle.mNormal.y)&&floor->mTriangle.mNormal.y>.5f,
+    "prefix slot source floor missing/unsafe");
+   receiverCheckSphere({target.x,double(y)+r/floor->mTriangle.mNormal.y,target.z},r+.10);
+  }
+  const bool roster=initialBodyCount==20&&count==20&&n->getPlatePikis()==20;
+  const auto& w=ReceiverPrefix[prefixProgress.guide];const Vector3f goal(w.x,0.f,w.z);
+  auto* floor=mapMgr->getCurrTri(w.x,w.z,true);const float y=mapMgr->getMinY(w.x,w.z,true);
+  require(floor&&std::isfinite(y)&&std::isfinite(floor->mTriangle.mNormal.y)&&floor->mTriangle.mNormal.y>.5f,
+   "prefix guide source floor missing/unsafe");
+  const float r=n->mCollisionRadius,offset=n->isCreatureFlag(CF_EnableGroundOffset)?n->mGroundOffset:0.f;
+  require(std::isfinite(r)&&r>0.f,"prefix invalid native captain radius");
+  RouteVec begin={n->mSRT.t.x,n->mSRT.t.y-offset+r,n->mSRT.t.z};
+  RouteVec end={w.x,double(y)+r/floor->mTriangle.mNormal.y,w.z};
+  const double span=std::sqrt(rvdot(rvsub(end,begin),rvsub(end,begin)));
+  require(std::isfinite(span)&&span<512.,"prefix captain shortcut span invalid");
+  const int samples=std::max(1,int(std::ceil(span/.25)));
+  for(int j=0;j<=samples;++j)receiverCheckSphere(rvadd(begin,rvscale(rvsub(end,begin),double(j)/samples)),r+.10+.125);
+  const int guide=prefixProgress.guide;
+  const auto command=prefixProgress.observe(distance(n->mSRT.t,goal),roster,ReceiverPrefixCount);
+  require(command!=PcKochappyPrefixInput::Refuse,"bounded ordinary west prefix stalled/invalid");
+  if(age%30==0||command!=PcKochappyPrefixInput::Walk)
+   std::printf("P2_PURPLE_KOCHAPPY_WEST_PREFIX age=%d guide=%d count=%d elapsed=%d captain=%.4f,%.4f,%.4f goal=%.4f,%.4f body_lag=%.4f slot_width=%.4f original20=%d all_actual_body_slot_walls_checked=1 future_AI_trajectory_proven=0 actor_writes=0\n",
+    age,guide,ReceiverPrefixCount,prefixProgress.elapsed,n->mSRT.t.x,n->mSRT.t.y,n->mSRT.t.z,w.x,w.z,lag,width,int(roster));
+  if(command==PcKochappyPrefixInput::Walk)point(n,goal,true,KeyConfig::_instance->mSetCursorKey.mBind,ReceiverRouteReach);
+  else input();
+  return true;
  }
  bool catchupRoute(Navi* n,float radius) {
   require(routeCatchup.active,"catchup requires an actually visited guide");
@@ -719,6 +784,7 @@ public:
     std::fflush(nullptr);
    }
    if(n->getPlatePikis()==20&&age-start>30){
+    if(approachPrefix(n))return result;
     if(gatherDiverted){
      require(reentryProgress.mayBegin(receiverWaypoint),"route repeated gather diversion without forward progress or budget exhausted");
      require(receiverWaypoint<=ReceiverRouteCount,"route reentry history exceeds original route");

@@ -5,6 +5,24 @@
 #include <limits>
 #define CHECK(x) do {if(!(x)){std::fprintf(stderr,"FSM observation check failed: %s line%d\n",#x,__LINE__);return 1;}}while(false)
 int main(){
+ PcKochappyPrefixProgress prefix;
+ CHECK(prefix.observe(20.f,true,4)==PcKochappyPrefixInput::Walk);
+ CHECK(prefix.observe(.5f,true,4)==PcKochappyPrefixInput::Reached&&prefix.guide==1);
+ CHECK(prefix.observe(.49f,true,4)==PcKochappyPrefixInput::Reached&&prefix.guide==2);
+ CHECK(prefix.observe(0.f,true,4)==PcKochappyPrefixInput::Reached&&prefix.guide==3);
+ CHECK(prefix.observe(.5f,true,4)==PcKochappyPrefixInput::Done&&prefix.guide==4);
+ CHECK(prefix.observe(0.f,true,4)==PcKochappyPrefixInput::Done);
+ CHECK(prefix.observe(0.f,false,4)==PcKochappyPrefixInput::Refuse);
+ for(float bad:{-1.f,std::numeric_limits<float>::quiet_NaN(),std::numeric_limits<float>::infinity()}){
+  PcKochappyPrefixProgress invalid;CHECK(invalid.observe(bad,true,4)==PcKochappyPrefixInput::Refuse);
+ }
+ PcKochappyPrefixProgress invalidCount;CHECK(invalidCount.observe(1.f,true,0)==PcKochappyPrefixInput::Refuse);
+ PcKochappyPrefixProgress prefixStall;
+ for(int i=0;i<90;++i)CHECK(prefixStall.observe(100.f,true,4)==PcKochappyPrefixInput::Walk);
+ CHECK(prefixStall.observe(100.f,true,4)==PcKochappyPrefixInput::Refuse);
+ PcKochappyPrefixProgress prefixCap;
+ for(int i=0;i<179;++i)CHECK(prefixCap.observe(400.f-float(i)*1.1f,true,4)==PcKochappyPrefixInput::Walk);
+ CHECK(prefixCap.observe(203.1f,true,4)==PcKochappyPrefixInput::Refuse);
  CHECK(pc_kochappy_neutral_edge(false,true,false,true,0,0,0,0,8)==22);
  CHECK(pc_kochappy_neutral_edge(false,true,false,true,1,0,0,0,30)==31);
  CHECK(pc_kochappy_neutral_edge(false,true,false,true,2,0,0,0,73)==74);
