@@ -17,7 +17,7 @@ bool sameRow(const CatalogRow& a,const CatalogRow& b){
 }
 
 }
-bool supported(unsigned source){return source==47||source==49||source==88||source==91;}
+bool supported(unsigned source){return source==47||source==49||source==88||source==91||source==92;}
 bool decode(const CatalogRow& row,std::string& e){
  if(!supported(row.enemy.source))return reject(e,"unsupported original foliage source");
  if(!validateOriginalRecord(row.enemy,e))return false;

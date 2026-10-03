@@ -85,7 +85,8 @@ def main():
     mods = sorted(bank.glob('*/*.mod'))
     report = json.loads((bank / 'foliage.json').read_text())
     identities = {47: ('Clover', 'clover'), 49: ('Ooinu_s', 'ooinu_s'),
-                  88: ('Nekojarashi', 'nekojarashi'), 91: ('KareOoinu_s', 'kareooinu_s')}
+                  88: ('Nekojarashi', 'nekojarashi'), 91: ('KareOoinu_s', 'kareooinu_s'),
+                  92: ('KareOoinu_l', 'karaooinu_l')}
     expected = set()
     sources = []
     for name, species in report['species'].items():
