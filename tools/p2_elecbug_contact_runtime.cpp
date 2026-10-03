@@ -90,9 +90,10 @@ Vector3f pressAim(Teki* enemy,Teki* partner){
     Vector3f goal=enemy->mSRT.t;
     if(!std::strcmp(mode,"red-electric")){
         Vector3f away=goal-partner->mSRT.t;away.y=0;away.normalise();
-        // Aim at the outside face with ordinary cursor input so the live arc
-        // does not intercept the vulnerable Red before physical press contact.
-        goal=goal+away*3.f;
+        // The outside-face aim missed the fitted receiver before grounding.
+        // Move the ordinary cursor slightly through the endpoint so the
+        // descending body reaches physical contact earlier in the throw.
+        goal=goal-away*6.f;
     }
     return goal;
 }
