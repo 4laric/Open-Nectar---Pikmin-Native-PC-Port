@@ -134,7 +134,10 @@ bool NativeFloor::install(const CaveDescriptor& cave,const FloorDefinition& floo
    if(!born)return false;
    if(suppressed){
     if(actor.actor)return refuse(error,"retail suppressed source unexpectedly born");
-    binding.state=BindingState::SourceSuppressed;binding.receipt="source-population-gate";
+    if((row.sourceId!=6&&row.sourceId!=7)||!m->scene.suppressed(row,*origin,m->context,binding,error))return false;
+    if(!(binding.identity==*origin)||binding.actor||binding.state!=BindingState::SourceSuppressed||
+       binding.receipt.empty()||!m->scene.absent(row,*origin,m->context,binding))
+     return refuse(error,"retail actual suppression has no selected source receipt");
    }else{
     if(!actor.actor)return refuse(error,"retail family returned no actual actor");
     auto& owned=m->actors.back();

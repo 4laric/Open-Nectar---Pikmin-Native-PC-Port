@@ -26,6 +26,8 @@ public:
  // Verify selected live/terminal disposition before any native enemy allocation.
  virtual bool prior(const ContentRow&,const BirthIdentity&,const Snapshot&,LiveBinding&,bool& absent,std::string&)=0;
  virtual bool cargo(const Placement&,const ContentRow&,const BirthIdentity&,const Snapshot&,LiveBinding&,std::string&)=0;
+ // Called only after the real leaf returns its population-gated null birth.
+ virtual bool suppressed(const ContentRow&,const BirthIdentity&,const Snapshot&,LiveBinding&,std::string&)=0;
  virtual bool absent(const ContentRow&,const BirthIdentity&,const Snapshot&,const LiveBinding&)const=0;
  virtual bool commit(const Snapshot&,std::string&)=0;
  virtual bool release(std::string&)=0;
