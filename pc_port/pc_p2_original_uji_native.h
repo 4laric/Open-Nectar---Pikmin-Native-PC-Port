@@ -14,3 +14,4 @@ private:
 };
 } }
 void pc_p2_original_uji_forget(BTeki*);
+bool pc_p2_original_uji_admitted();

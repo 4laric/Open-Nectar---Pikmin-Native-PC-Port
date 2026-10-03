@@ -30,6 +30,7 @@ public:
  // Called by the native forget funnel before address reuse, without killing.
  void retired(Creature* actor){mHosts.erase(actor);}
  Host* lookup(Creature* actor){auto i=mHosts.find(actor);return i==mHosts.end()?nullptr:&i->second;}
+ bool prepared()const{return mPrepared;}
 private:
  Engine& mEngine;std::map<unsigned,CatalogRow> mRows;
  std::map<unsigned,unsigned> mRemaining;std::map<Creature*,Host> mHosts;
