@@ -1,6 +1,7 @@
 #pragma once
 #include <cmath>
 #include <limits>
+#include <initializer_list>
 
 // Input planning only. Recruitment remains the native strict XZ radius test.
 enum class PcKochappyGatherInput { Refuse, Cursor, Walk };
@@ -212,16 +213,37 @@ struct PcKochappyGuidePulse {
 // Ordinary near-guide input adapter. Model exact Navi angle bin/boost and
 // strict per-axis SDL dead zone; this does not predict collision movement.
 struct PcKochappyGuideAxes {bool valid=false;int x=0,y=0;float magnitude=0,bearingError=0;};
+struct PcKochappyGuideMotion {
+ float speed=0,dt=0,tau=0,nx=0,ny=1,nz=0,vx=0,vz=0,bx=0,bz=0,gravity=0,slipFactor=0;
+ bool valid() const {
+  for(float v:{speed,dt,tau,nx,ny,nz,vx,vz,bx,bz,gravity,slipFactor})if(!std::isfinite(v))return false;
+  return speed>0&&dt>0&&dt<=1.f/30.f+.000001f&&tau>=dt&&ny>.5f
+   &&std::fabs(std::sqrt(nx*nx+ny*ny+nz*nz)-1.f)<.001f&&gravity>=0&&slipFactor>=0;
+ }
+ bool error(float dx,float dz,float tx,float tz,float& out) const {
+  const float dot=tx*nx+tz*nz,px=tx-dot*nx,py=-dot*ny,pz=tz-dot*nz;
+  const float targetSpeed=std::hypot(tx,tz),len=std::sqrt(px*px+py*py+pz*pz);
+  if(!std::isfinite(targetSpeed)||!std::isfinite(len)||len<=0)return false;
+  float sx=nx*ny,sy=ny*ny-1.f,sz=nz*ny;const float sl=std::sqrt(sx*sx+sy*sy+sz*sz);
+  const float slip=gravity*dt*slipFactor;if(!std::isfinite(slip))return false;
+  sx=sl>0?sx/sl*slip:0;sz=sl>0?sz/sl*slip:0;
+  const float nextX=vx+(px/len*targetSpeed+bx-vx)*dt/tau+sx;
+  const float nextZ=vz+(pz/len*targetSpeed+bz-vz)*dt/tau+sz;
+  out=std::hypot(dx-nextX*dt,dz-nextZ*dt);
+  return std::isfinite(nextX)&&std::isfinite(nextZ)&&std::isfinite(out);
+ }
+};
 inline PcKochappyGuideAxes pc_kochappy_analog_guide(float dx,float dz,float cameraX,float cameraZ,
-    int deadZone,float binDegrees,float clamp,float neutral,float cursor) {
+    int deadZone,float binDegrees,float clamp,float neutral,float cursor,const PcKochappyGuideMotion* motion=nullptr) {
  PcKochappyGuideAxes out;
+ if(motion&&!motion->valid())return out;
  if(!std::isfinite(dx)||!std::isfinite(dz)||!std::isfinite(cameraX)||!std::isfinite(cameraZ)
     ||std::fabs(std::hypot(cameraX,cameraZ)-1.f)>.001f||deadZone<0||deadZone>127
     ||!std::isfinite(binDegrees)||binDegrees<=0||binDegrees>180||!std::isfinite(clamp)||clamp<=0||clamp>1
     ||!std::isfinite(neutral)||neutral<0||!std::isfinite(cursor)||cursor<neutral||cursor>=clamp)return out;
  const float distance=std::hypot(dx,dz);if(!std::isfinite(distance)||distance<=.5f||distance>=12)return out;
  const float pi=3.14159265358979323846f,quarter=pi*.25f,width=pi/180.f*binDegrees;
- float bestError=10,bestMagnitude=10;
+ float bestError=std::numeric_limits<float>::infinity(),bestMagnitude=10;
  for(int x=-74;x<=74;++x)for(int y=-74;y<=74;++y){
   const float sx=std::abs(x)>deadZone?x/74.f:0.f,sz=std::abs(y)>deadZone?-y/74.f:0.f;
   float magnitude=std::hypot(sx,sz);if(magnitude==0)continue;
@@ -229,10 +251,11 @@ inline PcKochappyGuideAxes pc_kochappy_analog_guide(float dx,float dz,float came
   const float angle=width*int((theta+width*.5f)/width),remainder=angle-int(angle/quarter)*quarter;
   const float length=std::sin(quarter)/(std::sin(remainder)+std::sin(quarter-remainder));
   magnitude*=1.f/length;if(magnitude>=clamp)magnitude=1;
-  if(!std::isfinite(magnitude)||magnitude<=cursor||magnitude>=clamp)continue;
+  if(!std::isfinite(magnitude)||magnitude<=cursor||(!motion&&magnitude>=clamp))continue;
   const float lx=std::sin(angle),lz=std::cos(angle);
   const float wx=cameraX*lx-cameraZ*lz,wz=cameraZ*lx+cameraX*lz;
-  const float error=1.f-(wx*dx+wz*dz)/distance;
+  float error=1.f-(wx*dx+wz*dz)/distance;
+  if(motion&&!motion->error(dx,dz,wx*magnitude*motion->speed,wz*magnitude*motion->speed,error))continue;
   if(!std::isfinite(error)||error<-.00001f)continue;
   if(error<bestError-.000001f||(std::fabs(error-bestError)<=.000001f&&magnitude<bestMagnitude)){
    bestError=error;bestMagnitude=magnitude;out={true,x,y,magnitude,error};

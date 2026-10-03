@@ -43,6 +43,7 @@
 #include "KeyConfig.h"
 #include "pc_bbft.h"
 #include "pc_window.h"
+#include "pc_randomizer.h"
 #include "pc_gpu_preference.h"
 #include "pc_p2_kochappy.h"
 #include "pc_p2_kochappy_fsm.h"
@@ -944,13 +945,26 @@ public:
       require(pc_window_get_control_mode()==PC_CONTROL_CLASSIC&&pc_window_get_stick_invert()==0,
         "analog guide requires ordinary classic noninverted input");
       const auto& axis=n->controlCamera()->mViewXAxis;const float yaw=std::atan2(axis.z,axis.x);
+      require(n->mGroundTriangle&&n->mPlateMgr&&n->mProps,"analog guide actual ground/plate/props required");
+      const int slip=MapCode::getSlipCode(n->mGroundTriangle);require(slip>=0&&slip<=2,"analog guide native slip code unsupported");
+      Stickers sticks(n);const int stuck=sticks.getNumStickers();require(stuck>=0,"analog guide current sticker count invalid");
+      const float drag=std::max(.1f,1.f-stuck*.08f);
+      const auto& normal=n->mGroundTriangle->mTriangle.mNormal;
+      PcKochappyGuideMotion motion;
+      motion.speed=(n->mPlateMgr->canNaviRunFast()?C_NAVI_PARM(n,mRunSpeed):C_NAVI_PARM(n,mMoveSpeed))
+        *drag*pc_randomizer_captain_movement_multiplier()*pc_settings_get_navi_speed_scale();
+      motion.dt=gsys->getFrameTime();motion.tau=n->mProps->mCreatureProps.mAcceleration();
+      motion.nx=normal.x;motion.ny=normal.y;motion.nz=normal.z;motion.vx=n->mVelocity.x;motion.vz=n->mVelocity.z;
+      motion.bx=n->_B0.x;motion.bz=n->_B0.z;motion.gravity=AICONST.mGravity();
+      motion.slipFactor=slip==2?AICONST.mStrongSlipFactor():slip==1?AICONST.mWeakSlipFactor():0.f;
       const auto axes=pc_kochappy_analog_guide(goal.x-n->mSRT.t.x,goal.z-n->mSRT.t.z,
         std::cos(yaw),std::sin(yaw),pc_window_get_stick_dead_zone(),C_NAVI_PARM(n,mShakePreventionAngle),
-        C_NAVI_PARM(n,mClampStickToMaxThreshold),C_NAVI_PARM(n,mNeutralStickThreshold),C_NAVI_PARM(n,mCursorMoveStickThreshold));
+        C_NAVI_PARM(n,mClampStickToMaxThreshold),C_NAVI_PARM(n,mNeutralStickThreshold),C_NAVI_PARM(n,mCursorMoveStickThreshold),&motion);
       require(axes.valid,"analog guide loaded input has no genuinely moving axis");
-      std::printf("P2_PURPLE_KOCHAPPY_ANALOG_GUIDE age=%d guide=%d remaining=%.6f raw=%d,%d magnitude=%.9f bearing_error=%.9f loaded_bin=%.6f loaded_cursor=%.6f current_velocity=%.6f,%.6f ordinary_input=1 collision_prediction=0 actor_writes=0\n",
+      std::printf("P2_PURPLE_KOCHAPPY_ANALOG_GUIDE age=%d guide=%d remaining=%.6f raw=%d,%d magnitude=%.9f input_score=%.9f loaded_bin=%.6f loaded_cursor=%.6f current_velocity=%.6f,%.6f ordinary_input=1 collision_prediction=0 actor_writes=0\n",
         age,receiverWaypoint,guideDistance,axes.x,axes.y,axes.magnitude,axes.bearingError,
         C_NAVI_PARM(n,mShakePreventionAngle),C_NAVI_PARM(n,mCursorMoveStickThreshold),n->mVelocity.x,n->mVelocity.z);
+      std::printf("P2_PURPLE_KOCHAPPY_GUIDE_MOTION age=%d slip=%d source_speed=%.6f dt=%.9f tau=%.6f gravity=%.6f slip_factor=%.6f projected_step_goal_error=%.6f source_velocity_step_only=1 collision_trajectory_proven=0 actor_writes=0\n",age,slip,motion.speed,motion.dt,motion.tau,motion.gravity,motion.slipFactor,axes.bearingError);
       input(KeyConfig::_instance->mSetCursorKey.mBind,axes.x,axes.y);
      }else point(n,goal,true,KeyConfig::_instance->mSetCursorKey.mBind,ReceiverRouteReach);
      return result;

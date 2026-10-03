@@ -278,4 +278,20 @@ int main(){
  CHECK(!pc_kochappy_directed_prefix_edge(10,0,0,0,22,8).valid);
  CHECK(!pc_kochappy_directed_prefix_edge(NAN,0,1,0,22,8).valid);
  CHECK(!pc_kochappy_directed_prefix_edge(512,0,1,0,22,8).valid);
+ PcKochappyGuideMotion uphill;uphill.speed=160;uphill.dt=1.f/30.f;uphill.tau=.1f;
+ uphill.nx=-.2f;uphill.ny=std::sqrt(.96f);uphill.gravity=560;uphill.slipFactor=1;
+ CHECK(uphill.valid());
+ const auto slipAxes=pc_kochappy_analog_guide(5,0,1,0,8,10,.9f,.1f,.65f,&uphill);
+ CHECK(slipAxes.valid&&slipAxes.x>0&&slipAxes.magnitude>.99f);
+ float weakError=0;CHECK(uphill.error(5,0,160*.6517f,0,weakError));
+ CHECK(slipAxes.bearingError<weakError);
+ PcKochappyGuideMotion inertia=uphill;inertia.nx=0;inertia.ny=1;inertia.slipFactor=0;inertia.vx=160;
+ const auto brakeAxes=pc_kochappy_analog_guide(.6f,0,1,0,8,10,.9f,.1f,.65f,&inertia);
+ CHECK(brakeAxes.valid&&brakeAxes.x<0); // Ordinary stick brakes measured momentum.
+ auto invalidMotion=uphill;invalidMotion.tau=.001f;
+ CHECK(!pc_kochappy_analog_guide(5,0,1,0,8,10,.9f,.1f,.65f,&invalidMotion).valid);
+ invalidMotion=uphill;invalidMotion.bx=NAN;
+ CHECK(!pc_kochappy_analog_guide(5,0,1,0,8,10,.9f,.1f,.65f,&invalidMotion).valid);
+ invalidMotion=uphill;invalidMotion.gravity=std::numeric_limits<float>::max();invalidMotion.slipFactor=std::numeric_limits<float>::max();
+ CHECK(!pc_kochappy_analog_guide(5,0,1,0,8,10,.9f,.1f,.65f,&invalidMotion).valid);
 }
