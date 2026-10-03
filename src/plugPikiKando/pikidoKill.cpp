@@ -1,5 +1,8 @@
 #include "DebugLog.h"
 #include "pc_p2_gas_cloud.h"
+#if defined(PIKI_PC_PORT)
+#include "pc_p2_cave_campaign_party_engine.h"
+#endif
 #include "EffectMgr.h"
 #include "FlowController.h"
 #include "GameStat.h"
@@ -123,6 +126,11 @@ void Piki::doKill()
 	mFSM->transit(this, PIKISTATE_Dead);
 	_500.reset();
 	pikiMgr->mDeadPikis++;
+#if defined(PIKI_PC_PORT)
+	// Death observers above must see canonical source identity. Retire the
+	// consumer, then canonical origin, before the physical slot is released.
+	pc_p2_cave_campaign_party_forget(this);
+#endif
 	pikiMgr->kill(this);
 
 	STACK_PAD_VAR(10);
