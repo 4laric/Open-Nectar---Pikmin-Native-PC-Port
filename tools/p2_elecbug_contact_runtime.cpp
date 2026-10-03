@@ -86,6 +86,16 @@ Teki* find(unsigned token){
         if(t&&t->mGenerator&&t->mGenerator->_70==token)return t;}
     return nullptr;
 }
+Vector3f pressAim(Teki* enemy,Teki* partner){
+    Vector3f goal=enemy->mSRT.t;
+    if(!std::strcmp(mode,"red-electric")){
+        Vector3f away=goal-partner->mSRT.t;away.y=0;away.normalise();
+        // Aim at the outside face with ordinary cursor input so the live arc
+        // does not intercept the vulnerable Red before physical press contact.
+        goal=goal+away*12.f;
+    }
+    return goal;
+}
 class ContactApp:public PlugPikiApp {
     int frame=0,age=0,ready=0,throwTicks=0,neutralThrowTicks=0,uiResumeTicks=0;
     int redApproach=0;
@@ -385,12 +395,12 @@ public:
             const bool discharging=!std::strcmp(state,"discharge")||!std::strcmp(state,"childdischarge");
             if(held&&desiredSpecies()==P2SpeciesWhite&&pc_p2_species(held)==P2SpeciesWhite)require(held==acquiredWhite,"held White must be acquired witness");
             if(held&&(pc_p2_species(held)!=desiredSpecies()||(stagedRgb&&held!=stagedRgb))){
-                aHeld=true;point(n,enemy->mSRT.t,false,KBBTN_A|(age%6==0?KBBTN_DPAD_RIGHT:0));return result;
+                aHeld=true;point(n,pressAim(enemy,partner),false,KBBTN_A|(age%6==0?KBBTN_DPAD_RIGHT:0));return result;
             }
             bool pending=false;for(const auto& entry:flight)if(entry.second>=2)pending=true;
             if(!aHeld&&pending){input();return result;}
-            if(!held&&!aHeld){aHeld=true;point(n,enemy->mSRT.t,false,KBBTN_A);return result;}
-            if(aHeld&&!discharging){point(n,enemy->mSRT.t,false,KBBTN_A);return result;}
+            if(!held&&!aHeld){aHeld=true;point(n,pressAim(enemy,partner),false,KBBTN_A);return result;}
+            if(aHeld&&!discharging){point(n,pressAim(enemy,partner),false,KBBTN_A);return result;}
             if(aHeld){
                 input();for(auto& entry:flight)if(entry.second==1){entry.second=2;releasedAt[entry.first]=frame;witness(entry.first,"released");}
                 aHeld=false;return result;
@@ -398,7 +408,7 @@ public:
             if(pending){input();return result;}
         }
         const int cycle=throwTicks++%45;
-        if(cycle<22){aHeld=true;point(n,enemy->mSRT.t,false,KBBTN_A);}
+        if(cycle<22){aHeld=true;point(n,pressAim(enemy,partner),false,KBBTN_A);}
         else {
             input();
             if(aHeld)for(auto& entry:flight)if(entry.second==1){entry.second=2;releasedAt[entry.first]=frame;witness(entry.first,"released");}
