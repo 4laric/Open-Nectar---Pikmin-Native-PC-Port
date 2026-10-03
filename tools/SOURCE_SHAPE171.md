@@ -81,3 +81,17 @@ The actual Body animator must own those two buffers through each actor lifetime,
 including motion transitions, before claiming live support for both zero-scale
 clips. Offline sampled geometry cannot establish current-camera lighting,
 complete animation/FSM, gameplay or SAVE acceptance.
+
+
+`import_p2_piki_zero_sources.py --source-bank <raw67-bank> --species purple|white
+--output <fresh-private-output>` exports the exact105 raw transform frames for
+SHA-pinned19/63 plus original unbaked geometry, draw entries, authored joint
+parents and remapped bind transforms. `piki_source_geometry.py` is a literal
+snapshot adapter of the established converter parser with only the final bake
+omitted; it pins the genuine models before parsing. All work completes before
+fresh output creation. The shared converter and its singular-normal rejection
+remain unchanged. Exported raw scale/rotation/translation values retain exact
+source samples and hold-last track indexing. No normal matrices are generated.
+The actual owner must consume source draw/vertex/normal indices and maintain
+its own view-space destination buffers; these data files do not grant that
+lifecycle, a native animation clock, or a selected Scene.
