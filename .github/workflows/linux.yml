@@ -2,6 +2,8 @@ name: Linux build
 
 on:
   push:
+    branches-ignore:
+      - codex/captain-windows-netplay-112c-j2
   pull_request:
 
 jobs:
