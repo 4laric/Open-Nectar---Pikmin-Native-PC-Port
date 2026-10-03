@@ -118,8 +118,10 @@ bool animateWalk(Navi* n,const std::function<bool(int)>& emit,std::string& e){
  MotionState current;if(!b.bank->state(n,current,e))return false;
  auto next=actor->animation;next.bound=selectorMotion(current.motion);
  control::AnimationOutput selected;if(!control::updateWalkAnimation(b.params,frame.displacement,frame.deltaTime,b.frame.face,frame.faceDirectionOffset,frame.selfIsJKoke,next,selected,e))return false;
- if(selected.transition&&selected.preserveFrame)return fail(e,"source bank lacks frame-preserving locomotion transition API");
- if(selected.transition&&!b.bank->start(n,sourceMotion(selected.motion),e))return false;
+ if(selected.transition){
+  bool started=selected.preserveFrame?b.bank->startPreservingFrame(n,sourceMotion(selected.motion),e):b.bank->start(n,sourceMotion(selected.motion),e);
+  if(!started)return false;
+ }
  if(!b.bank->advance(n,selected.playbackSpeed*frame.deltaTime,emit,e))return false;
  if(n->getCurrState()==b.state->nativeState()&&pc_p2_original_captain_loaded_scene()==b.scene&&actor->actor==n&&actor->incarnation==b.scene->incarnation())actor->animation=next;
  return true;
