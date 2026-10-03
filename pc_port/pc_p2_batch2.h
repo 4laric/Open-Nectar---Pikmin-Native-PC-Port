@@ -49,6 +49,9 @@ unsigned long pc_p2_batch2_count();
 bool pc_p2_batch2_registered(BTeki*);
 // Runtime-born group member (Mitite fellows, #992): copy the host visual key.
 void pc_p2_batch2_adopt(BTeki* child, BTeki* host);
+// BigFoot child dependency: preload/bind the existing actual Mitite bank.
+bool pc_p2_batch2_prepare_tamago();
+bool pc_p2_batch2_bind_tamago(BTeki* child);
 // Explicit original-course Uji admission and per-actor presentation. These
 // calls read actual banks/meshes and never scan an AP or surrogate roster.
 bool pc_p2_batch2_original_uji_resources(unsigned source,std::vector<p2batch2clock::Row>&,std::string& error);
