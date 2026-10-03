@@ -93,6 +93,8 @@ void PomAi::initAI(Pom* pom)
  */
 void PomAi::animationKeyUpdated(immut PaniAnimKeyEvent& event)
 {
+    // Original source6 clips, not inherited P1 animation, own gameplay keys.
+    if(pc_p2_original_pom_managed(mPom))return;
 	switch (event.mEventType) {
 	case KEY_Action0:
 	{
@@ -332,6 +334,10 @@ int PomAi::killStickPiki()
  */
 void PomAi::createPikiHead()
 {
+    if(pc_p2_original_pom_managed(mPom)){
+        if(pc_p2_original_pom_ready(mPom)){pc_p2_convert_violet(mPom,pc_p2_original_pom_remaining(mPom));playSound(3);}
+        return;
+    }
     if (pc_p2_cave_bud_body_profile()) {
         const int species = pc_p2_cave_bud_body_species(mPom);
         const int remaining = pc_p2_cave_bud_body_remaining(mPom);
@@ -471,6 +477,7 @@ bool PomAi::isMotionFinishTransit()
  */
 bool PomAi::deadTransit()
 {
+    if(pc_p2_original_pom_managed(mPom))return pc_p2_original_pom_remaining(mPom)==0;
     if (pc_p2_cave_bud_body_profile())
         return pc_p2_cave_bud_body_species(mPom) >= 0 && pc_p2_cave_bud_body_remaining(mPom) == 0;
 	return mReleasedSeedCount >= ((pc_p2_violet(mPom) || pc_p2_ivory(mPom)) ? 5 : mMaxSeedCount);
@@ -504,7 +511,7 @@ bool PomAi::petalShakeTransit()
  */
 bool PomAi::petalCloseTransit()
 {
-	f32 closeWait = pc_p2_cave_bud_body_profile() ? 1.0f : (pc_p2_ivory(mPom) ? 1.0f : (pc_p2_violet(mPom) ? 5.0f : C_POM_PARM(mPom, mCloseWaitTime)));
+	f32 closeWait = (pc_p2_original_pom_managed(mPom) || pc_p2_cave_bud_body_profile()) ? 1.0f : (pc_p2_ivory(mPom) ? 1.0f : (pc_p2_violet(mPom) ? 5.0f : C_POM_PARM(mPom, mCloseWaitTime)));
     const int capacity = (pc_p2_cave_bud_body_profile() || pc_p2_violet(mPom) || pc_p2_ivory(mPom)) ? 5 : C_POM_PARM(mPom, mMaxPikiPerCycle);
 #if defined(PIKI_PC_PORT)
 	// Retail waits 30 seconds; keep short/custom and disabled timers intact.
@@ -551,6 +558,13 @@ bool PomAi::dischargeTransit()
  */
 void PomAi::initDie(int nextState)
 {
+    if(pc_p2_original_pom_managed(mPom)){
+        pc_p2_original_pom_motion(mPom,1);
+        mPom->setNextState(nextState);mPom->setMotionFinish(false);
+        mHasCollided=false;mPlaySound=false;mIsOpening=false;
+        mPom->setWalkTimer(0);mPom->disableStick();
+        return; // Source clips own animation; no P1 animator/effect/collision tags.
+    }
 	mPom->setNextState(nextState);
 	mPom->setMotionFinish(false);
 	mPom->setAttackTimer(0.0f);
@@ -562,6 +576,13 @@ void PomAi::initDie(int nextState)
  */
 void PomAi::initWait(int nextState)
 {
+    if(pc_p2_original_pom_managed(mPom)){
+        pc_p2_original_pom_motion(mPom,0);
+        mPom->setNextState(nextState);mPom->setMotionFinish(false);
+        mHasCollided=false;mPlaySound=false;mIsOpening=false;
+        mPom->setWalkTimer(0);mPom->disableStick();
+        return; // Source clips own animation; no P1 animator/effect/collision tags.
+    }
 	mPom->setNextState(nextState);
 	mPom->setMotionFinish(false);
 	mPom->mAnimator.startMotion(PaniMotionInfo(TekiMotion::Wait1, this));
@@ -573,7 +594,7 @@ void PomAi::initWait(int nextState)
 		Creature* stuck = *iter;
 		if (stuck && stuck->isAlive() && stuck->mObjType == OBJTYPE_Piki) {
 			Piki* stuckPiki = static_cast<Piki*>(*iter);
-			if (stuckPiki->mColor == mPom->mColor) {
+			if (!pc_p2_original_pom_managed(mPom) && stuckPiki->mColor == mPom->mColor) {
 				stuck->kill(false);
 				iter.dec();
 			}
@@ -588,6 +609,13 @@ void PomAi::initWait(int nextState)
  */
 void PomAi::initPetalOpen(int nextState)
 {
+    if(pc_p2_original_pom_managed(mPom)){
+        pc_p2_original_pom_motion(mPom,2);
+        mPom->setNextState(nextState);mPom->setMotionFinish(false);
+        mHasCollided=false;mPlaySound=false;mIsOpening=false;
+        mPom->setWalkTimer(0);mPom->disableStick();
+        return; // Source clips own animation; no P1 animator/effect/collision tags.
+    }
 	mPom->setNextState(nextState);
 	mPom->setMotionFinish(false);
 	mPom->mAnimator.startMotion(PaniMotionInfo(TekiMotion::Type1, this));
@@ -603,6 +631,13 @@ void PomAi::initPetalOpen(int nextState)
  */
 void PomAi::initPetalShake(int nextState)
 {
+    if(pc_p2_original_pom_managed(mPom)){
+        pc_p2_original_pom_motion(mPom,5);
+        mPom->setNextState(nextState);mPom->setMotionFinish(false);
+        mHasCollided=false;mPlaySound=false;mIsOpening=false;
+        mPom->setWalkTimer(0);mPom->disableStick();
+        return; // Source clips own animation; no P1 animator/effect/collision tags.
+    }
 	mPom->setNextState(nextState);
 	mPom->setMotionFinish(false);
 	mPom->mAnimator.startMotion(PaniMotionInfo(TekiMotion::Type4, this));
@@ -619,6 +654,13 @@ void PomAi::initPetalShake(int nextState)
  */
 void PomAi::initPetalClose(int nextState)
 {
+    if(pc_p2_original_pom_managed(mPom)){
+        pc_p2_original_pom_motion(mPom,3);
+        mPom->setNextState(nextState);mPom->setMotionFinish(false);
+        mHasCollided=false;mPlaySound=false;mIsOpening=false;
+        mPom->setWalkTimer(0);mPom->disableStick();
+        return; // Source clips own animation; no P1 animator/effect/collision tags.
+    }
 	mPom->setNextState(nextState);
 	mPom->setMotionFinish(false);
 	mPom->setLoopCounter(0);
@@ -632,6 +674,13 @@ void PomAi::initPetalClose(int nextState)
  */
 void PomAi::initDischarge(int nextState)
 {
+    if(pc_p2_original_pom_managed(mPom)){
+        pc_p2_original_pom_motion(mPom,4);
+        mPom->setNextState(nextState);mPom->setMotionFinish(false);
+        mHasCollided=false;mPlaySound=false;mIsOpening=false;
+        mPom->setWalkTimer(0);mPom->disableStick();
+        return; // Source clips own animation; no P1 animator/effect/collision tags.
+    }
 	mPom->setNextState(nextState);
 	mPom->setMotionFinish(false);
 	mPom->mAnimator.startMotion(PaniMotionInfo(TekiMotion::Type3, this));
@@ -719,26 +768,37 @@ void PomAi::update()
 {
     // Bodies exist before generator attachment and scene activation. They may
     // not run legacy capture/death/output while the explicit profile is fenced.
-    if (pc_p2_cave_bud_body_profile() && pc_p2_cave_bud_body_species(mPom) < 0) return;
-	setEveryFrame();
+    const bool original=pc_p2_original_pom_managed(mPom);
+    if(original) {
+        if(!pc_p2_original_pom_ready(mPom))return;
+        const auto sourceEvent=pc_p2_original_pom_advance(mPom,gsys->getFrameTime());
+        if(sourceEvent.action && mPom->getCurrentState()==5)createPikiHead();
+        // P2 END is a transition signal, never P1 death/pellet effects.
+        if(sourceEvent.finished)mPom->setMotionFinish(true);
+        mHasCollided=pc_p2_original_pom_take_touch(mPom);
+    } else if (pc_p2_cave_bud_body_profile() && pc_p2_cave_bud_body_species(mPom) < 0) return;
+	if(!original)setEveryFrame();
 	switch (mPom->getCurrentState()) {
 	case 0:
 	{
-		dieState();
+        if(original){
+            if(mPom->getMotionFinish() && pc_p2_original_pom_pending(mPom)==0
+                && mPom->getStickPikiCount()==0){mPom->doKill();return;}
+        }else dieState();
 		break;
 	}
 	case 1:
 	{
 		waitState();
-		if (petalOpenTransit()) {
+		if (original || petalOpenTransit()) {
 			initPetalOpen(2);
 		}
 		break;
 	}
 	case 2:
 	{
-		openState();
-		if (petalCloseTransit()) {
+		if(!original)openState();
+		if (!original && petalCloseTransit()) {
 			initPetalClose(4);
 		} else if (petalShakeTransit()) {
 			initPetalShake(3);
@@ -747,8 +807,10 @@ void PomAi::update()
 	}
 	case 3:
 	{
-		shakeState();
-		if (petalCloseTransit()) {
+        if(original)mPom->addWalkTimer(gsys->getFrameTime());else shakeState();
+        const bool sourceClose=original && (mPom->getWalkTimer()>1.f
+            ||pc_p2_original_pom_pending(mPom)>=pc_p2_original_pom_remaining(mPom));
+        if (sourceClose || (!original && petalCloseTransit())) {
 			initPetalClose(4);
 		} else if (petalShakeTransit()) {
 			initPetalShake(3);
@@ -757,9 +819,9 @@ void PomAi::update()
 	}
 	case 4:
 	{
-		closeState();
+		if(!original)closeState();
 		if (isMotionFinishTransit()) {
-			if (dischargeTransit()) {
+			if (original ? pc_p2_original_pom_pending(mPom)>0 : dischargeTransit()) {
 				initDischarge(5);
 			} else {
 				initWait(1);
@@ -771,7 +833,11 @@ void PomAi::update()
 	{
 		dischargeState();
 		if (isMotionFinishTransit()) {
-			if (deadTransit()) {
+            if(original && pc_p2_original_pom_pending(mPom)>0){
+                // Capacity-safe deviation: retain living reserved inputs and retry
+                // on a new actual Shot key, never consume without an output slot.
+                initDischarge(5);
+            } else if (deadTransit()) {
 				initDie(0);
 			} else {
 				initWait(1);
