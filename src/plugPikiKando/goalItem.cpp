@@ -515,10 +515,11 @@ Piki* GoalItem::exitPiki()
 	Piki* piki = static_cast<Piki*>(original ? pikiMgr->birthOriginalP2Container() : pikiMgr->birth());
 	pikiMgr->containerExitMode = false;
 	if (!piki) {
+        if (original) return nullptr;
 #if defined(PIKI_PC_PORT)
 		// Co-op: the exit that failed is still counted off by GoalItem::update (mPikisToExit--), so forfeit one
 		// owed exit too; otherwise the debt outlives the queue and the next day-start exit goes to captain 2.
-		if (!original) (void)pc_coop_onion_exit_next(mPcExitFor);
+		(void)pc_coop_onion_exit_next(mPcExitFor);
 #endif
 #if defined(VERSION_GPIJ01) || defined(VERSION_DPIJ01_PIKIDEMO)
 #else
