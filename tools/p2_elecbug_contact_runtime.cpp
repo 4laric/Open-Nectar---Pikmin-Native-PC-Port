@@ -88,6 +88,8 @@ Teki* find(unsigned token){
 }
 class ContactApp:public PlugPikiApp {
     int frame=0,age=0,ready=0,throwTicks=0,neutralThrowTicks=0,uiResumeTicks=0;
+    int redApproach=0;
+    Vector3f redApproachSide;
     bool captainSeen=false,started=false,offContactSeen=false,reverseSeen=false;
     bool slotSeen[2]={false,false};
     int acquisition=0,acquisitionTicks=0,whiteGather=0,ivoryThrowTicks=0;
@@ -337,6 +339,26 @@ public:
         }
         // Only virtual-pad input. Gather, approach, aim during A hold, release.
         if(age<90){input(KBBTN_B);return result;}
+        if (!std::strcmp(mode,"red-electric") && redApproach < 2) {
+            Vector3f away=enemy->mSRT.t-partner->mSRT.t;
+            away.y=0;
+            require(away.length()>1.f,"distinct Red approach endpoints");
+            away.normalise();
+            if (redApproach==0 && redApproachSide.length()==0) {
+                redApproachSide.set(-away.z,0,away.x);
+                if (redApproachSide.DP(n->mSRT.t-enemy->mSRT.t)<0) redApproachSide.multiply(-1.f);
+            }
+            // Walk around the live arc to the outside of its endpoint. This
+            // uses ordinary pad movement; no enemy/Pikmin/receiver state writes.
+            Vector3f goal=enemy->mSRT.t+away*100.f;
+            if (redApproach==0) goal=goal+redApproachSide*110.f;
+            if (distance(n->mSRT.t,goal)>20.f) {
+                neutralThrowTicks=0;point(n,goal,true);return result;
+            }
+            ++redApproach;
+            std::printf("P2_ELECBUG_RED_APPROACH phase=%d ordinary_pad=1\n",redApproach);
+            input();return result;
+        }
         UfoItem* ship=itemMgr?itemMgr->getUfo():nullptr;
         if(electric()&&desiredSpecies()!=P2SpeciesWhite&&!aHeld&&ship){
             const Vector3f goal=ship->getGoalPos();
