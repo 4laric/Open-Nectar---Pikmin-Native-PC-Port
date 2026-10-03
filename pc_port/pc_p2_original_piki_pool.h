@@ -19,6 +19,20 @@ struct PoolOwner {PoolTicket ticket;PoolPhase phase=PoolPhase::Allocated;std::ui
 PoolAllocation allocatePool(const OriginalPikiBody&,std::string&);
 bool initializePool(PoolTicket,const std::array<float,3>&,std::string&);
 bool poolCurrent(PoolTicket)noexcept;
+// Copies the actual retained immutable source atomically; stale/reused tickets
+// never publish an output or reconstruct source identity from body pointers.
+bool poolSource(PoolTicket,OriginalPikiBody&,std::string&);
+// Once-only transfer to the genuine external initializer. Source is copied
+// before state mutation, then Initializing/registration-attempt is retained
+// BEFORE caller's first context/counter/body write. Actual association must be
+// absent; no caller boolean attests successful initialization or cleanup.
+bool poolBeginPhysicalInitialization(PoolTicket,OriginalPikiBody&,std::string&);
+// Allocation-only cleanup, BEFORE any initialization/registration/association.
+// Calls the actual manager allocator kill, never Creature::kill. Census remains
+// owned until exact native slot status==-1 (deferred -2 is not retirement).
+// New physical initializers must transfer/mark this owner BEFORE first writes;
+// this API cannot authorize cleanup after an external unrecorded initializer.
+bool poolReleaseAllocation(PoolTicket,std::string&);
 // Read-only census includes failed/pending bodies. A stale allocation remains
 // owned and blocks teardown; it is never silently erased after pointer reuse.
 std::size_t poolOwners(std::array<PoolOwner,20>&)noexcept;
@@ -30,3 +44,6 @@ bool pc_p2_original_piki_pool_can_allocate()noexcept;
 void pc_p2_original_piki_pool_observe_birth(PikiMgr*,Piki*)noexcept;
 // Native manager implementation inspects its actual object array/entry status.
 bool pc_p2_original_piki_pool_slot_live(PikiMgr*,Piki*)noexcept;
+
+// Exact actual native slot retirement, distinct from !slot_live (status -2).
+bool pc_p2_original_piki_pool_slot_retired(PikiMgr*,Piki*)noexcept;
