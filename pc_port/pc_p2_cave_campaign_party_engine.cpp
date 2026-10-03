@@ -34,20 +34,24 @@ bool sameSource(const P2CavePartyBody& a,const P2CavePartyBody& b){
         &&a.sourceAttempt==b.sourceAttempt&&a.sourceActivation==b.sourceActivation;}
 }
 bool pc_p2_cave_campaign_party_capture(P2CaveCampaignParty& party,bool inside){
-    if(!pikiMgr||!naviMgr||!itemMgr||!itemMgr->getPikiHeadMgr())return false;
+    auto held=[](const char* why){std::printf("P2_CAMPAIGN_PARTY_CAPTURE_HELD reason=%s\n",why);return false;};
+    if(!pikiMgr||!naviMgr||!itemMgr||!itemMgr->getPikiHeadMgr())return held("missing_managers");
     auto captured=party;captured.present=true;captured.inside=inside;
     captured.resumeLiving=true;
     captured.landing=false;
     auto nextProvenance=provenance;
     captured.captains.clear();captured.bodies.clear();
-    Navi* active=naviMgr->getActiveNavi();if(!active)return false;
+    Navi* active=naviMgr->getActiveNavi();if(!active)return held("missing_active_captain");
     captured.active=active->getNaviIndex();
     for(int slot=0;slot<naviMgr->getNaviCount();++slot){Navi* n=naviMgr->getNavi(slot);
-        if(!n||!n->isAlive())return false;
-        captured.captains.push_back({slot,n->mHealth,n->mMaxHealth,n->mFaceDirection,point(n->mSRT.t)});}
+        if(!n||!n->isAlive())return held("unavailable_captain");
+        captured.captains.push_back({slot,n->mHealth,n->mMaxHealth,n->mFaceDirection,point(n->mSRT.t)});
+        if(!captured.captains.back().valid()){
+            std::printf("P2_CAMPAIGN_CAPTAIN_CAPTURE slot=%d health=%.9g inherited_max=%.9g parameter_max=%.9g state=%d\n",slot,n->mHealth,n->mMaxHealth,float(C_NAVI_PARM(n,mHealth)),n->getCurrState()?n->getCurrState()->getID():-1);
+            return held("invalid_captain_fields");}}
     Iterator bodies(pikiMgr);CI_LOOP(bodies){Piki* p=static_cast<Piki*>(*bodies);
         if(!p->isAlive())continue;
-        if(!p->getCurrState()||p->getCurrState()->getID()!=PIKISTATE_Normal||p->isStickTo())return false;
+        if(!p->getCurrState()||p->getCurrState()->getID()!=PIKISTATE_Normal||p->isStickTo())return held("unsettled_body");
         P2CavePartyBody b;
         const auto prior=nextProvenance.find(p);
         if(prior!=nextProvenance.end())b=prior->second;
@@ -58,26 +62,28 @@ bool pc_p2_cave_campaign_party_capture(P2CaveCampaignParty& party,bool inside){
                 b.catalogFingerprint=association->second.catalogFingerprint;
                 b.sourceAttempt=association->second.sourceAttempt;b.sourceActivation=association->second.sourceActivation;}
             if(p->mGenerator){b.originGenerator=pc_randomizer_generator_id(p->mGenerator);
-                if(!b.originGenerator)return false;}}
+                if(!b.originGenerator)return held("unresolved_generator_id");}}
         b.species=pc_p2_species(p);b.growth=p->mHappa;
         b.owner=p->mNavi?p->mNavi->getNaviIndex():-1;b.player=p->mPlayerId;b.mode=p->mMode;
         b.generator=p->mGenerator?pc_randomizer_generator_id(p->mGenerator):0;
         b.health=p->mHealth;b.maxHealth=p->mMaxHealth;b.face=p->mFaceDirection;b.position=point(p->mSRT.t);
-        if(!b.valid()||!assets(b.species))return false;
+        if(!b.valid()||!assets(b.species)){
+            std::printf("P2_CAMPAIGN_BODY_CAPTURE species=%d growth=%d owner=%d player=%d mode=%d health=%.9g max=%.9g assets=%d\n",b.species,b.growth,b.owner,b.player,b.mode,b.health,b.maxHealth,int(assets(b.species)));
+            return held("invalid_body_fields");}
         if(prior==nextProvenance.end()&&(b.originGenerator||!b.sourceKey.empty()))captured.origins.push_back(b);
         nextProvenance[p]=b;
         captured.bodies.push_back(b);}
     auto& heads=inside?captured.floorHeads:captured.surfaceHeads;heads.clear();
     Iterator sprouts(itemMgr->getPikiHeadMgr());CI_LOOP(sprouts){auto* h=static_cast<PikiHeadItem*>(*sprouts);
-        if(!h->canPullout()||!h->getCurrState()||h->getCurrState()->getID()!=PikiHeadAI::PIKIHEAD_Wait)return false;
+        if(!h->canPullout()||!h->getCurrState()||h->getCurrState()->getID()!=PikiHeadAI::PIKIHEAD_Wait)return held("unsettled_head");
         P2CavePartyHead s;s.species=pc_p2_species(h);s.growth=h->mFlowerStage;s.owner=h->mPcOwner;
         s.parent=h->mParentOnion?int(h->mParentOnion->mOnionColour):-1;s.state=h->getCurrState()->getID();
         s.counter=h->mSAICtx.mCounter;s.timer=h->mSAICtx.mCurrentItemHealth;
         s.motion=h->mItemAnimator.mMotionIdx;s.key=h->mItemAnimator.mCurrentKeyIndex;
         s.previousKey=int(h->mItemAnimator.mPreviousKeyIndex);s.playState=h->mItemAnimator.mPlayState;
         s.frame=h->mItemAnimator.mAnimationCounter;s.speed=h->mMotionSpeed;s.position=point(h->mSRT.t);
-        if(!s.valid()||!assets(s.species))return false;heads.push_back(s);}
-    if(!captured.valid())return false;
+        if(!s.valid()||!assets(s.species))return held("invalid_head_fields");heads.push_back(s);}
+    if(!captured.valid())return held("invalid_party_relationships");
     party=std::move(captured);provenance=std::move(nextProvenance);return true;
 }
 void pc_p2_cave_campaign_party_forget(Piki* body){provenance.erase(body);birthOrigins.erase(body);}

@@ -1,6 +1,17 @@
 #pragma once
 #include <string>
 #include <cstdint>
+#include "pc_campaign_ui_observer.h"
+class Controller;
+class Graphics;
+struct P2CaveSaveChoiceSnapshot {
+    bool active=false;
+    int state=-1,slot=-1;
+    PcDefaultFileSnapshot defaultFile;
+};
+P2CaveSaveChoiceSnapshot pc_p2_cave_campaign_save_choice();
+bool pc_p2_cave_campaign_update_save_choice(Controller* input);
+void pc_p2_cave_campaign_draw_save_choice(Graphics& gfx);
 // Seed-owned ordinary section provider; historical seeds are inert.
 void pc_p2_cave_campaign_prepare();
 void pc_p2_cave_campaign_select_stage();

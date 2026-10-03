@@ -987,6 +987,10 @@ ModeState* IntroGameModeState::update(u32& result)
 ModeState* RunningModeState::update(u32& result)
 {
 #if defined(PIKI_PC_PORT)
+    if(pc_p2_cave_campaign_update_save_choice(mParentSection->mController)){
+        result=UPDATE_NONE;
+        return this;
+    }
 	if(pc_p2_cave_campaign_commit_transition()){
 		result=UPDATE_NONE;
 		mParentSection->mPendingOnePlayerSectionID=ONEPLAYER_NewPikiGame;

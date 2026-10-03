@@ -23,6 +23,9 @@
 #include "MoviePlayer.h"
 #include "MapMgr.h"
 #include "gameflow.h"
+#include "zen/ogFileChkSel.h"
+#include "zen/ogFileSelect.h"
+#include "zen/ogMemChk.h"
 #include <fstream>
 #include <cstdio>
 #include <cstdlib>
@@ -36,6 +39,8 @@ StageInfo* surfaceStage=nullptr;
 StageInfo* floorStage=nullptr;
 bool prepared=false,sceneReady=false,restored=false,requested=false,pending=false;
 bool detaching=false,restoringParty=false;
+zen::ogScrFileChkSelMgr* saveChoice=nullptr;
+bool choosingSave=false;
 std::uint64_t permitGeneration=0;
 std::array<std::uint8_t,32> permitSha{};
 void clearPermit(){detaching=false;restoringParty=false;permitGeneration=0;permitSha.fill(0);}
@@ -89,6 +94,7 @@ void moveParty(P2CaveCampaignParty& party,bool entering){
 }
 void pc_p2_cave_campaign_prepare(){
     prepared=false;surfaceStage=nullptr;floorStage=nullptr;
+    saveChoice=nullptr;choosingSave=false;
     clearPermit();
     if(!pc_randomizer_generated_cave())return;
     std::ifstream in("p2-cave-campaign.txt");std::string magic,version,extra;
@@ -131,6 +137,8 @@ void pc_p2_cave_campaign_before_preload(){
 void pc_p2_cave_campaign_scene_setup(){
     sceneReady=false;restored=false;requested=false;
     if(!pc_randomizer_generated_cave()||!prepared)return;
+    saveChoice=new zen::ogScrFileChkSelMgr();
+    choosingSave=false;
     auto party=pc_randomizer_generated_cave_party();
     if(inside()){
         pc_p2_cave_rooms_setup();const auto* layout=pc_p2_cave_rooms_layout();
@@ -166,11 +174,53 @@ void pc_p2_cave_campaign_scene_setup(){
 }
 void pc_p2_cave_campaign_scene_exit(){
     if(!pc_randomizer_generated_cave())return;
+    if(choosingSave)gameflow.mIsUIOverlayActive=FALSE;
+    choosingSave=false;saveChoice=nullptr;
     detaching=pending&&permitGeneration!=0;
     sceneReady=false;pc_p2_cave_items_shutdown();pc_p2_cave_geometry_shutdown();pc_p2_cave_rooms_shutdown();
     pc_p2_cave_campaign_party_scene_exit();
 }
-void pc_p2_cave_campaign_request(){if(pc_randomizer_generated_cave()&&safe()&&atBoundary())requested=true;}
+void pc_p2_cave_campaign_request(){
+    if(!pc_randomizer_generated_cave()||!safe()||!atBoundary()||!saveChoice)return;
+    // Direct randomizer startup bypasses the title/file menu. Reuse its real
+    // preparation and controller-driven file choice at each cave boundary;
+    // physical backup slots are derived by the native card inventory.
+    requested=false;saveChoice->startSave();choosingSave=true;
+    gameflow.mIsUIOverlayActive=TRUE;
+    std::puts("P2_CAMPAIGN_SAVE_CHOICE_STARTED native_file_menu=1");
+}
+P2CaveSaveChoiceSnapshot pc_p2_cave_campaign_save_choice(){
+    P2CaveSaveChoiceSnapshot result;
+    if(!pc_randomizer_generated_cave()||!choosingSave||!saveChoice)return result;
+    result.active=true;result.state=saveChoice->mState;
+    if(saveChoice->mMemChkMgr)result.defaultFile=saveChoice->mMemChkMgr->pcDefaultFileSnapshot();
+    if(saveChoice->mIsScreenVisible&&saveChoice->mFileSelectMgr)
+        result.slot=saveChoice->mFileSelectMgr->pcSaveInputSlot();
+    return result;
+}
+bool pc_p2_cave_campaign_update_save_choice(Controller* input){
+    if(!pc_randomizer_generated_cave()||!choosingSave||!saveChoice)return false;
+    if(!input)invalid("card selection without native controller");
+    CardQuickInfo selection;
+    const auto state=saveChoice->update(input,selection);
+    if(state==zen::ogScrFileChkSelMgr::SelectionA||state==zen::ogScrFileChkSelMgr::SelectionB
+        ||state==zen::ogScrFileChkSelMgr::SelectionC){
+        // These are the actual controller-selected logical A/B/C slots. The
+        // native inventory selects an unused/older physical backup itself.
+        CardQuickInfo infos[4];gameflow.mMemoryCard.getQuickInfos(infos);
+        gameflow.mPlayState.mSaveSlot=static_cast<u8>(state-zen::ogScrFileChkSelMgr::SelectionA);
+        requested=true;choosingSave=false;gameflow.mIsUIOverlayActive=FALSE;
+        std::printf("P2_CAMPAIGN_SAVE_CHOICE_SELECTED slot=%u backup=%u native_inventory=1\n",
+            unsigned(gameflow.mPlayState.mSaveSlot),unsigned(gameflow.mGamePrefs.mSpareMemCardSaveIndex));
+    }else if(state==zen::ogScrFileChkSelMgr::ErrorOrCompleted||state==zen::ogScrFileChkSelMgr::ForceExit){
+        requested=false;choosingSave=false;gameflow.mIsUIOverlayActive=FALSE;
+        std::puts("P2_CAMPAIGN_SAVE_CHOICE_CANCELLED realm_unchanged=1");
+    }
+    return true;
+}
+void pc_p2_cave_campaign_draw_save_choice(Graphics& gfx){
+    if(pc_randomizer_generated_cave()&&choosingSave&&saveChoice)saveChoice->draw(gfx);
+}
 void pc_p2_cave_campaign_tick(){
     if(!pc_randomizer_generated_cave()||!sceneReady)return;
     if(inside()){pc_p2_cave_carry_tick();pc_p2_cave_geometry_tick();pc_p2_cave_bud_tick();}

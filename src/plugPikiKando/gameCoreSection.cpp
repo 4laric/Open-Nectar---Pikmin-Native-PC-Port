@@ -5675,6 +5675,9 @@ void GameCoreSection::draw2D(Graphics& gfx)
 		accountWindow->draw(gfx);
 	}
 
+#if defined(PIKI_PC_PORT)
+	pc_p2_cave_campaign_draw_save_choice(gfx);
+#endif
 	// this function requires an UNGODLY amount of stack from inlines, plus some
 	// from temps. ternaries in the stripped out PRINT function generate inline
 	// stack. forgive my sins please, this combo lets it match.
