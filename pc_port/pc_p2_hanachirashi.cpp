@@ -39,6 +39,7 @@
 #include "pc_p2_hanachirashi.h"
 #include "pc_p2_original_actor.h"
 #include "pc_p2_original_hanachirashi_native.h"
+#include "pc_p2_original_hanachirashi_bank.h"
 #include "settings/pc_settings.h"
 #include "teki.h"
 #include "Interactions.h"
@@ -431,7 +432,9 @@ bool loadClips(std::string& error) {
 }
 bool pc_p2_hanachirashi_original_resources(unsigned source,std::string& error){
  if(source!=55){error="invalid original Hanachirashi source";return false;}
- if(!actors.empty()&&!clips.empty()){error.clear();return true;}
+ for(const auto& actor:actors)if(!actor.second.original){error="original Hanachirashi cannot reuse AP/family actors";return false;}
+ std::ifstream authored("p2-flying-bank.txt");if(!p2original::hanachirashi::validateBank(authored,error))return false;
+ if(!actors.empty()){error.clear();return true;}
  clips.clear();return loadClips(error);
 }
 bool pc_p2_hanachirashi_original_birth(BTeki* actor,unsigned source,unsigned uid,unsigned ordinal,std::string& error){
