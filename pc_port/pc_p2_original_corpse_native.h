@@ -1,12 +1,17 @@
 #pragma once
 #include "pc_p2_original_corpse_profile.h"
 #include "pc_p2_original_corpse_ledger.h"
+#include "pc_p2_original_corpse_death_policy.h"
 #include <string>
 class BTeki; class Pellet; class PelletView; class PelletConfig; class GoalItem;
 struct Matrix4f; struct Vector3f;
 // Provider callback: validates the literal profile and live native pellet manager.
 // Provider still owns admission of its genuine dead animation/body bank.
 bool pc_p2_original_corpse_resources(unsigned source,std::string& error);
+// Producer must prove the actual Stone death boundary and call BEFORE dieSoon.
+// Refuses nonoriginal actors, unknown causes and bodies already born. Only
+// suppresses the normal corpse; carried cargo and Honey remain producer-owned.
+bool pc_p2_original_corpse_set_death_cause(BTeki*,p2original::CorpseDeathCause,std::string& error);
 // Only explicit original actors are routed. Unknown original profiles refuse;
 // source55 has no corpse. P1/AP and preview-only actors retain their own path.
 bool pc_p2_original_corpse_leaves(BTeki*,bool ordinary);
