@@ -1,3 +1,4 @@
+#include "pc_p2_surface_save.h"
 #include "Generator.h"
 #include "Age.h"
 #include "DebugLog.h"
@@ -642,7 +643,7 @@ void Generator::init()
 	}
 
 	if (ramMode && (mCarryOverFlags & GENCARRY_SaveSpawnCount)) {
-		if (gameflow.mWorldClock.mCurrentDay >= mLatestSpawnDay + mRespawnInterval) {
+		if (!pc_p2_surface_save_living_scene() && gameflow.mWorldClock.mCurrentDay >= mLatestSpawnDay + mRespawnInterval) {
 			// we're due to respawn afresh.
 			PRINT("****** RESET DAY (curr=%d / save=%d interval=%d)\n", gameflow.mWorldClock.mCurrentDay, mLatestSpawnDay,
 			      mRespawnInterval);
