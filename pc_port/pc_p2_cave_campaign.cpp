@@ -37,6 +37,8 @@
 #include <cstring>
 #include <cstdint>
 
+// Match the historical cave route's optional netplay seam in both profiles.
+__attribute__((weak)) bool pc_netplay_session_active(void);
 namespace {
 struct Config {std::uint64_t seed=0;std::string token,surface,floor;float entryX=0,entryZ=0,exitX=0,exitZ=0,spawnX=0,spawnZ=0;};
 Config config;
@@ -60,7 +62,11 @@ bool adoptPermit(){
 }
 [[noreturn]] void invalid(const char* why){std::fprintf(stderr,"Invalid ordinary generated cave: %s\n",why);std::abort();}
 bool inside(){return pc_randomizer_generated_cave_cache().inside;}
-bool safe(){return sceneReady&&pc_randomizer_ready()&&naviMgr&&naviMgr->getActiveNavi()
+bool safe(){return sceneReady&&pc_randomizer_ready()
+    &&!(pc_netplay_session_active&&pc_netplay_session_active())
+    &&naviMgr&&naviMgr->getActiveNavi()
+    &&naviMgr->getActiveNavi()->isAlive()
+    &&std::isfinite(naviMgr->getActiveNavi()->mHealth)&&naviMgr->getActiveNavi()->mHealth>1.f
     &&naviMgr->getActiveNavi()->getCurrState()&&naviMgr->getActiveNavi()->getCurrState()->getID()==NAVISTATE_Walk
     &&!gameflow.mPauseAll&&!gameflow.mIsUIOverlayActive&&!gameflow.mIsDayEndActive
     &&gameflow.mMoviePlayer&&!gameflow.mMoviePlayer->mIsActive;}
