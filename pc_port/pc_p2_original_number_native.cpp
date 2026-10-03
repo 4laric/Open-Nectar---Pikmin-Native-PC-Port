@@ -227,9 +227,10 @@ bool pc_p2_original_number_update(Pellet* p){
  p->mStateMachine->exec(p);
  // A genuine suction completion may retire this view inside exec.
  if(!sameBinding()||!p->isAlive())return true;
- P2OriginalNumberAccess::animate(p);
  if(p->getState()==PELSTATE_Goal||p->getState()==PELSTATE_UfoLoad||p->getState()==PELSTATE_Swallowed||p->isStickToMouth()){
-  p->mVolatileVelocity.set(0,0,0);pc_p2_original_number_collision(p);return true;
+  p->mVolatileVelocity.set(0,0,0);P2OriginalNumberAccess::animate(p);
+  if(!sameBinding())return true;
+  pc_p2_original_number_collision(p);return true;
  }
  const bool picked=p->getPickOffset()!=0,previousFloor=p->mGroundTriangle!=nullptr;
  const float dt=gsys->getFrameTime();
@@ -259,6 +260,10 @@ bool pc_p2_original_number_update(Pellet* p){
  p->mSRT.t.set(trace.position.x,trace.position.y+(picked?4.0f:0.0f),trace.position.z);
  p->mVelocity.set(trace.velocity.x,trace.velocity.y,trace.velocity.z);
  p->mIsAIActive=contacts.floor!=nullptr;
+ // Retail doAnimation runs update/movement first, then carry animation and
+ // transform/collider refresh. A bounce may change the motion this same tick.
+ P2OriginalNumberAccess::animate(p);
+ if(!sameBinding())return true;
  pc_p2_original_number_collision(p);return true;
 }
 bool pc_p2_original_number_unload(std::string& e){
