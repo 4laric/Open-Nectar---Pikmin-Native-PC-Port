@@ -20,7 +20,7 @@ enum class GatePhase {Wait, Damaged, Down, Open};
 enum class GateAction {None, DamageMotion, DownMotion, Idle, Open};
 struct GateState {
  GatePhase phase=GatePhase::Wait;
- float health=100,damage=0;
+ float health=100,damage=0,animationFrame=0;
  unsigned segmentsDown=0;
  bool damageAnimationFinished=false;
 };
