@@ -1,4 +1,5 @@
 #include "pc_p2_original_pod.h"
+#include "pc_p2_original_pod_registry.h"
 #include "Suckable.h"
 #include "Pellet.h"
 #include "PelletState.h"
@@ -94,13 +95,13 @@ public:
  void finishSuck(Pellet*)override{}
  Shape* bank;int waypoint;bool live=false; // Prepared bodies are not observable gameplay.
 };
-enum class Phase {Bound,Sucking,Completed,Lost};
-struct Cargo {p2retail::BirthIdentity birth;p2retail::SceneIdentity scene;CompletedCallback callback;Phase phase=Phase::Bound;};
-struct LostCargo {p2retail::BirthIdentity birth;p2retail::SceneIdentity scene;};
+using Phase=p2originalpod::CargoPhase;
+using Cargo=p2originalpod::CargoBinding;
 Config config;ContextProvider contextProvider;Shape* shape=nullptr;Pod* pod=nullptr;
 CreatureNode* node=nullptr;MeltingPotMgr* manager=nullptr;
-std::map<Pellet*,Cargo> cargo;
-std::vector<LostCargo> lostCargo; // Identity tombstones never own recycled pool addresses.
+p2originalpod::Ownership ownership;
+auto& cargo=ownership.live;
+auto& lostCargo=ownership.lost;
 bool prepared=false,committed=false,everSucked=false,retaining=false;Pellet* completing=nullptr;
 struct RetainScope {RetainScope(){retaining=true;}~RetainScope(){retaining=false;}};
 bool current(p2retail::Snapshot* out=nullptr){
@@ -176,7 +177,7 @@ bool pc_p2_original_pod_bind_cargo(Pellet* p,const p2retail::BirthIdentity& birt
  for(const auto& lost:lostCargo)if(lost.scene==scene&&lost.birth.instance==birth.instance)return reject(e,"pod_lost_original_cargo_requires_recovery");
  cargo.emplace(p,Cargo{birth,scene,std::move(callback),Phase::Bound});e.clear();return true;
 }
-bool pc_p2_original_pod_owns(const Pellet* p){return cargo.count(const_cast<Pellet*>(p))!=0;}
+bool pc_p2_original_pod_owns(const Pellet* p){return ownership.owns(p);}
 Suckable* pc_p2_original_pod_goal_for(Pellet* p){auto it=cargo.find(p);return it!=cargo.end()&&it->second.phase!=Phase::Completed&&it->second.phase!=Phase::Lost?pc_p2_original_pod_goal(it->second.scene):nullptr;}
 bool pc_p2_original_pod_completed(Pellet* p,Suckable* receiver,const p2retail::SceneIdentity& scene){
  auto it=cargo.find(p);p2retail::Snapshot out;
@@ -239,9 +240,7 @@ bool P2OriginalPodNativeSeam::done(Pellet* p,const PelletGoalState& state){
 }
 void P2OriginalPodNativeSeam::cleanup(Pellet* p){auto it=cargo.find(p);if(it!=cargo.end()&&it->second.phase==Phase::Sucking)it->second.phase=Phase::Bound;}
 void pc_p2_original_pod_forget_pellet(Pellet* p){
- auto it=cargo.find(p);if(it==cargo.end())return;
- if(it->second.phase!=Phase::Completed)lostCargo.push_back({it->second.birth,it->second.scene});
  // Revoke the native pool-address claim even on loss. The identity tombstone
  // still blocks unload/SAVE, while an unrelated recycled Pellet is unowned.
- cargo.erase(it);
+ ownership.forget(p);
 }
