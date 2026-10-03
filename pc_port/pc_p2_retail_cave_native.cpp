@@ -15,7 +15,7 @@ bool refuse(std::string& error,const char* text){error=text;return false;}
 struct NativeFloor::Impl {
  FloorPlan plan;SceneOps& scene;std::map<unsigned,std::shared_ptr<FamilyOps>> families;
  std::set<std::shared_ptr<FamilyOps>> preparedFamilies;
- Snapshot context;bool prepared=false,begun=false,committed=false,cleaning=false;
+ Snapshot context;bool prepared=false,scenePreparationOwned=false,begun=false,committed=false,cleaning=false;
  struct Source {p2original::CatalogRow row;std::unique_ptr<Generator> generator;std::uint64_t handle=0;};
  struct Actor {Creature* actor=nullptr;unsigned source=0,token=0;std::uint64_t handle=0;
                BirthIdentity origin;bool registered=false;};
@@ -32,7 +32,7 @@ NativeFloor::NativeFloor(FloorPlan plan,SceneOps& scene):m(new Impl(std::move(pl
  m->families.emplace(45,std::make_shared<FamilyOps>(std::move(snow)));owners().insert(this);
 }
 NativeFloor::~NativeFloor(){
- if(!m->actors.empty()||!m->sources.empty()||m->begun||m->prepared){std::fputs("P2_RETAIL_FLOOR live owner destroyed\n",stderr);std::abort();}
+ if(!m->actors.empty()||!m->sources.empty()||m->begun||m->prepared||m->scenePreparationOwned){std::fputs("P2_RETAIL_FLOOR live owner destroyed\n",stderr);std::abort();}
  owners().erase(this);
 }
 bool NativeFloor::family(unsigned source,FamilyOps ops,std::string& error){
@@ -52,7 +52,7 @@ bool NativeFloor::preflight(const CaveDescriptor& cave,const FloorDefinition& fl
  FloorPlan verified;
  if(!parseFloorPlan(m->plan.authenticatedBytes,m->plan.layoutSha256,verified,error))return false;
  m->plan=std::move(verified);
- if(m->prepared||m->begun||!m->sources.empty()||!m->actors.empty()||!mapMgr||
+ if(m->prepared||m->scenePreparationOwned||m->begun||!m->sources.empty()||!m->actors.empty()||!mapMgr||
     m->plan.cave!=cave.cave||m->plan.floor!=number||identity.layoutSha256!=m->plan.layoutSha256||
     m->plan.sourceSha256!=cave.sourceSha256||m->plan.catalogSha256!=cave.catalogSha256)
   return refuse(error,"retail floor native scene/source mismatch");
@@ -69,6 +69,7 @@ bool NativeFloor::preflight(const CaveDescriptor& cave,const FloorDefinition& fl
  m->context={cave.cave,cave.source,cave.sourceSha256,cave.catalogSha256,number,cave.maxFloor,identity,story,inCave};
  // The scene owner verifies actual selected native mode, card/session, installed
  // geometry/routes, source anchors, cargo assets/profiles and receiver capacity.
+ m->scenePreparationOwned=true; // Pod/resources may stage state even if preflight later fails.
  if(!m->scene.preflight(m->plan,m->context,error))return false;
  m->prepared=true;
  for(const auto& group:groups){
@@ -180,8 +181,8 @@ bool NativeFloor::retired(Creature* pointer,std::string& error){
 bool NativeFloor::release(std::string& error){
  // Cargo/Pod reject an observable incomplete suction transaction. No actor is
  // destroyed until that owner agrees the scene can release or roll back.
- if(m->begun&&!m->scene.release(error))return false;
- m->begun=false;m->committed=false;m->cleaning=true;
+ if((m->scenePreparationOwned||m->begun)&&!m->scene.release(error))return false;
+ m->scenePreparationOwned=false;m->begun=false;m->committed=false;m->cleaning=true;
  auto& registry=p2original::originalActors();
  for(auto& actor:m->actors)if(actor.actor){
   Creature* pointer=actor.actor;auto& family=*m->families.at(actor.source);
