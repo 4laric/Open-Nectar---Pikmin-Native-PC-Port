@@ -29,9 +29,10 @@ public:
  // slot distances, angle/command fields and timers, not just this reset.
  virtual float resultingSceneAnimationTimer() const=0;
  // Commits the preflighted source whistle update(result,false), CPlate effects,
- // then source Rappa only where requested. Must not fail after preparation.
+ // then source Rappa only where requested. A callback may retire authority;
+ // report refusal before executing any subsequent source command.
  // The plan is bound to exact scene incarnation/actor/current source State.
- virtual void commit(Navi&)=0;
+ virtual bool commit(Navi&,std::string&)=0;
 };
 struct AnimationFrame {
  // Source FakePiki position-minus-previousPosition (after real movement),

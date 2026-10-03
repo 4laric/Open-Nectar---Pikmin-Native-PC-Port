@@ -3,6 +3,7 @@
 #include "pc_p2_original_captain_throw.h"
 #include "Navi.h"
 #include "NaviState.h"
+#include "Camera.h"
 #include <fstream>
 #include <iterator>
 #include <iostream>
@@ -29,10 +30,10 @@ struct Typed:NaviState,State {
  StateId id=StateId::Punch;const NaviState* nativeState()const override{return this;}StateId sourceStateId()const override{return id;}bool sourceAlive(const Navi&)const override{return true;}
  bool sourceInvincible()const override{return false;}std::optional<std::uint8_t> actorInvincibleFrames(const Navi&)const override{return 0;}bool canEnterSourceDead(const Navi&)const override{return false;}void enterSourceDead(Navi&)override{}void sourceDamageFeedback(Navi&)override{}
 } typed,alternate;
-std::string resource;
+std::string resource;bool frameExpires=false;
 struct Actions:actions::ActionSource {
  const LoadedScene& scene()const override{return ::scene;}const std::string& parameterBytes()const override{return resource;}
- bool frame(const Navi&,actions::ActorFrame& f,std::string&)const override{f={};f.delta=1;return true;}
+ bool frame(const Navi&,actions::ActorFrame& f,std::string&)const override{f={};f.delta=1;if(frameExpires)a.current=&alternate;return true;}
  bool squad(const Navi&,std::vector<actions::PikiFrame>&,std::string&)const override{return false;}
  bool piki(const Navi&,actions::PikiHandle,actions::PikiFrame&,std::string&)const override{return false;}
  bool control(Navi&,std::string&)override{return false;}bool whistle(const Navi&,actions::WhistleFrame&,std::string&)const override{return false;}
@@ -42,13 +43,15 @@ struct Actions:actions::ActionSource {
  bool holdFields(Navi&,float,float,float,std::string&)override{return false;}bool nextThrowPiki(Navi&,std::optional<actions::PikiHandle>,std::string&)override{return false;}bool findNextThrowPiki(Navi&,std::string&)override{return false;}
  bool throwPiki(Navi&,actions::PikiHandle,actions::Vec3,std::string&)override{return false;}bool feedback(Navi&,actions::Feedback,actions::PikiHandle,std::string&)override{return false;}
 } actionsProvider;
-nc::AnimationFrame observation;
+nc::AnimationFrame observation;int commitMode=0,commitCalls=0;bool controlFacts=false;
+struct Plan:nc::PreparedEffects {float resultingSceneAnimationTimer()const override{return 7;}bool commit(Navi&,std::string&)override;};
 struct Effects:nc::Effects {
- const LoadedScene& scene()const override{return ::scene;}bool facts(const Navi&,nc::ControlFacts&,std::string&)const override{return false;}
- bool prepare(const Navi&,const nc::Request&,std::unique_ptr<nc::PreparedEffects>&,std::string&)const override{return false;}
+ const LoadedScene& scene()const override{return ::scene;}bool facts(const Navi&,nc::ControlFacts& out,std::string&)const override{out={};return controlFacts;}
+ bool prepare(const Navi&,const nc::Request&,std::unique_ptr<nc::PreparedEffects>& out,std::string&)const override{out.reset(new Plan);return true;}
  bool animationFrame(const Navi&,nc::AnimationFrame& out,std::string&)const override{out=observation;return true;}
 } effects;
 SourceBank* bankProvider=nullptr;const nc::Effects* effectsProvider=&effects;
+bool Plan::commit(Navi& n,std::string& e){++commitCalls;if(commitMode==1){e="actual postRefresh facts unavailable";return false;}if(commitMode==2)nc::forget(&n);if(commitMode==3){nc::forget(&n);if(!nc::resetAfterBootstrap(&n,e))return false;}if(commitMode==4)a.current=&alternate;if(commitMode==5)effectsProvider=nullptr;if(commitMode==6)++scene.epoch;return true;}
 MotionState channels[2];Listener listeners[2];int lock=-1;unsigned long long generation=10;
 struct Start {Animator channel;Motion motion;bool preserve;Listener listener;float oldFrame;};
 std::vector<Start> starts;std::vector<Animator> advances;std::vector<float> amounts;bool sendEvents=false,listenerAvailable=true;
@@ -128,6 +131,15 @@ int main(int argc,char** argv){try{
  reset(Motion::Wait,Motion::Wait,-1);resource[0]^=1;check(!animate()&&starts.empty()&&advances.empty(),"mutated actual parameter resource refuses beforeclock");resource[0]^=1;
  reset(Motion::Wait,Motion::Wait,-1);NaviState p1;a.current=&p1;check(!animate()&&starts.empty()&&advances.empty(),"common selector neverfalls back from untyped P1state");
  reset(Motion::Wait,Motion::Wait,-1);effectsProvider=nullptr;check(!animate()&&starts.empty()&&advances.empty(),"missing actual observation provider refuses");
+ Camera camera;a.camera=&camera;controlFacts=true;
+ reset(Motion::Wait,Motion::Wait,-1);commitMode=0;commitCalls=0;check(nc::control(&a,error)&&commitCalls==1&&nc::sceneAnimationTimer(&a)==7,"completed actual effects publishes timer");
+ reset(Motion::Wait,Motion::Wait,-1);commitMode=1;check(!nc::control(&a,error)&&nc::sceneAnimationTimer(&a)==0,"postRefresh refusal never publishes proposed timer");
+ reset(Motion::Wait,Motion::Wait,-1);commitMode=2;check(!nc::control(&a,error)&&!nc::sceneAnimationTimer(&a),"commit callback retirement leaves forgotten actor untouched");
+ reset(Motion::Wait,Motion::Wait,-1);commitMode=3;check(!nc::control(&a,error)&&nc::sceneAnimationTimer(&a)==0,"same-slot same-incarnation rebootstrap cannot receive old control timer");
+ reset(Motion::Wait,Motion::Wait,-1);commitMode=4;check(!nc::control(&a,error)&&nc::sceneAnimationTimer(&a)==0,"commit state replacement prevents stale timer publication");
+ reset(Motion::Wait,Motion::Wait,-1);commitMode=5;check(!nc::control(&a,error)&&nc::sceneAnimationTimer(&a)==0,"commit effects provider replacement prevents stale timer publication");
+ reset(Motion::Wait,Motion::Wait,-1);commitMode=6;check(!nc::control(&a,error)&&!nc::sceneAnimationTimer(&a),"commit incarnation replacement prevents stale timer publication");
+ reset(Motion::Wait,Motion::Wait,-1);commitMode=0;frameExpires=true;const auto previousCommits=commitCalls;check(!nc::control(&a,error)&&commitCalls==previousCommits&&nc::sceneAnimationTimer(&a)==0,"frame callback state expiry refuses before effects commit");frameExpires=false;
  // No SourceBank::advance definition is linked. Using state-style advancement
  // would fail the standalone link rather than silently pass an empty counter.
  std::cout<<"P2_ORIGINAL_NATIVE_DUAL_ANIMATOR_ACTUAL_TU_CONTROLS_PASS checks="<<checks<<" gameplay=UNTESTED providers=DOUBLES\n";return 0;
