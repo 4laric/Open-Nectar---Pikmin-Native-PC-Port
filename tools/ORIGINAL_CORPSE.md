@@ -28,6 +28,19 @@ It retains catalog fingerprint/generator UID/ordinal/respawn epoch/activation
 after actor retirement and suppresses P1 bestiary/preview economy credit.
 Duplicate callback grants zero. Native birth/resource readiness grants nothing.
 
+For the actual retail Stone death boundary, the family producer calls
+`pc_p2_original_corpse_set_death_cause(actor, p2original::CorpseDeathCause::StoneShatter, error)`
+BEFORE `pcEscapeNow`/`dieSoon`. The header is
+`pc_port/pc_p2_original_corpse_native.h`. This one-way policy is keyed by full
+catalog/UID/ordinal/epoch/activation, refuses nonoriginal/invalid activations,
+unknown causes and a body already born, and prevents direct normal corpse birth.
+Duplicate selection is harmless; a new epoch/activation retains ordinary policy.
+The bounded policy persists on ordinary course unload/reentry and clears only
+on an explicit new session. It grants/consumes no corpse reward. The producer
+still owns proof of real Stone state, authored cargo throwup and Honey children.
+The policy is not physical-death SAVE state; no Stone gameplay claim is made by
+the pure policy tests or native object compilation.
+
 At an explicit NEW session, startup calls
 `pc_p2_original_corpse_new_session(catalog,error)` after previous bodies retire.
 Do not reset it on ordinary course reentry. Providers must kill owned corpse
