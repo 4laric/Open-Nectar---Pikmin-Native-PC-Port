@@ -28,6 +28,9 @@ bool pc_p2_retail_treasure_cargo_carry_radius(Pellet*,float&);
 // wrapper owner supplies its own release operation through the overload, so
 // both its native receiver and bookkeeping transition exactly once.
 bool pc_p2_retail_treasure_cargo_abort_prepared(std::string&);
+// Read-only boundary readiness while the actual selected scene is still live.
+// Does not release the receiver, retire actors or authorize SAVE/retention.
+bool pc_p2_retail_treasure_cargo_can_release_collected(std::string&);
 bool pc_p2_retail_treasure_cargo_release_collected(std::string&);
 bool pc_p2_retail_treasure_cargo_abort_prepared(p2retailcargo::PodTeardown,std::string&);
 bool pc_p2_retail_treasure_cargo_release_collected(p2retailcargo::PodTeardown,std::string&);
