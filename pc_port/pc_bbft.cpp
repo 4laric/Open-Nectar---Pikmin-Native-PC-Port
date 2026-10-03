@@ -185,6 +185,7 @@ void pc_bbft_milestone(const char* text) {
 #endif
 }
 const char* pc_bbft_save_root() {
+    if(pc_randomizer_original_session())return pc_randomizer_save_root();
     if (p2SurfaceCampaign) return "save/p2-campaign";
     if (pc_randomizer_enabled()) return pc_randomizer_save_root();
     if (!enabled && challengeLevel < 0 && p2ChallengeStage.empty() && !p2SurfaceTutorial) return "save";
@@ -291,6 +292,13 @@ void pc_bbft_init(int argc, char** argv) {
     if (p2SurfaceTutorial) {
         const char* port = std::getenv("BBFT_PORT");
         if (port && *port) { std::fprintf(stderr,"Surface boot cannot use BBFT sessions\n"); std::exit(2); }
+        bool originalSession=false;
+        for(int i=1;i<argc;++i)if(!std::strcmp(argv[i],"--randomizer-seed"))originalSession=true;
+        if(p2SurfaceCampaign&&originalSession){
+            for(int i=1;i<argc;++i)if(!std::strcmp(argv[i],"--bbft-port")){std::fprintf(stderr,"Original campaign cannot use BBFT\n");std::exit(2);}
+            if(!pc_randomizer_init(argc,argv)||!pc_randomizer_original_session()){std::fprintf(stderr,"Campaign requires authenticated original session\n");std::exit(2);}
+            enabled=true;return;
+        }
         for (int i=1; i<argc; ++i) if (!std::strcmp(argv[i],"--randomizer-seed") || !std::strcmp(argv[i],"--bbft-port")) {
             std::fprintf(stderr,"Surface boot cannot use AP or BBFT sessions\n"); std::exit(2);
         }

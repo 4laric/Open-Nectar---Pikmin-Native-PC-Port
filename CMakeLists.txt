@@ -269,6 +269,9 @@ set(PC_PORT_SOURCES
     pc_port/pc_p2_original_corpse_profile.cpp
     pc_port/pc_p2_original_corpse_ledger.cpp
     pc_port/pc_p2_original_corpse_native.cpp
+    pc_port/pc_p2_original_progress.cpp
+    pc_port/pc_p2_original_manifest.cpp
+    pc_port/pc_p2_original_piki_manifest.cpp
     pc_port/pc_p2_original_lifecycle.cpp
     pc_port/pc_p2_original_armor.cpp
     pc_port/pc_p2_original_armor_native.cpp
@@ -277,9 +280,6 @@ set(PC_PORT_SOURCES
     pc_port/pc_p2_original_group.cpp
     pc_port/pc_p2_original_dispatch.cpp
     pc_port/pc_p2_original_course.cpp
-    pc_port/pc_p2_original_manifest.cpp
-    pc_port/pc_p2_original_piki_manifest.cpp
-    pc_port/pc_p2_original_progress.cpp
     pc_port/pc_p2_original_chappy.cpp
     pc_port/pc_p2_original_chappy_native.cpp
     pc_port/pc_p2_original_group_engine.cpp
@@ -2567,7 +2567,8 @@ endif()
 # Standalone adapter harness; exercises real file I/O without game assets.
 # Include the P2 ordinary delivery ledger because pc_randomizer.cpp always links
 # against its host entry points; this only changes probe linkage, not behavior.
-add_executable(pc_randomizer_probe pc_port/pc_randomizer_probe.cpp pc_port/pc_randomizer.cpp pc_port/netplay/pc_netplay_randstate.cpp pc_port/pc_randomizer_outbox.cpp pc_port/pc_p2_delivery_host.cpp pc_port/pc_p2_proxy.cpp)
+add_executable(pc_randomizer_probe pc_port/pc_randomizer_probe.cpp pc_port/pc_randomizer.cpp pc_port/netplay/pc_netplay_randstate.cpp pc_port/pc_randomizer_outbox.cpp pc_port/pc_p2_delivery_host.cpp pc_port/pc_p2_proxy.cpp pc_port/pc_p2_original_progress.cpp pc_port/pc_p2_original_lifecycle.cpp)
+target_compile_definitions(pc_randomizer_probe PRIVATE PC_RANDOMIZER_NO_ORIGINAL_ENGINE=1)
 # Same engine-header preinclude as pc_bbft_test above (pc_p2_proxy.cpp needs it).
 target_compile_options(pc_randomizer_probe PRIVATE ${NATIVE_COMPILE_OPTIONS})
 add_executable(p2_cave_seed_binding_test tools/p2_cave_seed_binding_test.cpp)
@@ -3545,3 +3546,48 @@ add_executable(pc_p2_surface_water_drain_test tools/test_p2_surface_water_drain.
 target_include_directories(pc_p2_surface_water_drain_test PRIVATE pc_port)
 target_compile_options(pc_p2_surface_water_drain_test PRIVATE -UNDEBUG)
 add_test(NAME p2_surface_water_drain COMMAND pc_p2_surface_water_drain_test)
+add_executable(p2_original_progress_test tools/pc_p2_original_progress_test.cpp pc_port/pc_p2_original_progress.cpp)
+target_include_directories(p2_original_progress_test PRIVATE pc_port)
+target_compile_options(p2_original_progress_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+add_test(NAME p2_original_progress COMMAND p2_original_progress_test)
+add_executable(p2_campaign_checkpoint_state_test tools/pc_p2_campaign_checkpoint_state_test.cpp
+    pc_port/pc_p2_original_progress.cpp pc_port/pc_p2_original_lifecycle.cpp)
+target_include_directories(p2_campaign_checkpoint_state_test PRIVATE pc_port)
+target_compile_options(p2_campaign_checkpoint_state_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+add_test(NAME p2_campaign_checkpoint_state COMMAND p2_campaign_checkpoint_state_test)
+add_executable(p2_original_session_test tools/pc_p2_original_session_test.cpp
+    pc_port/pc_p2_original_manifest.cpp pc_port/pc_p2_original_piki_manifest.cpp
+    pc_port/pc_p2_original_catalog.cpp pc_port/pc_p2_original_spawn_plan.cpp
+    pc_port/pc_p2_original_lifecycle.cpp pc_port/pc_p2_original_progress.cpp)
+target_include_directories(p2_original_session_test PRIVATE pc_port)
+target_compile_options(p2_original_session_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+add_test(NAME p2_original_session COMMAND p2_original_session_test "${CMAKE_CURRENT_BINARY_DIR}/original-session-tests")
+add_executable(p2_original_calendar_test tools/pc_p2_original_calendar_test.cpp)
+target_include_directories(p2_original_calendar_test PRIVATE pc_port)
+target_compile_options(p2_original_calendar_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+add_test(NAME p2_original_calendar COMMAND p2_original_calendar_test)
+add_executable(p2_campaign_treasure_test tools/test_p2_campaign_treasure.cpp)
+target_include_directories(p2_campaign_treasure_test PRIVATE pc_port)
+target_compile_options(p2_campaign_treasure_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_campaign_treasure COMMAND p2_campaign_treasure_test)
+
+# Component probes have no native generator scene. Keep the original-session
+# boundary explicit there; never link a mock original scene into production.
+get_property(pikmin_component_targets DIRECTORY PROPERTY BUILDSYSTEM_TARGETS)
+foreach(pikmin_component IN LISTS pikmin_component_targets)
+    get_target_property(pikmin_component_sources ${pikmin_component} SOURCES)
+    if("pc_port/pc_randomizer.cpp" IN_LIST pikmin_component_sources
+        AND "pc_port/pc_p2_original_course.cpp" IN_LIST pikmin_component_sources)
+        target_compile_definitions(${pikmin_component} PRIVATE PIKMIN_P2_ORIGINAL_COURSE_PROVIDER=1)
+    endif()
+    if("pc_port/pc_randomizer.cpp" IN_LIST pikmin_component_sources
+        AND NOT "pc_port/pc_p2_original_group_engine.cpp" IN_LIST pikmin_component_sources)
+        target_compile_definitions(${pikmin_component} PRIVATE PC_RANDOMIZER_NO_ORIGINAL_ENGINE=1)
+        if(NOT "pc_port/pc_p2_original_progress.cpp" IN_LIST pikmin_component_sources)
+            target_sources(${pikmin_component} PRIVATE pc_port/pc_p2_original_progress.cpp)
+        endif()
+        if(NOT "pc_port/pc_p2_original_lifecycle.cpp" IN_LIST pikmin_component_sources)
+            target_sources(${pikmin_component} PRIVATE pc_port/pc_p2_original_lifecycle.cpp)
+        endif()
+    endif()
+endforeach()
