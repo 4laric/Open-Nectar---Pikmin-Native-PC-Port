@@ -59,3 +59,7 @@ bool pc_p2_batch2_original_uji_bind(BTeki*,unsigned source,std::string& error);
 // Runtime evidence helper: count of authored clock events delivered exactly once
 // by the sampled clock (#431). Does not execute damage/capture/drops.
 unsigned long long pc_p2_batch2_event_count();
+
+// Literal source-15 Armor ground bank admission, independent of AP rosters.
+bool pc_p2_batch2_original_ground_resources(unsigned source,std::vector<p2batch2clock::Row>&,std::string& error);
+bool pc_p2_batch2_original_ground_bind(BTeki*,unsigned source,std::string& error);

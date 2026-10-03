@@ -267,6 +267,8 @@ set(PC_PORT_SOURCES
     pc_port/pc_p2_original_catalog.cpp
     pc_port/pc_p2_original_actor.cpp
     pc_port/pc_p2_original_lifecycle.cpp
+    pc_port/pc_p2_original_armor.cpp
+    pc_port/pc_p2_original_armor_native.cpp
     pc_port/pc_p2_original_group.cpp
     pc_port/pc_p2_original_progress.cpp
     pc_port/pc_p2_original_chappy.cpp
@@ -3368,3 +3370,12 @@ add_executable(pc_p2_original_red_test tools/test_p2_original_red.cpp
 target_include_directories(pc_p2_original_red_test PRIVATE pc_port)
 target_compile_options(pc_p2_original_red_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
 add_test(NAME pc_p2_original_red_test COMMAND pc_p2_original_red_test)
+# Original retail Armor source-15 provider contract; no engine/gameplay substitute.
+add_executable(pc_p2_original_armor_test tools/pc_p2_original_armor_test.cpp
+ pc_port/pc_p2_original_armor.cpp pc_port/pc_p2_original_spawn_plan.cpp
+ pc_port/pc_p2_original_drop.cpp pc_port/pc_p2_original_catalog.cpp)
+target_include_directories(pc_p2_original_armor_test PRIVATE pc_port)
+target_compile_options(pc_p2_original_armor_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME pc_p2_original_armor_test COMMAND pc_p2_original_armor_test)
+
+pikmin_add_ci_fixture(original_armor tools/p2_original_armor_runtime.cpp)
